@@ -1,0 +1,97 @@
+# WorkoutApp
+
+An iPhone app in the style of Bevel: **Strain, Recovery and Sleep** scores from Apple Health, an **AI coach** you can chat with, plus a full **gym workout tracker** whose sessions count toward strain.
+
+> Working name. Pick your own name and icon before shipping. Don't use Bevel's or Whoop's name, logo or artwork.
+
+## What's in v0.1
+
+| Area | What it does |
+|---|---|
+| **Today** | Sleep, Recovery and Strain rings; cards with HRV and resting HR vs. your baseline, sleep stages, heart-rate zones, and cardio vs. lifting load |
+| **Workout** | Start a session, add from 750+ exercises (with images and instructions), log weight/reps/RPE per set, warm-up sets, rest timer, history. Finishing asks how hard it felt and saves to Apple Health |
+| **Nutrition** | Calories, protein (vs. a 1.6 g/kg target), carbs, fat and fiber from **Cronometer**, read through Apple Health |
+| **Coach** | Chat that sees today's scores, your food log and your last 14 days of workouts. Runs on-device (Apple Intelligence, free and private) or on Claude via your own Supabase server |
+| **Settings** | Age/sex/max HR for zones, kg/lb, coach mode, Health access |
+
+### How the scores work (`Packages/AppCore`)
+
+- **Strain (0-21)**: cardio load from heart rate (Banister TRIMP), plus **lifting load** = session RPE x minutes (Foster sRPE). A gym session counts as whichever is higher, its heart-rate load or its RPE load, so lifting isn't undercounted and nothing is counted twice. Load maps onto 0-21 with a curve that flattens near the top.
+- **Recovery (0-100%)**: last night's HRV and resting heart rate compared with your own 30-day baseline (z-scores), plus sleep. Needs about 4 nights of data to calibrate.
+- **Sleep (0-100)**: time asleep vs. need (need goes up after hard days), efficiency, deep + REM share, interruptions. Overlapping iPhone/Watch records are merged.
+
+These are our own formulas from published sports-science methods, not Whoop's or Bevel's (theirs aren't public). Tune the constants in `StrainCalculator`, `RecoveryCalculator` and `SleepCalculator`; the tests in `Packages/AppCore/Tests` show the expected ranges.
+
+## Run it on your iPhone (Mac + Xcode)
+
+You need Xcode 26 or later, an iPhone on iOS 26+, and your Apple Developer account.
+
+```bash
+git clone https://github.com/08xavstj/WorkoutApp.git
+cd WorkoutApp
+brew install xcodegen
+xcodegen generate
+open WorkoutApp.xcodeproj
+```
+
+In Xcode:
+1. Select the **WorkoutApp** target → **Signing & Capabilities** → choose your Team. Change the bundle ID from `com.example.workoutapp` to something you own (or edit `project.yml` and re-run `xcodegen generate`).
+2. Plug in your iPhone (or use Wi-Fi debugging), pick it as the run destination, press **Run**.
+3. On the phone: allow Apple Health access when asked. Wear your Apple Watch to bed for a few nights so recovery can build a baseline.
+
+The `.xcodeproj` is generated, so it isn't committed. Re-run `xcodegen generate` after pulling changes that add files.
+
+Run the score tests any time: `swift test --package-path Packages/AppCore`.
+
+## Connect Cronometer
+
+Cronometer has no public API (it only gives API access to selected partners), but it can write your food log to Apple Health, and this app reads it from there.
+
+1. In the Cronometer app, open its settings, find **Apple Health** under connected apps/devices, and turn on **exporting nutrition** to Health.
+2. On your iPhone, open **Settings → Health → Data Access & Devices → Cronometer** and check that it's allowed to *write* Energy Consumed, Protein, Carbohydrates, Fat, Fiber and Water.
+3. In WorkoutApp, allow it to *read* those same types (asked on first launch, or **Settings → Review Health access**).
+
+Food you log shows up on the Today screen and the coach uses it. For example, it can tell you that you ate too little protein after a high-strain day. If Cronometer doesn't send a nutrient (some users report carbs or fiber dropping out), that field shows "--".
+
+## Turn on the Claude coach (optional)
+
+The on-device coach works with no setup on iPhones that support Apple Intelligence. For Claude:
+
+1. Create a Supabase project (or use an existing one). In **Authentication → Sign In / Providers**, turn on **Allow anonymous sign-ins**.
+2. Install the Supabase CLI (`brew install supabase/tap/supabase`), then from this repo:
+   ```bash
+   supabase link --project-ref <your-project-ref>
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+   supabase functions deploy coach
+   ```
+3. In the app: **Settings → AI coach → Claude**, paste your project URL and anon key.
+
+The function uses `claude-opus-5-5` at low effort (change `MODEL` and `effort` in `supabase/functions/coach/index.ts`). Every user signs in anonymously, so before you share the app widely, add rate limiting or Sign in with Apple. Anyone with the anon key could otherwise run up your Anthropic bill.
+
+## Project layout
+
+```
+project.yml                 XcodeGen spec (targets, entitlements, Info.plist)
+App/                        iPhone app (SwiftUI + SwiftData)
+  Design/                   Theme colors, score rings, cards
+  Models/                   SwiftData models: WorkoutSession, ExerciseLog, SetLog
+  Services/                 HealthKit, daily scores, exercise library, settings
+  Services/Coach/           On-device (Foundation Models) and Claude coaches
+  Features/                 Today, Workout, Coach, Settings screens
+  Resources/exercises.json  Exercise library (free-exercise-db, public domain)
+Packages/AppCore/           Strain/recovery/sleep math + tests (no UI, no HealthKit)
+supabase/functions/coach/   Claude proxy (Deno/TypeScript)
+.claude/skills/             Claude Code skills for this project
+.github/workflows/ios.yml   CI: runs tests and builds the app on macOS
+```
+
+## Roadmap
+
+1. **Apple Watch app**: live heart rate and set logging from the wrist. This is the biggest accuracy gain for gym strain.
+2. Widgets and Live Activity for the rest timer and today's rings.
+3. Templates/routines, PRs and progress charts per exercise (Swift Charts).
+4. Stress score (daytime HRV), nutrition trends and calorie balance (intake vs. burn), and trends (7/30-day charts).
+5. Coach upgrades: weekly review, auto-generated plans saved as templates, App Intents so Siri can answer "what's my recovery?".
+6. Sign in with Apple + per-user rate limits on the coach function.
+
+See [docs/REFERENCES.md](docs/REFERENCES.md) for the open-source projects and skills this builds on.

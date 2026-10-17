@@ -1,0 +1,5 @@
+# Minimal Supabase CLI config for the coach function.
+# Link your project first: supabase link --project-ref <your-project-ref>
+
+[functions.coach]
+verify_jwt = true
