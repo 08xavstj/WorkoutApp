@@ -95,7 +95,7 @@ struct ScoreRing: View {
 // MARK: - Arc gauge (270°)
 
 /// An arc from bottom-left round to bottom-right, as a fraction 0...1 of the sweep.
-struct GaugeArc: Shape {
+nonisolated struct GaugeArc: Shape {
     var from: Double
     var to: Double
 
