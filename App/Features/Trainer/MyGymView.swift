@@ -1,0 +1,226 @@
+import SwiftUI
+import AppCore
+
+/// Edit the equipment and weights the trainer is allowed to use.
+struct MyGymView: View {
+    @Environment(GymStore.self) private var gym
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft = GymProfile.commercialPounds
+    @State private var newDumbbell: Double?
+    @State private var newKettlebell: Double?
+    @State private var rangeFrom: Double = 5
+    @State private var rangeTo: Double = 50
+    @State private var rangeStep: Double = 5
+
+    private let toggleable = EquipmentKind.allCases.filter { $0 != .bodyweight }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $draft.name)
+                    Picker("Plates and stacks are in", selection: $draft.unit) {
+                        Text("Pounds (lb)").tag(LoadUnit.lb)
+                        Text("Kilograms (kg)").tag(LoadUnit.kg)
+                    }
+                    Menu {
+                        Button("Commercial gym (lb)") { apply(.commercialPounds) }
+                        Button("Commercial gym (kg)") { apply(.commercialKilograms) }
+                        Button("Home gym: dumbbells only") { apply(.homeDumbbells) }
+                    } label: {
+                        Label("Start from a preset", systemImage: "square.on.square")
+                    }
+                } footer: {
+                    Text("The trainer only plans exercises you have equipment for, and rounds every weight to one you can actually load here.")
+                }
+
+                Section("Equipment") {
+                    ForEach(toggleable) { kind in
+                        Toggle(kind.label, isOn: Binding(
+                            get: { draft.equipment.contains(kind) },
+                            set: { isOn in
+                                if isOn { draft.equipment.insert(kind) } else { draft.equipment.remove(kind) }
+                            }
+                        ))
+                    }
+                }
+
+                if draft.has(.barbell) || draft.has(.ezBar) || draft.has(.smithMachine) {
+                    Section {
+                        if draft.has(.barbell) {
+                            weightField("Barbell", value: $draft.barbellWeight)
+                        }
+                        if draft.has(.ezBar) {
+                            weightField("EZ bar", value: $draft.ezBarWeight)
+                        }
+                        if draft.has(.smithMachine) {
+                            weightField("Smith bar (counted weight)", value: $draft.smithBarWeight)
+                        }
+                    } header: {
+                        Text("Bars")
+                    }
+
+                    Section {
+                        ForEach(Array(draft.plates.indices), id: \.self) { index in
+                            HStack {
+                                TextField("Weight", value: $draft.plates[index].weight, format: .number)
+                                    .keyboardType(.decimalPad)
+                                    .frame(width: 70)
+                                Text(draft.unit.rawValue).foregroundStyle(Theme.secondaryText)
+                                Spacer()
+                                Stepper("\(draft.plates[index].pairs) pairs", value: $draft.plates[index].pairs, in: 0...20)
+                                    .fixedSize()
+                            }
+                        }
+                        .onDelete { offsets in draft.plates.remove(atOffsets: offsets) }
+                        Button {
+                            draft.plates.append(PlateCount(weight: draft.unit == .lb ? 1.25 : 0.5, pairs: 1))
+                        } label: {
+                            Label("Add plate size", systemImage: "plus.circle")
+                        }
+                    } header: {
+                        Text("Plates (pairs)")
+                    } footer: {
+                        Text("Add microplates (like 1.25 lb or 0.5 kg) if your gym has them; the trainer will use smaller jumps.")
+                    }
+                }
+
+                if draft.has(.dumbbell) {
+                    Section {
+                        weightChips(draft.dumbbells) { weight in
+                            draft.dumbbells.removeAll { $0 == weight }
+                        }
+                        HStack {
+                            TextField("Add a weight", value: $newDumbbell, format: .number)
+                                .keyboardType(.decimalPad)
+                            Button("Add") {
+                                if let value = newDumbbell, value > 0, !draft.dumbbells.contains(value) {
+                                    draft.dumbbells.append(value)
+                                    draft.dumbbells.sort()
+                                }
+                                newDumbbell = nil
+                            }
+                        }
+                        HStack {
+                            TextField("From", value: $rangeFrom, format: .number).keyboardType(.decimalPad)
+                            TextField("To", value: $rangeTo, format: .number).keyboardType(.decimalPad)
+                            TextField("Step", value: $rangeStep, format: .number).keyboardType(.decimalPad)
+                            Button("Fill range") {
+                                guard rangeStep > 0, rangeTo >= rangeFrom else { return }
+                                draft.dumbbells = stride(from: rangeFrom, through: rangeTo + 0.001, by: rangeStep).map { $0 }
+                            }
+                        }
+                    } header: {
+                        Text("Dumbbells (\(draft.dumbbells.count) weights)")
+                    } footer: {
+                        Text("Weight per dumbbell. Use Fill range for a full rack, or add odd sizes one at a time.")
+                    }
+                }
+
+                if draft.has(.kettlebell) {
+                    Section("Kettlebells") {
+                        weightChips(draft.kettlebells) { weight in
+                            draft.kettlebells.removeAll { $0 == weight }
+                        }
+                        HStack {
+                            TextField("Add a kettlebell", value: $newKettlebell, format: .number)
+                                .keyboardType(.decimalPad)
+                            Button("Add") {
+                                if let value = newKettlebell, value > 0, !draft.kettlebells.contains(value) {
+                                    draft.kettlebells.append(value)
+                                    draft.kettlebells.sort()
+                                }
+                                newKettlebell = nil
+                            }
+                        }
+                    }
+                }
+
+                if draft.has(.cable) {
+                    stackSection("Cable stack", stack: $draft.cableStack)
+                }
+                if draft.has(.machine) {
+                    stackSection("Machine stacks", stack: $draft.machineStack)
+                }
+
+                Section("What the trainer will use") {
+                    Text(WorkoutPlanner(gym: draft).gymSummary())
+                        .font(.footnote)
+                        .foregroundStyle(Theme.secondaryText)
+                    if draft.has(.barbell), let jump = draft.smallestJump(from: draft.barbellWeight + 90, on: .barbell) {
+                        LabeledContent("Smallest barbell jump", value: "\(jump.formatted()) \(draft.unit.rawValue)")
+                    }
+                }
+            }
+            .navigationTitle("My Gym")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        draft.plates.removeAll { $0.weight <= 0 }
+                        gym.save(draft)
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear { draft = gym.profile }
+        }
+    }
+
+    private func apply(_ preset: GymProfile) {
+        let name = draft.name
+        draft = preset
+        if !name.isEmpty { draft.name = name }
+    }
+
+    private func weightField(_ title: String, value: Binding<Double>) -> some View {
+        LabeledContent(title) {
+            HStack(spacing: 4) {
+                TextField(title, value: value, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
+                Text(draft.unit.rawValue).foregroundStyle(Theme.secondaryText)
+            }
+        }
+    }
+
+    private func stackSection(_ title: String, stack: Binding<WeightStack>) -> some View {
+        Section {
+            weightField("Lightest", value: stack.start)
+            weightField("Step", value: stack.step)
+            weightField("Heaviest", value: stack.max)
+        } header: {
+            Text(title)
+        } footer: {
+            Text("Many stacks go up in 5s or 10s; some have add-on weights. Set the smallest step you can make.")
+        }
+    }
+
+    private func weightChips(_ weights: [Double], remove: @escaping (Double) -> Void) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(weights, id: \.self) { weight in
+                    Button {
+                        remove(weight)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(weight.formatted())
+                            Image(systemName: "xmark").font(.caption2.weight(.bold))
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Theme.cardRaised, in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove \(weight.formatted())")
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+}

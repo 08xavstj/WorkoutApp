@@ -77,6 +77,10 @@ final class UserSettings {
     var supabaseURL: String { didSet { defaults.set(supabaseURL, forKey: "supabaseURL") } }
     var supabaseAnonKey: String { didSet { defaults.set(supabaseAnonKey, forKey: "supabaseAnonKey") } }
     var hasOnboarded: Bool { didSet { defaults.set(hasOnboarded, forKey: "hasOnboarded") } }
+    /// Used when Apple Health has no height. 0 = not set.
+    var heightCm: Double { didSet { defaults.set(heightCm, forKey: "heightCm") } }
+    /// Used when Apple Health has no weight. 0 = not set.
+    var weightKg: Double { didSet { defaults.set(weightKg, forKey: "weightKg") } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -89,6 +93,8 @@ final class UserSettings {
         supabaseURL = defaults.string(forKey: "supabaseURL") ?? ""
         supabaseAnonKey = defaults.string(forKey: "supabaseAnonKey") ?? ""
         hasOnboarded = defaults.bool(forKey: "hasOnboarded")
+        heightCm = defaults.double(forKey: "heightCm")
+        weightKg = defaults.double(forKey: "weightKg")
     }
 
     func heartRateProfile(restingHeartRate: Double?) -> HeartRateProfile {

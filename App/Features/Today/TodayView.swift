@@ -2,55 +2,48 @@ import SwiftUI
 import SwiftData
 import AppCore
 
-/// Home screen: sleep, recovery and strain rings, then a card for each.
+/// Home: score rings and coaching, the strain goal with ways to reach it,
+/// nutrition and energy balance, and the health monitor.
 struct TodayView: View {
     let askCoach: (String) -> Void
 
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
-    @Environment(\.healthClient) private var health
-    @Environment(\.scenePhase) private var scenePhase
+    @Environment(WorkoutLauncher.self) private var launcher
+    @Environment(AppRefresher.self) private var refresher
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
+    @State private var showingSettings = false
     @State private var showingHRVEntry = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    rings
+                    header
+                    if let active = sessions.first(where: \.isActive) {
+                        ResumeWorkoutBanner(session: active) { launcher.activeSession = active }
+                    }
                     if let error = metrics.errorMessage {
                         HealthAccessCard(message: error)
                     }
-                    StrainCard(result: metrics.strain, target: metrics.targetStrain)
-                    RecoveryCard(
-                        result: metrics.recovery,
-                        hrv: metrics.hrv,
-                        hrvIsManual: metrics.hrvIsManual,
-                        restingHeartRate: metrics.restingHeartRate,
-                        onEnterHRV: { showingHRVEntry = true }
-                    )
-                    SleepCard(result: metrics.sleep)
-                    NutritionCard(day: metrics.nutritionToday, proteinTarget: metrics.proteinTarget)
-                    TodayLiftsCard(sessions: todaysSessions, unit: settings.weightUnit)
+                    ScoresCard()
+                    StrainGoalCard(sessions: sessions)
+                    EnergyCard()
+                    HealthMonitor(onEnterHRV: { showingHRVEntry = true })
                     askCoachCard
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
             }
+            .scrollIndicators(.hidden)
+            .background(alignment: .top) {
+                TopGlow(colors: [Theme.recoveryHigh, Theme.strain])
+            }
             .background(Theme.background)
-            .navigationTitle(Date.now.formatted(.dateTime.weekday(.wide).month().day()))
-            .refreshable { await refresh() }
-            .task { await refresh() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await refresh() } }
-            }
-            .onChange(of: sessions.count) {
-                Task { await refresh() }
-            }
-            .onChange(of: hrvReadings.map(\.milliseconds)) {
-                Task { await refresh() }
-            }
+            .toolbarVisibility(.hidden, for: .navigationBar)
+            .refreshable { await refresher.refresh() }
+            .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(isPresented: $showingHRVEntry) {
                 HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
                     .presentationDetents([.medium])
@@ -58,42 +51,37 @@ struct TodayView: View {
         }
     }
 
-    private var todaysSessions: [WorkoutSession] {
-        sessions.filter { Calendar.current.isDateInToday($0.startedAt) && !$0.isActive }
-    }
-
-    private var rings: some View {
-        HStack(spacing: 12) {
-            ScoreRing(
-                title: "Sleep",
-                valueText: metrics.sleep.map { "\($0.score)%" } ?? "--",
-                progress: Double(metrics.sleep?.score ?? 0) / 100,
-                color: Theme.sleep
-            )
-            .frame(maxWidth: .infinity)
-            ScoreRing(
-                title: "Recovery",
-                valueText: metrics.recovery.map { "\($0.score)%" } ?? "--",
-                progress: Double(metrics.recovery?.score ?? 0) / 100,
-                color: Theme.recoveryColor(for: metrics.recovery?.score),
-                size: 120
-            )
-            .frame(maxWidth: .infinity)
-            ScoreRing(
-                title: "Strain",
-                valueText: metrics.strain.map { $0.strain.formatted(.number.precision(.fractionLength(1))) } ?? "--",
-                progress: (metrics.strain?.strain ?? 0) / 21,
-                color: Theme.strain
-            )
-            .frame(maxWidth: .infinity)
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "person.fill")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Theme.card)
+                        .frame(width: 42, height: 42)
+                        .background(Theme.ink, in: .circle)
+                }
+                .accessibilityLabel("Settings")
+                SyncChip(isLoading: metrics.isLoading, lastUpdated: metrics.lastUpdated)
+                Spacer()
+            }
+            Text("Today, \(Date.now.formatted(.dateTime.month(.wide).day()))")
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(Theme.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .accessibilityAddTraits(.isHeader)
         }
-        .padding(.vertical, 8)
+        .padding(.top, 8)
     }
 
     private var askCoachCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Ask your coach", systemImage: "sparkles")
                 .font(.headline)
+                .foregroundStyle(Theme.primaryText)
             ForEach(CoachModel.suggestions.prefix(3), id: \.self) { question in
                 Button {
                     askCoach(question)
@@ -104,31 +92,84 @@ struct TodayView: View {
                         Image(systemName: "arrow.up.right")
                     }
                     .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
                     .padding(12)
-                    .background(Theme.cardRaised, in: .rect(cornerRadius: 12))
+                    .background(Theme.cardRaised, in: .rect(cornerRadius: 14))
                 }
                 .buttonStyle(.plain)
             }
         }
         .card()
     }
+}
 
-    private func refresh() async {
-        guard let health else { return }
-        let cutoff = Calendar.current.date(byAdding: .day, value: -2, to: .now) ?? .now
-        let recent = sessions
-            .filter { !$0.isActive && $0.startedAt >= cutoff }
-            .map(\.strainSummary)
-        // Keep the latest entry per morning.
-        var manualHRV: [Date: Double] = [:]
-        for reading in hrvReadings where manualHRV[reading.date] == nil {
-            manualHRV[reading.date] = reading.milliseconds
-        }
-        await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
+// MARK: - Header pieces
+
+struct TopGlow: View {
+    let colors: [Color]
+
+    var body: some View {
+        LinearGradient(
+            colors: [colors.first?.opacity(0.18) ?? .clear, (colors.last ?? .clear).opacity(0.12), Theme.background.opacity(0)],
+            startPoint: .topLeading,
+            endPoint: .bottom
+        )
+        .frame(height: 320)
+        .blur(radius: 30)
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
     }
 }
 
-// MARK: - Cards
+private struct SyncChip: View {
+    let isLoading: Bool
+    let lastUpdated: Date?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isLoading {
+                ProgressView().controlSize(.mini)
+                Text("Syncing")
+            } else {
+                Circle().fill(Theme.recoveryHigh).frame(width: 8, height: 8)
+                Text(lastUpdated == nil ? "Not synced" : "Synced")
+            }
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(lastUpdated == nil && !isLoading ? Theme.secondaryText : Theme.recoveryHigh)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Theme.recoveryHigh.opacity(0.13), in: .capsule)
+    }
+}
+
+struct ResumeWorkoutBanner: View {
+    let session: WorkoutSession
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                IconBadge(systemName: "dumbbell.fill", color: Theme.lifting, size: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(session.name) in progress")
+                        .font(.headline)
+                    TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
+                        Text(Duration.seconds(context.date.timeIntervalSince(session.startedAt)).formatted(.time(pattern: .hourMinuteSecond)))
+                            .font(.subheadline)
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                Spacer()
+                Chip(text: "Resume", color: Theme.lifting, filled: true)
+            }
+            .foregroundStyle(Theme.primaryText)
+            .card()
+        }
+        .buttonStyle(.plain)
+    }
+}
 
 private struct HealthAccessCard: View {
     let message: String
@@ -153,52 +194,135 @@ private struct HealthAccessCard: View {
     }
 }
 
-private struct StrainCard: View {
-    let result: StrainCalculator.Result?
-    let target: ClosedRange<Double>?
+// MARK: - Scores
+
+private struct ScoresCard: View {
+    @Environment(DailyMetricsModel.self) private var metrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Strain", systemImage: "flame.fill")
-                    .font(.headline)
+        let coaching = TrainerSuggestions.coachingLine(metrics: metrics)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                ScoreRing(
+                    title: "Strain",
+                    value: metrics.strain.map { $0.strain.formatted(.number.precision(.fractionLength(1))) } ?? "--",
+                    subtitle: "of 21",
+                    progress: (metrics.strain?.strain ?? 0) / 21,
+                    colors: [Theme.strainLight, Theme.strain]
+                )
+                .frame(maxWidth: .infinity)
+                ScoreRing(
+                    title: "Recovery",
+                    value: metrics.recovery.map { "\($0.score)" } ?? "--",
+                    unit: metrics.recovery == nil ? "" : "%",
+                    subtitle: metrics.recovery.map { $0.status.rawValue.capitalized },
+                    progress: Double(metrics.recovery?.score ?? 0) / 100,
+                    colors: Theme.recoveryColors(for: metrics.recovery?.score)
+                )
+                .frame(maxWidth: .infinity)
+                ScoreRing(
+                    title: "Sleep",
+                    value: metrics.sleep.map { "\($0.score)" } ?? "--",
+                    unit: metrics.sleep == nil ? "" : "%",
+                    subtitle: metrics.sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
+                    progress: Double(metrics.sleep?.score ?? 0) / 100,
+                    colors: [Theme.sleepLight, Theme.sleep]
+                )
+                .frame(maxWidth: .infinity)
+            }
+            Divider().overlay(Theme.separator)
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Coaching", systemImage: "sparkle")
+                    .font(.caption.weight(.semibold))
+                    .textCase(.uppercase)
+                    .tracking(1.2)
                     .foregroundStyle(Theme.strain)
-                Spacer()
-                if let target {
-                    Text("Target \(Int(target.lowerBound))-\(Int(target.upperBound))")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Theme.strain.opacity(0.15), in: .capsule)
+                if let highlight = coaching.highlight {
+                    let lead = Text(coaching.text).foregroundStyle(Theme.primaryText)
+                    let accent = Text(highlight).foregroundStyle(Theme.strain).fontWeight(.semibold)
+                    Text("\(lead) \(accent)")
+                        .font(.body)
+                } else {
+                    Text(coaching.text)
+                        .font(.body)
+                        .foregroundStyle(Theme.primaryText)
                 }
             }
-            if let result, result.totalLoad > 0 {
-                HStack {
-                    StatView(label: "Cardio", value: result.cardioLoad.formatted(.number.precision(.fractionLength(0))), detail: "heart-rate load", color: Theme.strain)
-                    StatView(label: "Lifting", value: result.liftingLoad.formatted(.number.precision(.fractionLength(0))), detail: "gym load", color: Theme.lifting)
+        }
+        .card()
+    }
+}
+
+// MARK: - Strain goal
+
+private struct StrainGoalCard: View {
+    let sessions: [WorkoutSession]
+
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(UserSettings.self) private var settings
+    @Environment(WorkoutLauncher.self) private var launcher
+
+    var body: some View {
+        let current = metrics.strain?.strain ?? 0
+        let target = metrics.targetStrain ?? 10...14
+        let status = StrainPlanner().status(current: current, target: target)
+        let suggestions = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                CardLabel(text: "Strain goal")
+                Spacer()
+                switch status {
+                case .below(let remaining):
+                    Chip(text: "\(remaining.formatted(.number.precision(.fractionLength(1)))) to go")
+                case .inRange:
+                    Chip(text: "Target reached", color: Theme.recoveryHigh)
+                case .above:
+                    Chip(text: "Above target", color: Theme.recoveryModerate)
                 }
-                SegmentedBar(segments: [
-                    .init(value: result.cardioLoad, color: Theme.strain),
-                    .init(value: result.liftingLoad, color: Theme.lifting)
-                ])
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Heart-rate zones")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                    SegmentedBar(segments: result.zoneMinutes.enumerated().map { index, minutes in
-                        SegmentedBar.Segment(value: minutes, color: Theme.zoneColors[index])
-                    })
-                    HStack {
-                        ForEach(0..<5, id: \.self) { index in
-                            Text("Z\(index + 1) \(Int(result.zoneMinutes[index].rounded()))m")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.zoneColors[index])
-                                .frame(maxWidth: .infinity)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(current.formatted(.number.precision(.fractionLength(1))))
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.primaryText)
+                Text("/ target \(Int(target.lowerBound))–\(Int(target.upperBound))")
+                    .font(.title3)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            StrainGoalBar(current: current, target: target)
+
+            switch status {
+            case .below:
+                CardLabel(text: "Suggested to close the gap")
+                ForEach(suggestions) { suggestion in
+                    Button {
+                        if suggestion.option.kind == .strength {
+                            launcher.openBuilder(focus: suggestion.focus, minutes: suggestion.minutes)
                         }
+                    } label: {
+                        SuggestionRow(suggestion: suggestion)
                     }
+                    .buttonStyle(.plain)
+                    .disabled(suggestion.option.kind == .cardio)
                 }
-            } else {
-                Text("No strain yet today. Wear your watch or log a gym session.")
+                Button {
+                    let strength = suggestions.first { $0.option.kind == .strength }
+                    launcher.openBuilder(focus: strength?.focus, minutes: strength?.minutes)
+                } label: {
+                    Label("Start workout", systemImage: "play.fill")
+                        .font(.headline)
+                        .foregroundStyle(Theme.card)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(Theme.ink, in: .capsule)
+                }
+                .buttonStyle(.plain)
+            case .inRange:
+                Text("You've hit today's target. Anything more is optional; recovery work and sleep will pay off tomorrow.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            case .above:
+                Text("You're past today's target. Keep the rest of the day easy and get to bed early.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -207,241 +331,290 @@ private struct StrainCard: View {
     }
 }
 
-private struct RecoveryCard: View {
-    let result: RecoveryCalculator.Result?
-    let hrv: Double?
-    let hrvIsManual: Bool
-    let restingHeartRate: Double?
-    let onEnterHRV: () -> Void
+private struct SuggestionRow: View {
+    let suggestion: TrainerSuggestions.Suggestion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Recovery", systemImage: "bolt.heart.fill")
+        let isStrength = suggestion.option.kind == .strength
+        HStack(spacing: 12) {
+            IconBadge(
+                systemName: isStrength ? "dumbbell.fill" : "bicycle",
+                color: isStrength ? Theme.lifting : Theme.strain,
+                size: 42
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(suggestion.option.title)
                     .font(.headline)
-                    .foregroundStyle(Theme.recoveryColor(for: result?.score))
+                    .foregroundStyle(Theme.primaryText)
+                Text(suggestion.option.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Spacer()
+            Text("+\(suggestion.option.gain.formatted(.number.precision(.fractionLength(1))))")
+                .font(.headline)
+                .monospacedDigit()
+                .foregroundStyle(Theme.strain)
+            if isStrength {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .padding(12)
+        .background(Theme.cardRaised, in: .rect(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(isStrength ? "Opens the workout builder" : "")
+    }
+}
+
+// MARK: - Energy and nutrition
+
+private struct EnergyCard: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        let food = metrics.nutritionToday
+        let energy = metrics.energy
+        let eaten = food?.calories ?? 0
+        let burn = energy?.projectedTotal
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                CardLabel(text: "Energy & nutrition")
                 Spacer()
-                // Only offered when HRV isn't coming from Apple Health.
-                if hrv == nil || hrvIsManual {
-                    Button(hrv == nil ? "Add HRV" : "Edit HRV", action: onEnterHRV)
+                Text("From Cronometer")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            HStack(alignment: .center, spacing: 18) {
+                GradientRing(
+                    progress: burn.map { eaten / max($0, 1) } ?? 0,
+                    colors: [Theme.nutritionLight, Theme.nutrition],
+                    lineWidth: 12
+                ) {
+                    VStack(spacing: 0) {
+                        Text(eaten.formatted(.number.precision(.fractionLength(0))))
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.primaryText)
+                        Text(burn.map { "of \($0.formatted(.number.precision(.fractionLength(0)))) kcal" } ?? "kcal eaten")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.secondaryText)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(width: 118, height: 118)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    ProgressRow(label: "Protein", value: food?.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
+                    ProgressRow(label: "Carbs", value: food?.carbsGrams ?? 0, color: Theme.recoveryModerate)
+                    ProgressRow(label: "Fat", value: food?.fatGrams ?? 0, color: Theme.sleep)
+                }
+            }
+            if let energy {
+                Divider().overlay(Theme.separator)
+                HStack {
+                    StatView(label: "Burned so far", value: energy.burnedSoFar.formatted(.number.precision(.fractionLength(0))), detail: "kcal")
+                    StatView(label: "Projected today", value: energy.projectedTotal.formatted(.number.precision(.fractionLength(0))), detail: "kcal")
+                    if let balance = energy.balance, eaten > 0 {
+                        StatView(
+                            label: balance < 0 ? "Deficit" : "Surplus",
+                            value: abs(balance).formatted(.number.precision(.fractionLength(0))),
+                            detail: "kcal",
+                            color: balance < 0 ? Theme.strain : Theme.lifting
+                        )
+                    }
+                }
+                SegmentedBar(segments: [
+                    .init(value: energy.restingFullDay, color: Theme.nutrition.opacity(0.45)),
+                    .init(value: energy.exercise, color: Theme.lifting),
+                    .init(value: energy.everydayMovement, color: Theme.strain),
+                    .init(value: energy.digestion, color: Theme.sleep)
+                ])
+                Text("Resting \(Int(energy.restingFullDay)) · Exercise \(Int(energy.exercise)) · Movement \(Int(energy.everydayMovement)) · Digestion \(Int(energy.digestion)). Estimate from \(energy.bmrMethod), heart rate and steps.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            } else {
+                Text("Add your weight in Apple Health (or Settings) to estimate calories burned.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if food == nil || food?.isEmpty == true {
+                Text("No food logged today. Log meals in Cronometer with its Apple Health sync turned on.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .card()
+    }
+}
+
+// MARK: - Health monitor
+
+private struct HealthMonitor: View {
+    let onEnterHRV: () -> Void
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        VStack(spacing: 12) {
+            SectionTitle(text: "Health Monitor", trailing: summary.text, trailingColor: summary.color)
+            HStack(spacing: 12) {
+                rhrTile
+                hrvTile
+            }
+            HStack(spacing: 12) {
+                respiratoryTile
+                sleepTile
+            }
+        }
+    }
+
+    private var summary: (text: String?, color: Color) {
+        guard let recovery = metrics.recovery, recovery.isCalibrated else { return (nil, Theme.secondaryText) }
+        let flags = [(recovery.hrvChangePercent ?? 0) < -15, (recovery.restingHeartRateChange ?? 0) > 5].filter { $0 }.count
+        return flags == 0 ? ("All normal", Theme.recoveryHigh) : ("\(flags) to watch", Theme.recoveryModerate)
+    }
+
+    /// Position of a value within baseline ± 2 SD, as 0...1.
+    private func position(_ value: Double?, mean: Double?, sd: Double?) -> Double? {
+        guard let value, let mean, let sd, sd > 0 else { return value == nil ? nil : 0.5 }
+        return min(1, max(0, (value - (mean - 2 * sd)) / (4 * sd)))
+    }
+
+    private var rhrTile: some View {
+        let change = metrics.recovery?.restingHeartRateChange
+        return MonitorTile(
+            title: "Resting HR",
+            value: metrics.restingHeartRate.map { "\(Int($0.rounded()))" },
+            unit: "bpm",
+            status: change.map { delta in
+                delta <= 0
+                    ? TileStatus(text: "Lower", icon: "arrow.down", color: Theme.recoveryHigh)
+                    : TileStatus(text: "Higher", icon: "arrow.up", color: delta > 5 ? Theme.recoveryModerate : Theme.secondaryText)
+            },
+            gauge: position(metrics.restingHeartRate, mean: metrics.baseline?.meanRHR, sd: metrics.baseline?.sdRHR),
+            color: Theme.recoveryHigh
+        )
+    }
+
+    private var hrvTile: some View {
+        let change = metrics.recovery?.hrvChangePercent
+        let logValue = metrics.hrv.map { log($0) }
+        return MonitorTile(
+            title: "HRV",
+            value: metrics.hrv.map { "\(Int($0.rounded()))" },
+            unit: "ms",
+            status: change.map { delta in
+                delta >= 0
+                    ? TileStatus(text: "Higher", icon: "arrow.up", color: Theme.recoveryHigh)
+                    : TileStatus(text: "Lower", icon: "arrow.down", color: delta < -15 ? Theme.recoveryModerate : Theme.secondaryText)
+            },
+            gauge: position(logValue, mean: metrics.baseline?.meanLogHRV, sd: metrics.baseline?.sdLogHRV),
+            color: Theme.recoveryHigh,
+            actionTitle: metrics.hrv == nil ? "Add HRV" : (metrics.hrvIsManual ? "Edit" : nil),
+            onAction: onEnterHRV
+        )
+    }
+
+    private var respiratoryTile: some View {
+        let rate = metrics.respiratoryRate
+        let normal = rate.map { (12...20).contains($0) } ?? true
+        return MonitorTile(
+            title: "Respiratory",
+            value: rate.map { $0.formatted(.number.precision(.fractionLength(1))) },
+            unit: "rpm",
+            status: rate.map { _ in
+                normal ? TileStatus(text: "Normal", color: Theme.secondaryText) : TileStatus(text: "Check", color: Theme.recoveryModerate)
+            },
+            gauge: rate.map { min(1, max(0, ($0 - 8) / 16)) },
+            color: Theme.strain
+        )
+    }
+
+    private var sleepTile: some View {
+        let sleep = metrics.sleep
+        return MonitorTile(
+            title: "Sleep",
+            value: sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
+            unit: "",
+            status: sleep.map { night in
+                night.asleep >= night.need * 0.9
+                    ? TileStatus(text: "Normal", color: Theme.secondaryText)
+                    : TileStatus(text: "Short", color: Theme.recoveryModerate)
+            },
+            gauge: sleep.map { min(1, $0.asleep / max($0.need * 1.3, 1)) },
+            color: Theme.sleep
+        )
+    }
+}
+
+private struct TileStatus {
+    var text: String
+    var icon: String?
+    var color: Color
+}
+
+private struct MonitorTile: View {
+    let title: String
+    let value: String?
+    let unit: String
+    let status: TileStatus?
+    let gauge: Double?
+    let color: Color
+    var actionTitle: String?
+    var onAction: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.secondaryText)
+                if let value {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(value)
+                            .font(.system(size: 30, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                        Text(unit)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    .foregroundStyle(Theme.primaryText)
+                } else {
+                    Text("No data")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText.opacity(0.7))
+                }
+                if let actionTitle, let onAction {
+                    Button(actionTitle, action: onAction)
                         .font(.caption.weight(.semibold))
                         .buttonStyle(.bordered)
-                }
-            }
-            HStack {
-                StatView(
-                    label: "HRV",
-                    value: hrv.map { "\(Int($0.rounded())) ms" } ?? "--",
-                    detail: result?.hrvChangePercent.map { change in
-                        "\(change >= 0 ? "+" : "")\(Int(change.rounded()))% vs normal"
-                    } ?? (hrvIsManual ? "entered from Garmin" : nil)
-                )
-                StatView(
-                    label: "Resting HR",
-                    value: restingHeartRate.map { "\(Int($0.rounded())) bpm" } ?? "--",
-                    detail: result?.restingHeartRateChange.map { change in
-                        "\(change >= 0 ? "+" : "")\(change.formatted(.number.precision(.fractionLength(1)))) vs normal"
+                        .controlSize(.small)
+                } else if let status {
+                    HStack(spacing: 3) {
+                        if let icon = status.icon {
+                            Image(systemName: icon)
+                        }
+                        Text(status.text)
                     }
-                )
-            }
-            if let result, !result.isCalibrated {
-                Text("Building your baseline. Recovery gets more accurate after a few nights of wearing your watch to bed.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-            } else if result == nil {
-                Text("Wear your watch to sleep to see recovery.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            if result != nil && hrv == nil {
-                Text("No HRV today, so recovery is based on resting heart rate and sleep. Garmin doesn't share HRV with Apple Health. Tap Add HRV and type last night's average from Garmin Connect.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-        }
-        .card()
-    }
-}
-
-private struct SleepCard: View {
-    let result: SleepCalculator.Result?
-
-    private func hours(_ interval: TimeInterval) -> String {
-        Duration.seconds(interval).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Sleep", systemImage: "moon.zzz.fill")
-                .font(.headline)
-                .foregroundStyle(Theme.sleep)
-            if let result {
-                HStack {
-                    StatView(label: "Asleep", value: hours(result.asleep), detail: "need \(hours(result.need))")
-                    StatView(label: "Efficiency", value: result.efficiency.formatted(.percent.precision(.fractionLength(0))), detail: "\(result.interruptions) interruptions")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(status.color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(status.color.opacity(0.12), in: .capsule)
                 }
-                SegmentedBar(segments: [
-                    .init(value: result.deep, color: Theme.sleep),
-                    .init(value: result.rem, color: Theme.sleep.opacity(0.7)),
-                    .init(value: result.core, color: Theme.sleep.opacity(0.4)),
-                    .init(value: result.awake, color: Theme.recoveryModerate.opacity(0.8))
-                ])
-                HStack(spacing: 12) {
-                    legend("Deep", result.deep, Theme.sleep)
-                    legend("REM", result.rem, Theme.sleep.opacity(0.7))
-                    legend("Core", result.core, Theme.sleep.opacity(0.4))
-                    legend("Awake", result.awake, Theme.recoveryModerate)
-                }
-            } else {
-                Text("No sleep recorded last night.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
             }
+            Spacer(minLength: 0)
+            VerticalRangeGauge(value: gauge, color: color)
+                .frame(height: 74)
         }
-        .card()
-    }
-
-    private func legend(_ name: String, _ value: TimeInterval, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(name).font(.caption2).foregroundStyle(Theme.secondaryText)
-            Text(hours(value)).font(.caption.weight(.semibold))
-        }
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct NutritionCard: View {
-    let day: NutritionDay?
-    let proteinTarget: Double?
-
-    private func grams(_ value: Double?) -> String {
-        value.map { "\(Int($0.rounded())) g" } ?? "--"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Nutrition", systemImage: "fork.knife")
-                .font(.headline)
-                .foregroundStyle(Theme.nutrition)
-            if let day, !day.isEmpty {
-                HStack {
-                    StatView(label: "Calories", value: day.calories.map { "\(Int($0.rounded()))" } ?? "--", detail: "kcal")
-                    StatView(
-                        label: "Protein",
-                        value: grams(day.proteinGrams),
-                        detail: proteinTarget.map { "target \(Int($0)) g" },
-                        color: Theme.nutrition
-                    )
-                }
-                if let proteinTarget, let protein = day.proteinGrams {
-                    ProgressView(value: min(protein, proteinTarget), total: proteinTarget)
-                        .tint(Theme.nutrition)
-                        .accessibilityLabel("Protein toward target")
-                }
-                HStack {
-                    StatView(label: "Carbs", value: grams(day.carbsGrams))
-                    StatView(label: "Fat", value: grams(day.fatGrams))
-                    StatView(label: "Fiber", value: grams(day.fiberGrams))
-                }
-            } else {
-                Text("No food logged today. Log meals in Cronometer and turn on its Apple Health sync to see them here.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-        }
-        .card()
-    }
-}
-
-private struct TodayLiftsCard: View {
-    let sessions: [WorkoutSession]
-    let unit: WeightUnit
-
-    var body: some View {
-        if !sessions.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Today's training", systemImage: "dumbbell.fill")
-                    .font(.headline)
-                    .foregroundStyle(Theme.lifting)
-                ForEach(sessions) { session in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(session.name).font(.subheadline.weight(.semibold))
-                            Text("\(session.workingSets.count) sets · \(unit.format(session.totalVolumeKg)) \(unit.rawValue)")
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        Spacer()
-                        Text(Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
-                            .font(.subheadline)
-                            .monospacedDigit()
-                    }
-                }
-            }
-            .card()
-        }
-    }
-}
-
-/// Type in last night's HRV from Garmin Connect (Health → HRV Status → overnight average).
-private struct HRVEntrySheet: View {
-    let existing: HRVReading?
-
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
-    @State private var value: Double?
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("e.g. 52", value: $value, format: .number.precision(.fractionLength(0)))
-                        .keyboardType(.numberPad)
-                        .focused($focused)
-                        .font(.title2.weight(.semibold))
-                } header: {
-                    Text("Last night's HRV (ms)")
-                } footer: {
-                    Text("In Garmin Connect, open HRV Status and use last night's average. Enter it each morning for the most accurate recovery.")
-                }
-                if let existing {
-                    Section {
-                        Button("Delete today's entry", role: .destructive) {
-                            modelContext.delete(existing)
-                            try? modelContext.save()
-                            dismiss()
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Overnight HRV")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save)
-                        .disabled((value ?? 0) <= 0)
-                }
-            }
-            .onAppear {
-                value = existing?.milliseconds
-                focused = true
-            }
-        }
-    }
-
-    private func save() {
-        guard let value, value > 0 else { return }
-        if let existing {
-            existing.milliseconds = value
-        } else {
-            modelContext.insert(HRVReading(date: .now, milliseconds: value))
-        }
-        try? modelContext.save()
-        dismiss()
+        .background(Theme.card, in: .rect(cornerRadius: 22))
+        .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
+        .accessibilityElement(children: .combine)
     }
 }

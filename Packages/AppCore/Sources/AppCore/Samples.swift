@@ -98,8 +98,10 @@ public struct StrengthSessionSummary: Sendable, Equatable {
     public var setRPEs: [Double]
     public var workingSets: Int
     public var totalVolumeKg: Double
+    public var name: String?
 
     public init(
+        name: String? = nil,
         start: Date,
         end: Date,
         sessionRPE: Double? = nil,
@@ -107,6 +109,7 @@ public struct StrengthSessionSummary: Sendable, Equatable {
         workingSets: Int = 0,
         totalVolumeKg: Double = 0
     ) {
+        self.name = name
         self.start = start
         self.end = end
         self.sessionRPE = sessionRPE

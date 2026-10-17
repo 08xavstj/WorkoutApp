@@ -280,10 +280,44 @@ public struct WorkoutPlanner: Sendable {
     }
 
     public func choose(_ slot: MovementSlot) -> CatalogExercise? {
-        ExerciseCatalog.options[slot]?.first { exercise in
+        alternatives(for: slot).first
+    }
+
+    /// Every catalog exercise for a slot that this gym supports, best first.
+    public func alternatives(for slot: MovementSlot) -> [CatalogExercise] {
+        (ExerciseCatalog.options[slot] ?? []).filter { exercise in
             exercise.requires.allSatisfy { gym.has($0) } &&
             (exercise.load.map { !gym.achievableLoads(for: $0).isEmpty } ?? true)
         }
+    }
+
+    /// Sets, reps, effort and load for one exercise in a session.
+    public func prescribe(
+        _ choice: CatalogExercise,
+        slot: MovementSlot,
+        minutes: Int,
+        sessionRPE rpe: Double,
+        history: [String: ExerciseHistory]
+    ) -> PlannedExercise {
+        let compound = slot.isCompound
+        let sets = compound ? (minutes <= 30 ? 3 : 4) : 3
+        let reps: ClosedRange<Int> = compound ? 6...8 : (slot == .core ? 10...15 : 10...12)
+        let setRPE = compound ? rpe : min(9, rpe + 0.5)
+        var planned = PlannedExercise(
+            exerciseID: choice.id, name: choice.name, sets: sets, reps: reps,
+            rpe: setRPE, load: nil, loadKind: choice.load, note: nil
+        )
+        if let kind = choice.load {
+            if let past = history[choice.id] {
+                planned.load = suggestedLoad(history: past, reps: reps, rpe: setRPE, kind: kind)
+                if let load = planned.load {
+                    planned.note = loadNote(load: load, kind: kind)
+                }
+            } else {
+                planned.note = "First time: pick a weight you can lift \(reps.upperBound) times with \(Int(10 - setRPE)) left in the tank."
+            }
+        }
+        return planned
     }
 
     public func plan(
@@ -297,25 +331,7 @@ public struct WorkoutPlanner: Sendable {
         var exercises: [PlannedExercise] = []
         for slot in focus.slots {
             guard exercises.count < exerciseCount, let choice = choose(slot) else { continue }
-            let compound = slot.isCompound
-            let sets = compound ? (minutes <= 30 ? 3 : 4) : 3
-            let reps: ClosedRange<Int> = compound ? 6...8 : (slot == .core ? 10...15 : 10...12)
-            let setRPE = compound ? rpe : min(9, rpe + 0.5)
-            var planned = PlannedExercise(
-                exerciseID: choice.id, name: choice.name, sets: sets, reps: reps,
-                rpe: setRPE, load: nil, loadKind: choice.load, note: nil
-            )
-            if let kind = choice.load {
-                if let past = history[choice.id] {
-                    planned.load = suggestedLoad(history: past, reps: reps, rpe: setRPE, kind: kind)
-                    if let load = planned.load {
-                        planned.note = loadNote(load: load, kind: kind)
-                    }
-                } else {
-                    planned.note = "First time: pick a weight you can lift \(reps.upperBound) times with \(Int(10 - setRPE)) left in the tank."
-                }
-            }
-            exercises.append(planned)
+            exercises.append(prescribe(choice, slot: slot, minutes: minutes, sessionRPE: rpe, history: history))
         }
         return PlannedWorkout(focus: focus, title: focus.title, minutes: minutes, targetRPE: rpe, exercises: exercises, unit: gym.unit)
     }

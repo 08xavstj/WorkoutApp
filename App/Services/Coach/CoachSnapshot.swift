@@ -40,6 +40,13 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     var nutritionToday: Nutrition?
     var nutritionYesterday: Nutrition?
     var recentWorkouts: [Workout]
+    /// Equipment, plates and increments the user has.
+    var gym: String?
+    /// The trainer's planned session for today, if one was built.
+    var suggestedWorkout: String?
+    var caloriesBurnedSoFar: Double?
+    var caloriesProjected: Double?
+    var calorieBalance: Double?
 
     /// Food totals from Apple Health (logged in Cronometer or another food app).
     nonisolated struct Nutrition: Codable, Sendable, Equatable {
@@ -87,12 +94,31 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
         lines.append("HRV: \(fmt(hrv, 0)) ms (\(fmt(hrvChangePercent, 0))% vs baseline). Resting HR: \(fmt(restingHeartRate, 0)) bpm (\(fmt(restingHeartRateChange)) vs baseline).")
         let target = proteinTargetGrams.map { " (protein target \(Int($0)) g)" } ?? ""
         lines.append("Food today so far: \(nutritionToday?.summary ?? "nothing logged")\(target).")
+        if let caloriesProjected {
+            let balance = calorieBalance.map { $0 < 0 ? "deficit of \(Int(-$0))" : "surplus of \(Int($0))" } ?? "unknown balance"
+            lines.append("Calories burned so far: \(Int(caloriesBurnedSoFar ?? 0)), projected for today: \(Int(caloriesProjected)) (\(balance) kcal vs food logged).")
+        }
         lines.append("Food yesterday: \(nutritionYesterday?.summary ?? "nothing logged").")
         if let bodyMassKg {
             lines.append("Body weight: \(bodyMassKg.formatted(.number.precision(.fractionLength(1)))) kg.")
         }
         lines.append("Sleep: score \(sleepScore.map(String.init) ?? "n/a"), \(fmt(sleepHours)) h asleep of \(fmt(sleepNeedHours)) h needed, deep \(fmt(deepHours)) h, REM \(fmt(remHours)) h, \(sleepInterruptions.map(String.init) ?? "n/a") interruptions.")
         return lines.joined(separator: "\n")
+    }
+
+    static func describe(_ plan: PlannedWorkout) -> String {
+        let lines = plan.exercises.map { exercise in
+            let load = exercise.load.map { " at \($0.formatted(.number.precision(.fractionLength(0...2)))) \(plan.unit.rawValue)" } ?? ""
+            return "- \(exercise.name): \(exercise.sets) x \(exercise.reps.lowerBound)-\(exercise.reps.upperBound) @ RPE \(exercise.rpe.formatted())\(load)"
+        }
+        return (["\(plan.title), about \(WorkoutPlanner.estimatedMinutes(plan.exercises)) min:"] + lines).joined(separator: "\n")
+    }
+
+    var trainerSummary: String {
+        var parts: [String] = []
+        if let gym { parts.append(gym) }
+        if let suggestedWorkout { parts.append("Suggested session (weights already rounded to the user's plates/dumbbells):\n\(suggestedWorkout)") }
+        return parts.isEmpty ? "No gym set up yet." : parts.joined(separator: "\n")
     }
 
     var workoutsSummary: String {
@@ -107,7 +133,14 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
 
 extension CoachSnapshot {
     @MainActor
-    static func make(metrics: DailyMetricsModel, sessions: [WorkoutSession], unit: WeightUnit, now: Date = .now) -> CoachSnapshot {
+    static func make(
+        metrics: DailyMetricsModel,
+        sessions: [WorkoutSession],
+        unit: WeightUnit,
+        gymSummary: String? = nil,
+        plan: PlannedWorkout? = nil,
+        now: Date = .now
+    ) -> CoachSnapshot {
         let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: now) ?? now
         let workouts = sessions
             .filter { !$0.isActive && $0.startedAt >= cutoff }
@@ -157,7 +190,12 @@ extension CoachSnapshot {
             proteinTargetGrams: metrics.proteinTarget,
             nutritionToday: Nutrition(metrics.nutritionToday),
             nutritionYesterday: Nutrition(metrics.nutritionYesterday),
-            recentWorkouts: Array(workouts)
+            recentWorkouts: Array(workouts),
+            gym: gymSummary,
+            suggestedWorkout: plan.map(Self.describe),
+            caloriesBurnedSoFar: metrics.energy?.burnedSoFar,
+            caloriesProjected: metrics.energy?.projectedTotal,
+            calorieBalance: metrics.energy?.balance
         )
     }
 }

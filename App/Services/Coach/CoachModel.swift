@@ -1,4 +1,5 @@
 import Foundation
+import AppCore
 
 /// Chat state for the Coach tab. Routes each message to the on-device model
 /// or to Claude, depending on Settings.
@@ -9,6 +10,8 @@ final class CoachModel {
         let id = UUID()
         let role: Role
         let text: String
+        /// A workout the trainer built for this reply, shown as a card with Start.
+        var plan: PlannedWorkout?
     }
 
     private(set) var messages: [ChatMessage] = []
@@ -20,10 +23,17 @@ final class CoachModel {
     @ObservationIgnored private let cloud = CloudCoach()
 
     static let suggestions = [
-        "How hard should I train today?",
+        "How should I train today?",
         "Why is my recovery where it is?",
         "Plan my next workout",
-        "How can I sleep better tonight?"
+        "Am I eating enough for my training?"
+    ]
+
+    static let followUps = [
+        "Make it 30 min",
+        "Swap for a ride",
+        "What should I eat after?",
+        "Make it leg day"
     ]
 
     func newConversation() {
@@ -31,7 +41,31 @@ final class CoachModel {
         onDevice.reset()
     }
 
-    func send(_ text: String, snapshot: CoachSnapshot, settings: UserSettings) async {
+    /// Whether a message is about training, so the reply should carry a workout.
+    static func isTrainingQuestion(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let words = ["train", "workout", "work out", "session", "lift", "gym", "push", "pull", "leg", "upper", "lower", "full body", "exercise", "plan", "min"]
+        return words.contains { lower.contains($0) }
+    }
+
+    /// Focus and length mentioned in a message ("make it 30 min", "leg day").
+    static func requestedFocusAndMinutes(_ text: String) -> (WorkoutFocus?, Int?) {
+        let lower = text.lowercased()
+        var focus: WorkoutFocus?
+        if lower.contains("full body") { focus = .fullBody }
+        else if lower.contains("upper") { focus = .upper }
+        else if lower.contains("lower") { focus = .lower }
+        else if lower.contains("push") || lower.contains("chest") { focus = .push }
+        else if lower.contains("pull") || lower.contains("back") { focus = .pull }
+        else if lower.contains("leg") { focus = .legs }
+        var minutes: Int?
+        if let match = lower.firstMatch(of: /(\d{2,3})\s*(min|minute)/), let value = Int(match.1) {
+            minutes = [30, 45, 60, 75].min { abs($0 - value) < abs($1 - value) }
+        }
+        return (focus, minutes)
+    }
+
+    func send(_ text: String, snapshot: CoachSnapshot, settings: UserSettings, plan: PlannedWorkout? = nil) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isThinking else { return }
         messages.append(ChatMessage(role: .user, text: trimmed))
@@ -54,7 +88,7 @@ final class CoachModel {
                 }
                 reply = try await cloud.reply(history: history, snapshot: snapshot, settings: settings)
             }
-            messages.append(ChatMessage(role: .coach, text: reply))
+            messages.append(ChatMessage(role: .coach, text: reply, plan: plan))
         } catch {
             messages.append(ChatMessage(role: .error, text: error.localizedDescription))
         }

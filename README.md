@@ -8,11 +8,16 @@ An iPhone app in the style of Bevel: **Strain, Recovery and Sleep** scores from 
 
 | Area | What it does |
 |---|---|
-| **Today** | Sleep, Recovery and Strain rings; cards with HRV and resting HR vs. your baseline, sleep stages, heart-rate zones, and cardio vs. lifting load |
-| **Workout** | Start a session, add from 750+ exercises (with images and instructions), log weight/reps/RPE per set, warm-up sets, rest timer, history. Finishing asks how hard it felt and saves to Apple Health |
-| **Nutrition** | Calories, protein (vs. a 1.6 g/kg target), carbs, fat and fiber from **Cronometer**, read through Apple Health |
-| **Coach** | Chat that sees today's scores, your food log and your last 14 days of workouts. Runs on-device (Apple Intelligence, free and private) or on Claude via your own Supabase server |
-| **Settings** | Age/sex/max HR for zones, kg/lb, coach mode, Health access |
+| **Home** | Strain, Recovery and Sleep rings with a coaching line; **strain goal** card showing how far you are from today's target and the workouts that would close the gap; energy balance (Cronometer intake vs. estimated calories burned) and macros; health monitor tiles (RHR, HRV, breathing rate, sleep) |
+| **Fitness** | Week strip of daily strain, big strain gauge with today's target band and encouragement, cardio and muscular **training load** (7-day vs 28-day), today's activities (logged lifts plus Garmin/other workouts), heart-rate zones, history |
+| **Trainer** | **My Gym**: your equipment, bar weights, plate pairs, dumbbell/kettlebell sets and machine/cable increments. The workout builder picks exercises you can do there, sets reps and effort from your recovery, and suggests weights from your lift history **rounded to what you can actually load**, progressing by your gym's smallest jump. Swap any exercise; see plate loading per side |
+| **Live workout** | Timer, live strain added, rest pill (−15s/+15s/Skip), previous sets, "New PR" badges, plate-loading hints, finished and upcoming exercises collapsed |
+| **Coach** | Chat that knows your scores, food, calories, gym and lifts; training questions come back with a ready-to-start workout card. On-device (Apple Intelligence) or Claude |
+| **Biology** | 90-day HRV baseline chart and biomarker trends (weight, RHR, body fat, VO₂ max, protein) |
+
+### Calories burned (`EnergyCalculator`)
+
+Resting energy uses **Katch-McArdle** when Apple Health has your body-fat % (better for lean, muscular people), otherwise **Mifflin-St Jeor** (height, weight, age, sex). Exercise uses the **Keytel et al. (2005)** heart-rate equation for minutes when your heart rate is clearly raised, with a MET-based floor for logged lifting sessions (heart rate swings during lifting). Everyday movement comes from steps outside workouts, and digestion adds ~10% of what you ate. HRV isn't part of any validated energy equation, so it isn't used. Expect roughly ±10–15% error, like any wearable estimate.
 
 ### How the scores work (`Packages/AppCore`)
 

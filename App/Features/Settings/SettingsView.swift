@@ -4,6 +4,9 @@ import AppCore
 struct SettingsView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(\.healthClient) private var health
+    @Environment(GymStore.self) private var gym
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingGym = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -21,10 +24,36 @@ struct SettingsView: View {
                         in: 0...230,
                         step: 1
                     )
+                    LabeledContent("Height (if not in Health)") {
+                        TextField("cm", value: $settings.heightCm, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                        Text("cm").foregroundStyle(Theme.secondaryText)
+                    }
+                    LabeledContent("Weight (if not in Health)") {
+                        TextField("kg", value: $settings.weightKg, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                        Text("kg").foregroundStyle(Theme.secondaryText)
+                    }
                 } header: {
                     Text("Profile")
                 } footer: {
-                    Text("Age and sex set your heart-rate zones. Leave max heart rate on \"estimate\" unless you've measured it.")
+                    Text("Age and sex set your heart-rate zones and calorie estimate. Leave max heart rate on \"estimate\" unless you've measured it. Height and weight from Apple Health are used first.")
+                }
+
+                Section {
+                    Button {
+                        showingGym = true
+                    } label: {
+                        LabeledContent("My Gym", value: gym.isConfigured ? gym.profile.name : "Not set up")
+                    }
+                } header: {
+                    Text("Trainer")
+                } footer: {
+                    Text("Your equipment, plates and dumbbells, so planned weights are ones you can load.")
                 }
 
                 Section("Appearance") {
@@ -92,6 +121,12 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.background)
             .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showingGym) { MyGymView() }
         }
     }
 }

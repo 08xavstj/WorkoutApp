@@ -28,6 +28,9 @@ How the app's scores work:
 - Recovery (0-100%): overnight HRV and resting heart rate compared with the person's 30-day baseline, plus sleep. Under 34% is low, 34-66% moderate, 67%+ high.
 - Target strain is a suggested range for today based on recovery.
 - Sleep score (0-100): time asleep vs. need (need rises after high-strain days), efficiency, deep + REM share, and interruptions.
+- Calories burned: estimated from Mifflin-St Jeor or Katch-McArdle resting energy, the Keytel heart-rate equation for exercise, steps, and 10% for digestion. calorieBalance is food eaten minus projected burn (negative = deficit).
+- Gym: the snapshot's "gym" field lists the user's equipment, plates and weight increments. Only suggest exercises they can do there, and loads they can actually make with those plates/dumbbells/stacks.
+- suggestedWorkout: when present, the app shows this planned session as a card with a Start button (weights already rounded to the user's equipment). Explain why it suits today and how to adjust it; don't repeat the whole list.
 - Nutrition: daily calories and macros the user logs in Cronometer, read from Apple Health. Today's numbers may be partial if the day isn't over. Protein target is 1.6 g/kg body weight. Relate food to training and recovery (e.g. low protein or calories after a hard day), without moralizing about food.
 
 How to answer:

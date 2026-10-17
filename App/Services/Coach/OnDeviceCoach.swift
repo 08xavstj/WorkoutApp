@@ -51,7 +51,7 @@ final class OnDeviceCoach {
 
     private func makeSession(snapshot: CoachSnapshot) -> LanguageModelSession {
         LanguageModelSession(
-            tools: [TodayMetricsTool(snapshot: snapshot), RecentWorkoutsTool(snapshot: snapshot)],
+            tools: [TodayMetricsTool(snapshot: snapshot), RecentWorkoutsTool(snapshot: snapshot), TrainerTool(snapshot: snapshot)],
             instructions: CoachPrompt.onDeviceInstructions
         )
     }
@@ -86,5 +86,21 @@ struct RecentWorkoutsTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         snapshot.workoutsSummary
+    }
+}
+
+struct TrainerTool: Tool {
+    let name = "getGymAndPlannedWorkout"
+    let description = "Get the user's gym equipment, plates and weight increments, and the workout the trainer planned for today."
+    let snapshot: CoachSnapshot
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "What the user asked for, e.g. 'leg day' or 'shorter workout'")
+        var request: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        snapshot.trainerSummary
     }
 }

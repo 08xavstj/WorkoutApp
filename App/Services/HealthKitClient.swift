@@ -18,6 +18,11 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.activeEnergyBurned),
             HKCategoryType(.sleepAnalysis),
             HKQuantityType(.bodyMass),
+            HKQuantityType(.height),
+            HKQuantityType(.bodyFatPercentage),
+            HKQuantityType(.vo2Max),
+            HKQuantityType(.respiratoryRate),
+            HKQuantityType(.stepCount),
             HKQuantityType(.dietaryEnergyConsumed),
             HKQuantityType(.dietaryProtein),
             HKQuantityType(.dietaryCarbohydrates),
@@ -204,6 +209,125 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
     }
 
+    // MARK: - Body measurements and series
+
+    /// Most recent value of a quantity (height, body fat, VO2 max...).
+    @concurrent
+    func latest(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double? {
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: HKQuantityType(identifier))],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
+            limit: 1
+        )
+        return try await descriptor.result(for: store).first?.quantity.doubleValue(for: unit)
+    }
+
+    /// One value per day for the last `days` days (average, or total when `cumulative`).
+    /// Days without data are left out.
+    @concurrent
+    func dailySeries(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, days: Int, cumulative: Bool) async throws -> [DatedValue] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: today),
+              let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) else { return [] }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKStatisticsCollectionQueryDescriptor(
+            predicate: .quantitySample(type: HKQuantityType(identifier), predicate: predicate),
+            options: cumulative ? .cumulativeSum : .discreteAverage,
+            anchorDate: today,
+            intervalComponents: DateComponents(day: 1)
+        )
+        do {
+            return try await descriptor.result(for: store).statistics().compactMap { statistics in
+                let quantity = cumulative ? statistics.sumQuantity() : statistics.averageQuantity()
+                guard let quantity else { return nil }
+                return DatedValue(date: statistics.startDate, value: quantity.doubleValue(for: unit))
+            }
+        } catch let error as HKError where error.code == .errorNoData {
+            return []
+        }
+    }
+
+    /// Average breathing rate during the night ending on the morning of `day`.
+    @concurrent
+    func overnightRespiratoryRate(forNightEnding day: Date) async throws -> Double? {
+        let morning = Calendar.current.startOfDay(for: day)
+        let predicate = HKQuery.predicateForSamples(withStart: morning.addingTimeInterval(-6 * 3600), end: morning.addingTimeInterval(12 * 3600))
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: HKQuantityType(.respiratoryRate), predicate: predicate)],
+            sortDescriptors: []
+        )
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let values = try await descriptor.result(for: store).map { $0.quantity.doubleValue(for: unit) }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    /// Workouts recorded by other apps (Garmin Connect, Strava...) in a time range.
+    @concurrent
+    func externalWorkouts(from start: Date, to end: Date) async throws -> [ExternalWorkout] {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.workout(predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        let ownBundle = Bundle.main.bundleIdentifier
+        let strengthTypes: [HKWorkoutActivityType] = [.traditionalStrengthTraining, .functionalStrengthTraining]
+        return try await descriptor.result(for: store).compactMap { workout in
+            guard workout.sourceRevision.source.bundleIdentifier != ownBundle else { return nil }
+            let distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meterUnit(with: .kilo))
+            return ExternalWorkout(
+                name: Self.name(for: workout.workoutActivityType),
+                isStrength: strengthTypes.contains(workout.workoutActivityType),
+                start: workout.startDate,
+                end: workout.endDate,
+                distanceKm: distance
+            )
+        }
+    }
+
+    /// Step count today, split into steps inside and outside the given windows.
+    @concurrent
+    func steps(from start: Date, to end: Date, excluding windows: [DateInterval]) async throws -> (total: Double, outside: Double) {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: HKQuantityType(.stepCount), predicate: predicate)],
+            sortDescriptors: []
+        )
+        var total = 0.0
+        var outside = 0.0
+        for sample in try await descriptor.result(for: store) {
+            let count = sample.quantity.doubleValue(for: .count())
+            total += count
+            let middle = sample.startDate.addingTimeInterval(sample.endDate.timeIntervalSince(sample.startDate) / 2)
+            if !windows.contains(where: { $0.contains(middle) }) {
+                outside += count
+            }
+        }
+        return (total, outside)
+    }
+
+    private static func name(for type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .walking: "Walk"
+        case .running: "Run"
+        case .cycling: "Ride"
+        case .hiking: "Hike"
+        case .swimming: "Swim"
+        case .rowing: "Row"
+        case .elliptical: "Elliptical"
+        case .yoga: "Yoga"
+        case .highIntensityIntervalTraining: "HIIT"
+        case .traditionalStrengthTraining, .functionalStrengthTraining: "Strength"
+        case .stairClimbing: "Stairs"
+        case .soccer: "Soccer"
+        case .basketball: "Basketball"
+        case .tennis: "Tennis"
+        case .hockey: "Hockey"
+        default: "Workout"
+        }
+    }
+
     // MARK: - Writing workouts
 
     /// Saves a finished gym session to Apple Health as Traditional Strength Training.
@@ -217,4 +341,20 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         try await builder.endCollection(at: end)
         _ = try await builder.finishWorkout()
     }
+}
+
+nonisolated struct DatedValue: Sendable, Identifiable, Equatable {
+    var date: Date
+    var value: Double
+    var id: Date { date }
+}
+
+nonisolated struct ExternalWorkout: Sendable, Identifiable, Equatable {
+    var name: String
+    var isStrength: Bool
+    var start: Date
+    var end: Date
+    var distanceKm: Double?
+    var id: Date { start }
+    var minutes: Int { Int(end.timeIntervalSince(start) / 60) }
 }

@@ -116,7 +116,9 @@ enum CoachPrompt {
     Always call getTodayMetrics before answering questions about today, and \
     getRecentWorkouts before answering questions about training.
     Strain is 0-21. Recovery is 0-100% (under 34 low, 34-66 moderate, 67+ high).
-    getTodayMetrics also includes food logged in Cronometer; today's food may be partial.
+    getTodayMetrics also includes food logged in Cronometer and calories burned; today's food may be partial.
+    For workout questions call getGymAndPlannedWorkout. The app shows the planned session as a card, \
+    so explain why it fits today instead of listing every exercise. Only suggest equipment the user has.
     Keep answers under 120 words. Give one clear recommendation.
     You are not a doctor; suggest seeing one for pain, illness or injury.
     """

@@ -45,6 +45,7 @@ final class WorkoutSession {
     /// The summary the strain calculator works on.
     var strainSummary: StrengthSessionSummary {
         StrengthSessionSummary(
+            name: name,
             start: startedAt,
             end: endedAt ?? .now,
             sessionRPE: sessionRPE.map(Double.init),
