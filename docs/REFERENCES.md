@@ -41,3 +41,22 @@ Run `scripts/fetch-references.sh` to clone these into `references/` (git-ignored
 ## Not used: REA (morluto/rea)
 
 REA ("Reverse Engineer Anything") decompiles apps. Using it on Bevel would likely break Bevel's terms of service, and copying their design or code exposes you legally (Whoop is already suing Bevel). This app matches the *style* (dark cards, score rings, coach) with original code and branding.
+
+## Design skills (installed in `.claude/skills/`)
+
+| Skill(s) | Source | License |
+|---|---|---|
+| `apple-design`, `apple-design-foundations`, `-materials`, `-motion`, `-os`, `-interaction`, `-tactics`, `-web`, `-backend` | [s1gmamale1/apple-design-skills](https://github.com/s1gmamale1/apple-design-skills) | MIT |
+| `apple-design-hig` (renamed from `apple-design` to avoid a clash) | [SudewaJay/apple-design-skill](https://github.com/SudewaJay/apple-design-skill) | MIT |
+| `liquid-glass` | [heyparsadev/liquid-glass-skill](https://github.com/heyparsadev/liquid-glass-skill) | MIT |
+| `ui-ux-pro-max` | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | MIT |
+| `swiftui-design-principles` | [arjitj2/swiftui-design-principles](https://github.com/arjitj2/swiftui-design-principles) | MIT |
+| `writing-for-interfaces` | [andrewgleave/skills](https://github.com/andrewgleave/skills) | MIT |
+| `swiftui-ui-patterns`, `swiftui-liquid-glass`, `swiftui-view-refactor`, `swiftui-performance-audit` | [Dimillian/Skills](https://github.com/Dimillian/Skills) | MIT |
+| `swiftui-expert-skill` | [AvdLee/SwiftUI-Agent-Skill](https://github.com/AvdLee/SwiftUI-Agent-Skill) | MIT |
+| `swift-accessibility-skill` | [PasqualeVittoriosi/swift-accessibility-skill](https://github.com/PasqualeVittoriosi/swift-accessibility-skill) | MIT |
+| `widgets` | [n0an/Widgets-Agent-Skill](https://github.com/n0an/Widgets-Agent-Skill) | MIT |
+
+Not installed: [dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills) has no license and a registry security advisory; read it for reference only.
+
+Planned UI libraries (added to the app when the redesign uses them): Swift Charts (built in), [EmergeTools/Pow](https://github.com/EmergeTools/Pow) (MIT), [twostraws/Vortex](https://github.com/twostraws/Vortex) (MIT), [twostraws/Inferno](https://github.com/twostraws/Inferno) (MIT), [airbnb/lottie-ios](https://github.com/airbnb/lottie-ios) (Apache-2.0), [rive-app/rive-ios](https://github.com/rive-app/rive-ios) (MIT), [SFSafeSymbols](https://github.com/SFSafeSymbols/SFSafeSymbols) (MIT), [markiv/SwiftUI-Shimmer](https://github.com/markiv/SwiftUI-Shimmer) (MIT).
