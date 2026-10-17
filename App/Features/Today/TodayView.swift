@@ -141,6 +141,9 @@ private struct HealthAccessCard: View {
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
+            Text("If you already answered, open the Health app → your profile picture → Apps → WorkoutApp, and tap Turn On All.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
             Button("Allow access") {
                 Task { try? await health?.requestAuthorization() }
             }
@@ -320,7 +323,7 @@ private struct NutritionCard: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Nutrition", systemImage: "fork.knife")
                 .font(.headline)
-                .foregroundStyle(Theme.recoveryHigh)
+                .foregroundStyle(Theme.nutrition)
             if let day, !day.isEmpty {
                 HStack {
                     StatView(label: "Calories", value: day.calories.map { "\(Int($0.rounded()))" } ?? "--", detail: "kcal")
@@ -328,12 +331,12 @@ private struct NutritionCard: View {
                         label: "Protein",
                         value: grams(day.proteinGrams),
                         detail: proteinTarget.map { "target \(Int($0)) g" },
-                        color: Theme.recoveryHigh
+                        color: Theme.nutrition
                     )
                 }
                 if let proteinTarget, let protein = day.proteinGrams {
                     ProgressView(value: min(protein, proteinTarget), total: proteinTarget)
-                        .tint(Theme.recoveryHigh)
+                        .tint(Theme.nutrition)
                         .accessibilityLabel("Protein toward target")
                 }
                 HStack {

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import AppCore
 
 enum WeightUnit: String, CaseIterable, Identifiable {
@@ -19,6 +20,29 @@ enum WeightUnit: String, CaseIterable, Identifiable {
 
     func format(_ kilograms: Double) -> String {
         display(kilograms).formatted(.number.precision(.fractionLength(0...1)))
+    }
+}
+
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case light, dark, system
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .light: "Light"
+        case .dark: "Dark"
+        case .system: "Match iPhone"
+        }
+    }
+
+    /// nil lets the app follow the iPhone's setting.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .light: .light
+        case .dark: .dark
+        case .system: nil
+        }
     }
 }
 
@@ -49,6 +73,7 @@ final class UserSettings {
     var maxHeartRate: Int { didSet { defaults.set(maxHeartRate, forKey: "maxHeartRate") } }
     var weightUnit: WeightUnit { didSet { defaults.set(weightUnit.rawValue, forKey: "weightUnit") } }
     var coachMode: CoachMode { didSet { defaults.set(coachMode.rawValue, forKey: "coachMode") } }
+    var appearance: AppAppearance { didSet { defaults.set(appearance.rawValue, forKey: "appearance") } }
     var supabaseURL: String { didSet { defaults.set(supabaseURL, forKey: "supabaseURL") } }
     var supabaseAnonKey: String { didSet { defaults.set(supabaseAnonKey, forKey: "supabaseAnonKey") } }
     var hasOnboarded: Bool { didSet { defaults.set(hasOnboarded, forKey: "hasOnboarded") } }
@@ -60,6 +85,7 @@ final class UserSettings {
         maxHeartRate = defaults.integer(forKey: "maxHeartRate")
         weightUnit = WeightUnit(rawValue: defaults.string(forKey: "weightUnit") ?? "") ?? .pounds
         coachMode = CoachMode(rawValue: defaults.string(forKey: "coachMode") ?? "") ?? .onDevice
+        appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .light
         supabaseURL = defaults.string(forKey: "supabaseURL") ?? ""
         supabaseAnonKey = defaults.string(forKey: "supabaseAnonKey") ?? ""
         hasOnboarded = defaults.bool(forKey: "hasOnboarded")

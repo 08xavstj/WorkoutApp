@@ -138,7 +138,7 @@ private struct ExerciseSection: View {
         } header: {
             Text(exercise.name)
                 .font(.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.primaryText)
                 .textCase(nil)
         }
     }
@@ -174,7 +174,7 @@ private struct SetRow: View {
             } label: {
                 Text(set.isWarmup ? "W" : "\(index)")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(set.isWarmup ? Theme.recoveryModerate : .white)
+                    .foregroundStyle(set.isWarmup ? Theme.recoveryModerate : Theme.primaryText)
             }
             .buttonStyle(.plain)
             .frame(width: 32, alignment: .leading)

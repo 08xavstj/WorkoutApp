@@ -29,7 +29,7 @@ struct WorkoutAppApp: App {
                 .environment(metrics)
                 .environment(coach)
                 .environment(\.healthClient, health)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)
         }
         .modelContainer(container)

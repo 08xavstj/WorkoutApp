@@ -52,7 +52,6 @@ targets:
       properties:
         CFBundleDisplayName: WorkoutApp
         UILaunchScreen: {}
-        UIUserInterfaceStyle: Dark
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSHealthShareUsageDescription: >-

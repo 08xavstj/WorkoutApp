@@ -142,14 +142,22 @@ private struct MessageBubble: View {
                 .textSelection(.enabled)
                 .padding(12)
                 .background(background, in: .rect(cornerRadius: 16))
-                .foregroundStyle(message.role == .error ? Theme.recoveryLow : .white)
+                .foregroundStyle(foreground)
             if message.role != .user { Spacer(minLength: 40) }
+        }
+    }
+
+    private var foreground: Color {
+        switch message.role {
+        case .user: .white
+        case .coach: Theme.primaryText
+        case .error: Theme.recoveryLow
         }
     }
 
     private var background: Color {
         switch message.role {
-        case .user: Theme.strain.opacity(0.35)
+        case .user: Theme.strain
         case .coach: Theme.card
         case .error: Theme.recoveryLow.opacity(0.12)
         }

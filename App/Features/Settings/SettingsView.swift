@@ -27,6 +27,15 @@ struct SettingsView: View {
                     Text("Age and sex set your heart-rate zones. Leave max heart rate on \"estimate\" unless you've measured it.")
                 }
 
+                Section("Appearance") {
+                    Picker("Theme", selection: $settings.appearance) {
+                        ForEach(AppAppearance.allCases) { appearance in
+                            Text(appearance.label).tag(appearance)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
                 Section("Units") {
                     Picker("Weight", selection: $settings.weightUnit) {
                         ForEach(WeightUnit.allCases) { unit in
@@ -60,10 +69,17 @@ struct SettingsView: View {
                     Text("On-device is free and private. Claude gives deeper answers and runs through your own Supabase server, so your Anthropic key never ships in the app. See README.")
                 }
 
-                Section("Apple Health") {
-                    Button("Review Health access") {
+                Section {
+                    Button("Ask for Health access") {
                         Task { try? await health?.requestAuthorization() }
                     }
+                    if let healthURL = URL(string: "x-apple-health://") {
+                        Link("Open the Health app", destination: healthURL)
+                    }
+                } header: {
+                    Text("Apple Health")
+                } footer: {
+                    Text("iOS only shows the permission screen once. To change access later, open the Health app → your profile picture → Apps → WorkoutApp, and tap Turn On All.")
                 }
 
                 Section("About") {

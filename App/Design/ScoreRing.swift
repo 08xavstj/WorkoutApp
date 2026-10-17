@@ -79,7 +79,7 @@ struct StatView: View {
     let label: String
     let value: String
     var detail: String?
-    var color: Color = .white
+    var color: Color = Theme.primaryText
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {

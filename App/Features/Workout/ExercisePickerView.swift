@@ -24,7 +24,7 @@ struct ExercisePickerView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(exercise.name)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(Theme.primaryText)
                                 Text([exercise.primaryMuscleLabel, exercise.equipment?.capitalized].compactMap { $0 }.joined(separator: " · "))
                                     .font(.caption)
                                     .foregroundStyle(Theme.secondaryText)

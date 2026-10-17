@@ -29,6 +29,11 @@ struct OnboardingView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(isRequesting)
+            Text("On the next screen, tap **Turn On All** at the top, then **Allow**. iOS keeps Allow greyed out until you turn something on.")
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
             Button("Not now") { finish() }
                 .frame(maxWidth: .infinity)
         }
