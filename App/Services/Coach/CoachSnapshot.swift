@@ -81,6 +81,9 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
         lines.append("Yesterday's strain: \(fmt(yesterdayStrain)).")
         let calibration = recoveryCalibrated == false ? " (still building a baseline - treat as rough)" : ""
         lines.append("Recovery: \(recovery.map { "\($0)%" } ?? "n/a")\(calibration).")
+        if hrv == nil {
+            lines.append("HRV is not available today (Garmin doesn't share it with Apple Health), so recovery uses resting heart rate and sleep.")
+        }
         lines.append("HRV: \(fmt(hrv, 0)) ms (\(fmt(hrvChangePercent, 0))% vs baseline). Resting HR: \(fmt(restingHeartRate, 0)) bpm (\(fmt(restingHeartRateChange)) vs baseline).")
         let target = proteinTargetGrams.map { " (protein target \(Int($0)) g)" } ?? ""
         lines.append("Food today so far: \(nutritionToday?.summary ?? "nothing logged")\(target).")

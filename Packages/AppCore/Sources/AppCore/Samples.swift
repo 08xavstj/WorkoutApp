@@ -32,6 +32,31 @@ public struct DailyVitals: Sendable, Equatable {
     }
 }
 
+extension DailyVitals {
+    /// Fills in HRV the user typed in (for watches like Garmin that don't share
+    /// HRV with Apple Health). Health data wins when both exist for a night.
+    /// Returned newest first.
+    public static func merging(
+        _ vitals: [DailyVitals],
+        manualHRV: [Date: Double],
+        calendar: Calendar = .current
+    ) -> [DailyVitals] {
+        var byNight: [Date: DailyVitals] = [:]
+        for entry in vitals {
+            byNight[calendar.startOfDay(for: entry.date)] = entry
+        }
+        for (date, milliseconds) in manualHRV where milliseconds > 0 {
+            let night = calendar.startOfDay(for: date)
+            var entry = byNight[night] ?? DailyVitals(date: night, hrvMilliseconds: nil, restingHeartRate: nil)
+            if entry.hrvMilliseconds == nil {
+                entry.hrvMilliseconds = milliseconds
+            }
+            byNight[night] = entry
+        }
+        return byNight.values.sorted { $0.date > $1.date }
+    }
+}
+
 public enum SleepStage: String, Sendable, Codable, CaseIterable {
     case inBed
     case awake

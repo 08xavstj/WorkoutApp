@@ -105,10 +105,26 @@ final class SetLog {
     }
 }
 
+/// Overnight HRV typed in by the user, for watches (like Garmin) that don't
+/// share HRV with Apple Health. One reading per morning.
+@Model
+final class HRVReading {
+    /// Start of the day the reading belongs to (the morning after the night).
+    var date: Date
+    var milliseconds: Double
+    var source: String
+
+    init(date: Date, milliseconds: Double, source: String = "Garmin") {
+        self.date = Calendar.current.startOfDay(for: date)
+        self.milliseconds = milliseconds
+        self.source = source
+    }
+}
+
 nonisolated enum WorkoutSchema: VersionedSchema {
     static let versionIdentifier = Schema.Version(1, 0, 0)
     static var models: [any PersistentModel.Type] {
-        [WorkoutSession.self, ExerciseLog.self, SetLog.self]
+        [WorkoutSession.self, ExerciseLog.self, SetLog.self, HRVReading.self]
     }
 }
 

@@ -37,11 +37,25 @@ open WorkoutApp.xcodeproj
 In Xcode:
 1. Select the **WorkoutApp** target → **Signing & Capabilities** → choose your Team. Change the bundle ID from `com.example.workoutapp` to something you own (or edit `project.yml` and re-run `xcodegen generate`).
 2. Plug in your iPhone (or use Wi-Fi debugging), pick it as the run destination, press **Run**.
-3. On the phone: allow Apple Health access when asked. Wear your Apple Watch to bed for a few nights so recovery can build a baseline.
+3. On the phone: allow Apple Health access when asked. Wear your watch to bed for a few nights so recovery can build a baseline.
 
 The `.xcodeproj` is generated, so it isn't committed. Re-run `xcodegen generate` after pulling changes that add files.
 
 Run the score tests any time: `swift test --package-path Packages/AppCore`.
+
+## Connect a Garmin watch
+
+The app reads everything through Apple Health, so it works with Garmin watches (like the Instinct 2) as well as Apple Watch.
+
+1. In the **Garmin Connect** app: **More → Settings → Connected Apps → Apple Health**, and turn on every category.
+2. On your iPhone: **Settings → Health → Data Access & Devices → Garmin Connect**, and allow all categories.
+3. Open Garmin Connect once a day (or leave it running in the background) so it syncs to Health.
+
+What comes through: heart rate, resting heart rate, sleep and stages, and workouts. That covers strain and sleep.
+
+What doesn't: **HRV**. Garmin keeps HRV Status in its own app. Without it, recovery is based on resting heart rate and sleep only. To include HRV, tap **Add HRV** on the Recovery card each morning and type last night's average from Garmin Connect (HRV Status). Health HRV is used instead whenever it exists.
+
+Gym sessions: log them in this app. If you also start a Strength activity on the watch, turn off **Save to Apple Health** when you finish, so Health doesn't get the workout twice. Garmin's in-workout heart rate sometimes reaches Health only as a summary, which is why lifting strain is driven by your effort rating.
 
 ## Connect Cronometer
 
@@ -87,7 +101,7 @@ supabase/functions/coach/   Claude proxy (Deno/TypeScript)
 
 ## Roadmap
 
-1. **Apple Watch app**: live heart rate and set logging from the wrist. This is the biggest accuracy gain for gym strain.
+1. **Automatic HRV for Garmin**: Garmin's Health API (requires approved business access), or a 1-minute morning reading with a Bluetooth chest strap or the iPhone camera.
 2. Widgets and Live Activity for the rest timer and today's rings.
 3. Templates/routines, PRs and progress charts per exercise (Swift Charts).
 4. Stress score (daytime HRV), nutrition trends and calorie balance (intake vs. burn), and trends (7/30-day charts).

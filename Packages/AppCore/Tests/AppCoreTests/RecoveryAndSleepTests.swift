@@ -116,3 +116,29 @@ struct SleepCalculatorTests {
         #expect(calculator.score(samples: [SleepSample(stage: .inBed, start: at(0), end: at(8))]) == nil)
     }
 }
+
+struct ManualHRVTests {
+    let calendar = Calendar(identifier: .gregorian)
+    let morning = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func manualHRVFillsMissingNights() {
+        let health = [DailyVitals(date: morning, hrvMilliseconds: nil, restingHeartRate: 52)]
+        let merged = DailyVitals.merging(health, manualHRV: [morning: 48], calendar: calendar)
+        #expect(merged.count == 1)
+        #expect(merged[0].hrvMilliseconds == 48)
+        #expect(merged[0].restingHeartRate == 52)
+    }
+
+    @Test func healthDataWinsOverManualEntry() {
+        let health = [DailyVitals(date: morning, hrvMilliseconds: 60, restingHeartRate: 52)]
+        let merged = DailyVitals.merging(health, manualHRV: [morning: 48], calendar: calendar)
+        #expect(merged[0].hrvMilliseconds == 60)
+    }
+
+    @Test func manualOnlyNightsAreAddedNewestFirst() {
+        let earlier = morning.addingTimeInterval(-86_400)
+        let merged = DailyVitals.merging([], manualHRV: [earlier: 50, morning: 55], calendar: calendar)
+        #expect(merged.map(\.hrvMilliseconds) == [55, 50])
+        #expect(merged[0].restingHeartRate == nil)
+    }
+}

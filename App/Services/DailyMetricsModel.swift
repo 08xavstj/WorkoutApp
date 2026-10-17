@@ -10,6 +10,8 @@ final class DailyMetricsModel {
     private(set) var sleep: SleepCalculator.Result?
     private(set) var restingHeartRate: Double?
     private(set) var hrv: Double?
+    /// True when today's HRV came from a manual entry rather than Apple Health.
+    private(set) var hrvIsManual = false
     private(set) var yesterdayStrain: Double?
     private(set) var nutritionToday: NutritionDay?
     private(set) var nutritionYesterday: NutritionDay?
@@ -29,7 +31,14 @@ final class DailyMetricsModel {
     }
 
     /// - Parameter sessions: gym sessions from roughly the last two days.
-    func refresh(health: HealthKitClient, settings: UserSettings, sessions: [StrengthSessionSummary], now: Date = .now) async {
+    /// - Parameter manualHRV: HRV the user typed in, keyed by morning.
+    func refresh(
+        health: HealthKitClient,
+        settings: UserSettings,
+        sessions: [StrengthSessionSummary],
+        manualHRV: [Date: Double] = [:],
+        now: Date = .now
+    ) async {
         guard health.isAvailable else {
             errorMessage = "Apple Health isn't available on this device."
             return
@@ -45,7 +54,11 @@ final class DailyMetricsModel {
             async let vitalsTask = health.nightlyVitals(days: 31, endingOn: today)
             async let sleepTask = health.sleepSamples(forNightEnding: today)
             async let heartRateTask = health.heartRateSamples(from: yesterday, to: now)
-            let (vitals, sleepSamples, heartRate) = try await (vitalsTask, sleepTask, heartRateTask)
+            let (healthVitals, sleepSamples, heartRate) = try await (vitalsTask, sleepTask, heartRateTask)
+            let vitals = DailyVitals.merging(healthVitals, manualHRV: manualHRV, calendar: calendar)
+            let healthHadHRVToday = healthVitals.contains {
+                calendar.isDate($0.date, inSameDayAs: today) && $0.hrvMilliseconds != nil
+            }
 
             let todayVitals = vitals.first { calendar.isDate($0.date, inSameDayAs: today) }
                 ?? DailyVitals(date: today, hrvMilliseconds: nil, restingHeartRate: nil)
@@ -54,6 +67,7 @@ final class DailyMetricsModel {
 
             restingHeartRate = todayVitals.restingHeartRate
             hrv = todayVitals.hrvMilliseconds
+            hrvIsManual = hrv != nil && !healthHadHRVToday
             let profile = settings.heartRateProfile(restingHeartRate: todayVitals.restingHeartRate ?? baseline.meanRHR)
 
             let yesterdayResult = strainCalculator.dailyStrain(

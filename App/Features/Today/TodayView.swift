@@ -11,6 +11,8 @@ struct TodayView: View {
     @Environment(\.healthClient) private var health
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
+    @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
+    @State private var showingHRVEntry = false
 
     var body: some View {
         NavigationStack {
@@ -21,7 +23,13 @@ struct TodayView: View {
                         HealthAccessCard(message: error)
                     }
                     StrainCard(result: metrics.strain, target: metrics.targetStrain)
-                    RecoveryCard(result: metrics.recovery, hrv: metrics.hrv, restingHeartRate: metrics.restingHeartRate)
+                    RecoveryCard(
+                        result: metrics.recovery,
+                        hrv: metrics.hrv,
+                        hrvIsManual: metrics.hrvIsManual,
+                        restingHeartRate: metrics.restingHeartRate,
+                        onEnterHRV: { showingHRVEntry = true }
+                    )
                     SleepCard(result: metrics.sleep)
                     NutritionCard(day: metrics.nutritionToday, proteinTarget: metrics.proteinTarget)
                     TodayLiftsCard(sessions: todaysSessions, unit: settings.weightUnit)
@@ -39,6 +47,13 @@ struct TodayView: View {
             }
             .onChange(of: sessions.count) {
                 Task { await refresh() }
+            }
+            .onChange(of: hrvReadings.map(\.milliseconds)) {
+                Task { await refresh() }
+            }
+            .sheet(isPresented: $showingHRVEntry) {
+                HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
+                    .presentationDetents([.medium])
             }
         }
     }
@@ -104,7 +119,12 @@ struct TodayView: View {
         let recent = sessions
             .filter { !$0.isActive && $0.startedAt >= cutoff }
             .map(\.strainSummary)
-        await metrics.refresh(health: health, settings: settings, sessions: recent)
+        // Keep the latest entry per morning.
+        var manualHRV: [Date: Double] = [:]
+        for reading in hrvReadings where manualHRV[reading.date] == nil {
+            manualHRV[reading.date] = reading.milliseconds
+        }
+        await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
     }
 }
 
@@ -175,7 +195,7 @@ private struct StrainCard: View {
                     }
                 }
             } else {
-                Text("No strain yet today. Wear your Apple Watch or log a gym session.")
+                Text("No strain yet today. Wear your watch or log a gym session.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -187,20 +207,31 @@ private struct StrainCard: View {
 private struct RecoveryCard: View {
     let result: RecoveryCalculator.Result?
     let hrv: Double?
+    let hrvIsManual: Bool
     let restingHeartRate: Double?
+    let onEnterHRV: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Recovery", systemImage: "bolt.heart.fill")
-                .font(.headline)
-                .foregroundStyle(Theme.recoveryColor(for: result?.score))
+            HStack {
+                Label("Recovery", systemImage: "bolt.heart.fill")
+                    .font(.headline)
+                    .foregroundStyle(Theme.recoveryColor(for: result?.score))
+                Spacer()
+                // Only offered when HRV isn't coming from Apple Health.
+                if hrv == nil || hrvIsManual {
+                    Button(hrv == nil ? "Add HRV" : "Edit HRV", action: onEnterHRV)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                }
+            }
             HStack {
                 StatView(
                     label: "HRV",
                     value: hrv.map { "\(Int($0.rounded())) ms" } ?? "--",
                     detail: result?.hrvChangePercent.map { change in
                         "\(change >= 0 ? "+" : "")\(Int(change.rounded()))% vs normal"
-                    }
+                    } ?? (hrvIsManual ? "entered from Garmin" : nil)
                 )
                 StatView(
                     label: "Resting HR",
@@ -215,8 +246,13 @@ private struct RecoveryCard: View {
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             } else if result == nil {
-                Text("Wear your Apple Watch to sleep to see recovery.")
+                Text("Wear your watch to sleep to see recovery.")
                     .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if result != nil && hrv == nil {
+                Text("No HRV today, so recovery is based on resting heart rate and sleep. Garmin doesn't share HRV with Apple Health. Tap Add HRV and type last night's average from Garmin Connect.")
+                    .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
         }
@@ -342,5 +378,67 @@ private struct TodayLiftsCard: View {
             }
             .card()
         }
+    }
+}
+
+/// Type in last night's HRV from Garmin Connect (Health → HRV Status → overnight average).
+private struct HRVEntrySheet: View {
+    let existing: HRVReading?
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @State private var value: Double?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("e.g. 52", value: $value, format: .number.precision(.fractionLength(0)))
+                        .keyboardType(.numberPad)
+                        .focused($focused)
+                        .font(.title2.weight(.semibold))
+                } header: {
+                    Text("Last night's HRV (ms)")
+                } footer: {
+                    Text("In Garmin Connect, open HRV Status and use last night's average. Enter it each morning for the most accurate recovery.")
+                }
+                if let existing {
+                    Section {
+                        Button("Delete today's entry", role: .destructive) {
+                            modelContext.delete(existing)
+                            try? modelContext.save()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Overnight HRV")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .disabled((value ?? 0) <= 0)
+                }
+            }
+            .onAppear {
+                value = existing?.milliseconds
+                focused = true
+            }
+        }
+    }
+
+    private func save() {
+        guard let value, value > 0 else { return }
+        if let existing {
+            existing.milliseconds = value
+        } else {
+            modelContext.insert(HRVReading(date: .now, milliseconds: value))
+        }
+        try? modelContext.save()
+        dismiss()
     }
 }
