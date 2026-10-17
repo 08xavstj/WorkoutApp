@@ -1,0 +1,9 @@
+// Signing defaults. Don't put your own team here: run
+//   scripts/set-signing.sh <TEAM_ID> <bundle.id>
+// which writes Config/Signing.local.xcconfig (git-ignored, survives
+// `xcodegen generate` and `git pull`).
+DEVELOPMENT_TEAM =
+PRODUCT_BUNDLE_IDENTIFIER = com.example.workoutapp
+CODE_SIGN_STYLE = Automatic
+
+#include? "Signing.local.xcconfig"

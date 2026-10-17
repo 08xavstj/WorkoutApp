@@ -34,9 +34,17 @@ xcodegen generate
 open WorkoutApp.xcodeproj
 ```
 
-In Xcode:
-1. Select the **WorkoutApp** target → **Signing & Capabilities** → choose your Team. Change the bundle ID from `com.example.workoutapp` to something you own (or edit `project.yml` and re-run `xcodegen generate`).
-2. Plug in your iPhone (or use Wi-Fi debugging), pick it as the run destination, press **Run**.
+Before opening Xcode, set your signing once (HealthKit needs your own team and a unique bundle ID):
+
+```bash
+scripts/set-signing.sh <TEAM_ID> com.yourname.workoutapp
+```
+
+Your Team ID is the 10-character code at [developer.apple.com/account](https://developer.apple.com/account) → **Membership details**. It's saved in `Config/Signing.local.xcconfig` (not committed), so it survives `xcodegen generate` and `git pull`. Don't set the team in Xcode's Signing tab: regenerating the project resets it.
+
+Then in Xcode:
+1. Plug in your iPhone (or use Wi-Fi debugging), pick it as the run destination, press **Run**.
+2. If Xcode shows a signing error, open **Signing & Capabilities**, check that *Automatically manage signing* is on and the team is your paid membership (not "Personal Team"), and click **Try Again**.
 3. On the phone: allow Apple Health access when asked. Wear your watch to bed for a few nights so recovery can build a baseline.
 
 The `.xcodeproj` is generated, so it isn't committed. Re-run `xcodegen generate` after pulling changes that add files.

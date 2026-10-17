@@ -5,6 +5,7 @@ iPhone app (iOS 26+, Swift 6.2, SwiftUI, SwiftData, HealthKit, Foundation Models
 ## Build
 
 - The Xcode project is generated: `xcodegen generate` (spec: `project.yml`). Never commit `*.xcodeproj`.
+- Signing (team + bundle ID) comes from `Config/Base.xcconfig`, which includes the git-ignored `Config/Signing.local.xcconfig` written by `scripts/set-signing.sh`. Don't put a team ID in `project.yml`.
 - Score math lives in `Packages/AppCore` (pure Swift, no UI/HealthKit). Test it with `swift test --package-path Packages/AppCore`. Put new scoring logic there, with tests.
 - CI (`.github/workflows/ios.yml`) runs the tests and a simulator build on macOS. Linux sandboxes can't build Swift for iOS, so check CI after pushing.
 
