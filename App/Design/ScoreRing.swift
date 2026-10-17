@@ -25,12 +25,12 @@ struct GradientRing<Content: View>: View {
         ZStack {
             Circle()
                 .stroke(Theme.track, lineWidth: lineWidth)
+            // Soft halo: a wider, faint copy of the arc (cheaper than a blur while scrolling).
             Circle()
                 .trim(from: 0, to: clamped)
-                .stroke(gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .stroke(gradient, style: StrokeStyle(lineWidth: lineWidth * 1.9, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .blur(radius: lineWidth * 0.6)
-                .opacity(0.45)
+                .opacity(0.14)
             Circle()
                 .trim(from: 0, to: clamped)
                 .stroke(gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
@@ -138,9 +138,8 @@ struct ArcGauge<Content: View>: View {
             }
             GaugeArc(from: 0, to: v)
                 .stroke(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing),
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .blur(radius: lineWidth * 0.5)
-                .opacity(0.4)
+                        style: StrokeStyle(lineWidth: lineWidth * 1.8, lineCap: .round))
+                .opacity(0.14)
             GaugeArc(from: 0, to: v)
                 .stroke(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing),
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
@@ -192,15 +191,15 @@ struct StrainGoalBar: View {
                 let w = geo.size.width
                 ZStack(alignment: .topLeading) {
                     ForEach([0.0, 7.0], id: \.self) { tick in
-                        Text("\(Int(tick))").offset(x: w * tick / maximum)
+                        Text("\(whole(tick))").offset(x: w * tick / maximum)
                     }
-                    Text("\(Int(target.lowerBound))")
+                    Text("\(whole(target.lowerBound))")
                         .foregroundStyle(Theme.recoveryHigh)
                         .offset(x: w * target.lowerBound / maximum - 6)
-                    Text("\(Int(target.upperBound))")
+                    Text("\(whole(target.upperBound))")
                         .foregroundStyle(Theme.recoveryHigh)
                         .offset(x: w * target.upperBound / maximum - 6)
-                    Text("\(Int(maximum))")
+                    Text("\(whole(maximum))")
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 .font(.caption.weight(.semibold))
@@ -209,7 +208,7 @@ struct StrainGoalBar: View {
             .frame(height: 16)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Strain \(current.formatted(.number.precision(.fractionLength(1)))) of 21, target \(Int(target.lowerBound)) to \(Int(target.upperBound))")
+        .accessibilityLabel("Strain \(current.formatted(.number.precision(.fractionLength(1)))) of 21, target \(whole(target.lowerBound)) to \(whole(target.upperBound))")
     }
 }
 
@@ -290,7 +289,7 @@ struct ProgressRow: View {
             HStack {
                 Text(label).foregroundStyle(Theme.secondaryText)
                 Spacer()
-                Text(LocalizedStringKey(goal.map { "**\(Int(value))** / \(Int($0)) \(unit)" } ?? "**\(Int(value))** \(unit)"))
+                Text(LocalizedStringKey(goal.map { "**\(whole(value))** / \(whole($0)) \(unit)" } ?? "**\(whole(value))** \(unit)"))
                     .foregroundStyle(Theme.primaryText)
                     .monospacedDigit()
             }

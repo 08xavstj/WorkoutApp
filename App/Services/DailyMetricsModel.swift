@@ -44,10 +44,42 @@ final class DailyMetricsModel {
     private(set) var lastUpdated: Date?
 
     @ObservationIgnored private let strainCalculator = StrainCalculator()
+    /// Finished days don't change, so their strain is kept between refreshes.
+    @ObservationIgnored private var dayCache: [Date: (key: String, result: StrainCalculator.Result)] = [:]
+    @ObservationIgnored private var isRefreshing = false
+    @ObservationIgnored private var refreshQueued = false
     @ObservationIgnored private let recoveryCalculator = RecoveryCalculator()
     @ObservationIgnored private let sleepCalculator = SleepCalculator()
 
+    @ObservationIgnored private var todaysHeartRate: [HeartRateSample] = []
+
     var proteinTarget: Double? { NutritionTargets.proteinGrams(bodyMassKg: bodyMassKg) }
+
+    /// Strain per day, computed off the main thread.
+    @concurrent
+    nonisolated private static func computeDays(
+        _ days: [Date],
+        heartRate: [HeartRateSample],
+        sessions: [StrengthSessionSummary],
+        profile: HeartRateProfile
+    ) async -> [Date: StrainCalculator.Result] {
+        let calendar = Calendar.current
+        var byDay: [Date: [HeartRateSample]] = [:]
+        for sample in heartRate {
+            byDay[calendar.startOfDay(for: sample.date), default: []].append(sample)
+        }
+        let calculator = StrainCalculator()
+        var results: [Date: StrainCalculator.Result] = [:]
+        for day in days {
+            let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
+            results[day] = calculator.dailyStrain(
+                heartRate: byDay[day] ?? [],
+                strengthSessions: sessions.filter { $0.start >= day && $0.start < next },
+                profile: profile
+            )
+        }
+        return results
+    }
 
     var targetStrain: ClosedRange<Double>? {
         recovery.map { StrainCalculator.targetStrain(forRecovery: $0.score) }
@@ -72,8 +104,31 @@ final class DailyMetricsModel {
             errorMessage = "Apple Health isn't available on this device."
             return
         }
+        // Don't stack refreshes: if one is running, run once more when it finishes.
+        if isRefreshing {
+            refreshQueued = true
+            return
+        }
+        isRefreshing = true
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isRefreshing = false
+            isLoading = false
+        }
+        await performRefresh(health: health, settings: settings, sessions: sessions, manualHRV: manualHRV, now: now)
+        if refreshQueued {
+            refreshQueued = false
+            await performRefresh(health: health, settings: settings, sessions: sessions, manualHRV: manualHRV, now: .now)
+        }
+    }
+
+    private func performRefresh(
+        health: HealthKitClient,
+        settings: UserSettings,
+        sessions: [StrengthSessionSummary],
+        manualHRV: [Date: Double],
+        now: Date
+    ) async {
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
@@ -83,9 +138,8 @@ final class DailyMetricsModel {
         do {
             async let vitalsTask = health.nightlyVitals(days: 31, endingOn: today)
             async let sleepTask = health.sleepSamples(forNightEnding: today)
-            async let heartRateTask = health.heartRateSamples(from: historyStart, to: now)
             async let workoutsTask = health.externalWorkouts(from: today, to: now)
-            let (healthVitals, sleepSamples, heartRate, externalWorkouts) = try await (vitalsTask, sleepTask, heartRateTask, workoutsTask)
+            let (healthVitals, sleepSamples, externalWorkouts) = try await (vitalsTask, sleepTask, workoutsTask)
 
             let vitals = DailyVitals.merging(healthVitals, manualHRV: manualHRV, calendar: calendar)
             let healthHadHRVToday = healthVitals.contains {
@@ -103,23 +157,34 @@ final class DailyMetricsModel {
             let profile = settings.heartRateProfile(restingHeartRate: todayVitals.restingHeartRate ?? base.meanRHR)
             heartRateProfile = profile
 
-            // Strain for each of the last 28 days (today last).
-            var byDay: [Date: [HeartRateSample]] = [:]
-            for sample in heartRate {
-                byDay[calendar.startOfDay(for: sample.date), default: []].append(sample)
-            }
-            var days: [(Date, StrainCalculator.Result)] = []
+            // Strain for each of the last 28 days (today last). Past days come from
+            // the cache unless their inputs changed; today and yesterday are always
+            // recomputed because the watch can sync late.
+            var allDays: [Date] = []
             var day = historyStart
             while day <= today {
-                let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
-                let result = strainCalculator.dailyStrain(
-                    heartRate: byDay[day] ?? [],
-                    strengthSessions: sessions.filter { $0.start >= day && $0.start < next },
-                    profile: profile
-                )
-                days.append((day, result))
-                day = next
+                allDays.append(day)
+                day = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
             }
+            let profileKey = "\(Int(profile.restingHeartRate))-\(Int(profile.maxHeartRate))-\(profile.sex.rawValue)"
+            func key(for day: Date) -> String {
+                let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day
+                let daySessions = sessions.filter { $0.start >= day && $0.start < next }
+                return profileKey + daySessions.map { "|\($0.start.timeIntervalSince1970)-\($0.end.timeIntervalSince1970)-\($0.sessionRPE ?? 0)" }.joined()
+            }
+            let needed = allDays.filter { day in
+                day >= yesterday || dayCache[day]?.key != key(for: day)
+            }
+            if let firstNeeded = needed.first {
+                let heartRate = try await health.heartRatePerMinute(from: firstNeeded, to: now)
+                let computed = await Self.computeDays(needed, heartRate: heartRate, sessions: sessions, profile: profile)
+                for (date, result) in computed {
+                    dayCache[date] = (key(for: date), result)
+                }
+                todaysHeartRate = heartRate.filter { $0.date >= today }
+            }
+            dayCache = dayCache.filter { $0.key >= historyStart }
+            let days: [(Date, StrainCalculator.Result)] = allDays.map { ($0, dayCache[$0]?.result ?? .empty) }
             let todayResult = days.last?.1 ?? .empty
             strain = todayResult
             yesterdayStrain = days.first { calendar.isDate($0.0, inSameDayAs: yesterday) }?.1.strain
@@ -132,7 +197,7 @@ final class DailyMetricsModel {
             recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: sleep?.score)
 
             // Today's activities: logged lifts plus workouts from other apps.
-            let todaysHR = byDay[today] ?? []
+            let todaysHR = todaysHeartRate
             let todaysSessions = sessions.filter { $0.start >= today }
             activities = makeActivities(
                 sessions: todaysSessions, external: externalWorkouts,

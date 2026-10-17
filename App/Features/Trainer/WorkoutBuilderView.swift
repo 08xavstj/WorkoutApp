@@ -180,7 +180,7 @@ struct WorkoutBuilderView: View {
             }
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
-                Text("Lands you around \(landsAt.formatted(.number.precision(.fractionLength(1)))) strain (target \(Int(target.lowerBound))–\(Int(target.upperBound)))\(inRange ? ", right on target." : ".")")
+                Text("Lands you around \(landsAt.formatted(.number.precision(.fractionLength(1)))) strain (target \(whole(target.lowerBound))–\(whole(target.upperBound)))\(inRange ? ", right on target." : ".")")
                     .font(.subheadline)
                     .foregroundStyle(inRange ? Theme.recoveryHigh : Theme.secondaryText)
             }

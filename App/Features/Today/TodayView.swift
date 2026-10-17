@@ -115,7 +115,6 @@ struct TopGlow: View {
             endPoint: .bottom
         )
         .frame(height: 320)
-        .blur(radius: 30)
         .ignoresSafeArea()
         .accessibilityHidden(true)
     }
@@ -285,7 +284,7 @@ private struct StrainGoalCard: View {
                     .font(.system(size: 44, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(Theme.primaryText)
-                Text("/ target \(Int(target.lowerBound))–\(Int(target.upperBound))")
+                Text("/ target \(whole(target.lowerBound))–\(whole(target.upperBound))")
                     .font(.title3)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -432,7 +431,7 @@ private struct EnergyCard: View {
                     .init(value: energy.everydayMovement, color: Theme.strain),
                     .init(value: energy.digestion, color: Theme.sleep)
                 ])
-                Text("Resting \(Int(energy.restingFullDay)) · Exercise \(Int(energy.exercise)) · Movement \(Int(energy.everydayMovement)) · Digestion \(Int(energy.digestion)). Estimate from \(energy.bmrMethod), heart rate and steps.")
+                Text("Resting \(whole(energy.restingFullDay)) · Exercise \(whole(energy.exercise)) · Movement \(whole(energy.everydayMovement)) · Digestion \(whole(energy.digestion)). Estimate from \(energy.bmrMethod), heart rate and steps.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             } else {
@@ -486,7 +485,7 @@ private struct HealthMonitor: View {
         let change = metrics.recovery?.restingHeartRateChange
         return MonitorTile(
             title: "Resting HR",
-            value: metrics.restingHeartRate.map { "\(Int($0.rounded()))" },
+            value: metrics.restingHeartRate.map { "\(whole($0.rounded()))" },
             unit: "bpm",
             status: change.map { delta in
                 delta <= 0
@@ -503,7 +502,7 @@ private struct HealthMonitor: View {
         let logValue = metrics.hrv.map { log($0) }
         return MonitorTile(
             title: "HRV",
-            value: metrics.hrv.map { "\(Int($0.rounded()))" },
+            value: metrics.hrv.map { "\(whole($0.rounded()))" },
             unit: "ms",
             status: change.map { delta in
                 delta >= 0

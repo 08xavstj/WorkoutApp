@@ -82,3 +82,8 @@ extension View {
             .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
     }
 }
+
+/// Rounds for display. Unlike `Int(_:)`, never crashes on NaN or infinity.
+func whole(_ value: Double) -> Int {
+    value.isFinite ? Int(value.rounded()) : 0
+}

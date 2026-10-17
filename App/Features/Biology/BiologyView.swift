@@ -62,7 +62,7 @@ struct BiologyView: View {
             }
             if let baseline = biology.hrvBaseline {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(Int(baseline.rounded()))")
+                    Text("\(whole(baseline.rounded()))")
                         .font(.system(size: 52, weight: .bold, design: .rounded))
                     Text("ms")
                         .font(.title2.weight(.semibold))
@@ -70,7 +70,7 @@ struct BiologyView: View {
                     Spacer()
                     if let change = biology.hrvChangePercent {
                         Chip(
-                            text: "\(change >= 0 ? "↑" : "↓") \(Int(abs(change).rounded()))% vs last month",
+                            text: "\(change >= 0 ? "↑" : "↓") \(whole(abs(change).rounded()))% vs last month",
                             color: change >= 0 ? Theme.recoveryHigh : Theme.recoveryModerate
                         )
                     }
@@ -81,7 +81,7 @@ struct BiologyView: View {
                         .foregroundStyle(Theme.secondaryText.opacity(0.5))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                         .annotation(position: .top, alignment: .leading) {
-                            Text("Baseline \(Int(baseline.rounded()))")
+                            Text("Baseline \(whole(baseline.rounded()))")
                                 .font(.caption2)
                                 .foregroundStyle(Theme.secondaryText)
                         }

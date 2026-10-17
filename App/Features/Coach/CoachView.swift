@@ -109,14 +109,14 @@ struct CoachView: View {
                     ContextChip(color: Theme.recoveryColor(for: recovery.score), label: "Recovery", value: "\(recovery.score)%")
                 }
                 if let strain = metrics.strain {
-                    let target = metrics.targetStrain.map { " / \(Int($0.lowerBound))–\(Int($0.upperBound))" } ?? ""
+                    let target = metrics.targetStrain.map { " / \(whole($0.lowerBound))–\(whole($0.upperBound))" } ?? ""
                     ContextChip(color: Theme.strain, label: "Strain", value: "\(strain.strain.formatted(.number.precision(.fractionLength(1))))\(target)")
                 }
                 if let protein = metrics.nutritionToday?.proteinGrams {
-                    ContextChip(color: Theme.nutrition, label: "Protein", value: "\(Int(protein)) g")
+                    ContextChip(color: Theme.nutrition, label: "Protein", value: "\(whole(protein)) g")
                 }
                 if let balance = metrics.energy?.balance {
-                    ContextChip(color: Theme.lifting, label: balance < 0 ? "Deficit" : "Surplus", value: "\(Int(abs(balance))) kcal")
+                    ContextChip(color: Theme.lifting, label: balance < 0 ? "Deficit" : "Surplus", value: "\(whole(abs(balance))) kcal")
                 }
             }
         }

@@ -76,6 +76,27 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
     }
 
+    /// Heart rate averaged per minute: at most 1,440 values a day, however often
+    /// the watch records. Much lighter than raw samples for multi-day ranges.
+    @concurrent
+    func heartRatePerMinute(from start: Date, to end: Date) async throws -> [HeartRateSample] {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKStatisticsCollectionQueryDescriptor(
+            predicate: .quantitySample(type: HKQuantityType(.heartRate), predicate: predicate),
+            options: .discreteAverage,
+            anchorDate: Calendar.current.startOfDay(for: start),
+            intervalComponents: DateComponents(minute: 1)
+        )
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        do {
+            return try await descriptor.result(for: store).statistics().compactMap { statistics in
+                statistics.averageQuantity().map { HeartRateSample(date: statistics.startDate, bpm: $0.doubleValue(for: unit)) }
+            }
+        } catch let error as HKError where error.code == .errorNoData {
+            return []
+        }
+    }
+
     // MARK: - Nightly vitals
 
     /// Overnight HRV and daily resting heart rate for each of the last `days` nights.

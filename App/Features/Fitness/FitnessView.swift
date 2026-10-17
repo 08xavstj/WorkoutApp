@@ -116,7 +116,7 @@ private struct DayStrainCard: View {
                 CardLabel(text: "Day strain")
                 Spacer()
                 if let target {
-                    Text("Target \(Int(target.lowerBound))–\(Int(target.upperBound))")
+                    Text("Target \(whole(target.lowerBound))–\(whole(target.upperBound))")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.recoveryHigh)
                 }
@@ -215,7 +215,7 @@ private struct LoadCard: View {
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.primaryText)
                     if let result, result.status != .calibrating {
-                        Text("optimal \(Int(result.optimal.lowerBound))–\(Int(result.optimal.upperBound.rounded(.up)))")
+                        Text("optimal \(whole(result.optimal.lowerBound))–\(whole(result.optimal.upperBound.rounded(.up)))")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -227,7 +227,7 @@ private struct LoadCard: View {
             HStack {
                 Text("0")
                 Spacer()
-                Text("max \(Int(maximum))")
+                Text("max \(whole(maximum))")
             }
             .font(.caption)
             .foregroundStyle(Theme.secondaryText)
@@ -322,13 +322,13 @@ private struct ZonesCard: View {
         let total = minutes.reduce(0, +)
         let peak = max(minutes.max() ?? 1, 1)
         VStack(alignment: .leading, spacing: 14) {
-            Text(total > 0 ? "\(Int(total)) min in zones today" : "No time in heart-rate zones yet today")
+            Text(total > 0 ? "\(whole(total)) min in zones today" : "No time in heart-rate zones yet today")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
             HStack(alignment: .bottom, spacing: 12) {
                 ForEach(0..<5, id: \.self) { index in
                     VStack(spacing: 6) {
-                        Text(minutes[index] > 0 ? "\(Int(minutes[index].rounded()))m" : "")
+                        Text(minutes[index] > 0 ? "\(whole(minutes[index].rounded()))m" : "")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Theme.primaryText)
                         ZStack(alignment: .bottom) {
