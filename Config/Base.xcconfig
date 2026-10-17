@@ -3,7 +3,7 @@
 // which writes Config/Signing.local.xcconfig (git-ignored, survives
 // `xcodegen generate` and `git pull`).
 DEVELOPMENT_TEAM =
-PRODUCT_BUNDLE_IDENTIFIER = com.example.workoutapp
+PRODUCT_BUNDLE_IDENTIFIER = com.lontraindustries.workoutapp
 CODE_SIGN_STYLE = Automatic
 
 #include? "Signing.local.xcconfig"

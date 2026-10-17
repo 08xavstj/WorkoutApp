@@ -7,7 +7,7 @@
 name: WorkoutApp
 
 options:
-  bundleIdPrefix: com.example
+  bundleIdPrefix: com.lontraindustries
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
