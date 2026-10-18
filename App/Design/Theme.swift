@@ -11,6 +11,8 @@ enum Theme {
     static let cardRaised = adaptive(light: 0xEEF1F6, dark: 0x22222A)
     static let separator = adaptive(light: 0xE3E6EC, dark: 0x2A2A33)
     static let track = adaptive(light: 0xEDEFF4, dark: 0x26262E)
+    /// Untrained muscles on the body map.
+    static let bodyNeutral = adaptive(light: 0xD5DAE1, dark: 0x3A3A44)
     static let ink = adaptive(light: 0x111827, dark: 0xF5F5F7)
 
     // Text

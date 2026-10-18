@@ -90,6 +90,11 @@ final class UserSettings {
     var hrvReminderOn: Bool { didSet { defaults.set(hrvReminderOn, forKey: "hrvReminderOn") } }
     /// Minutes after midnight for the reminder (default 7:30).
     var hrvReminderMinutes: Int { didSet { defaults.set(hrvReminderMinutes, forKey: "hrvReminderMinutes") } }
+    var name: String { didSet { defaults.set(name, forKey: "name") } }
+    var placeName: String { didSet { defaults.set(placeName, forKey: "placeName") } }
+    var latitude: Double { didSet { defaults.set(latitude, forKey: "latitude") } }
+    var longitude: Double { didSet { defaults.set(longitude, forKey: "longitude") } }
+    var hasLocation: Bool { !placeName.isEmpty && !(latitude == 0 && longitude == 0) }
     var checkInRemindersOn: Bool { didSet { defaults.set(checkInRemindersOn, forKey: "checkInRemindersOn") } }
     var morningCheckInMinutes: Int { didSet { defaults.set(morningCheckInMinutes, forKey: "morningCheckInMinutes") } }
     var eveningCheckInMinutes: Int { didSet { defaults.set(eveningCheckInMinutes, forKey: "eveningCheckInMinutes") } }
@@ -111,6 +116,10 @@ final class UserSettings {
         healthFilledFields = Set(defaults.stringArray(forKey: "healthFilledFields") ?? [])
         hrvReminderOn = defaults.bool(forKey: "hrvReminderOn")
         hrvReminderMinutes = defaults.object(forKey: "hrvReminderMinutes") as? Int ?? 7 * 60 + 30
+        name = defaults.string(forKey: "name") ?? ""
+        placeName = defaults.string(forKey: "placeName") ?? ""
+        latitude = defaults.double(forKey: "latitude")
+        longitude = defaults.double(forKey: "longitude")
         checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
         morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30

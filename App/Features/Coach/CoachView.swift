@@ -12,6 +12,7 @@ struct CoachView: View {
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(MedicationsModel.self) private var medications
     @Environment(CheckInStore.self) private var checkIns
+    @Environment(ConditionsModel.self) private var conditions
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var draft = ""
@@ -226,6 +227,8 @@ struct CoachView: View {
         )
         snapshot.medications = medications.coachSummary
         snapshot.checkIns = checkIns.coachSummary
+        snapshot.name = settings.name.isEmpty ? nil : settings.name
+        snapshot.weather = conditions.coachSummary(place: settings.placeName)
         await coach.send(text, snapshot: snapshot, settings: settings, plan: plan)
     }
 }

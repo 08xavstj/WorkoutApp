@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingGym = false
     @State private var showingMeds = false
+    @State private var showingLocation = false
 
     /// " · Health" when Apple Health filled this field.
     private func source(_ field: String) -> String {
@@ -42,6 +43,20 @@ struct SettingsView: View {
         @Bindable var settings = settings
         NavigationStack {
             Form {
+                Section {
+                    TextField("Your name", text: $settings.name)
+                        .textContentType(.givenName)
+                    Button {
+                        showingLocation = true
+                    } label: {
+                        LabeledContent("Where you live", value: settings.hasLocation ? settings.placeName : "Not set")
+                    }
+                } header: {
+                    Text("You")
+                } footer: {
+                    Text("Your city gives the coach local weather, air quality and daylight hours. Only the city's coordinates are stored, on this phone.")
+                }
+
                 Section {
                     Toggle("Fill in from Apple Health", isOn: $settings.profileFromHealth)
                         .onChange(of: settings.profileFromHealth) { _, on in
@@ -172,7 +187,7 @@ struct SettingsView: View {
 
                 Section("About") {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-")
-                    Text("Exercise library: free-exercise-db (public domain). Scores are estimates for training guidance, not medical advice.")
+                    Text("Exercise library: free-exercise-db (public domain). Muscle map outlines: react-body-highlighter (MIT, © 2020 GV79). Weather data by Open-Meteo.com (CC BY 4.0). Drug labels: openFDA. Scores are estimates for training guidance, not medical advice.")
                         .font(.footnote)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -187,6 +202,7 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingGym) { MyGymView() }
             .sheet(isPresented: $showingMeds) { MedicationsView() }
+            .sheet(isPresented: $showingLocation) { LocationPicker() }
         }
     }
 }

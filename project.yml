@@ -69,6 +69,9 @@ targets:
           WorkoutApp reads your heart rate, HRV, resting heart rate, sleep, workouts,
           body weight and food log (for example from Cronometer) to calculate your
           daily scores and give coaching advice.
+        NSLocationWhenInUseUsageDescription: >-
+          WorkoutApp uses your location once to get local weather, air quality and
+          daylight hours for training advice. You can type your city instead.
         NSHealthUpdateUsageDescription: >-
           WorkoutApp saves the gym workouts you log to Apple Health.
     settings:

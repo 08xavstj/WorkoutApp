@@ -42,6 +42,38 @@ final class DailyMetricsModel {
     /// Calories the watch itself reports for today so far (via Apple Health).
     private(set) var deviceRestingToday: Double?
     private(set) var deviceActiveToday: Double?
+    /// Average resting calories a day from the watch (recent full days).
+    private(set) var watchRestingPerDay: Double?
+
+    /// One consistent set of calorie numbers for the Home card.
+    struct CalorieSummary: Equatable {
+        var eaten: Double?
+        var restingSoFar: Double
+        var activeSoFar: Double
+        var burnedSoFar: Double { restingSoFar + activeSoFar }
+        /// Burned so far plus resting calories still to come before midnight.
+        var projected: Double
+        /// Projected burn minus food eaten: positive = room left to maintain weight.
+        var left: Double { projected - (eaten ?? 0) }
+        var fromWatch: Bool
+    }
+
+    var calories: CalorieSummary? {
+        let now = Date.now
+        let midnight = Calendar.current.startOfDay(for: now.addingTimeInterval(86_400))
+        let minutesLeft = max(0, midnight.timeIntervalSince(now) / 60)
+        let eaten = nutritionToday?.calories
+        // Prefer what the watch measured so the numbers match Garmin.
+        if let resting = deviceRestingToday, let active = deviceActiveToday, resting > 0 {
+            let perMinute = (watchRestingPerDay ?? energy?.restingFullDay ?? resting * 1440 / max(1, 1440 - minutesLeft)) / 1440
+            return CalorieSummary(eaten: eaten, restingSoFar: resting, activeSoFar: active,
+                                  projected: resting + active + perMinute * minutesLeft, fromWatch: true)
+        }
+        guard let energy else { return nil }
+        return CalorieSummary(eaten: eaten, restingSoFar: energy.restingSoFar,
+                              activeSoFar: energy.exercise + energy.everydayMovement + energy.digestion,
+                              projected: energy.projectedTotal, fromWatch: false)
+    }
     private(set) var heartRateProfile: HeartRateProfile?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
@@ -238,6 +270,7 @@ final class DailyMetricsModel {
             deviceRestingToday = device?.resting
             deviceActiveToday = device?.active
             let watchResting = try? await measuredResting
+            watchRestingPerDay = watchResting
             let stepResult = try? await stepCounts
             steps = stepResult?.total
 

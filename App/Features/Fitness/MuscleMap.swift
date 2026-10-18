@@ -47,100 +47,48 @@ final class MuscleModel {
 
 // MARK: - Body drawing
 
-/// Simple shapes in a 100 x 220 box, scaled to fit.
-nonisolated enum BodyPart: Sendable {
-    case ellipse(CGRect)
-    case capsule(CGRect)
-    case rounded(CGRect, CGFloat)
-}
-
-nonisolated struct BodyShape: Shape {
-    let parts: [BodyPart]
+/// Muscle outlines (see BodyMapData.swift), scaled to fit while keeping proportions.
+nonisolated struct PolygonShape: Shape {
+    let polygons: [[Double]]
+    /// minX, minY, maxX, maxY of the whole figure, so every region scales the same.
+    let bounds: [Double]
 
     func path(in rect: CGRect) -> Path {
-        let scale = min(rect.width / 100, rect.height / 220)
-        let origin = CGPoint(x: rect.midX - 50 * scale, y: rect.midY - 110 * scale)
-        func map(_ r: CGRect) -> CGRect {
-            CGRect(x: origin.x + r.minX * scale, y: origin.y + r.minY * scale, width: r.width * scale, height: r.height * scale)
-        }
+        let width = bounds[2] - bounds[0]
+        let height = bounds[3] - bounds[1]
+        let scale = min(rect.width / width, rect.height / height)
+        let originX = rect.midX - width * scale / 2
+        let originY = rect.midY - height * scale / 2
         var path = Path()
-        for part in parts {
-            switch part {
-            case .ellipse(let r): path.addEllipse(in: map(r))
-            case .capsule(let r):
-                let m = map(r)
-                path.addRoundedRect(in: m, cornerSize: CGSize(width: min(m.width, m.height) / 2, height: min(m.width, m.height) / 2))
-            case .rounded(let r, let radius):
-                path.addRoundedRect(in: map(r), cornerSize: CGSize(width: radius * scale, height: radius * scale))
+        for polygon in polygons where polygon.count >= 6 {
+            for index in stride(from: 0, to: polygon.count - 1, by: 2) {
+                let point = CGPoint(x: originX + (polygon[index] - bounds[0]) * scale,
+                                    y: originY + (polygon[index + 1] - bounds[1]) * scale)
+                if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
             }
+            path.closeSubpath()
         }
         return path
     }
 }
 
-nonisolated enum BodyLayout {
-    static func r(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { CGRect(x: x, y: y, width: w, height: h) }
-    /// Mirrors a rect across the body's centre line.
-    static func m(_ rect: CGRect) -> CGRect { CGRect(x: 100 - rect.maxX, y: rect.minY, width: rect.width, height: rect.height) }
-    static func pair(_ part: (CGRect) -> BodyPart, _ rect: CGRect) -> [BodyPart] { [part(rect), part(m(rect))] }
-
-    static let silhouette: [BodyPart] = [
-        .ellipse(r(41, 1, 18, 21)),
-        .rounded(r(44, 18, 12, 10), 3),
-        .rounded(r(31, 25, 38, 62), 14),
-        .rounded(r(33, 80, 34, 22), 9),
-    ] + pair(BodyPart.capsule, r(20, 28, 13, 40))
-      + pair(BodyPart.capsule, r(16, 64, 11, 32))
-      + pair(BodyPart.ellipse, r(15, 93, 10, 12))
-      + pair(BodyPart.capsule, r(32, 92, 17, 58))
-      + pair(BodyPart.capsule, r(34, 146, 13, 58))
-      + pair(BodyPart.capsule, r(33, 200, 14, 10))
-
-    static let front: [Muscle: [BodyPart]] = [
-        .traps: pair(BodyPart.ellipse, r(37, 24, 11, 7)),
-        .shoulders: pair(BodyPart.ellipse, r(21, 27, 15, 16)),
-        .chest: pair({ .rounded($0, 6) }, r(34, 32, 15.5, 15)),
-        .biceps: pair(BodyPart.capsule, r(21.5, 44, 10, 21)),
-        .forearms: pair(BodyPart.capsule, r(17, 66, 9, 26)),
-        .abdominals: [.rounded(r(42.5, 49, 15, 33), 5)] + pair({ .rounded($0, 3) }, r(35, 51, 6.5, 26)),
-        .quadriceps: pair(BodyPart.capsule, r(33.5, 96, 13, 46)),
-        .adductors: pair(BodyPart.capsule, r(45, 98, 4.5, 26)),
-        .calves: pair(BodyPart.capsule, r(36, 152, 9, 38)),
-        .neck: [.rounded(r(46, 18, 8, 7), 2)],
-    ]
-
-    static let back: [Muscle: [BodyPart]] = [
-        .traps: [.rounded(r(39, 21, 22, 20), 8)],
-        .shoulders: pair(BodyPart.ellipse, r(21, 27, 15, 16)),
-        .triceps: pair(BodyPart.capsule, r(21.5, 44, 10, 21)),
-        .forearms: pair(BodyPart.capsule, r(17, 66, 9, 26)),
-        .lats: pair({ .rounded($0, 7) }, r(33, 40, 12, 30)),
-        .middleBack: [.rounded(r(45, 41, 10, 20), 4)],
-        .lowerBack: [.rounded(r(40, 64, 20, 15), 6)],
-        .glutes: pair(BodyPart.ellipse, r(34, 82, 16, 19)),
-        .abductors: pair(BodyPart.capsule, r(31, 84, 4.5, 14)),
-        .hamstrings: pair(BodyPart.capsule, r(34, 103, 12.5, 42)),
-        .calves: pair(BodyPart.capsule, r(35, 149, 11.5, 36)),
-    ]
-}
-
-/// One side of the body with each muscle filled by `color(for:)`.
+/// One side of the body, each muscle region filled by `color(for:)`.
 struct BodyFigure: View {
-    let muscles: [Muscle: [BodyPart]]
-    let color: (Muscle) -> Color
+    let data: [(String, [Double])]
+    let bounds: [Double]
+    /// Region names: Muscle raw values, "upperBack" (lats + upper back) or "body".
+    let color: (String) -> Color
 
     var body: some View {
+        let regions = Dictionary(grouping: data, by: \.0).mapValues { $0.map(\.1) }
         ZStack {
-            BodyShape(parts: BodyLayout.silhouette)
-                .fill(Theme.track.shadow(.inner(color: Color.black.opacity(0.12), radius: 2, y: 1)))
-            ForEach(Array(muscles.keys), id: \.self) { muscle in
-                let fill = color(muscle)
-                BodyShape(parts: muscles[muscle] ?? [])
-                    .fill(LinearGradient(colors: [fill.opacity(0.75), fill], startPoint: .top, endPoint: .bottom))
-                    .overlay(BodyShape(parts: muscles[muscle] ?? []).stroke(Color.white.opacity(0.7), lineWidth: 1))
+            ForEach(regions.keys.sorted(), id: \.self) { region in
+                let shape = PolygonShape(polygons: regions[region] ?? [], bounds: bounds)
+                shape.fill(color(region))
+                    .overlay(shape.stroke(Theme.card, style: StrokeStyle(lineWidth: 1.2, lineJoin: .round)))
             }
         }
-        .aspectRatio(100 / 220, contentMode: .fit)
+        .aspectRatio((bounds[2] - bounds[0]) / (bounds[3] - bounds[1]), contentMode: .fit)
         .accessibilityHidden(true)
     }
 }
@@ -165,16 +113,16 @@ struct MuscleMapCard: View {
             }
             .pickerStyle(.segmented)
             HStack(spacing: 24) {
-                VStack(spacing: 4) {
-                    BodyFigure(muscles: BodyLayout.front) { color(states[$0]) }
-                    Text("Front").font(.caption).foregroundStyle(Theme.secondaryText)
+                VStack(spacing: 6) {
+                    BodyFigure(data: BodyMapData.front, bounds: BodyMapData.backBounds) { color(region: $0, states) }
+                    Text("Front").font(.caption.weight(.semibold)).foregroundStyle(Theme.secondaryText)
                 }
-                VStack(spacing: 4) {
-                    BodyFigure(muscles: BodyLayout.back) { color(states[$0]) }
-                    Text("Back").font(.caption).foregroundStyle(Theme.secondaryText)
+                VStack(spacing: 6) {
+                    BodyFigure(data: BodyMapData.back, bounds: BodyMapData.backBounds) { color(region: $0, states) }
+                    Text("Back").font(.caption.weight(.semibold)).foregroundStyle(Theme.secondaryText)
                 }
             }
-            .frame(height: 250)
+            .frame(height: 300)
             .frame(maxWidth: .infinity)
             legend
             details(states)
@@ -182,11 +130,22 @@ struct MuscleMapCard: View {
         .card(tint: Theme.heart)
     }
 
+    /// Colour for a drawn region; "upperBack" shows the more tired of lats and upper back.
+    private func color(region: String, _ states: [Muscle: MuscleRecovery.State]) -> Color {
+        if region == "upperBack" {
+            let pair = [states[.lats], states[.middleBack]].compactMap { $0 }
+            let worst = mode == .recovery ? pair.min { $0.recovery < $1.recovery } : pair.max { $0.weeklySets < $1.weeklySets }
+            return color(worst)
+        }
+        guard let muscle = Muscle(rawValue: region) else { return Theme.bodyNeutral }
+        return color(states[muscle])
+    }
+
     private func color(_ state: MuscleRecovery.State?) -> Color {
-        guard let state else { return Theme.track }
+        guard let state else { return Theme.bodyNeutral }
         switch mode {
         case .recovery:
-            guard state.lastTrained != nil, state.recovery < 99 else { return Theme.track }
+            guard state.lastTrained != nil, state.recovery < 99 else { return Theme.bodyNeutral }
             switch state.status {
             case .fresh: return Theme.recoveryHigh
             case .recovering: return Theme.recoveryModerate
@@ -194,7 +153,7 @@ struct MuscleMapCard: View {
             }
         case .volume:
             switch state.volume {
-            case .none: return Theme.track
+            case .none: return Theme.bodyNeutral
             case .low: return Theme.oxygenLight
             case .productive: return Theme.recoveryHigh
             case .high: return Theme.recoveryLow

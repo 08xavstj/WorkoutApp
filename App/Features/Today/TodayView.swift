@@ -29,6 +29,7 @@ struct TodayView: View {
                     }
                     ScoresCard()
                     CheckInCard()
+                    ConditionsCard()
                     StrainGoalCard(sessions: sessions)
                     MedsTodayCard()
                     EnergyCard()
@@ -65,14 +66,26 @@ struct TodayView: View {
                     showingSettings = true
                 }
             }
-            Text("Today, \(Date.now.formatted(.dateTime.month(.wide).day()))")
-                .font(.largeTitle.weight(.bold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                Text(greeting)
+                    .font(.largeTitle.weight(.bold))
                 .foregroundStyle(Theme.primaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
+            }
         }
         .padding(.top, 8)
+    }
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: .now)
+        let part = hour < 12 ? "Good morning" : (hour < 18 ? "Good afternoon" : "Good evening")
+        let name = settings.name.trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? part : "\(part), \(name)"
     }
 
     private var askCoachCard: some View {
@@ -355,6 +368,87 @@ private struct SuggestionRow: View {
     }
 }
 
+// MARK: - Weather
+
+private struct ConditionsCard: View {
+    @Environment(ConditionsModel.self) private var conditions
+    @Environment(UserSettings.self) private var settings
+    @State private var showingPicker = false
+
+    var body: some View {
+        Group {
+            if let c = conditions.current, settings.hasLocation {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .center, spacing: 14) {
+                        Image(systemName: c.symbol)
+                            .symbolRenderingMode(.multicolor)
+                            .font(.system(size: 38))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(Int(c.temperature.rounded()))° · \(c.summary)")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(Theme.primaryText)
+                            Text("Feels \(Int(c.feelsLike.rounded()))°\(c.high.map { " · H \(Int($0.rounded()))°" } ?? "")\(c.low.map { " L \(Int($0.rounded()))°" } ?? "") · \(settings.placeName)")
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    HStack(spacing: 8) {
+                        if let uv = c.uvIndexMax { pill("sun.max", "UV \(Int(uv.rounded()))") }
+                        if let aqi = c.usAQI { pill("aqi.medium", "AQI \(Int(aqi))") }
+                        if let daylight = c.daylightHours { pill("sunrise", String(format: "%.1f h light", daylight)) }
+                    }
+                    if let sunrise = c.sunrise, let sunset = c.sunset {
+                        Text("Sunrise \(sunrise.formatted(date: .omitted, time: .shortened)) · Sunset \(sunset.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    ForEach(conditions.tips.prefix(2)) { tip in
+                        Label {
+                            Text(tip.text).font(.subheadline).foregroundStyle(Theme.primaryText)
+                        } icon: {
+                            Image(systemName: tip.level == .info ? "lightbulb.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(tip.level == .info ? Theme.oxygen : Theme.recoveryModerate)
+                        }
+                    }
+                }
+                .card(tint: Theme.oxygen)
+            } else if !settings.hasLocation {
+                Button {
+                    showingPicker = true
+                } label: {
+                    HStack(spacing: 12) {
+                        IconBadge(systemName: "location.fill", color: Theme.oxygen, size: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Add your city")
+                                .font(.headline)
+                                .foregroundStyle(Theme.primaryText)
+                            Text("Weather, air quality and daylight for smarter coaching.")
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.secondaryText)
+                    }
+                    .card()
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .sheet(isPresented: $showingPicker) { LocationPicker() }
+    }
+
+    private func pill(_ icon: String, _ text: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.oxygen)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Theme.oxygen.opacity(0.1), in: .capsule)
+    }
+}
+
 // MARK: - Check-in
 
 private struct CheckInCard: View {
@@ -437,92 +531,196 @@ private struct MedsTodayCard: View {
 
 private struct EnergyCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
+    @State private var showingDetails = false
 
     var body: some View {
         let food = metrics.nutritionToday
-        let energy = metrics.energy
-        let eaten = food?.calories ?? 0
-        let burn = energy?.projectedTotal
-        VStack(alignment: .leading, spacing: 16) {
+        let summary = metrics.calories
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
-                CardLabel(text: "Energy & nutrition")
+                CardLabel(text: "Calories today")
                 Spacer()
-                Text("From Cronometer")
-                    .font(.caption)
+                Button {
+                    showingDetails = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.title3)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .accessibilityLabel("How calories are calculated")
+            }
+            if let summary {
+                HStack(alignment: .center, spacing: 20) {
+                    GradientRing(
+                        progress: (summary.eaten ?? 0) / max(summary.projected, 1),
+                        colors: Theme.nutritionColors,
+                        lineWidth: 13
+                    ) {
+                        VStack(spacing: 0) {
+                            Text(whole(summary.left).formatted())
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(summary.left >= 0 ? Theme.primaryText : Theme.recoveryModerate)
+                                .minimumScaleFactor(0.6)
+                            Text(summary.left >= 0 ? "kcal left" : "kcal over")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        .padding(.horizontal, 14)
+                    }
+                    .frame(width: 124, height: 124)
+                    VStack(alignment: .leading, spacing: 12) {
+                        CalorieLine(icon: "fork.knife", color: Theme.nutrition, label: "Eaten", value: summary.eaten ?? 0)
+                        CalorieLine(icon: "flame.fill", color: Theme.strain, label: "Burned so far", value: summary.burnedSoFar)
+                        CalorieLine(icon: "moon.fill", color: Theme.sleep, label: "Burn by midnight", value: summary.projected)
+                    }
+                }
+                Text(summary.left >= 0
+                     ? "Eat about \(whole(summary.left).formatted()) more kcal today to maintain your weight."
+                     : "You've eaten \(whole(-summary.left).formatted()) kcal more than you'll burn today.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            } else {
+                Text("Add your weight in Apple Health (or Settings) to see calories burned.")
+                    .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
-            HStack(alignment: .center, spacing: 18) {
-                GradientRing(
-                    progress: burn.map { eaten / max($0, 1) } ?? 0,
-                    colors: Theme.nutritionColors,
-                    lineWidth: 13
-                ) {
-                    VStack(spacing: 0) {
-                        Text(eaten.formatted(.number.precision(.fractionLength(0))))
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(Theme.primaryText)
-                        Text(burn.map { "of \($0.formatted(.number.precision(.fractionLength(0)))) kcal" } ?? "kcal eaten")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.secondaryText)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .frame(width: 118, height: 118)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    ProgressRow(label: "Protein", value: food?.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
-                    ProgressRow(label: "Carbs", value: food?.carbsGrams ?? 0, color: Theme.strain)
-                    ProgressRow(label: "Fat", value: food?.fatGrams ?? 0, color: Theme.sleep)
-                }
-            }
-            if let energy {
-                Divider().overlay(Theme.separator)
-                HStack {
-                    StatView(label: "Burned so far", value: energy.burnedSoFar.formatted(.number.precision(.fractionLength(0))), detail: "kcal")
-                    StatView(label: "Projected today", value: energy.projectedTotal.formatted(.number.precision(.fractionLength(0))), detail: "kcal")
-                    if let balance = energy.balance, eaten > 0 {
-                        StatView(
-                            label: balance < 0 ? "Deficit" : "Surplus",
-                            value: abs(balance).formatted(.number.precision(.fractionLength(0))),
-                            detail: "kcal",
-                            color: balance < 0 ? Theme.strain : Theme.lifting
-                        )
-                    }
-                }
-                SegmentedBar(segments: [
-                    .init(value: energy.restingFullDay, color: Theme.nutrition),
-                    .init(value: energy.exercise, color: Theme.lifting),
-                    .init(value: energy.everydayMovement, color: Theme.strain),
-                    .init(value: energy.digestion, color: Theme.sleep)
-                ])
-                Text("Full day: resting \(whole(energy.restingFullDay)) (what your body burns in 24 h at rest) · exercise \(whole(energy.exercise)) · walking around \(whole(energy.everydayMovement)) · digestion \(whole(energy.digestion)). Resting comes from \(energy.bmrMethod); the rest from heart rate and steps.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                if let watchResting = metrics.deviceRestingToday, let watchActive = metrics.deviceActiveToday {
-                    HStack(spacing: 10) {
-                        Image(systemName: "applewatch.side.right")
-                            .foregroundStyle(Theme.oxygen)
-                        Text("Your watch so far: \(whole(watchResting)) resting + \(whole(watchActive)) active = **\(whole(watchResting + watchActive)) kcal**. The app's \"burned so far\" should be close to this; \"projected\" is the whole day.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.primaryText)
-                    }
-                    .padding(10)
-                    .background(Theme.oxygen.opacity(0.08), in: .rect(cornerRadius: 14))
+            Divider().overlay(Theme.separator)
+            if let food, !food.isEmpty {
+                HStack(spacing: 14) {
+                    MacroColumn(label: "Protein", value: food.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
+                    MacroColumn(label: "Carbs", value: food.carbsGrams ?? 0, goal: nil, color: Theme.strain)
+                    MacroColumn(label: "Fat", value: food.fatGrams ?? 0, goal: nil, color: Theme.sleep)
                 }
             } else {
-                Text("Add your weight in Apple Health (or Settings) to estimate calories burned.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            if food == nil || food?.isEmpty == true {
-                Text("No food logged today. Log meals in Cronometer with its Apple Health sync turned on.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
+                HStack(spacing: 10) {
+                    Image(systemName: "fork.knife.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(Theme.nutrition)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No food logged yet")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.primaryText)
+                        Text("Meals you log in Cronometer show up here\(metrics.proteinTarget.map { ". Protein goal: \(whole($0)) g" } ?? "").")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
             }
         }
         .card(tint: Theme.nutrition)
+        .sheet(isPresented: $showingDetails) {
+            CalorieDetailsSheet()
+                .presentationDetents([.medium, .large])
+        }
+    }
+}
+
+private struct CalorieLine: View {
+    let icon: String
+    let color: Color
+    let label: String
+    let value: Double
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(color.gradient, in: .circle)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                Text("\(whole(value).formatted()) kcal")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.primaryText)
+            }
+        }
+    }
+}
+
+private struct MacroColumn: View {
+    let label: String
+    let value: Double
+    let goal: Double?
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+            Text(goal.map { "\(whole(value))/\(whole($0)) g" } ?? "\(whole(value)) g")
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(Theme.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.track)
+                    Capsule()
+                        .fill(color.gradient)
+                        .frame(width: max(6, geo.size.width * min(1, value / max(goal ?? max(value, 1) * 1.2, 1))))
+                }
+            }
+            .frame(height: 6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Where each calorie number comes from.
+private struct CalorieDetailsSheet: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let summary = metrics.calories {
+                    Section {
+                        row("Resting so far", summary.restingSoFar)
+                        row("Active so far", summary.activeSoFar)
+                        row("Burned so far", summary.burnedSoFar, bold: true)
+                        row("Resting still to come", summary.projected - summary.burnedSoFar)
+                        row("Burn by midnight", summary.projected, bold: true)
+                    } header: {
+                        Text("Burned")
+                    } footer: {
+                        Text(summary.fromWatch
+                             ? "From your Garmin via Apple Health, so \"burned so far\" matches your watch. \"By midnight\" adds the resting calories your body will burn before the day ends; more activity adds to it."
+                             : "Estimated: resting from \(metrics.energy?.bmrMethod ?? "your profile"), activity from heart rate and steps, plus about 10% of food eaten for digestion.")
+                    }
+                    Section {
+                        row("Eaten", summary.eaten ?? 0)
+                        row(summary.left >= 0 ? "Left to maintain" : "Over", abs(summary.left), bold: true)
+                    } header: {
+                        Text("Food")
+                    } footer: {
+                        Text("Food comes from Cronometer through Apple Health. Eating less than \"burn by midnight\" means a deficit (weight loss over time).")
+                    }
+                }
+            }
+            .navigationTitle("Calories")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func row(_ label: String, _ value: Double, bold: Bool = false) -> some View {
+        LabeledContent(label) {
+            Text("\(whole(value).formatted()) kcal")
+                .monospacedDigit()
+                .fontWeight(bold ? .semibold : .regular)
+        }
     }
 }
 

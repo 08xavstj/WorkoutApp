@@ -19,6 +19,7 @@ struct WorkoutAppApp: App {
     @State private var medications = MedicationsModel()
     @State private var checkIns = CheckInStore()
     @State private var muscles = MuscleModel()
+    @State private var conditions = ConditionsModel()
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -58,6 +59,7 @@ struct WorkoutAppApp: App {
                 .environment(medications)
                 .environment(checkIns)
                 .environment(muscles)
+                .environment(conditions)
                 .environment(\.healthClient, health)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)
@@ -104,6 +106,7 @@ struct RootView: View {
     @Environment(MedicationsModel.self) private var medications
     @Environment(CheckInStore.self) private var checkIns
     @Environment(MuscleModel.self) private var muscles
+    @Environment(ConditionsModel.self) private var conditions
     @Environment(ExerciseLibrary.self) private var library
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(AppRefresher.self) private var refresher
@@ -234,6 +237,7 @@ struct RootView: View {
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent)
         checkIns.recordSleepScore(metrics.sleep?.score)
+        await conditions.refresh(settings: settings)
         await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health)
         let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
         Reminders.updateWidget(WidgetSnapshot(
