@@ -6,8 +6,8 @@ import Foundation
 /// 20% restorative sleep (deep + REM share), 10% interruptions.
 public struct SleepCalculator: Sendable {
     public var baseSleepNeedHours: Double = 8
-    /// Extra sleep needed per strain point above 10 the previous day.
-    public var extraNeedPerStrainPoint: TimeInterval = 3 * 60
+    /// Extra sleep needed per strain point (%) above 48 the previous day.
+    public var extraNeedPerStrainPoint: TimeInterval = 38
     /// Deep + REM share of total sleep that earns full marks.
     public var targetRestorativeShare: Double = 0.40
     /// Awake periods at least this long count as an interruption.
@@ -34,7 +34,7 @@ public struct SleepCalculator: Sendable {
     public func sleepNeed(previousDayStrain: Double?) -> TimeInterval {
         let base = baseSleepNeedHours * 3600
         guard let strain = previousDayStrain else { return base }
-        return base + max(0, strain - 10) * extraNeedPerStrainPoint
+        return base + max(0, strain - 48) * extraNeedPerStrainPoint
     }
 
     /// Returns nil when there is no sleep in the samples.

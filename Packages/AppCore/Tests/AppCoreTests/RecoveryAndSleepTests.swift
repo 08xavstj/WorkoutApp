@@ -107,7 +107,7 @@ struct SleepCalculatorTests {
     }
 
     @Test func hardDayRaisesSleepNeed() {
-        #expect(calculator.sleepNeed(previousDayStrain: 18) > calculator.sleepNeed(previousDayStrain: 8))
+        #expect(calculator.sleepNeed(previousDayStrain: 86) > calculator.sleepNeed(previousDayStrain: 38))
         #expect(calculator.sleepNeed(previousDayStrain: nil) == 8 * 3600)
     }
 

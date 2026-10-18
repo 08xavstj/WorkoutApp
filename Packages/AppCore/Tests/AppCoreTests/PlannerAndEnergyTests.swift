@@ -57,7 +57,7 @@ struct StrainPlannerTests {
 
     @Test func gainsShrinkAsStrainRises() {
         let load = planner.liftingLoad(minutes: 45, rpe: 8)
-        #expect(planner.strainGain(current: 5, addedLoad: load) > planner.strainGain(current: 15, addedLoad: load))
+        #expect(planner.strainGain(current: 24, addedLoad: load) > planner.strainGain(current: 71, addedLoad: load))
     }
 
     @Test func rankingPrefersOptionsThatLandInRange() {
@@ -66,10 +66,13 @@ struct StrainPlannerTests {
             StrainPlanner.Option(id: "push45", kind: .strength, title: "Push", detail: "", minutes: 45, load: planner.liftingLoad(minutes: 45, rpe: 8)),
             StrainPlanner.Option(id: "huge", kind: .strength, title: "Huge", detail: "", minutes: 180, load: planner.liftingLoad(minutes: 180, rpe: 10))
         ]
-        let ranked = planner.rank(options, current: 11.4, target: 14...18)
+        // Strain is a percentage; these match 11.4 and 14-18 on the old 0-21 scale.
+        let scale = 100.0 / 21
+        let target = (14 * scale)...(18 * scale)
+        let ranked = planner.rank(options, current: 11.4 * scale, target: target)
         #expect(ranked.first?.id == "push45")
         #expect(ranked.last?.id == "huge")
-        #expect((14...18).contains(ranked[0].landsAt))
+        #expect(target.contains(ranked[0].landsAt))
     }
 }
 
@@ -135,6 +138,23 @@ struct TrainingLoadTests {
 }
 
 struct EnergyTests {
+    @Test func watchRestingCaloriesReplaceTheFormula() {
+        let body = EnergyCalculator.Body(weightKg: 80, heightCm: 180, age: 30, sex: .male)
+        let profile = HeartRateProfile(age: 30, sex: .male, restingHeartRate: 60)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let noon = start.addingTimeInterval(12 * 3600)
+        let calculator = EnergyCalculator()
+        let measured = calculator.estimate(body: body, profile: profile, heartRate: [], strengthSessions: [],
+                                           stepsOutsideWorkouts: 0, intake: nil, dayStart: start, now: noon,
+                                           measuredRestingPerDay: 1700)
+        #expect(measured.restingFullDay == 1700)
+        #expect(abs(measured.restingSoFar - 850) < 0.001)
+        let implausible = calculator.estimate(body: body, profile: profile, heartRate: [], strengthSessions: [],
+                                              stepsOutsideWorkouts: 0, intake: nil, dayStart: start, now: noon,
+                                              measuredRestingPerDay: 200)
+        #expect(implausible.restingFullDay == calculator.bmr(body).kcal)
+    }
+
     let calc = EnergyCalculator()
     let body = EnergyCalculator.Body(weightKg: 74.3, heightCm: 180, age: 30, sex: .male)
 

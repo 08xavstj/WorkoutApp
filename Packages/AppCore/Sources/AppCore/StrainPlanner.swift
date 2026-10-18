@@ -18,7 +18,7 @@ public struct StrainPlanner: Sendable {
         return .inRange
     }
 
-    /// Strain added by extra load, given today's strain so far (the curve flattens near 21).
+    /// Strain added by extra load, given today's strain so far (the curve flattens near 100).
     public func strainGain(current: Double, addedLoad: Double) -> Double {
         let base = calculator.load(forStrain: current)
         let gain = calculator.strain(forLoad: base + max(0, addedLoad)) - current

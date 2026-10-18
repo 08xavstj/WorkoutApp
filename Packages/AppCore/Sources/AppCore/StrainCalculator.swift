@@ -99,24 +99,27 @@ public struct StrainCalculator: Sendable {
         return min(10, max(1, rpe)) * minutes * rpeToTrimp
     }
 
+    /// Strain is a percentage: 0 (no effort) to 100 (as hard as a day gets).
+    public static let maximum = 100.0
+
     public func strain(forLoad load: Double) -> Double {
         guard load > 0 else { return 0 }
-        let raw = 21 * (1 - exp(-load / saturationLoad))
+        let raw = Self.maximum * (1 - exp(-load / saturationLoad))
         return (raw * 10).rounded() / 10
     }
 
     /// Inverse of `strain(forLoad:)`: how much load reaches a given strain.
     public func load(forStrain strain: Double) -> Double {
-        let clamped = min(20.9, max(0, strain))
-        return -saturationLoad * log(1 - clamped / 21)
+        let clamped = min(Self.maximum - 0.5, max(0, strain))
+        return -saturationLoad * log(1 - clamped / Self.maximum)
     }
 
     /// Suggested strain range for today, based on recovery (0-100).
     public static func targetStrain(forRecovery recovery: Int) -> ClosedRange<Double> {
         switch recovery {
-        case ..<34: 4...10
-        case 34..<67: 10...14
-        default: 14...18
+        case ..<34: 20...45
+        case 34..<67: 45...65
+        default: 65...85
         }
     }
 }

@@ -60,9 +60,20 @@ extension EnvironmentValues {
 @Observable
 final class AppRefresher {
     @ObservationIgnored var perform: (() async -> Void)?
+    @ObservationIgnored private var pending: Task<Void, Never>?
 
     func refresh() async {
         await perform?()
+    }
+
+    /// Refreshes shortly, folding bursts of Health updates into one refresh.
+    func refreshSoon() {
+        pending?.cancel()
+        pending = Task {
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled else { return }
+            await refresh()
+        }
     }
 }
 
@@ -124,7 +135,19 @@ struct RootView: View {
             if settings.hasOnboarded {
                 await health?.requestAuthorizationIfNeeded()
             }
+            // Refresh when Garmin Connect (or anything else) writes new data to Health.
+            let refresher = refresher
+            health?.observeChanges {
+                Task { @MainActor in
+                    refresher.refreshSoon()
+                }
+            }
             await refreshMetrics()
+            // Keep today's numbers current while the app is open.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                if scenePhase == .active { await refreshMetrics() }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await refreshMetrics() } }

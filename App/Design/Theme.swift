@@ -132,6 +132,11 @@ extension View {
     }
 }
 
+/// Strain as shown everywhere: a whole percentage, e.g. "62%".
+func strainText(_ value: Double) -> String {
+    "\(whole(value))%"
+}
+
 /// Rounds for display. Unlike `Int(_:)`, never crashes on NaN or infinity.
 func whole(_ value: Double) -> Int {
     value.isFinite ? Int(value.rounded()) : 0

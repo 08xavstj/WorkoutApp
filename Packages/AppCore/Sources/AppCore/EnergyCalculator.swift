@@ -91,6 +91,9 @@ public struct EnergyCalculator: Sendable {
     ///   - stepsOutsideWorkouts: steps today not inside a workout window.
     ///   - intake: calories eaten today (from Cronometer via Apple Health).
     ///   - dayStart / now: the day being measured.
+    ///   - measuredRestingPerDay: resting calories a day as measured by the
+    ///     user's watch (average of recent full days from Apple Health). Used
+    ///     instead of the formula when it's plausible, so totals line up with the watch.
     public func estimate(
         body: Body,
         profile: HeartRateProfile,
@@ -99,9 +102,15 @@ public struct EnergyCalculator: Sendable {
         stepsOutsideWorkouts: Double,
         intake: Double?,
         dayStart: Date,
-        now: Date
+        now: Date,
+        measuredRestingPerDay: Double? = nil
     ) -> Result {
-        let (bmrKcal, method) = bmr(body)
+        let (bmrKcal, method): (Double, String) = {
+            if let measured = measuredRestingPerDay, (800...4000).contains(measured) {
+                return (measured, "your watch's resting calories")
+            }
+            return bmr(body)
+        }()
         let bmrPerMinute = bmrKcal / 1440
         let elapsedMinutes = min(1440, max(0, now.timeIntervalSince(dayStart) / 60))
 

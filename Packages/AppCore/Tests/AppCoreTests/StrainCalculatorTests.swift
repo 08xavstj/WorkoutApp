@@ -29,21 +29,21 @@ struct StrainCalculatorTests {
         #expect(result.strain == 0)
     }
 
-    @Test func moderateHourRunIsAroundThirteen() {
+    @Test func moderateHourRunIsAroundSixtyPercent() {
         let samples = steady(bpm: bpm(atReserve: 0.75), minutes: 60, from: start)
         let result = calculator.dailyStrain(heartRate: samples, strengthSessions: [], profile: profile)
-        #expect((12...14).contains(result.strain))
+        #expect((57...67).contains(result.strain))
         #expect(result.liftingLoad == 0)
     }
 
-    @Test func strainNeverExceedsTwentyOne() {
-        #expect(calculator.strain(forLoad: 10_000) <= 21)
-        #expect(calculator.strain(forLoad: 300) < 21)
+    @Test func strainNeverExceedsOneHundred() {
+        #expect(calculator.strain(forLoad: 10_000) <= 100)
+        #expect(calculator.strain(forLoad: 300) < 100)
     }
 
     @Test func strainCurveFlattensAtTheTop() {
-        let lowStep = calculator.load(forStrain: 9) - calculator.load(forStrain: 8)
-        let highStep = calculator.load(forStrain: 19) - calculator.load(forStrain: 18)
+        let lowStep = calculator.load(forStrain: 43) - calculator.load(forStrain: 38)
+        let highStep = calculator.load(forStrain: 90) - calculator.load(forStrain: 85)
         #expect(highStep > lowStep * 3)
     }
 
@@ -54,7 +54,7 @@ struct StrainCalculatorTests {
         let result = calculator.dailyStrain(heartRate: samples, strengthSessions: [session], profile: profile)
         #expect(result.liftingLoad == calculator.rpeLoad(for: session))
         #expect(result.cardioLoad == 0)
-        #expect((12...14.5).contains(result.strain))
+        #expect((57...69).contains(result.strain))
     }
 
     @Test func gymHeartRateIsNotCountedTwice() {
@@ -90,7 +90,7 @@ struct StrainCalculatorTests {
         #expect(result.zoneMinutes.reduce(0, +) - 30 < 0.001)
     }
 
-    @Test(arguments: [(10, 4.0...10.0), (50, 10.0...14.0), (90, 14.0...18.0)])
+    @Test(arguments: [(10, 20.0...45.0), (50, 45.0...65.0), (90, 65.0...85.0)])
     func targetStrainFollowsRecovery(recovery: Int, expected: ClosedRange<Double>) {
         #expect(StrainCalculator.targetStrain(forRecovery: recovery) == expected)
     }

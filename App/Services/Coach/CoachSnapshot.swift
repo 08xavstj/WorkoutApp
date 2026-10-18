@@ -81,7 +81,7 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
         }
         var lines: [String] = []
         lines.append("Date: \(date.formatted(date: .complete, time: .omitted))")
-        lines.append("Strain today: \(fmt(strain)) / 21 (target \(targetStrain ?? "n/a")). Cardio load \(fmt(cardioLoad, 0)), lifting load \(fmt(liftingLoad, 0)).")
+        lines.append("Strain today: \(fmt(strain)) % of 100 (target \(targetStrain ?? "n/a")). Cardio load \(fmt(cardioLoad, 0)), lifting load \(fmt(liftingLoad, 0)).")
         if let zoneMinutes {
             lines.append("Heart-rate zone minutes (Z1-Z5): \(zoneMinutes.map(String.init).joined(separator: ", ")).")
         }

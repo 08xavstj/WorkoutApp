@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import AppCore
 
 // MARK: - Rings
 
@@ -291,11 +292,11 @@ struct GlassIcon: View {
 
 // MARK: - Bars and gauges
 
-/// Strain progress on 0-21 with the target band shaded (Today's strain goal card).
+/// Strain progress on 0-100% with the target band shaded (Today's strain goal card).
 struct StrainGoalBar: View {
     let current: Double
     let target: ClosedRange<Double>
-    var maximum: Double = 21
+    var maximum: Double = StrainCalculator.maximum
 
     var body: some View {
         VStack(spacing: 6) {
@@ -326,7 +327,7 @@ struct StrainGoalBar: View {
             GeometryReader { geo in
                 let w = geo.size.width
                 ZStack(alignment: .topLeading) {
-                    ForEach([0.0, 7.0], id: \.self) { tick in
+                    ForEach([0.0], id: \.self) { tick in
                         Text("\(whole(tick))").offset(x: w * tick / maximum)
                     }
                     Text("\(whole(target.lowerBound))")
@@ -344,7 +345,7 @@ struct StrainGoalBar: View {
             .frame(height: 16)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Strain \(current.formatted(.number.precision(.fractionLength(1)))) of 21, target \(whole(target.lowerBound)) to \(whole(target.upperBound))")
+        .accessibilityLabel("Strain \(strainText(current)), target \(whole(target.lowerBound)) to \(whole(target.upperBound)) percent")
     }
 }
 

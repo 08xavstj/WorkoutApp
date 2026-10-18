@@ -146,9 +146,9 @@ struct ActiveWorkoutView: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
                 Spacer()
-                GradientRing(progress: liveStrain(elapsed: elapsed) / 8, colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
+                GradientRing(progress: liveStrain(elapsed: elapsed) / 40, colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
                     VStack(spacing: 0) {
-                        Text("+\(liveStrain(elapsed: elapsed).formatted(.number.precision(.fractionLength(1))))")
+                        Text("+\(strainText(liveStrain(elapsed: elapsed)))")
                             .font(.system(size: 26, weight: .bold, design: .rounded))
                             .monospacedDigit()
                         Text("strain")

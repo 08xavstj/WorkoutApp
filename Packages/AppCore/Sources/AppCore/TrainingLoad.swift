@@ -14,7 +14,7 @@ public struct TrainingLoadCalculator: Sendable {
     }
 
     public struct Result: Sendable, Equatable {
-        /// 7-day average daily load, on the 0-21 strain scale.
+        /// 7-day average daily load, on the 0-100 strain scale.
         public var value: Double
         public var optimal: ClosedRange<Double>
         public var status: Status

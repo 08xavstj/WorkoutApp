@@ -56,11 +56,12 @@ struct TodayView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
+                AppLogoHeader()
+                Spacer(minLength: 8)
+                SyncChip(isLoading: metrics.isLoading, lastUpdated: metrics.lastUpdated)
                 GlassIconButton(systemName: "person.fill", label: "Settings") {
                     showingSettings = true
                 }
-                SyncChip(isLoading: metrics.isLoading, lastUpdated: metrics.lastUpdated)
-                Spacer()
             }
             Text("Today, \(Date.now.formatted(.dateTime.month(.wide).day()))")
                 .font(.largeTitle.weight(.bold))
@@ -184,9 +185,10 @@ private struct ScoresCard: View {
             HStack(alignment: .top) {
                 ScoreRing(
                     title: "Strain",
-                    value: metrics.strain.map { $0.strain.formatted(.number.precision(.fractionLength(1))) } ?? "--",
-                    subtitle: "of 21",
-                    progress: (metrics.strain?.strain ?? 0) / 21,
+                    value: metrics.strain.map { "\(whole($0.strain))" } ?? "--",
+                    unit: metrics.strain == nil ? "" : "%",
+                    subtitle: metrics.targetStrain.map { "Goal \(whole($0.lowerBound))–\(whole($0.upperBound))%" } ?? "Day strain",
+                    progress: (metrics.strain?.strain ?? 0) / StrainCalculator.maximum,
                     colors: Theme.strainColors,
                     size: 100
                 )
@@ -255,7 +257,7 @@ private struct StrainGoalCard: View {
                 Spacer()
                 switch status {
                 case .below(let remaining):
-                    Chip(text: "\(remaining.formatted(.number.precision(.fractionLength(1)))) to go")
+                    Chip(text: "\(strainText(remaining)) to go")
                 case .inRange:
                     Chip(text: "Target reached", color: Theme.recoveryHigh)
                 case .above:
@@ -263,11 +265,11 @@ private struct StrainGoalCard: View {
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(current.formatted(.number.precision(.fractionLength(1))))
+                Text(strainText(current))
                     .font(.system(size: 48, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
-                Text("/ target \(whole(target.lowerBound))–\(whole(target.upperBound))")
+                Text("target \(whole(target.lowerBound))–\(whole(target.upperBound))%")
                     .font(.title3)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -334,7 +336,7 @@ private struct SuggestionRow: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             Spacer()
-            Text("+\(suggestion.option.gain.formatted(.number.precision(.fractionLength(1))))")
+            Text("+\(strainText(suggestion.option.gain))")
                 .font(.headline)
                 .monospacedDigit()
                 .foregroundStyle(Theme.strain)
@@ -415,9 +417,20 @@ private struct EnergyCard: View {
                     .init(value: energy.everydayMovement, color: Theme.strain),
                     .init(value: energy.digestion, color: Theme.sleep)
                 ])
-                Text("Resting \(whole(energy.restingFullDay)) · Exercise \(whole(energy.exercise)) · Movement \(whole(energy.everydayMovement)) · Digestion \(whole(energy.digestion)). Estimate from \(energy.bmrMethod), heart rate and steps.")
+                Text("Full day: resting \(whole(energy.restingFullDay)) (what your body burns in 24 h at rest) · exercise \(whole(energy.exercise)) · walking around \(whole(energy.everydayMovement)) · digestion \(whole(energy.digestion)). Resting comes from \(energy.bmrMethod); the rest from heart rate and steps.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
+                if let watchResting = metrics.deviceRestingToday, let watchActive = metrics.deviceActiveToday {
+                    HStack(spacing: 10) {
+                        Image(systemName: "applewatch.side.right")
+                            .foregroundStyle(Theme.oxygen)
+                        Text("Your watch so far: \(whole(watchResting)) resting + \(whole(watchActive)) active = **\(whole(watchResting + watchActive)) kcal**. The app's \"burned so far\" should be close to this; \"projected\" is the whole day.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.primaryText)
+                    }
+                    .padding(10)
+                    .background(Theme.oxygen.opacity(0.08), in: .rect(cornerRadius: 14))
+                }
             } else {
                 Text("Add your weight in Apple Health (or Settings) to estimate calories burned.")
                     .font(.caption)

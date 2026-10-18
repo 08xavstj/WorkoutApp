@@ -37,6 +37,7 @@ final class VitalsModel {
     private(set) var stress: StressEstimate.Result?
     private(set) var bloodOxygen: Double?
     private(set) var intensityMinutes: IntensityMinutes.Result?
+    private(set) var bodyAge: BodyAge.Result?
     private(set) var isLoading = false
     @ObservationIgnored private var isRefreshing = false
 
@@ -92,6 +93,7 @@ final class VitalsModel {
         async let workouts = health.workoutIntervals(from: twoWeeksAgo, to: now)
         async let perMinute = health.heartRatePerMinute(from: twoWeeksAgo, to: now)
         async let lastNight = health.sleepSamples(forNightEnding: today)
+        async let sleepAverage = health.averageSleepHours(nights: 7)
 
         func get(_ value: [DatedValue]?) -> [DatedValue] { value ?? [] }
         let rhrSeries = get(try? await rhr)
@@ -252,7 +254,8 @@ final class VitalsModel {
 
         // MARK: Body
         let unit = settings.weightUnit
-        let weightSeries = get(try? await weight).map { DatedValue(date: $0.date, value: unit.display($0.value)) }
+        let rawWeight = get(try? await weight)
+        let weightSeries = rawWeight.map { DatedValue(date: $0.date, value: unit.display($0.value)) }
         var weightStat = makeStat("weight", .body, "Weight", "scalemass.fill", series: weightSeries, unit: unit.rawValue, digits: 1)
         if !weightSeries.isEmpty {
             weightStat.status = Biomarkers.trend(weightSeries.suffix(30).map(\.value), threshold: 0.005).rawValue.capitalized
@@ -264,7 +267,8 @@ final class VitalsModel {
             status: { Biomarkers.bodyFatLabel($0, sex: settings.sex) },
             tone: { Biomarkers.bodyFatLabel($0, sex: settings.sex) == "High" ? .caution : .good }
         ))
-        result.append(makeStat("bmi", .body, "BMI", "figure.stand", series: get(try? await bmi), unit: "", digits: 1,
+        let bmiSeries = get(try? await bmi)
+        result.append(makeStat("bmi", .body, "BMI", "figure.stand", series: bmiSeries, unit: "", digits: 1,
                            status: { $0 < 18.5 ? "Under" : ($0 < 25 ? "Healthy" : ($0 < 30 ? "Over" : "High")) }))
         let leanSeries = get(try? await lean).map { DatedValue(date: $0.date, value: unit.display($0.value)) }
         result.append(makeStat("lean", .body, "Lean mass", "figure.strengthtraining.traditional", series: leanSeries, unit: unit.rawValue, digits: 1))
@@ -283,6 +287,29 @@ final class VitalsModel {
         result.append(todayStat("water", "Water", "waterbottle.fill", series: get(try? await water), unit: "L", digits: 1, today: latestToday, category: .body))
 
         stats = result
+
+        // Body age from the same data (30-day averages where it helps).
+        func average(_ series: [DatedValue], last days: Int) -> Double? {
+            let values = series.suffix(days).map(\.value)
+            return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+        }
+        let fullDaySteps = stepSeries.filter { !calendar.isDateInToday($0.date) }
+        bodyAge = BodyAge.estimate(BodyAge.Inputs(
+            age: settings.age,
+            sex: settings.sex,
+            vo2Max: vo2Series.last?.value,
+            restingHeartRate: average(rhrSeries, last: 14),
+            sleepHours: try? await sleepAverage,
+            dailySteps: average(fullDaySteps, last: 30),
+            bodyFatPercent: fatSeries.last?.value,
+            bmi: bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm)
+        ))
+    }
+
+    private func computedBMI(weightKg: Double?, heightCm: Double) -> Double? {
+        guard let weightKg, heightCm > 100 else { return nil }
+        let meters = heightCm / 100
+        return weightKg / (meters * meters)
     }
 
     // MARK: - Building stats

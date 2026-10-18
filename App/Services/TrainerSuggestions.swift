@@ -50,7 +50,7 @@ enum TrainerSuggestions {
             return ("Wear your watch to sleep tonight to get recovery and daily coaching.", nil)
         }
         let target = StrainCalculator.targetStrain(forRecovery: recovery.score)
-        let range = "\(Int(target.lowerBound))–\(Int(target.upperBound))"
+        let range = "\(Int(target.lowerBound))–\(Int(target.upperBound))%"
         let sleptWell = (metrics.sleep?.score ?? 80) >= 75
         switch recovery.status {
         case .high:
@@ -58,7 +58,7 @@ enum TrainerSuggestions {
         case .moderate:
             return (sleptWell ? "Recovery is moderate. Train, but keep the effort controlled:" : "Recovery is moderate and sleep was short. Keep it controlled:", "aim for strain \(range).")
         case .low:
-            return ("Your body needs extra care. Keep it light and prioritise sleep:", "stay under strain \(Int(target.upperBound)).")
+            return ("Your body needs extra care. Keep it light and prioritise sleep:", "stay under \(Int(target.upperBound))% strain.")
         }
     }
 }

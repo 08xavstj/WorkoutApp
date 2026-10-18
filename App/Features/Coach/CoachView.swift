@@ -106,8 +106,8 @@ struct CoachView: View {
                     ContextChip(color: Theme.recoveryColor(for: recovery.score), label: "Recovery", value: "\(recovery.score)%")
                 }
                 if let strain = metrics.strain {
-                    let target = metrics.targetStrain.map { " / \(whole($0.lowerBound))–\(whole($0.upperBound))" } ?? ""
-                    ContextChip(color: Theme.strain, label: "Strain", value: "\(strain.strain.formatted(.number.precision(.fractionLength(1))))\(target)")
+                    let target = metrics.targetStrain.map { " / \(whole($0.lowerBound))–\(whole($0.upperBound))%" } ?? ""
+                    ContextChip(color: Theme.strain, label: "Strain", value: "\(strainText(strain.strain))\(target)")
                 }
                 if let protein = metrics.nutritionToday?.proteinGrams {
                     ContextChip(color: Theme.nutrition, label: "Protein", value: "\(whole(protein)) g")
@@ -304,7 +304,7 @@ private struct PlanCard: View {
                     .foregroundStyle(Theme.primaryText)
                 Spacer()
                 let time = Text("\(minutes) min · ").foregroundStyle(Theme.secondaryText)
-                let strain = Text("≈+\(gain.formatted(.number.precision(.fractionLength(1)))) strain").foregroundStyle(Theme.strain)
+                let strain = Text("≈+\(strainText(gain)) strain").foregroundStyle(Theme.strain)
                 Text("\(time)\(strain)")
             }
             .font(.subheadline)

@@ -178,11 +178,11 @@ struct WorkoutBuilderView: View {
             HStack(spacing: 18) {
                 StatView(label: "Time", value: "~\(estimated) min")
                 StatView(label: "Effort", value: "RPE \(plan.targetRPE.formatted())")
-                StatView(label: "Strain", value: "≈+\(gain.formatted(.number.precision(.fractionLength(1))))", color: Theme.strain)
+                StatView(label: "Strain", value: "≈+\(strainText(gain))", color: Theme.strain)
             }
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
-                Text("Lands you around \(landsAt.formatted(.number.precision(.fractionLength(1)))) strain (target \(whole(target.lowerBound))–\(whole(target.upperBound)))\(inRange ? ", right on target." : ".")")
+                Text("Lands you around \(strainText(landsAt)) strain (target \(whole(target.lowerBound))–\(whole(target.upperBound))%)\(inRange ? ", right on target." : ".")")
                     .font(.subheadline)
                     .foregroundStyle(inRange ? Theme.recoveryHigh : Theme.secondaryText)
             }

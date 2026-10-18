@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Charts
+import AppCore
 
 /// Long-term baselines: HRV trend and biomarkers.
 struct BiologyView: View {
@@ -27,6 +28,7 @@ struct BiologyView: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                     .padding(.top, 8)
+                    BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
                     hrvCard
                     ForEach(VitalsModel.Category.allCases) { category in
                         SectionTitle(text: category.rawValue)
@@ -304,5 +306,115 @@ struct VitalDetailView: View {
                 }
             }
         }
+    }
+}
+
+/// Body age: the headline number, how it compares with your age, and what moves it.
+struct BodyAgeCard: View {
+    let result: BodyAge.Result?
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                CardLabel(text: "Body age")
+                Spacer()
+                Text("Estimate")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if let result {
+                let younger = result.difference <= 0
+                let tone = younger ? Theme.recoveryHigh : Theme.recoveryModerate
+                HStack(alignment: .center, spacing: 18) {
+                    GradientRing(
+                        progress: min(1, result.bodyAge / 80),
+                        colors: younger ? [Theme.recoveryHighLight, Theme.recoveryHigh] : [Theme.recoveryModerateLight, Theme.recoveryModerate],
+                        lineWidth: 12
+                    ) {
+                        VStack(spacing: 0) {
+                            Text(result.bodyAge.formatted(.number.precision(.fractionLength(1))))
+                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.primaryText)
+                                .minimumScaleFactor(0.7)
+                            Text("years")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        .padding(.horizontal, 14)
+                    }
+                    .frame(width: 118, height: 118)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: younger ? "arrow.down" : "arrow.up")
+                            Text("\(abs(result.difference).formatted(.number.precision(.fractionLength(1)))) years \(younger ? "younger" : "older")")
+                        }
+                        .font(.headline)
+                        .foregroundStyle(tone)
+                        Text("than your age (\(result.age))")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryText)
+                        Text(younger ? "Your habits are adding years. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                VStack(spacing: 10) {
+                    ForEach(result.factors) { factor in
+                        FactorRow(factor: factor)
+                    }
+                }
+                Text("Based on VO₂ max (fitness age, HUNT study), resting heart rate, sleep, steps and body fat or BMI, using published mortality research. Not a medical test.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+            } else {
+                Text(isLoading ? "Working it out…" : "Needs at least two of: VO₂ max, resting heart rate, sleep, steps, body fat or BMI. Wear your Garmin day and night and add your height and weight in Settings.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .card(tint: (result?.difference ?? 0) <= 0 ? Theme.recoveryHigh : Theme.recoveryModerate)
+    }
+}
+
+private struct FactorRow: View {
+    let factor: BodyAge.Factor
+
+    var body: some View {
+        let helps = factor.years <= 0
+        let color = helps ? Theme.recoveryHigh : Theme.recoveryModerate
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(factor.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text(factor.detail)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Spacer(minLength: 8)
+            // Bar centred on zero: left = younger, right = older.
+            GeometryReader { geo in
+                let half = geo.size.width / 2
+                let length = min(half, half * abs(factor.years) / 8)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.track).frame(height: 6)
+                    Rectangle().fill(Theme.secondaryText.opacity(0.4)).frame(width: 1.5, height: 12).offset(x: half - 0.75)
+                    Capsule()
+                        .fill(LinearGradient(colors: helps ? [Theme.recoveryHighLight, color] : [Theme.recoveryModerateLight, color], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(4, length), height: 6)
+                        .offset(x: helps ? half - max(4, length) : half)
+                }
+                .frame(height: 12)
+                .frame(maxHeight: .infinity)
+            }
+            .frame(width: 90, height: 28)
+            Text("\(helps ? "−" : "+")\(abs(factor.years).formatted(.number.precision(.fractionLength(1)))) y")
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .frame(width: 56, alignment: .trailing)
+        }
+        .accessibilityElement(children: .combine)
     }
 }

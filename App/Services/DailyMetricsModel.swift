@@ -1,4 +1,5 @@
 import Foundation
+import HealthKit
 import AppCore
 
 /// Loads today's data from Apple Health, combines it with logged gym sessions,
@@ -38,6 +39,9 @@ final class DailyMetricsModel {
     private(set) var bodyMassKg: Double?
     private(set) var energy: EnergyCalculator.Result?
     private(set) var steps: Double?
+    /// Calories the watch itself reports for today so far (via Apple Health).
+    private(set) var deviceRestingToday: Double?
+    private(set) var deviceActiveToday: Double?
     private(set) var heartRateProfile: HeartRateProfile?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
@@ -211,6 +215,9 @@ final class DailyMetricsModel {
             async let height = health.latest(.height, unit: .meterUnit(with: .centi))
             async let bodyFat = health.latest(.bodyFatPercentage, unit: .percent())
             async let respiratory = health.overnightRespiratoryRate(forNightEnding: today)
+            async let recentRespiratory = health.latest(.respiratoryRate, unit: HKUnit.count().unitDivided(by: .minute()), since: calendar.date(byAdding: .day, value: -3, to: today))
+            async let measuredResting = health.restingEnergyPerDay()
+            async let deviceEnergy = health.deviceEnergy(from: today, to: now)
             let windows = todaysSessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                 + externalWorkouts.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
             async let stepCounts = health.steps(from: today, to: now, excluding: windows)
@@ -221,7 +228,14 @@ final class DailyMetricsModel {
             bodyMassKg = healthWeight ?? (settings.weightKg > 0 ? settings.weightKg : nil)
             let heightCm = (try? await height) ?? (settings.heightCm > 0 ? settings.heightCm : nil)
             let bodyFatPercent = (try? await bodyFat).map { $0 * 100 }
-            respiratoryRate = try? await respiratory
+            // Last night's average, or the latest reading if the watch logs it at other times.
+            let overnight = try? await respiratory
+            let latestRespiratory = try? await recentRespiratory
+            respiratoryRate = overnight ?? latestRespiratory
+            let device = try? await deviceEnergy
+            deviceRestingToday = device?.resting
+            deviceActiveToday = device?.active
+            let watchResting = try? await measuredResting
             let stepResult = try? await stepCounts
             steps = stepResult?.total
 
@@ -235,7 +249,8 @@ final class DailyMetricsModel {
                     strengthSessions: todaysSessions,
                     stepsOutsideWorkouts: stepResult?.outside ?? 0,
                     intake: nutritionToday?.calories,
-                    dayStart: today, now: now
+                    dayStart: today, now: now,
+                    measuredRestingPerDay: watchResting
                 )
             } else {
                 energy = nil

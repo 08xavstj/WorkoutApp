@@ -13,7 +13,7 @@ struct OnboardingView: View {
             Text("Your training, recovery and sleep in one place")
                 .font(.largeTitle.weight(.bold))
             VStack(alignment: .leading, spacing: 16) {
-                row("flame.fill", Theme.strain, "Strain", "How hard your body worked today, 0-21. Gym sessions count, not just cardio.")
+                row("flame.fill", Theme.strain, "Strain", "How hard your body worked today, 0-100%. Gym sessions count, not just cardio.")
                 row("bolt.heart.fill", Theme.recoveryHigh, "Recovery", "How ready you are, from your HRV, resting heart rate and sleep.")
                 row("moon.zzz.fill", Theme.sleep, "Sleep", "Time asleep against what you need, plus quality.")
                 row("sparkles", Theme.lifting, "Coach", "Ask what to do today. It knows your numbers and your workouts.")

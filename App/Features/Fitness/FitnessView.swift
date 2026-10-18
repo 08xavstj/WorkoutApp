@@ -78,8 +78,8 @@ private struct WeekStrip: View {
                             .strokeBorder(Theme.secondaryText.opacity(0.35), style: StrokeStyle(lineWidth: 2.5, dash: [3, 3]))
                             .frame(width: 36, height: 36)
                     } else {
-                        GradientRing(progress: (strain ?? 0) / 21, colors: Theme.strainColors, lineWidth: 4, showsDisk: false) {
-                            Text(strain.map { $0.formatted(.number.precision(.fractionLength(1))) } ?? "–")
+                        GradientRing(progress: (strain ?? 0) / StrainCalculator.maximum, colors: Theme.strainColors, lineWidth: 4, showsDisk: false) {
+                            Text(strain.map { "\(whole($0))" } ?? "–")
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundStyle(Theme.primaryText)
                         }
@@ -113,23 +113,23 @@ private struct DayStrainCard: View {
                 CardLabel(text: "Day strain")
                 Spacer()
                 if let target {
-                    Text("Target \(whole(target.lowerBound))–\(whole(target.upperBound))")
+                    Text("Target \(whole(target.lowerBound))–\(whole(target.upperBound))%")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.recoveryHigh)
                 }
             }
             ArcGauge(
-                value: current / 21,
-                band: target.map { ($0.lowerBound / 21)...($0.upperBound / 21) },
+                value: current / StrainCalculator.maximum,
+                band: target.map { ($0.lowerBound / StrainCalculator.maximum)...($0.upperBound / StrainCalculator.maximum) },
                 colors: [Theme.strainLight, Theme.strain, Theme.lifting],
                 lineWidth: 24
             ) {
                 VStack(spacing: 2) {
-                    Text(current.formatted(.number.precision(.fractionLength(1))))
+                    Text(strainText(current))
                         .font(.system(size: 60, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
-                    Text("of 21 strain")
+                    Text("day strain")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -149,7 +149,7 @@ private struct DayStrainCard: View {
             let (lead, rest): (String, String) = {
                 switch status {
                 case .below(let remaining):
-                    let amount = remaining.formatted(.number.precision(.fractionLength(1)))
+                    let amount = strainText(remaining)
                     return ("\(amount) to go:", metrics.activities.contains(where: \.isStrength)
                         ? "one more session today will get you there."
                         : "a workout today will get you into your target range.")
@@ -192,7 +192,7 @@ private struct LoadCard: View {
     let colors: [Color]
 
     var body: some View {
-        let maximum = 21.0
+        let maximum = StrainCalculator.maximum
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.headline)
@@ -228,7 +228,7 @@ private struct LoadCard: View {
             HStack {
                 Text("0")
                 Spacer()
-                Text("max \(whole(maximum))")
+                Text("\(whole(maximum))%")
             }
             .font(.caption)
             .foregroundStyle(Theme.secondaryText)
@@ -304,7 +304,7 @@ private struct ActivityCard: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                     Spacer()
-                    Chip(text: "+\(item.strainAdded.formatted(.number.precision(.fractionLength(1))))")
+                    Chip(text: "+\(strainText(item.strainAdded))")
                 }
                 .accessibilityElement(children: .combine)
             }

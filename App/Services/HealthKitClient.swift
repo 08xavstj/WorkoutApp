@@ -226,6 +226,42 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
     }
 
+    /// Average hours asleep over the last `nights` nights (overlapping
+    /// samples from different sources are merged, not double counted).
+    @concurrent
+    func averageSleepHours(nights: Int = 7) async throws -> Double? {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        guard let start = calendar.date(byAdding: .day, value: -nights, to: today)?.addingTimeInterval(-6 * 3600) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        let asleepValues: Set<Int> = [
+            HKCategoryValueSleepAnalysis.asleepCore.rawValue, HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
+            HKCategoryValueSleepAnalysis.asleepREM.rawValue, HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue
+        ]
+        var byNight: [Date: [DateInterval]] = [:]
+        for sample in try await descriptor.result(for: store) where asleepValues.contains(sample.value) {
+            let night = calendar.startOfDay(for: sample.startDate.addingTimeInterval(6 * 3600))
+            byNight[night, default: []].append(DateInterval(start: sample.startDate, end: max(sample.startDate, sample.endDate)))
+        }
+        let totals = byNight.values.map { intervals -> Double in
+            var merged: [DateInterval] = []
+            for interval in intervals.sorted(by: { $0.start < $1.start }) {
+                if let last = merged.last, interval.start <= last.end {
+                    merged[merged.count - 1] = DateInterval(start: last.start, end: max(last.end, interval.end))
+                } else {
+                    merged.append(interval)
+                }
+            }
+            return merged.map(\.duration).reduce(0, +) / 3600
+        }.filter { $0 >= 2 }
+        guard !totals.isEmpty else { return nil }
+        return totals.reduce(0, +) / Double(totals.count)
+    }
+
     // MARK: - Nutrition (Cronometer and other food loggers write these to Health)
 
     /// Totals for one calendar day. Values are nil when nothing of that type was logged.
@@ -282,9 +318,10 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     /// Most recent value of a quantity (height, body fat, VO2 max...).
     @concurrent
-    func latest(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double? {
+    func latest(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, since: Date? = nil) async throws -> Double? {
+        let predicate = since.map { HKQuery.predicateForSamples(withStart: $0, end: nil) }
         let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: HKQuantityType(identifier))],
+            predicates: [.quantitySample(type: HKQuantityType(identifier), predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
             limit: 1
         )
@@ -387,25 +424,57 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return byDay.keys.sorted().map { DatedValue(date: $0, value: byDay[$0] ?? 0) }
     }
 
-    /// Step count today, split into steps inside and outside the given windows.
+    /// Step count in a range, split into steps inside and outside the given
+    /// windows. Uses statistics so steps counted by both the iPhone and the
+    /// watch aren't added twice (Health picks one source per moment).
     @concurrent
     func steps(from start: Date, to end: Date, excluding windows: [DateInterval]) async throws -> (total: Double, outside: Double) {
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
-        let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: HKQuantityType(.stepCount), predicate: predicate)],
-            sortDescriptors: []
-        )
-        var total = 0.0
-        var outside = 0.0
-        for sample in try await descriptor.result(for: store) {
-            let count = sample.quantity.doubleValue(for: .count())
-            total += count
-            let middle = sample.startDate.addingTimeInterval(sample.endDate.timeIntervalSince(sample.startDate) / 2)
-            if !windows.contains(where: { $0.contains(middle) }) {
-                outside += count
-            }
+        let total = try await dailySum(.stepCount, unit: .count(), start: start, end: end) ?? 0
+        var inside = 0.0
+        for window in windows {
+            let from = max(window.start, start)
+            let to = min(window.end, end)
+            guard to > from else { continue }
+            inside += try await dailySum(.stepCount, unit: .count(), start: from, end: to) ?? 0
         }
-        return (total, outside)
+        return (total, max(0, total - inside))
+    }
+
+    /// Average resting calories a day over recent complete days, as written by
+    /// the watch (Garmin Connect writes resting energy). Nil if there's too little.
+    @concurrent
+    func restingEnergyPerDay(days: Int = 7) async throws -> Double? {
+        let series = try await dailySeries(.basalEnergyBurned, unit: .kilocalorie(), days: days + 1, cumulative: true)
+        let today = Calendar.current.startOfDay(for: .now)
+        let full = series.filter { $0.date < today && $0.value > 800 }.map(\.value)
+        guard full.count >= 2 else { return nil }
+        return full.reduce(0, +) / Double(full.count)
+    }
+
+    /// What the watch has written for today so far: resting and active calories.
+    @concurrent
+    func deviceEnergy(from start: Date, to end: Date) async throws -> (resting: Double?, active: Double?) {
+        async let resting = dailySum(.basalEnergyBurned, unit: .kilocalorie(), start: start, end: end)
+        async let active = dailySum(.activeEnergyBurned, unit: .kilocalorie(), start: start, end: end)
+        return try await (resting, active)
+    }
+
+    /// Calls `onChange` whenever new steps, energy, heart rate, breathing or
+    /// sleep data lands in Apple Health (e.g. after Garmin Connect syncs).
+    func observeChanges(_ onChange: @escaping @Sendable () -> Void) {
+        let types: [HKSampleType] = [
+            HKQuantityType(.stepCount), HKQuantityType(.activeEnergyBurned), HKQuantityType(.heartRate),
+            HKQuantityType(.restingHeartRate), HKQuantityType(.respiratoryRate), HKQuantityType(.oxygenSaturation),
+            HKQuantityType(.heartRateVariabilitySDNN), HKCategoryType(.sleepAnalysis),
+            HKQuantityType(.dietaryEnergyConsumed)
+        ]
+        for type in types {
+            let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
+                if error == nil { onChange() }
+                completion()
+            }
+            store.execute(query)
+        }
     }
 
     private static func name(for type: HKWorkoutActivityType) -> String {
