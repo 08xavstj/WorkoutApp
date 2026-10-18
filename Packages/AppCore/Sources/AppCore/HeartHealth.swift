@@ -8,6 +8,12 @@ public enum HeartRateRecovery {
         public var peak: Double
         public var oneMinuteDrop: Double
         public var twoMinuteDrop: Double?
+
+        public init(peak: Double, oneMinuteDrop: Double, twoMinuteDrop: Double?) {
+            self.peak = peak
+            self.oneMinuteDrop = oneMinuteDrop
+            self.twoMinuteDrop = twoMinuteDrop
+        }
     }
 
     /// - Parameters:
@@ -50,6 +56,12 @@ public enum StressEstimate {
         public var minutes: Int
         /// Share of measured minutes in each band: rest, low, medium, high.
         public var bands: [Double]
+
+        public init(score: Int, minutes: Int, bands: [Double]) {
+            self.score = score
+            self.minutes = minutes
+            self.bands = bands
+        }
     }
 
     /// Fraction of heart-rate reserve that counts as maximum stress when not exercising.
@@ -104,6 +116,11 @@ public enum IntensityMinutes {
         public var moderate: Int
         public var vigorous: Int
         public var total: Int { moderate + 2 * vigorous }
+
+        public init(moderate: Int, vigorous: Int) {
+            self.moderate = moderate
+            self.vigorous = vigorous
+        }
     }
 
     public static let weeklyGoal = 150
@@ -134,6 +151,11 @@ public enum SleepingHeartRate {
         public var average: Double
         /// Lowest 5-minute average, which is less noisy than the single lowest reading.
         public var lowest: Double
+
+        public init(average: Double, lowest: Double) {
+            self.average = average
+            self.lowest = lowest
+        }
     }
 
     public static func measure(_ samples: [HeartRateSample], during sleep: [SleepSample]) -> Result? {
