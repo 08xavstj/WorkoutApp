@@ -488,6 +488,7 @@ private struct SetRow: View {
                 ZStack {
                     Circle()
                         .fill(set.isCompleted ? Theme.recoveryHigh : Color.clear)
+                    Circle()
                         .strokeBorder(set.isCompleted ? Theme.recoveryHigh : Theme.secondaryText.opacity(0.4), lineWidth: 2)
                     if set.isCompleted {
                         Image(systemName: "checkmark")
@@ -636,7 +637,6 @@ private struct NumberStepper<Field: View>: View {
                 .background(Theme.lifting.opacity(0.12), in: .circle)
         }
         .buttonStyle(.plain)
-        .sensoryFeedback(.selection, trigger: label)
         .accessibilityLabel(icon == "plus" ? "Increase \(label)" : "Decrease \(label)")
     }
 }
@@ -696,7 +696,7 @@ private struct RPEPicker: View {
             Text(rpe.map { value in
                 let level = RPEScale.level(for: value)
                 return "\(RPEScale.summary(value)). \(level?.feel ?? "")"
-            } ?? "How hard was it? Tap the number of reps you had left: 8 = 2 more reps possible.")
+            } ?? "Optional. Pick how hard the set was: 8 means you had 2 reps left, 10 means none.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
