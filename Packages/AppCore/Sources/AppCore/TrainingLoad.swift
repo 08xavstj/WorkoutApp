@@ -1,24 +1,33 @@
 import Foundation
 
-/// Training load: how much you've done this week compared with what your body
-/// is used to (acute 7-day vs. chronic 28-day load). Shown on the strain scale.
+/// Training load trend: this week's average daily load compared with your
+/// usual (last 4 weeks), on the strain scale.
+///
+/// This is a description, not an injury predictor. The acute:chronic ratio's
+/// link with injury hasn't held up (Impellizzeri et al., Sports Med 2021,
+/// "Time to dismiss the ACWR"), so the app only flags big jumps, which are
+/// worth easing into.
 public struct TrainingLoadCalculator: Sendable {
     public var calculator = StrainCalculator()
-    /// The "sweet spot" of the acute:chronic ratio.
-    public var optimalRatio: ClosedRange<Double> = 0.8...1.3
+    /// "Your usual": 80-130% of the 4-week average.
+    public var usualRatio: ClosedRange<Double> = 0.8...1.3
+    /// More than 50% above usual counts as a big jump.
+    public var spikeRatio = 1.5
 
     public init() {}
 
     public enum Status: String, Sendable {
-        case calibrating, low, optimal, high
+        case calibrating, lighter, steady, building, spike
     }
 
     public struct Result: Sendable, Equatable {
         /// 7-day average daily load, on the 0-100 strain scale.
         public var value: Double
-        public var optimal: ClosedRange<Double>
+        /// Your usual range on the same scale.
+        public var usual: ClosedRange<Double>
         public var status: Status
-        public var acuteChronicRatio: Double?
+        /// This week vs the 4-week average, e.g. 1.2 = 20% more.
+        public var ratio: Double?
     }
 
     /// - Parameter dailyLoads: one value per day, oldest first, ideally 28 days.
@@ -28,13 +37,19 @@ public struct TrainingLoadCalculator: Sendable {
         let chronic = dailyLoads.isEmpty ? 0 : dailyLoads.reduce(0, +) / Double(dailyLoads.count)
         let value = calculator.strain(forLoad: acute)
         guard dailyLoads.count >= 14, chronic > 0 else {
-            return Result(value: value, optimal: 0...0, status: .calibrating, acuteChronicRatio: nil)
+            return Result(value: value, usual: 0...0, status: .calibrating, ratio: nil)
         }
-        let low = calculator.strain(forLoad: chronic * optimalRatio.lowerBound)
-        let high = calculator.strain(forLoad: chronic * optimalRatio.upperBound)
+        let low = calculator.strain(forLoad: chronic * usualRatio.lowerBound)
+        let high = calculator.strain(forLoad: chronic * usualRatio.upperBound)
         let ratio = acute / chronic
-        let status: Status = ratio < optimalRatio.lowerBound ? .low : (ratio > optimalRatio.upperBound ? .high : .optimal)
-        return Result(value: value, optimal: low...high, status: status, acuteChronicRatio: ratio)
+        let status: Status
+        switch ratio {
+        case ..<usualRatio.lowerBound: status = .lighter
+        case ...usualRatio.upperBound: status = .steady
+        case ...spikeRatio: status = .building
+        default: status = .spike
+        }
+        return Result(value: value, usual: low...high, status: status, ratio: ratio)
     }
 }
 

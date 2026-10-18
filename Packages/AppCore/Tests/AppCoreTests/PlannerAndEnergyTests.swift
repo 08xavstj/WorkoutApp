@@ -119,15 +119,20 @@ struct TrainingLoadTests {
         #expect(result.status == .calibrating)
     }
 
-    @Test func steadyTrainingIsOptimal() {
+    @Test func steadyTrainingIsSteady() {
         let result = TrainingLoadCalculator().evaluate(dailyLoads: Array(repeating: 80, count: 28))
-        #expect(result.status == .optimal)
-        #expect(result.optimal.contains(result.value))
+        #expect(result.status == .steady)
+        #expect(result.usual.contains(result.value))
     }
 
-    @Test func suddenSpikeIsHigh() {
+    @Test func suddenJumpIsASpike() {
         let loads = Array(repeating: 40.0, count: 21) + Array(repeating: 150.0, count: 7)
-        #expect(TrainingLoadCalculator().evaluate(dailyLoads: loads).status == .high)
+        #expect(TrainingLoadCalculator().evaluate(dailyLoads: loads).status == .spike)
+    }
+
+    @Test func easyWeekIsLighter() {
+        let loads = Array(repeating: 80.0, count: 21) + Array(repeating: 20.0, count: 7)
+        #expect(TrainingLoadCalculator().evaluate(dailyLoads: loads).status == .lighter)
     }
 
     @Test func trendDirection() {

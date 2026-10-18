@@ -36,13 +36,20 @@ extension DailyVitals {
     /// Fills in HRV the user typed in (for watches like Garmin that don't share
     /// HRV with Apple Health). Health data wins when both exist for a night.
     /// Returned newest first.
+    ///
+    /// - Parameter manualOnlyHRV: drop Health's HRV when the user types HRV in.
+    ///   Garmin reports RMSSD and Apple Health stores SDNN; the two differ, so
+    ///   mixing them would skew the baseline.
     public static func merging(
         _ vitals: [DailyVitals],
         manualHRV: [Date: Double],
+        manualOnlyHRV: Bool = false,
         calendar: Calendar = .current
     ) -> [DailyVitals] {
         var byNight: [Date: DailyVitals] = [:]
-        for entry in vitals {
+        let dropHealthHRV = manualOnlyHRV && manualHRV.values.contains { $0 > 0 }
+        for var entry in vitals {
+            if dropHealthHRV { entry.hrvMilliseconds = nil }
             byNight[calendar.startOfDay(for: entry.date)] = entry
         }
         for (date, milliseconds) in manualHRV where milliseconds > 0 {

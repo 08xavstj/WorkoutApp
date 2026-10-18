@@ -47,6 +47,21 @@ struct RecoveryCalculatorTests {
         #expect(result.status == .low)
     }
 
+    @Test func weekOfLowHRVIsBelowNormalRange() throws {
+        let lowWeek = (1...6).map { day in
+            DailyVitals(date: today.addingTimeInterval(Double(-day) * 86_400), hrvMilliseconds: 48, restingHeartRate: 56)
+        }
+        let older = history.map { DailyVitals(date: $0.date.addingTimeInterval(-7 * 86_400), hrvMilliseconds: $0.hrvMilliseconds, restingHeartRate: $0.restingHeartRate) }
+        let result = try #require(calculator.score(
+            today: DailyVitals(date: today, hrvMilliseconds: 50, restingHeartRate: 56),
+            history: lowWeek + older,
+            sleepScore: 75
+        ))
+        let trend = try #require(result.hrvTrend)
+        #expect(trend.status == .below)
+        #expect(trend.nights == 7)
+    }
+
     @Test func notCalibratedWithoutHistory() throws {
         let result = try #require(calculator.score(
             today: DailyVitals(date: today, hrvMilliseconds: 60, restingHeartRate: 55),
@@ -111,6 +126,32 @@ struct SleepCalculatorTests {
         #expect(calculator.sleepNeed(previousDayStrain: nil) == 8 * 3600)
     }
 
+    @Test func regularScheduleScoresHigherThanIrregular() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let base = calendar.date(from: DateComponents(year: 2027, month: 1, day: 4, hour: 23))!
+        let regular = (0..<7).map { day in
+            let bed = base.addingTimeInterval(Double(day) * 86_400 + Double(day % 2) * 600)
+            return SleepConsistency.Night(bedtime: bed, wake: bed.addingTimeInterval(8 * 3600))
+        }
+        let irregular = (0..<7).map { day in
+            let bed = base.addingTimeInterval(Double(day) * 86_400 + Double(day % 3) * 5400 - 5400)
+            return SleepConsistency.Night(bedtime: bed, wake: bed.addingTimeInterval(7 * 3600))
+        }
+        let good = try #require(SleepConsistency.score(regular, calendar: calendar))
+        let bad = try #require(SleepConsistency.score(irregular, calendar: calendar))
+        #expect(good == 100)
+        #expect(bad < 50)
+        #expect(SleepConsistency.score(Array(regular.prefix(3)), calendar: calendar) == nil)
+    }
+
+    @Test func consistencyCountsInTheSleepScore() throws {
+        let samples = [SleepSample(stage: .core, start: at(0), end: at(8))]
+        let steady = try #require(calculator.score(samples: samples, consistency: 100))
+        let erratic = try #require(calculator.score(samples: samples, consistency: 0))
+        #expect(steady.score - erratic.score == 15)
+    }
+
     @Test func noSleepReturnsNil() {
         #expect(calculator.score(samples: []) == nil)
         #expect(calculator.score(samples: [SleepSample(stage: .inBed, start: at(0), end: at(8))]) == nil)
@@ -133,6 +174,18 @@ struct ManualHRVTests {
         let health = [DailyVitals(date: morning, hrvMilliseconds: 60, restingHeartRate: 52)]
         let merged = DailyVitals.merging(health, manualHRV: [morning: 48], calendar: calendar)
         #expect(merged[0].hrvMilliseconds == 60)
+    }
+
+    @Test func manualOnlyDropsHealthHRV() {
+        let earlier = morning.addingTimeInterval(-86_400)
+        let health = [
+            DailyVitals(date: morning, hrvMilliseconds: 60, restingHeartRate: 52),
+            DailyVitals(date: earlier, hrvMilliseconds: 62, restingHeartRate: 53),
+        ]
+        let merged = DailyVitals.merging(health, manualHRV: [morning: 48], manualOnlyHRV: true, calendar: calendar)
+        #expect(merged.first { $0.date == morning }?.hrvMilliseconds == 48)
+        #expect(merged.first { $0.date == earlier }?.hrvMilliseconds == nil)
+        #expect(merged.first { $0.date == earlier }?.restingHeartRate == 53)
     }
 
     @Test func manualOnlyNightsAreAddedNewestFirst() {

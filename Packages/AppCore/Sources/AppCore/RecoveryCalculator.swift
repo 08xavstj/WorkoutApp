@@ -5,10 +5,17 @@ import Foundation
 ///
 /// Each input becomes a z-score (how many "normal days" away from your average).
 /// HRV above baseline is good; resting heart rate above baseline is bad.
+///
+/// HRV counts twice: the 7-day rolling average of ln HRV against your normal
+/// range (baseline mean ± 0.5 SD, the "smallest worthwhile change"), which is
+/// the method validated for guiding training (Plews et al. 2012-2013;
+/// Javaloyes et al., IJSPP 2019), and last night's value, so a bad night
+/// still shows.
 public struct RecoveryCalculator: Sendable {
     public var baselineDays: Int = 30
     public var minimumBaselineDays: Int = 4
-    public var hrvWeight: Double = 0.55
+    public var hrvTrendWeight: Double = 0.35
+    public var hrvWeight: Double = 0.20
     public var restingHeartRateWeight: Double = 0.25
     public var sleepWeight: Double = 0.20
 
@@ -18,8 +25,20 @@ public struct RecoveryCalculator: Sendable {
         case low, moderate, high
     }
 
+    /// The 7-day HRV average and where it sits against your normal range.
+    public struct HRVTrend: Sendable, Equatable {
+        public enum Status: String, Sendable { case below, within, above }
+        public var average: Double
+        public var normalRange: ClosedRange<Double>
+        public var status: Status
+        /// Day-to-day swing over the last 7 nights (coefficient of variation of ln HRV, %).
+        public var variation: Double?
+        public var nights: Int
+    }
+
     public struct Result: Sendable, Equatable {
         public var score: Int
+        public var hrvTrend: HRVTrend?
         public var status: Status
         /// Percent difference from baseline, e.g. +8 means 8% above normal.
         public var hrvChangePercent: Double?
@@ -59,6 +78,27 @@ public struct RecoveryCalculator: Sendable {
         var weightUsed = 0.0
         var hrvChange: Double?
         var rhrChange: Double?
+        var trend: HRVTrend?
+
+        // 7-day rolling ln HRV (tonight + up to 6 previous nights).
+        let lastWeek = ([today] + history.sorted { $0.date > $1.date }.prefix(6))
+            .compactMap(\.hrvMilliseconds).filter { $0 > 0 }.map { log($0) }
+        if lastWeek.count >= 3, let mean = base.meanLogHRV, let sd = base.sdLogHRV, calibrated {
+            let rolling = lastWeek.reduce(0, +) / Double(lastWeek.count)
+            let swc = 0.5 * max(sd, 0.05)
+            let status: HRVTrend.Status = rolling < mean - swc ? .below : (rolling > mean + swc ? .above : .within)
+            let (_, weekSD) = Self.meanAndSD(lastWeek)
+            trend = HRVTrend(
+                average: exp(rolling),
+                normalRange: exp(mean - swc)...exp(mean + swc),
+                status: status,
+                variation: weekSD.map { $0 / rolling * 100 },
+                nights: lastWeek.count
+            )
+            let z = (rolling - mean) / max(sd, 0.10)
+            combined += hrvTrendWeight * Self.clampZ(z)
+            weightUsed += hrvTrendWeight
+        }
 
         if let hrv = today.hrvMilliseconds, hrv > 0, let mean = base.meanLogHRV, let sd = base.sdLogHRV, calibrated {
             // Floor the SD so a very steady baseline doesn't make small changes look huge.
@@ -87,6 +127,7 @@ public struct RecoveryCalculator: Sendable {
 
         return Result(
             score: score,
+            hrvTrend: trend,
             status: Self.status(for: score),
             hrvChangePercent: hrvChange,
             restingHeartRateChange: rhrChange,

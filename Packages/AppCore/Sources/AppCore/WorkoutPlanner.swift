@@ -237,6 +237,18 @@ public struct PlannedExercise: Codable, Sendable, Equatable, Identifiable {
     public var note: String?
 }
 
+extension PlannedExercise {
+    /// "2-3 reps in reserve": how many more reps you could do at the end of each set.
+    public var repsInReserve: String {
+        let reserve = max(0, 10 - rpe)
+        let low = Int(reserve.rounded(.down))
+        let high = Int(reserve.rounded(.up))
+        if high == 0 { return "to failure" }
+        let range = low == high ? "\(low)" : "\(low)-\(high)"
+        return "\(range) rep\(high == 1 ? "" : "s") in reserve"
+    }
+}
+
 public struct PlannedWorkout: Codable, Sendable, Equatable {
     public var focus: WorkoutFocus
     public var title: String
@@ -248,9 +260,12 @@ public struct PlannedWorkout: Codable, Sendable, Equatable {
 
 public struct WorkoutPlanner: Sendable {
     public var gym: GymProfile
+    /// Rep ranges and effort, from the user's goals.
+    public var style: TrainingStyle
 
-    public init(gym: GymProfile) {
+    public init(gym: GymProfile, style: TrainingStyle = .balanced) {
         self.gym = gym
+        self.style = style
     }
 
     /// The focus that's been rested longest, rotating push → pull → legs.
@@ -301,8 +316,25 @@ public struct WorkoutPlanner: Sendable {
     ) -> PlannedExercise {
         let compound = slot.isCompound
         let sets = compound ? (minutes <= 30 ? 3 : 4) : 3
-        let reps: ClosedRange<Int> = compound ? 6...8 : (slot == .core ? 10...15 : 10...12)
-        let setRPE = compound ? rpe : min(9, rpe + 0.5)
+        // Effort: big lifts stop 2-3 reps short of failure; small lifts go
+        // closer, since muscle growth benefits from proximity to failure while
+        // strength barely does and failure adds fatigue (Robinson et al., Sports Med 2024).
+        let reps: ClosedRange<Int>
+        let setRPE: Double
+        switch style {
+        case .balanced:
+            reps = compound ? 6...8 : (slot == .core ? 10...15 : 10...12)
+            setRPE = compound ? rpe : min(9.5, rpe + 1)
+        case .strength:
+            reps = compound ? 3...6 : (slot == .core ? 8...12 : 8...10)
+            setRPE = compound ? min(rpe, 8) : min(9, rpe + 0.5)
+        case .muscle:
+            reps = compound ? 6...10 : (slot == .core ? 10...15 : 10...15)
+            setRPE = compound ? min(8.5, rpe + 0.5) : min(9.5, rpe + 1.5)
+        case .endurance:
+            reps = compound ? 10...15 : 12...20
+            setRPE = compound ? min(rpe, 7.5) : min(8.5, rpe + 0.5)
+        }
         var planned = PlannedExercise(
             exerciseID: choice.id, name: choice.name, sets: sets, reps: reps,
             rpe: setRPE, load: nil, loadKind: choice.load, note: nil
