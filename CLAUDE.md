@@ -13,7 +13,9 @@ iPhone app (iOS 26+, Swift 6.2, SwiftUI, SwiftData, HealthKit, Foundation Models
 
 - Build settings: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and approachable concurrency. Types that are Codable or shared across actors are declared `nonisolated` (see `CoachSnapshot`, `Exercise`). HealthKit work goes through `HealthKitClient`, whose methods are `@concurrent` and return AppCore value types.
 - Weights are stored in kilograms; convert only in the UI via `WeightUnit`.
-- Colors and card styling come from `App/Design/Theme.swift` (light by default, adaptive dark). Reusable pieces (rings, gauges, chips, sparklines) are in `App/Design/ScoreRing.swift`. The mockups in `docs/mockups/` are the visual reference.
+- Colors and card styling come from `App/Design/Theme.swift` (light by default, adaptive dark). Reusable pieces (rings, gauges, chips, sparklines) are in `App/Design/ScoreRing.swift`. The mockups in `docs/mockups/` are the visual reference. Each tab has a pastel `TopGlow` wash and each score a two-color gradient (`Theme.strainColors` etc.).
+- SwiftUI resolves colors and draws shapes on a background render thread. Color providers and `Shape` types must be `nonisolated` (see `Theme.adaptive`, `GaugeArc`); a main-actor closure there crashes at launch. Avoid `Canvas` for the same reason.
+- Scroll content gets `.lockedToScreenWidth()` so pages never pan sideways.
 - The trainer (`WorkoutPlanner`, `GymProfile` in AppCore) must only plan exercises the user's gym supports and loads they can make with their plates/dumbbells/stacks.
 - Use the installed skills: `swiftui-pro`, `swiftdata-pro`, `swift-concurrency-pro`, `swift-testing-pro`, `foundation-models-on-device` (its `ToolOutput` example is outdated; return `String` from `Tool.call`).
 - The Anthropic API key lives only in Supabase secrets. The app never calls api.anthropic.com directly.

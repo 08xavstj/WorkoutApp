@@ -35,10 +35,12 @@ struct TodayView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
+                .lockedToScreenWidth()
             }
             .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .background(alignment: .top) {
-                TopGlow(colors: [Theme.recoveryHigh, Theme.strain])
+                TopGlow(colors: [Theme.Wash.peach, Theme.Wash.butter, Theme.Wash.sky])
             }
             .background(Theme.background)
             .toolbarVisibility(.hidden, for: .navigationBar)
@@ -54,16 +56,9 @@ struct TodayView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Button {
+                GlassIconButton(systemName: "person.fill", label: "Settings") {
                     showingSettings = true
-                } label: {
-                    Image(systemName: "person.fill")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(Theme.card)
-                        .frame(width: 42, height: 42)
-                        .background(Theme.ink, in: .circle)
                 }
-                .accessibilityLabel("Settings")
                 SyncChip(isLoading: metrics.isLoading, lastUpdated: metrics.lastUpdated)
                 Spacer()
             }
@@ -81,7 +76,7 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Ask your coach", systemImage: "sparkles")
                 .font(.headline)
-                .foregroundStyle(Theme.primaryText)
+                .foregroundStyle(LinearGradient(colors: [Theme.sleep, Theme.lifting], startPoint: .leading, endPoint: .trailing))
             ForEach(CoachModel.suggestions.prefix(3), id: \.self) { question in
                 Button {
                     askCoach(question)
@@ -99,26 +94,11 @@ struct TodayView: View {
                 .buttonStyle(.plain)
             }
         }
-        .card()
+        .card(tint: Theme.sleep)
     }
 }
 
 // MARK: - Header pieces
-
-struct TopGlow: View {
-    let colors: [Color]
-
-    var body: some View {
-        LinearGradient(
-            colors: [colors.first?.opacity(0.18) ?? .clear, (colors.last ?? .clear).opacity(0.12), Theme.background.opacity(0)],
-            startPoint: .topLeading,
-            endPoint: .bottom
-        )
-        .frame(height: 320)
-        .ignoresSafeArea()
-        .accessibilityHidden(true)
-    }
-}
 
 private struct SyncChip: View {
     let isLoading: Bool
@@ -137,8 +117,8 @@ private struct SyncChip: View {
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(lastUpdated == nil && !isLoading ? Theme.secondaryText : Theme.recoveryHigh)
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(Theme.recoveryHigh.opacity(0.13), in: .capsule)
+        .padding(.vertical, 8)
+        .glassEffect(.regular, in: .capsule)
     }
 }
 
@@ -207,7 +187,8 @@ private struct ScoresCard: View {
                     value: metrics.strain.map { $0.strain.formatted(.number.precision(.fractionLength(1))) } ?? "--",
                     subtitle: "of 21",
                     progress: (metrics.strain?.strain ?? 0) / 21,
-                    colors: [Theme.strainLight, Theme.strain]
+                    colors: Theme.strainColors,
+                    size: 100
                 )
                 .frame(maxWidth: .infinity)
                 ScoreRing(
@@ -216,7 +197,8 @@ private struct ScoresCard: View {
                     unit: metrics.recovery == nil ? "" : "%",
                     subtitle: metrics.recovery.map { $0.status.rawValue.capitalized },
                     progress: Double(metrics.recovery?.score ?? 0) / 100,
-                    colors: Theme.recoveryColors(for: metrics.recovery?.score)
+                    colors: Theme.recoveryColors(for: metrics.recovery?.score),
+                    size: 100
                 )
                 .frame(maxWidth: .infinity)
                 ScoreRing(
@@ -225,7 +207,8 @@ private struct ScoresCard: View {
                     unit: metrics.sleep == nil ? "" : "%",
                     subtitle: metrics.sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
                     progress: Double(metrics.sleep?.score ?? 0) / 100,
-                    colors: [Theme.sleepLight, Theme.sleep]
+                    colors: Theme.sleepColors,
+                    size: 100
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -281,9 +264,9 @@ private struct StrainGoalCard: View {
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(current.formatted(.number.precision(.fractionLength(1))))
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(Theme.primaryText)
+                    .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
                 Text("/ target \(whole(target.lowerBound))–\(whole(target.upperBound))")
                     .font(.title3)
                     .foregroundStyle(Theme.secondaryText)
@@ -310,10 +293,11 @@ private struct StrainGoalCard: View {
                 } label: {
                     Label("Start workout", systemImage: "play.fill")
                         .font(.headline)
-                        .foregroundStyle(Theme.card)
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 15)
-                        .background(Theme.ink, in: .capsule)
+                        .background(LinearGradient(colors: [Theme.strainLight, Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing), in: .capsule)
+                        .shadow(color: Theme.strain.opacity(0.35), radius: 10, y: 5)
                 }
                 .buttonStyle(.plain)
             case .inRange:
@@ -326,7 +310,7 @@ private struct StrainGoalCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
         }
-        .card()
+        .card(tint: Theme.strain)
     }
 }
 
@@ -338,7 +322,7 @@ private struct SuggestionRow: View {
         HStack(spacing: 12) {
             IconBadge(
                 systemName: isStrength ? "dumbbell.fill" : "bicycle",
-                color: isStrength ? Theme.lifting : Theme.strain,
+                color: isStrength ? Theme.lifting : Theme.sleep,
                 size: 42
             )
             VStack(alignment: .leading, spacing: 2) {
@@ -388,8 +372,8 @@ private struct EnergyCard: View {
             HStack(alignment: .center, spacing: 18) {
                 GradientRing(
                     progress: burn.map { eaten / max($0, 1) } ?? 0,
-                    colors: [Theme.nutritionLight, Theme.nutrition],
-                    lineWidth: 12
+                    colors: Theme.nutritionColors,
+                    lineWidth: 13
                 ) {
                     VStack(spacing: 0) {
                         Text(eaten.formatted(.number.precision(.fractionLength(0))))
@@ -407,7 +391,7 @@ private struct EnergyCard: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     ProgressRow(label: "Protein", value: food?.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
-                    ProgressRow(label: "Carbs", value: food?.carbsGrams ?? 0, color: Theme.recoveryModerate)
+                    ProgressRow(label: "Carbs", value: food?.carbsGrams ?? 0, color: Theme.strain)
                     ProgressRow(label: "Fat", value: food?.fatGrams ?? 0, color: Theme.sleep)
                 }
             }
@@ -426,7 +410,7 @@ private struct EnergyCard: View {
                     }
                 }
                 SegmentedBar(segments: [
-                    .init(value: energy.restingFullDay, color: Theme.nutrition.opacity(0.45)),
+                    .init(value: energy.restingFullDay, color: Theme.nutrition),
                     .init(value: energy.exercise, color: Theme.lifting),
                     .init(value: energy.everydayMovement, color: Theme.strain),
                     .init(value: energy.digestion, color: Theme.sleep)
@@ -445,7 +429,7 @@ private struct EnergyCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
         }
-        .card()
+        .card(tint: Theme.nutrition)
     }
 }
 
@@ -454,6 +438,7 @@ private struct EnergyCard: View {
 private struct HealthMonitor: View {
     let onEnterHRV: () -> Void
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(VitalsModel.self) private var vitals
 
     var body: some View {
         VStack(spacing: 12) {
@@ -466,7 +451,28 @@ private struct HealthMonitor: View {
                 respiratoryTile
                 sleepTile
             }
+            HStack(spacing: 12) {
+                vitalTile("spo2", title: "Blood oxygen", color: Theme.oxygen, light: Theme.oxygenLight)
+                vitalTile("hrr", title: "HR recovery", color: Theme.heart, light: Theme.heartLight)
+            }
+            HStack(spacing: 12) {
+                vitalTile("stress", title: "Stress", color: Theme.recoveryModerate, light: Theme.recoveryHighLight)
+                vitalTile("steps", title: "Steps", color: Theme.strain, light: Theme.strainLight)
+            }
         }
+    }
+
+    private func vitalTile(_ id: String, title: String, color: Color, light: Color) -> some View {
+        let stat = vitals.stat(id)
+        return MonitorTile(
+            title: title,
+            value: stat?.value,
+            unit: stat?.unit ?? "",
+            status: stat?.status.map { TileStatus(text: $0, color: VitalTile.color(for: stat?.tone ?? .neutral)) },
+            gauge: stat?.gauge,
+            color: color,
+            lightColor: light
+        )
     }
 
     private var summary: (text: String?, color: Color) {
@@ -493,7 +499,8 @@ private struct HealthMonitor: View {
                     : TileStatus(text: "Higher", icon: "arrow.up", color: delta > 5 ? Theme.recoveryModerate : Theme.secondaryText)
             },
             gauge: position(metrics.restingHeartRate, mean: metrics.baseline?.meanRHR, sd: metrics.baseline?.sdRHR),
-            color: Theme.recoveryHigh
+            color: Theme.heart,
+            lightColor: Theme.heartLight
         )
     }
 
@@ -511,6 +518,7 @@ private struct HealthMonitor: View {
             },
             gauge: position(logValue, mean: metrics.baseline?.meanLogHRV, sd: metrics.baseline?.sdLogHRV),
             color: Theme.recoveryHigh,
+            lightColor: Theme.recoveryHighLight,
             actionTitle: metrics.hrv == nil ? "Add HRV" : (metrics.hrvIsManual ? "Edit" : nil),
             onAction: onEnterHRV
         )
@@ -527,7 +535,8 @@ private struct HealthMonitor: View {
                 normal ? TileStatus(text: "Normal", color: Theme.secondaryText) : TileStatus(text: "Check", color: Theme.recoveryModerate)
             },
             gauge: rate.map { min(1, max(0, ($0 - 8) / 16)) },
-            color: Theme.strain
+            color: Theme.oxygen,
+            lightColor: Theme.oxygenLight
         )
     }
 
@@ -543,7 +552,8 @@ private struct HealthMonitor: View {
                     : TileStatus(text: "Short", color: Theme.recoveryModerate)
             },
             gauge: sleep.map { min(1, $0.asleep / max($0.need * 1.3, 1)) },
-            color: Theme.sleep
+            color: Theme.sleep,
+            lightColor: Theme.sleepLight
         )
     }
 }
@@ -561,6 +571,7 @@ private struct MonitorTile: View {
     let status: TileStatus?
     let gauge: Double?
     let color: Color
+    var lightColor: Color?
     var actionTitle: String?
     var onAction: (() -> Void)?
 
@@ -570,6 +581,8 @@ private struct MonitorTile: View {
                 Text(title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 if let value {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(value)
@@ -607,13 +620,20 @@ private struct MonitorTile: View {
                 }
             }
             Spacer(minLength: 0)
-            VerticalRangeGauge(value: gauge, color: color)
-                .frame(height: 74)
+            VerticalRangeGauge(value: gauge, color: color, lightColor: lightColor)
+                .frame(height: 78)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: .rect(cornerRadius: 22))
-        .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
+        .background {
+            RoundedRectangle(cornerRadius: 22)
+                .fill(Theme.card)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22)
+                        .fill(RadialGradient(colors: [color.opacity(0.13), color.opacity(0)], center: .bottomTrailing, startRadius: 0, endRadius: 160))
+                )
+        }
+        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 5)
         .accessibilityElement(children: .combine)
     }
 }

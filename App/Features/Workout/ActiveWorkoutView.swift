@@ -54,11 +54,13 @@ struct ActiveWorkoutView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
+                .lockedToScreenWidth()
             }
             .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .scrollDismissesKeyboard(.interactively)
             .background(alignment: .top) {
-                TopGlow(colors: [Theme.strain, Theme.lifting])
+                TopGlow(colors: [Theme.Wash.peach, Theme.Wash.rose, Theme.Wash.butter])
             }
             .background(Theme.background)
             .toolbarVisibility(.hidden, for: .navigationBar)

@@ -8,6 +8,7 @@ struct WorkoutAppApp: App {
     @State private var library = ExerciseLibrary()
     @State private var metrics = DailyMetricsModel()
     @State private var biology = BiologyModel()
+    @State private var vitals = VitalsModel()
     @State private var coach = CoachModel()
     @State private var gym = GymStore()
     @State private var launcher = WorkoutLauncher()
@@ -37,6 +38,7 @@ struct WorkoutAppApp: App {
                 .environment(library)
                 .environment(metrics)
                 .environment(biology)
+                .environment(vitals)
                 .environment(coach)
                 .environment(gym)
                 .environment(launcher)
@@ -72,6 +74,7 @@ struct RootView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(CoachModel.self) private var coach
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(VitalsModel.self) private var vitals
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(AppRefresher.self) private var refresher
     @Environment(\.healthClient) private var health
@@ -117,6 +120,10 @@ struct RootView: View {
         }
         .task {
             refresher.perform = { await refreshMetrics() }
+            // After an update adds new health stats, ask for just those.
+            if settings.hasOnboarded {
+                await health?.requestAuthorizationIfNeeded()
+            }
             await refreshMetrics()
         }
         .onChange(of: scenePhase) { _, phase in
@@ -149,5 +156,6 @@ struct RootView: View {
             .filter { !$0.isActive && $0.startedAt >= cutoff }
             .map(\.strainSummary)
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
+        await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent)
     }
 }

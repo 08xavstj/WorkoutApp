@@ -23,6 +23,21 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.vo2Max),
             HKQuantityType(.respiratoryRate),
             HKQuantityType(.stepCount),
+            // Everything else a Garmin (via Garmin Connect), a scale or a food app may write.
+            HKQuantityType(.walkingHeartRateAverage),
+            HKQuantityType(.heartRateRecoveryOneMinute),
+            HKQuantityType(.oxygenSaturation),
+            HKQuantityType(.bodyTemperature),
+            HKQuantityType(.appleSleepingWristTemperature),
+            HKQuantityType(.basalEnergyBurned),
+            HKQuantityType(.distanceWalkingRunning),
+            HKQuantityType(.flightsClimbed),
+            HKQuantityType(.appleExerciseTime),
+            HKQuantityType(.bodyMassIndex),
+            HKQuantityType(.leanBodyMass),
+            HKQuantityType(.bloodPressureSystolic),
+            HKQuantityType(.bloodPressureDiastolic),
+            HKCategoryType(.mindfulSession),
             HKQuantityType(.dietaryEnergyConsumed),
             HKQuantityType(.dietaryProtein),
             HKQuantityType(.dietaryCarbohydrates),
@@ -44,6 +59,16 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     func requestAuthorization() async throws {
         guard isAvailable else { return }
         try await store.requestAuthorization(toShare: shareTypes, read: readTypes)
+    }
+
+    /// Shows the Health permission sheet again only when there are types the
+    /// user hasn't been asked about yet (e.g. after an update adds new stats).
+    @concurrent
+    func requestAuthorizationIfNeeded() async {
+        guard isAvailable,
+              let status = try? await store.statusForAuthorizationRequest(toShare: shareTypes, read: readTypes),
+              status == .shouldRequest else { return }
+        try? await store.requestAuthorization(toShare: shareTypes, read: readTypes)
     }
 
     /// Age and sex from the Health profile, if the user allowed it.
@@ -328,6 +353,38 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
                 distanceKm: distance
             )
         }
+    }
+
+    /// Start and end of every workout in a range, from any app (used for
+    /// heart-rate recovery and to leave workouts out of the stress estimate).
+    @concurrent
+    func workoutIntervals(from start: Date, to end: Date) async throws -> [DateInterval] {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.workout(predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        return try await descriptor.result(for: store).map {
+            DateInterval(start: $0.startDate, end: max($0.startDate, $0.endDate))
+        }
+    }
+
+    /// Total mindful minutes per day (breathing or meditation sessions).
+    @concurrent
+    func mindfulMinutes(days: Int) async throws -> [DatedValue] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) else { return [] }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.categorySample(type: HKCategoryType(.mindfulSession), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        var byDay: [Date: Double] = [:]
+        for sample in try await descriptor.result(for: store) {
+            byDay[calendar.startOfDay(for: sample.startDate), default: 0] += sample.endDate.timeIntervalSince(sample.startDate) / 60
+        }
+        return byDay.keys.sorted().map { DatedValue(date: $0, value: byDay[$0] ?? 0) }
     }
 
     /// Step count today, split into steps inside and outside the given windows.

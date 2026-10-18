@@ -45,8 +45,10 @@ struct CoachView: View {
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 12)
+                    .lockedToScreenWidth()
                 }
                 .scrollIndicators(.hidden)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: coach.messages.count) {
                     guard let lastID = coach.messages.last?.id else { return }
@@ -54,7 +56,7 @@ struct CoachView: View {
                 }
             }
             .background(alignment: .top) {
-                TopGlow(colors: [Theme.sleep, Theme.strain])
+                TopGlow(colors: [Theme.Wash.lavender, Theme.Wash.rose, Theme.Wash.sky])
             }
             .background(Theme.background)
             .toolbarVisibility(.hidden, for: .navigationBar)
@@ -86,12 +88,7 @@ struct CoachView: View {
                     Button("New conversation", systemImage: "square.and.pencil") { coach.newConversation() }
                     Button("My Gym", systemImage: "dumbbell") { showingGym = true }
                 } label: {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.headline)
-                        .foregroundStyle(Theme.primaryText)
-                        .frame(width: 46, height: 46)
-                        .background(Theme.card, in: .circle)
-                        .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
+                    GlassIcon(systemName: "line.3.horizontal")
                 }
                 .accessibilityLabel("Coach options")
             }
@@ -186,7 +183,7 @@ struct CoachView: View {
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(width: 40, height: 40)
-                    .background(Theme.strain, in: .circle)
+                    .background(LinearGradient(colors: [Theme.sleep, Theme.lifting], startPoint: .bottomLeading, endPoint: .topTrailing), in: .circle)
             }
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || coach.isThinking)
             .accessibilityLabel("Send")
@@ -194,8 +191,7 @@ struct CoachView: View {
         .padding(.leading, 18)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .background(.regularMaterial, in: .capsule)
-        .overlay(Capsule().strokeBorder(Theme.separator))
+        .glassEffect(.regular, in: .capsule)
         .padding(.horizontal)
         .padding(.bottom, 8)
     }

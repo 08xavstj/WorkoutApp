@@ -38,7 +38,9 @@ struct QuickAddView: View {
                     .buttonStyle(.plain)
                 }
                 .padding()
+                .lockedToScreenWidth()
             }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .background(Theme.background)
             .navigationTitle("Add")
             .sheet(isPresented: $showingHRV) {

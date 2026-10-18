@@ -41,7 +41,9 @@ struct WorkoutBuilderView: View {
                     }
                 }
                 .padding()
+                .lockedToScreenWidth()
             }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .background(Theme.background)
             .navigationTitle("Build a workout")
             .navigationBarTitleDisplayMode(.inline)

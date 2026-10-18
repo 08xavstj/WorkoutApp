@@ -22,12 +22,7 @@ struct FitnessView: View {
                         NavigationLink {
                             WorkoutHistoryView()
                         } label: {
-                            Image(systemName: "calendar")
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(Theme.primaryText)
-                                .frame(width: 46, height: 46)
-                                .background(Theme.card, in: .circle)
-                                .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
+                            GlassIcon(systemName: "calendar")
                         }
                         .accessibilityLabel("Workout history")
                     }
@@ -36,8 +31,8 @@ struct FitnessView: View {
                     DayStrainCard()
                     SectionTitle(text: "Training Load")
                     HStack(spacing: 12) {
-                        LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.strainLight, Theme.strain])
-                        LoadCard(title: "Muscular", result: metrics.muscularLoad, colors: [Theme.liftingLight, Theme.lifting])
+                        LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.oxygenLight, Theme.oxygen, Theme.sleep])
+                        LoadCard(title: "Muscular", result: metrics.muscularLoad, colors: [Theme.strainLight, Theme.strain, Theme.lifting])
                     }
                     SectionTitle(text: "Today's Activity")
                     ActivityCard()
@@ -46,10 +41,12 @@ struct FitnessView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
+                .lockedToScreenWidth()
             }
             .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .background(alignment: .top) {
-                TopGlow(colors: [Theme.strain, Theme.sleep])
+                TopGlow(colors: [Theme.Wash.peach, Theme.Wash.rose, Theme.Wash.butter])
             }
             .background(Theme.background)
             .toolbarVisibility(.hidden, for: .navigationBar)
@@ -81,7 +78,7 @@ private struct WeekStrip: View {
                             .strokeBorder(Theme.secondaryText.opacity(0.35), style: StrokeStyle(lineWidth: 2.5, dash: [3, 3]))
                             .frame(width: 36, height: 36)
                     } else {
-                        GradientRing(progress: (strain ?? 0) / 21, colors: [Theme.strainLight, Theme.strain], lineWidth: 4, showsDisk: false) {
+                        GradientRing(progress: (strain ?? 0) / 21, colors: Theme.strainColors, lineWidth: 4, showsDisk: false) {
                             Text(strain.map { $0.formatted(.number.precision(.fractionLength(1))) } ?? "–")
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundStyle(Theme.primaryText)
@@ -124,14 +121,14 @@ private struct DayStrainCard: View {
             ArcGauge(
                 value: current / 21,
                 band: target.map { ($0.lowerBound / 21)...($0.upperBound / 21) },
-                colors: [Theme.strainLight, Theme.strain],
-                lineWidth: 22
+                colors: [Theme.strainLight, Theme.strain, Theme.lifting],
+                lineWidth: 24
             ) {
                 VStack(spacing: 2) {
                     Text(current.formatted(.number.precision(.fractionLength(1))))
-                        .font(.system(size: 56, weight: .bold, design: .rounded))
+                        .font(.system(size: 60, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(Theme.primaryText)
+                        .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
                     Text("of 21 strain")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
@@ -142,7 +139,7 @@ private struct DayStrainCard: View {
 
             encouragement(current: current, target: target)
         }
-        .card()
+        .card(tint: Theme.strain)
     }
 
     @ViewBuilder
@@ -197,33 +194,37 @@ private struct LoadCard: View {
     var body: some View {
         let maximum = 21.0
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(Theme.primaryText)
-                Spacer()
-                Chip(text: statusText, color: statusColor)
-            }
-            ArcGauge(
-                value: (result?.value ?? 0) / maximum,
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+            Text(statusText)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(statusColor)
+            TickDial(
+                value: result.map { $0.value / maximum },
                 band: band(maximum: maximum),
                 colors: colors,
-                lineWidth: 12
+                tickCount: 36,
+                tickLength: 10
             ) {
                 VStack(spacing: 0) {
                     Text(result.map { $0.value.formatted(.number.precision(.fractionLength(0))) } ?? "–")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.primaryText)
                     if let result, result.status != .calibrating {
                         Text("optimal \(whole(result.optimal.lowerBound))–\(whole(result.optimal.upperBound.rounded(.up)))")
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                 }
+                .padding(.horizontal, 18)
             }
-            .frame(width: 120, height: 120)
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: 140)
             .frame(maxWidth: .infinity)
-            .padding(.bottom, -18)
+            .padding(.bottom, -14)
             HStack {
                 Text("0")
                 Spacer()
@@ -232,7 +233,7 @@ private struct LoadCard: View {
             .font(.caption)
             .foregroundStyle(Theme.secondaryText)
         }
-        .card()
+        .card(tint: colors.last)
     }
 
     private func band(maximum: Double) -> ClosedRange<Double>? {
@@ -291,7 +292,7 @@ private struct ActivityCard: View {
                 HStack(spacing: 12) {
                     IconBadge(
                         systemName: item.isStrength ? "dumbbell.fill" : "figure.walk",
-                        color: item.isStrength ? Theme.lifting : Theme.recoveryHigh,
+                        color: item.isStrength ? Theme.lifting : Theme.oxygen,
                         size: 48
                     )
                     VStack(alignment: .leading, spacing: 2) {
@@ -334,8 +335,9 @@ private struct ZonesCard: View {
                         ZStack(alignment: .bottom) {
                             RoundedRectangle(cornerRadius: 10).fill(Theme.track)
                             RoundedRectangle(cornerRadius: 10)
-                                .fill(LinearGradient(colors: [Theme.zoneColors[index], Theme.zoneColors[index].opacity(0.75)], startPoint: .top, endPoint: .bottom))
+                                .fill(LinearGradient(colors: [Theme.zoneColors[index], Theme.zoneColors[index].opacity(0.45)], startPoint: .top, endPoint: .bottom))
                                 .frame(height: max(6, 130 * minutes[index] / peak))
+                                .shadow(color: Theme.zoneColors[index].opacity(minutes[index] > 0 ? 0.45 : 0), radius: 6)
                         }
                         .frame(height: 130)
                         Text("Z\(index + 1)")

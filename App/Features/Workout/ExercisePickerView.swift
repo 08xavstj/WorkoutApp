@@ -120,6 +120,7 @@ struct ExerciseDetailView: View {
                 .card()
             }
             .padding()
+            .lockedToScreenWidth()
         }
         .background(Theme.background)
         .navigationTitle(exercise.name)
