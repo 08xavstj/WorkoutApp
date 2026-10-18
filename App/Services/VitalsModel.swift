@@ -200,6 +200,8 @@ final class VitalsModel {
             tone: { $0 >= 95 ? .good : .caution },
             gaugeRange: 85...100
         ))
+        let respirationSeries = get(try? await respiration)
+        respirationHistory = respirationSeries
         result.append(makeStat(
             "respiration", .breathing, "Respiration", "wind", series: respirationSeries, unit: "brpm", digits: 1,
             status: { (12...20).contains($0) ? "Normal" : "Unusual" },
@@ -208,8 +210,6 @@ final class VitalsModel {
         ))
         let wrist = get(try? await wristTemp)
         let body = get(try? await bodyTemp)
-        let respirationSeries = get(try? await respiration)
-        respirationHistory = respirationSeries
         wristTemperatureHistory = wrist
         if !wrist.isEmpty || body.isEmpty {
             let baseline = wrist.dropLast().suffix(14).map(\.value)
