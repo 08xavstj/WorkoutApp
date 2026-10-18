@@ -18,6 +18,7 @@ struct CheckInView: View {
     @Environment(\.healthClient) private var health
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppRouter.self) private var router
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
@@ -86,6 +87,19 @@ struct CheckInView: View {
             Text("Feeling sick?")
         } footer: {
             Text("Leave empty if you feel fine.")
+        }
+        Section {
+            Button {
+                save()
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(400))
+                    router.showProgressPhotos = true
+                }
+            } label: {
+                Label("Take progress photos", systemImage: "camera.fill")
+            }
+        } footer: {
+            Text("Saves your answers so far, then opens the camera for your front and side photos.")
         }
         Section("Woke up during the night?") {
             Picker("Wakings", selection: $morning.nightWakings) {

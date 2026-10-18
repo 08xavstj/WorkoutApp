@@ -13,6 +13,7 @@ An iPhone app in the style of Bevel: **Strain, Recovery and Sleep** scores from 
 | **Trainer** | **My Gym**: your equipment, bar weights, plate pairs, dumbbell/kettlebell sets and machine/cable increments. The workout builder picks exercises you can do there, sets reps and effort from your recovery, and suggests weights from your lift history **rounded to what you can actually load**, progressing by your gym's smallest jump. Swap any exercise; see plate loading per side |
 | **Live workout** | Timer, live strain added, rest pill (−15s/+15s/Skip), previous sets, "New PR" badges, plate-loading hints, finished and upcoming exercises collapsed |
 | **Coach** | Chat that knows your scores, food, calories, gym and lifts; training questions come back with a ready-to-start workout card. On-device (Apple Intelligence) or Claude |
+| **Progress photos** | Daily front and side photos kept only inside the app (encrypted, never in the Photos library), a before/after slider and timeline, and a weekly Claude analysis (`supabase/functions/progress`) that relates visible changes to your goal, weight trend, calories, protein and training |
 | **Biology** | 90-day HRV baseline chart plus every stat Apple Health has: resting, sleeping and walking heart rate, heart-rate recovery (measured after workouts), a heart-rate stress estimate, VO₂ max, blood oxygen, respiration, temperature, mindful minutes, steps, distance, floors, intensity minutes, active/resting energy, weight, body fat, BMI, lean mass, blood pressure, water and protein |
 
 ### Calories burned (`EnergyCalculator`)
@@ -90,6 +91,7 @@ The on-device coach works with no setup on iPhones that support Apple Intelligen
    supabase link --project-ref <your-project-ref>
    supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
    supabase functions deploy coach
+   supabase functions deploy progress   # weekly progress-photo analysis
    ```
 3. In the app: **Settings → AI coach → Claude**, paste your project URL and anon key.
 

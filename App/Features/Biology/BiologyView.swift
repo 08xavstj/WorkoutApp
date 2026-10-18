@@ -10,6 +10,8 @@ struct BiologyView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(VitalsModel.self) private var vitals
     @Environment(CheckInStore.self) private var checkIns
+    @Environment(AppRouter.self) private var router
+    @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(\.healthClient) private var health
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
@@ -30,6 +32,7 @@ struct BiologyView: View {
                     }
                     .padding(.top, 8)
                     BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
+                    ProgressPhotosCard { router.showProgressPhotos = true }
                     InsightsCard(insights: checkIns.insights, daysLeft: checkIns.daysUntilInsights)
                     hrvCard
                     MicronutrientsCard(findings: metrics.micronutrients)
@@ -542,5 +545,56 @@ struct MicronutrientsCard: View {
 
     private func amount(_ value: Double) -> String {
         value >= 100 ? "\(Int(value.rounded()))" : value.formatted(.number.precision(.fractionLength(0...1)))
+    }
+}
+
+/// Latest front/side photos and the latest weekly analysis.
+struct ProgressPhotosCard: View {
+    @Environment(ProgressPhotosModel.self) private var photos
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    CardLabel(text: "Progress photos", color: Theme.lifting)
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(Theme.secondaryText)
+                }
+                HStack(spacing: 10) {
+                    ForEach(ProgressPhotosModel.Pose.allCases) { pose in
+                        Group {
+                            if let entry = photos.latest(pose), let image = photos.thumbnail(entry) {
+                                Image(uiImage: image).resizable().scaledToFill()
+                            } else {
+                                ZStack {
+                                    Theme.cardRaised
+                                    Image(systemName: "camera.fill").foregroundStyle(Theme.lifting)
+                                }
+                            }
+                        }
+                        .frame(width: 72, height: 96)
+                        .clipShape(.rect(cornerRadius: 12))
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(photos.todayEntry(.front) == nil ? "Take today's photos" : "Today's photos done")
+                            .font(.headline)
+                            .foregroundStyle(Theme.primaryText)
+                        if let analysis = photos.latestAnalysis {
+                            Text(analysis.text)
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                                .lineLimit(4)
+                        } else {
+                            Text("Front and side, kept only in the app. Claude compares them weekly.")
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                    }
+                }
+            }
+            .card(tint: Theme.lifting)
+        }
+        .buttonStyle(.plain)
     }
 }

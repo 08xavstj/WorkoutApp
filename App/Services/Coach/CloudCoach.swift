@@ -29,44 +29,65 @@ final class CloudCoach {
     private var auth: Session?
     private let urlSession = URLSession.shared
 
+    /// A photo sent for the weekly progress analysis (base64 JPEG).
+    nonisolated struct Photo: Encodable, Sendable {
+        let label: String
+        let data: String
+    }
+
+    nonisolated private struct ProgressBody: Encodable {
+        let photos: [Photo]
+        let context: String
+    }
+
     func reply(history: [Message], snapshot: CoachSnapshot, settings: UserSettings) async throws -> String {
+        try await call(function: "coach", body: RequestBody(messages: history, snapshot: snapshot), settings: settings)
+    }
+
+    /// Weekly progress-photo analysis via the `progress` Edge Function. Photos
+    /// are sent only for this request and aren't stored on the server.
+    func analyzeProgress(photos: [Photo], context: String, settings: UserSettings) async throws -> String {
+        try await call(function: "progress", body: ProgressBody(photos: photos, context: context), settings: settings)
+    }
+
+    private func call<Body: Encodable>(function: String, body: Body, settings: UserSettings) async throws -> String {
         let base = settings.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let anonKey = settings.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let baseURL = URL(string: base), !base.isEmpty, !anonKey.isEmpty else {
-            throw CoachError.unavailable("Add your Supabase project URL and anon key in Settings to use Claude.")
+            throw CoachError.unavailable("Add your Supabase project URL and anon key in Settings (AI coach → Claude) to use Claude.")
         }
 
         do {
-            return try await send(history: history, snapshot: snapshot, baseURL: baseURL, anonKey: anonKey)
+            return try await send(function: function, body: body, baseURL: baseURL, anonKey: anonKey)
         } catch CoachError.unauthorized {
             // Token expired: refresh (or sign in again) and retry once.
             auth = try await refreshOrSignIn(baseURL: baseURL, anonKey: anonKey)
-            return try await send(history: history, snapshot: snapshot, baseURL: baseURL, anonKey: anonKey)
+            return try await send(function: function, body: body, baseURL: baseURL, anonKey: anonKey)
         }
     }
 
-    private func send(history: [Message], snapshot: CoachSnapshot, baseURL: URL, anonKey: String) async throws -> String {
+    private func send<Body: Encodable>(function: String, body: Body, baseURL: URL, anonKey: String) async throws -> String {
         if auth == nil {
             auth = try await refreshOrSignIn(baseURL: baseURL, anonKey: anonKey)
         }
         guard let token = auth?.access_token else { throw CoachError.unauthorized }
 
-        var request = URLRequest(url: baseURL.appending(path: "functions/v1/coach"))
+        var request = URLRequest(url: baseURL.appending(path: "functions/v1/\(function)"))
         request.httpMethod = "POST"
-        request.timeoutInterval = 120
+        request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        request.httpBody = try encoder.encode(RequestBody(messages: history, snapshot: snapshot))
+        request.httpBody = try encoder.encode(body)
 
         let (data, response) = try await urlSession.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401 { throw CoachError.unauthorized }
-        let body = try? JSONDecoder().decode(ResponseBody.self, from: data)
-        guard (200..<300).contains(status), let reply = body?.reply else {
-            throw CoachError.server(body?.error ?? "The coach server returned an error (\(status)).")
+        let decoded = try? JSONDecoder().decode(ResponseBody.self, from: data)
+        guard (200..<300).contains(status), let reply = decoded?.reply else {
+            throw CoachError.server(decoded?.error ?? "The server returned an error (\(status)).")
         }
         return reply
     }

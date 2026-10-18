@@ -98,6 +98,8 @@ final class UserSettings {
     /// Weight and training goals (see GoalsView).
     var goals: Goals { didSet { if let data = try? JSONEncoder().encode(goals) { defaults.set(data, forKey: "goals") } } }
     var goalsSet: Bool { didSet { defaults.set(goalsSet, forKey: "goalsSet") } }
+    /// Claude compares progress photos once a week.
+    var weeklyPhotoAnalysis: Bool { didSet { defaults.set(weeklyPhotoAnalysis, forKey: "weeklyPhotoAnalysis") } }
     var checkInRemindersOn: Bool { didSet { defaults.set(checkInRemindersOn, forKey: "checkInRemindersOn") } }
     var morningCheckInMinutes: Int { didSet { defaults.set(morningCheckInMinutes, forKey: "morningCheckInMinutes") } }
     var eveningCheckInMinutes: Int { didSet { defaults.set(eveningCheckInMinutes, forKey: "eveningCheckInMinutes") } }
@@ -125,6 +127,7 @@ final class UserSettings {
         longitude = defaults.double(forKey: "longitude")
         goals = defaults.data(forKey: "goals").flatMap { try? JSONDecoder().decode(Goals.self, from: $0) } ?? Goals()
         goalsSet = defaults.bool(forKey: "goalsSet")
+        weeklyPhotoAnalysis = defaults.object(forKey: "weeklyPhotoAnalysis") as? Bool ?? true
         checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
         morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30

@@ -3,3 +3,6 @@
 
 [functions.coach]
 verify_jwt = true
+
+[functions.progress]
+verify_jwt = true

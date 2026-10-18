@@ -69,6 +69,9 @@ targets:
           WorkoutApp reads your heart rate, HRV, resting heart rate, sleep, workouts,
           body weight and food log (for example from Cronometer) to calculate your
           daily scores and give coaching advice.
+        NSCameraUsageDescription: >-
+          WorkoutApp uses the camera for your front and side progress photos. They are
+          saved only inside the app, not in your Photos library.
         NSLocationWhenInUseUsageDescription: >-
           WorkoutApp uses your location once to get local weather, air quality and
           daylight hours for training advice. You can type your city instead.

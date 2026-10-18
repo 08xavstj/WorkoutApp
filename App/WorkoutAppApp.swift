@@ -20,6 +20,7 @@ struct WorkoutAppApp: App {
     @State private var checkIns = CheckInStore()
     @State private var muscles = MuscleModel()
     @State private var conditions = ConditionsModel()
+    @State private var progressPhotos = ProgressPhotosModel()
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -60,6 +61,7 @@ struct WorkoutAppApp: App {
                 .environment(checkIns)
                 .environment(muscles)
                 .environment(conditions)
+                .environment(progressPhotos)
                 .environment(\.healthClient, health)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)
@@ -107,6 +109,7 @@ struct RootView: View {
     @Environment(CheckInStore.self) private var checkIns
     @Environment(MuscleModel.self) private var muscles
     @Environment(ConditionsModel.self) private var conditions
+    @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(ExerciseLibrary.self) private var library
     @Environment(GymStore.self) private var gym
     @Environment(WorkoutLauncher.self) private var launcher
@@ -149,6 +152,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $router.showMedications) {
             MedicationsView()
+        }
+        .sheet(isPresented: $router.showProgressPhotos) {
+            ProgressPhotosView(runAnalysis: analyzeProgressPhotos)
         }
         .sheet(item: $router.checkIn, onDismiss: scheduleCheckInReminders) { kind in
             CheckInView(kind: kind)
@@ -243,6 +249,11 @@ struct RootView: View {
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         checkIns.recordSleepScore(metrics.sleep?.score)
         await conditions.refresh(settings: settings)
+        // Weekly photo analysis, when due and Claude is set up.
+        if settings.weeklyPhotoAnalysis, !settings.supabaseURL.isEmpty, !settings.supabaseAnonKey.isEmpty,
+           progressPhotos.isAnalysisDue, !progressPhotos.isAnalyzing {
+            await analyzeProgressPhotos()
+        }
         await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
         let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
         Reminders.updateWidget(WidgetSnapshot(
@@ -252,6 +263,33 @@ struct RootView: View {
             recovery: metrics.recovery?.score,
             strain: metrics.strain?.strain
         ))
+    }
+
+    private func analyzeProgressPhotos() async {
+        await progressPhotos.analyze(context: progressContext(), settings: settings)
+    }
+
+    /// Goal and data the photo analysis relates the pictures to.
+    private func progressContext() -> String {
+        var lines: [String] = []
+        lines.append("Sex: \(settings.sex.rawValue), age \(settings.age).")
+        lines.append(settings.goalsSet ? "Goal: \(settings.goals.title)." : "No goal set.")
+        if let weight = metrics.bodyMassKg { lines.append("Weight: \(weight.formatted(.number.precision(.fractionLength(1)))) kg.") }
+        if let weekly = metrics.weightTrendWeekly { lines.append("Weight trend: \(weekly.formatted(.number.precision(.fractionLength(2)))) kg/week (last 4 weeks).") }
+        if let maintenance = metrics.maintenance {
+            lines.append("Average intake \(whole(maintenance.averageIntake)) kcal vs measured maintenance \(whole(maintenance.maintenance)) kcal.")
+        }
+        if let target = metrics.calorieTarget { lines.append("Calorie target \(whole(target)) kcal/day.") }
+        if let protein = metrics.proteinTarget { lines.append("Protein target \(whole(protein)) g/day.") }
+        let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now
+        let recentSessions = sessions.filter { !$0.isActive && $0.startedAt >= cutoff }.count
+        lines.append("Gym sessions in the last 2 weeks: \(recentSessions).")
+        let weekly = muscles.states.values.filter { $0.weeklySets > 0 }
+            .sorted { $0.weeklySets > $1.weeklySets }
+            .map { "\($0.muscle.name) \($0.weeklySets.formatted(.number.precision(.fractionLength(0...1))))" }
+        if !weekly.isEmpty { lines.append("Hard sets per muscle this week: " + weekly.joined(separator: ", ") + ".") }
+        if let fat = vitals.stat("fat")?.value { lines.append("Smart-scale body fat: \(fat)%.") }
+        return lines.joined(separator: "\n")
     }
 
     private func scheduleCheckInReminders() {

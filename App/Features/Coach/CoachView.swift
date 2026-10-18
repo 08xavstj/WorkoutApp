@@ -15,6 +15,7 @@ struct CoachView: View {
     @Environment(ConditionsModel.self) private var conditions
     @Environment(VitalsModel.self) private var vitals
     @Environment(MuscleModel.self) private var muscles
+    @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var draft = ""
@@ -265,6 +266,9 @@ extension CoachView {
         if let deload = muscles.deload { lines.append("Deload suggested: stalled " + deload.stalledLifts.joined(separator: ", ") + ".") }
         let tired = muscles.states.values.filter { $0.status == .fatigued }.map(\.muscle.name)
         if !tired.isEmpty { lines.append("Fatigued muscles: " + tired.sorted().joined(separator: ", ") + ".") }
+        if let analysis = progressPhotos.latestAnalysis {
+            lines.append("Latest progress-photo analysis (\(analysis.date.formatted(date: .abbreviated, time: .omitted))): " + String(analysis.text.prefix(700)))
+        }
         return lines.joined(separator: "\n")
     }
 }

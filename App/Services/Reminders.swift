@@ -10,6 +10,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var showHRVEntry = false
     var showMedications = false
     var checkIn: CheckInKind?
+    var showProgressPhotos = false
     /// Bumped when doses change outside the app (Live Activity, notification).
     var dosesVersion = 0
 
@@ -18,6 +19,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         switch url.host() {
         case "hrv": showHRVEntry = true
         case "meds": showMedications = true
+        case "photos": showProgressPhotos = true
         case "checkin": checkIn = url.lastPathComponent == "evening" ? .evening : .morning
         default: break
         }

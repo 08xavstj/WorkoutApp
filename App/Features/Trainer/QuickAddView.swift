@@ -11,6 +11,7 @@ struct QuickAddView: View {
     @State private var showingHRV = false
     @State private var showingGym = false
     @State private var showingMeds = false
+    @Environment(AppRouter.self) private var router
 
     var body: some View {
         NavigationStack {
@@ -27,6 +28,9 @@ struct QuickAddView: View {
                     }
                     action("Log overnight HRV", "From Garmin Connect's HRV Status", "waveform.path.ecg", Theme.recoveryHigh) {
                         showingHRV = true
+                    }
+                    action("Progress photos", "Front and side, compared weekly by Claude", "camera.fill", Theme.lifting) {
+                        router.showProgressPhotos = true
                     }
                     action("Medications", "Doses, reminders and how they affect training", "pills.fill", Theme.heart) {
                         showingMeds = true
