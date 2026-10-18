@@ -371,6 +371,29 @@ public enum MedicationKnowledge {
             sources: ["Ferracioli-Oda E. et al. PLoS One 2013;8:e63773 (melatonin for primary sleep disorders, meta-analysis)."]
         ),
         DrugClass(
+            id: "creatine", name: "Creatine (supplement)",
+            names: ["creatine", "creapure"],
+            effects: [
+                e(.muscle, "With lifting, adds more strength and muscle than training alone (on average about 1 kg more lean mass over a few months)."),
+                e(.weight, "Holds extra water in muscle, so scale weight often rises 0.5-2 kg in the first 1-4 weeks. That's water, not fat."),
+                e(.hydration, "Doesn't cause dehydration or cramps in studies; drink normally."),
+                e(.energy, "Raises creatinine on blood tests without harming healthy kidneys."),
+            ],
+            recommendations: [
+                "Take 3-5 g every day, rest days included. The time of day matters far less than not missing days.",
+                "No loading phase needed: 3-5 g a day fills your muscles in about 3-4 weeks (loading 20 g a day for 5-7 days just gets there sooner).",
+                "Expect the scale to jump at first; judge fat loss by your waist and photos for the first month.",
+                "Tell your doctor you take it before kidney blood tests, and ask first if you have kidney disease.",
+            ],
+            adjustments: [],
+            sources: [
+                "Kreider R.B. et al. J Int Soc Sports Nutr 2017;14:18 (ISSN position stand on creatine).",
+                "Antonio J. et al. J Int Soc Sports Nutr 2021;18:13 (common questions and misconceptions about creatine).",
+                "Delpino F.M. et al. Nutrition 2022;103-104:111791 (creatine and lean mass with resistance training, meta-analysis).",
+                "Hultman E. et al. J Appl Physiol 1996;81:232-7 (loading vs 3 g/day reach the same muscle levels).",
+            ]
+        ),
+        DrugClass(
             id: "testosterone", name: "Testosterone",
             names: ["testosterone", "androgel", "testim", "depo testosterone", "xyosted"],
             effects: [

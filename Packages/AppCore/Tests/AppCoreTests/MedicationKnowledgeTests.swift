@@ -9,6 +9,7 @@ struct MedicationKnowledgeTests {
         ("LEXAPRO", "ssri"),
         ("Cipro 500", "fluoroquinolone"),
         ("Depo Testosterone", "testosterone"),
+        ("Creatine monohydrate", "creatine"),
     ])
     func matchesGenericAndBrandNames(name: String, expected: String) {
         #expect(MedicationKnowledge.match(name)?.id == expected)

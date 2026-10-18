@@ -51,6 +51,31 @@ final class MedicationsModel {
         }
     }
 
+    // MARK: Creatine
+
+    /// The creatine entry, if the user takes it.
+    var creatine: Medication? {
+        medications.first { MedicationKnowledge.match($0.name)?.id == "creatine" }
+    }
+
+    var creatineReminderOn: Bool {
+        creatine.map { $0.isActive && !$0.times.isEmpty } ?? false
+    }
+
+    /// Reminder time in minutes after midnight (default 8:00).
+    var creatineMinutes: Int { creatine?.times.first ?? 8 * 60 }
+
+    /// Turns the daily creatine reminder on or off, adding a 5 g creatine entry
+    /// the first time. Off only clears the reminder time, so the entry (and what
+    /// it means for weight and training) stays.
+    func setCreatineReminder(on: Bool, minutes: Int? = nil) {
+        guard on || creatine != nil else { return }
+        var entry = creatine ?? Medication(name: "Creatine", dose: "5 g")
+        if on { entry.isActive = true }
+        entry.times = on ? [minutes ?? creatineMinutes] : []
+        save(entry)
+    }
+
     // MARK: What the medications mean
 
     struct Match: Identifiable {
@@ -88,6 +113,9 @@ final class MedicationsModel {
             }
             if adjustments.contains(.tendonCaution) {
                 result.append("\(match.medication.name): avoid jumps, sprints and sudden jumps in load (tendon risk).")
+            }
+            if match.drug.id == "creatine", days < 28 {
+                result.append("Started creatine recently: expect 0.5-2 kg of water weight in the first weeks. It's not fat, so judge progress by your waist and photos for now.")
             }
             if adjustments.contains(.raiseProtein) {
                 result.append("\(match.medication.name): protein target raised to 2.0 g/kg to protect muscle.")

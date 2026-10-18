@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(\.healthClient) private var health
     @Environment(GymStore.self) private var gym
+    @Environment(MedicationsModel.self) private var meds
     @Environment(\.dismiss) private var dismiss
     @State private var showingGym = false
     @State private var showingMeds = false
@@ -23,6 +24,23 @@ struct SettingsView: View {
             set: { date in
                 let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
                 settings[keyPath: keyPath] = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+            }
+        )
+    }
+
+    private var creatineOn: Binding<Bool> {
+        Binding(
+            get: { meds.creatineReminderOn },
+            set: { meds.setCreatineReminder(on: $0) }
+        )
+    }
+
+    private var creatineTime: Binding<Date> {
+        Binding(
+            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(meds.creatineMinutes * 60)) },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                meds.setCreatineReminder(on: true, minutes: (parts.hour ?? 0) * 60 + (parts.minute ?? 0))
             }
         )
     }
@@ -131,6 +149,10 @@ struct SettingsView: View {
                     if settings.hrvReminderOn {
                         DatePicker("Time", selection: reminderTime, displayedComponents: .hourAndMinute)
                     }
+                    Toggle("Daily creatine", isOn: creatineOn)
+                    if meds.creatineReminderOn {
+                        DatePicker("Creatine time", selection: creatineTime, displayedComponents: .hourAndMinute)
+                    }
                     Button {
                         showingMeds = true
                     } label: {
@@ -139,7 +161,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Reminders")
                 } footer: {
-                    Text("The morning check-in includes last night's HRV, so most people only need check-in reminders. Reminders are skipped once done. Medication reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → WorkoutApp.")
+                    Text("The morning check-in includes last night's HRV, so most people only need check-in reminders. Reminders are skipped once done. Medication and creatine reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → WorkoutApp.")
                 }
 
                 Section("Appearance") {

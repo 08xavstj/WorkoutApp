@@ -21,7 +21,10 @@ struct MedicationsView: View {
                     if !meds.notes.isEmpty {
                         MedicationNotesCard(notes: meds.notes)
                     }
-                    SectionTitle(text: "Your medications")
+                    SectionTitle(text: "Medications & supplements")
+                    if meds.creatine == nil {
+                        CreatineSuggestionCard()
+                    }
                     if meds.medications.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Add what you take")
@@ -76,6 +79,30 @@ struct MedicationsView: View {
             .onAppear { meds.reload() }
             .onChange(of: router.dosesVersion) { meds.reload() }
         }
+    }
+}
+
+/// One tap to add creatine with a daily reminder.
+private struct CreatineSuggestionCard: View {
+    @Environment(MedicationsModel.self) private var meds
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconBadge(systemName: "bolt.fill", color: Theme.strain, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Take creatine?")
+                    .font(.headline)
+                    .foregroundStyle(Theme.primaryText)
+                Text("Get a daily 5 g reminder with a Taken button. It works best when you don't miss days.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Spacer(minLength: 4)
+            Button("Add") { meds.setCreatineReminder(on: true) }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.strain)
+        }
+        .card(tint: Theme.strain)
     }
 }
 
