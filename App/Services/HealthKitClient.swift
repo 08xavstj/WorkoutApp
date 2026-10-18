@@ -36,7 +36,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     }
 
     private var shareTypes: Set<HKSampleType> {
-        [HKObjectType.workoutType()]
+        // Heart rate and energy are written by the live workout session (AirPods Pro 3 / chest strap).
+        [HKObjectType.workoutType(), HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned)]
     }
 
     @concurrent
@@ -95,6 +96,28 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         } catch let error as HKError where error.code == .errorNoData {
             return []
         }
+    }
+
+    /// Raw heart rate in a window, grouped by where it came from
+    /// (e.g. "AirPods Pro" via this app vs. "Garmin Connect").
+    @concurrent
+    func heartRateBySource(from start: Date, to end: Date) async throws -> [HeartRateSource] {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: HKQuantityType(.heartRate), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        var groups: [String: [HeartRateSample]] = [:]
+        var order: [String] = []
+        for sample in try await descriptor.result(for: store) {
+            let source = sample.sourceRevision.source.name
+            let device = sample.device?.name
+            let label = device.map { "\($0) (\(source))" } ?? source
+            if groups[label] == nil { order.append(label) }
+            groups[label, default: []].append(HeartRateSample(date: sample.startDate, bpm: sample.quantity.doubleValue(for: unit)))
+        }
+        return order.map { HeartRateSource(name: $0, samples: groups[$0] ?? []) }
     }
 
     // MARK: - Nightly vitals
@@ -378,4 +401,10 @@ nonisolated struct ExternalWorkout: Sendable, Identifiable, Equatable {
     var distanceKm: Double?
     var id: Date { start }
     var minutes: Int { Int(end.timeIntervalSince(start) / 60) }
+}
+
+nonisolated struct HeartRateSource: Sendable, Identifiable {
+    var name: String
+    var samples: [HeartRateSample]
+    var id: String { name }
 }

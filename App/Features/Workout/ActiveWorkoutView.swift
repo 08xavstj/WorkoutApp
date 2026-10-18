@@ -11,6 +11,7 @@ struct ActiveWorkoutView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(GymStore.self) private var gym
+    @Environment(LiveWorkoutRecorder.self) private var recorder
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var showingPicker = false
     @State private var showingFinish = false
@@ -25,6 +26,7 @@ struct ActiveWorkoutView: View {
                 VStack(spacing: 16) {
                     headerBar
                     titleBlock
+                    LiveHeartRateBar(recorder: recorder, profile: metrics.heartRateProfile)
                     if let restEndsAt {
                         RestTimerPill(endsAt: restEndsAt, length: restLength) { change in
                             if let change {
@@ -67,8 +69,15 @@ struct ActiveWorkoutView: View {
                 FinishWorkoutSheet(session: session) { dismiss() }
                     .presentationDetents([.medium])
             }
+            .task {
+                // Live heart rate from AirPods Pro 3 or a Bluetooth strap while this workout runs.
+                if session.isActive && !recorder.isRecording {
+                    await recorder.start(at: session.startedAt)
+                }
+            }
             .confirmationDialog("Discard this workout?", isPresented: $showingDiscard, titleVisibility: .visible) {
                 Button("Discard", role: .destructive) {
+                    if recorder.sessionStart == session.startedAt { recorder.discard() }
                     modelContext.delete(session)
                     try? modelContext.save()
                     dismiss()
@@ -582,5 +591,57 @@ private struct RestTimerPill: View {
             .padding(.vertical, 7)
             .background(Color.white.opacity(0.2), in: .capsule)
             .buttonStyle(.plain)
+    }
+}
+
+/// Live heart rate from the iPhone workout session (AirPods Pro 3 or a chest strap).
+private struct LiveHeartRateBar: View {
+    let recorder: LiveWorkoutRecorder
+    let profile: HeartRateProfile?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "heart.fill")
+                .font(.title3)
+                .foregroundStyle(Theme.recoveryLow)
+                .symbolEffect(.pulse, isActive: recorder.heartRate != nil)
+            if let bpm = recorder.heartRate {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text("\(whole(bpm))")
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                        Text("bpm").font(.subheadline).foregroundStyle(Theme.secondaryText)
+                    }
+                    .foregroundStyle(Theme.primaryText)
+                    Text(zoneText(bpm))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Spacer()
+                StatView(label: "Avg", value: recorder.averageHeartRate.map { "\(whole($0))" } ?? "–")
+                    .frame(width: 56)
+                StatView(label: "Max", value: recorder.maximumHeartRate.map { "\(whole($0))" } ?? "–")
+                    .frame(width: 56)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recorder.isRecording ? "Waiting for heart rate…" : "Live heart rate off")
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                    Text(recorder.problem ?? "Wear AirPods Pro 3 (or connect a Bluetooth chest strap) to see heart rate here. It's saved with the workout so you can compare it with your Garmin.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .card()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func zoneText(_ bpm: Double) -> String {
+        guard let profile else { return "Live" }
+        guard let zone = profile.zone(for: bpm) else { return "Below zone 1" }
+        return "Zone \(zone) · \(whole(profile.reserveFraction(for: bpm) * 100))% of reserve"
     }
 }

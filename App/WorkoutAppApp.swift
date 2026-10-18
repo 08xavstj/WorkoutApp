@@ -12,10 +12,14 @@ struct WorkoutAppApp: App {
     @State private var gym = GymStore()
     @State private var launcher = WorkoutLauncher()
     @State private var refresher = AppRefresher()
-    private let health = HealthKitClient()
+    @State private var recorder: LiveWorkoutRecorder
+    private let health: HealthKitClient
     private let container: ModelContainer
 
     init() {
+        let health = HealthKitClient()
+        self.health = health
+        _recorder = State(initialValue: LiveWorkoutRecorder(store: health.store))
         do {
             container = try ModelContainer(
                 for: Schema(versionedSchema: WorkoutSchema.self),
@@ -37,6 +41,7 @@ struct WorkoutAppApp: App {
                 .environment(gym)
                 .environment(launcher)
                 .environment(refresher)
+                .environment(recorder)
                 .environment(\.healthClient, health)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)

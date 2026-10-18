@@ -8,6 +8,7 @@ struct FinishWorkoutSheet: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.healthClient) private var health
+    @Environment(LiveWorkoutRecorder.self) private var recorder
     @Environment(\.dismiss) private var dismiss
     @State private var rpe: Double = 7
     @State private var saveToHealth = true
@@ -79,14 +80,28 @@ struct FinishWorkoutSheet: View {
             errorMessage = "Couldn't save: \(error.localizedDescription)"
             return
         }
-        if saveToHealth, let health, let end = session.endedAt {
-            do {
-                try await health.saveStrengthWorkout(start: session.startedAt, end: end)
-                session.savedToHealth = true
-                try? modelContext.save()
-            } catch {
-                // The workout is saved in the app either way.
+        if let end = session.endedAt {
+            if recorder.isRecording {
+                // The live session already holds the heart rate (AirPods / strap); save it with the workout.
+                if saveToHealth {
+                    do {
+                        try await recorder.finish(at: end)
+                        session.savedToHealth = true
+                    } catch {
+                        recorder.discard()
+                    }
+                } else {
+                    recorder.discard()
+                }
+            } else if saveToHealth, let health {
+                do {
+                    try await health.saveStrengthWorkout(start: session.startedAt, end: end)
+                    session.savedToHealth = true
+                } catch {
+                    // The workout is saved in the app either way.
+                }
             }
+            try? modelContext.save()
         }
         dismiss()
         onFinished()
