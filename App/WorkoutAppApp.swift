@@ -207,6 +207,9 @@ struct RootView: View {
             }
         }
         .onChange(of: router.dosesVersion) { medications.reload() }
+        .onChange(of: router.openWorkout) {
+            if let active = sessions.first(where: \.isActive) { launcher.activeSession = active }
+        }
         .onChange(of: settings.hrvReminderOn) { scheduleHRVReminder() }
         .onChange(of: settings.hrvReminderMinutes) { scheduleHRVReminder() }
         .onChange(of: settings.checkInRemindersOn) { scheduleCheckInReminders() }

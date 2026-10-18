@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var showingMeds = false
     @State private var showingLocation = false
     @State private var showingGoals = false
+    @State private var showingRPEGuide = false
 
     /// " · Health" when Apple Health filled this field.
     private func source(_ field: String) -> String {
@@ -108,6 +109,11 @@ struct SettingsView: View {
                         showingGym = true
                     } label: {
                         LabeledContent("My Gym", value: gym.isConfigured ? gym.profile.name : "Not set up")
+                    }
+                    Button {
+                        showingRPEGuide = true
+                    } label: {
+                        LabeledContent("RPE guide", value: "What each number means")
                     }
                 } header: {
                     Text("Trainer")
@@ -210,6 +216,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showingMeds) { MedicationsView() }
             .sheet(isPresented: $showingLocation) { LocationPicker() }
             .sheet(isPresented: $showingGoals) { GoalsView() }
+            .sheet(isPresented: $showingRPEGuide) { RPEGuideView() }
         }
     }
 }

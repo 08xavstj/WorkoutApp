@@ -11,6 +11,8 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var showMedications = false
     var checkIn: CheckInKind?
     var showProgressPhotos = false
+    /// Bumped to bring the running workout back on screen (Live Activity tap).
+    var openWorkout = 0
     /// Bumped when doses change outside the app (Live Activity, notification).
     var dosesVersion = 0
 
@@ -20,6 +22,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         case "hrv": showHRVEntry = true
         case "meds": showMedications = true
         case "photos": showProgressPhotos = true
+        case "workout": openWorkout += 1
         case "checkin": checkIn = url.lastPathComponent == "evening" ? .evening : .morning
         default: break
         }

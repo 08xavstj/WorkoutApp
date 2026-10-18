@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AppCore
 
 /// Asks how hard the session felt (this feeds strain), then saves it.
 struct FinishWorkoutSheet: View {
@@ -14,6 +15,7 @@ struct FinishWorkoutSheet: View {
     @State private var saveToHealth = true
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var showingRPEGuide = false
 
     var body: some View {
         NavigationStack {
@@ -23,7 +25,7 @@ struct FinishWorkoutSheet: View {
                         HStack {
                             Text("How hard was it?")
                             Spacer()
-                            Text("\(Int(rpe)) / 10 · \(label(for: Int(rpe)))")
+                            Text("\(Int(rpe)) / 10 · \(RPEScale.sessionLabel(Int(rpe)))")
                                 .monospacedDigit()
                                 .foregroundStyle(Theme.lifting)
                         }
@@ -31,7 +33,11 @@ struct FinishWorkoutSheet: View {
                             .tint(Theme.lifting)
                     }
                 } footer: {
-                    Text("Lifting doesn't raise your heart rate much, so this rating is how your gym work counts toward strain.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Rate the whole workout, not your last set. Lifting doesn't raise your heart rate much, so this rating is how your gym work counts toward strain.")
+                        Button("What do the numbers mean?") { showingRPEGuide = true }
+                            .font(.footnote.weight(.semibold))
+                    }
                 }
                 Section {
                     Toggle("Save to Apple Health", isOn: $saveToHealth)
@@ -41,6 +47,10 @@ struct FinishWorkoutSheet: View {
                 }
             }
             .navigationTitle("Finish workout")
+            .sheet(isPresented: $showingRPEGuide) {
+                RPEGuideView()
+                    .presentationDetents([.medium, .large])
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -51,15 +61,6 @@ struct FinishWorkoutSheet: View {
                         .disabled(isSaving)
                 }
             }
-        }
-    }
-
-    private func label(for value: Int) -> String {
-        switch value {
-        case ...3: "Easy"
-        case 4...6: "Moderate"
-        case 7...8: "Hard"
-        default: "Max effort"
         }
     }
 
@@ -103,6 +104,7 @@ struct FinishWorkoutSheet: View {
             }
             try? modelContext.save()
         }
+        await WorkoutLiveActivity.endAll()
         dismiss()
         onFinished()
     }

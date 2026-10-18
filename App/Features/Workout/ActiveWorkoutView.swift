@@ -16,8 +16,6 @@ struct ActiveWorkoutView: View {
     @State private var showingPicker = false
     @State private var showingFinish = false
     @State private var showingDiscard = false
-    @State private var restEndsAt: Date?
-    @State private var restLength: TimeInterval = 90
     @State private var expanded: Set<PersistentIdentifier> = []
 
     var body: some View {
@@ -27,13 +25,17 @@ struct ActiveWorkoutView: View {
                     headerBar
                     titleBlock
                     LiveHeartRateBar(recorder: recorder, profile: metrics.heartRateProfile)
-                    if let restEndsAt {
-                        RestTimerPill(endsAt: restEndsAt, length: restLength) { change in
-                            if let change {
-                                self.restEndsAt = restEndsAt.addingTimeInterval(change)
-                                restLength = max(15, restLength + change)
-                            } else {
-                                self.restEndsAt = nil
+                    // Reads the shared timer each second, so +15s / Skip on the
+                    // Lock Screen show up here too.
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        if let ends = RestTimerStore.endsAt {
+                            RestTimerPill(endsAt: ends, length: RestTimerStore.length) { change in
+                                if let change {
+                                    RestTimerStore.adjust(by: change)
+                                } else {
+                                    RestTimerStore.stop()
+                                }
+                                Task { await WorkoutLiveActivity.refresh() }
                             }
                         }
                     }
@@ -72,14 +74,21 @@ struct ActiveWorkoutView: View {
                     .presentationDetents([.medium])
             }
             .task {
+                guard session.isActive else { return }
+                // Lock Screen / Dynamic Island: elapsed time, next set and rest timer.
+                let next = nextSetText()
+                await WorkoutActivityController.startIfNeeded(
+                    name: session.name, startedAt: session.startedAt, exercise: next.exercise, detail: next.detail
+                )
                 // Live heart rate from AirPods Pro 3 or a Bluetooth strap while this workout runs.
-                if session.isActive && !recorder.isRecording {
+                if !recorder.isRecording {
                     await recorder.start(at: session.startedAt)
                 }
             }
             .confirmationDialog("Discard this workout?", isPresented: $showingDiscard, titleVisibility: .visible) {
                 Button("Discard", role: .destructive) {
                     if recorder.sessionStart == session.startedAt { recorder.discard() }
+                    Task { await WorkoutLiveActivity.endAll() }
                     modelContext.delete(session)
                     try? modelContext.save()
                     dismiss()
@@ -220,8 +229,24 @@ struct ActiveWorkoutView: View {
 
     private func startRest(for exercise: ExerciseLog) {
         let compound = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound ?? false
-        restLength = compound ? 150 : 90
-        restEndsAt = .now.addingTimeInterval(restLength)
+        RestTimerStore.start(seconds: compound ? 150 : 90)
+        let next = nextSetText()
+        Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
+    }
+
+    /// The next set to do, for the Live Activity ("Bench Press", "Set 3 of 4 · 135 lb × 8").
+    private func nextSetText() -> (exercise: String, detail: String) {
+        for exercise in session.orderedExercises {
+            let sets = exercise.orderedSets
+            guard let index = sets.firstIndex(where: { !$0.isCompleted }) else { continue }
+            let set = sets[index]
+            var detail = "Set \(index + 1) of \(sets.count)"
+            if set.weightKg > 0 || set.reps > 0 {
+                detail += " · \(settings.weightUnit.format(set.weightKg)) \(settings.weightUnit.rawValue) × \(set.reps)"
+            }
+            return (exercise.name, detail)
+        }
+        return ("All sets done", "Tap Finish when you're ready")
     }
 
     private func add(_ exercise: Exercise) {
@@ -250,10 +275,14 @@ private struct ExerciseCard: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(ExerciseLibrary.self) private var library
+    /// The set open in the editor (defaults to the next set to do).
+    @State private var focusedSetID: PersistentIdentifier?
+    @State private var showingRPEGuide = false
 
     var body: some View {
         let sets = exercise.orderedSets
         let currentSet = sets.first { !$0.isCompleted }
+        let editing = sets.first { $0.persistentModelID == focusedSetID } ?? currentSet
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 IconBadge(systemName: "dumbbell.fill", color: Theme.lifting, size: 46)
@@ -293,26 +322,15 @@ private struct ExerciseCard: View {
                 .accessibilityLabel("Exercise options")
             }
 
-            HStack(spacing: 6) {
-                Text("SET").frame(width: 30, alignment: .leading)
-                Text("PREVIOUS").frame(maxWidth: .infinity, alignment: .leading)
-                Text(unit.rawValue.uppercased()).frame(width: 64)
-                Text("REPS").frame(width: 50)
-                Text("RPE").frame(width: 50)
-                Color.clear.frame(width: 34, height: 1)
-            }
-            .font(.caption.weight(.semibold))
-            .tracking(0.8)
-            .foregroundStyle(Theme.secondaryText)
-
             ForEach(Array(sets.enumerated()), id: \.element.persistentModelID) { index, set in
                 SetRow(
                     set: set,
                     label: set.isWarmup ? "W" : "\(workingNumber(set, in: sets))",
                     previous: previousText(index: index),
                     unit: unit,
-                    isCurrent: set.persistentModelID == currentSet?.persistentModelID,
-                    onCompleted: onSetCompleted
+                    isEditing: set.persistentModelID == editing?.persistentModelID,
+                    onTap: { focusedSetID = set.persistentModelID },
+                    onToggle: { toggle(set) }
                 )
                 .contextMenu {
                     Button(set.isWarmup ? "Make working set" : "Make warm-up set") { set.isWarmup.toggle() }
@@ -323,10 +341,16 @@ private struct ExerciseCard: View {
                 }
             }
 
-            if let currentSet, let hint = plateHint(for: currentSet) {
-                Label(hint, systemImage: "circle.grid.2x1")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.secondaryText)
+            if let editing {
+                SetEditor(
+                    set: editing,
+                    title: editing.isWarmup ? "Warm-up" : "Set \(workingNumber(editing, in: sets))",
+                    unit: unit,
+                    step: { up in step(editing, up: up) },
+                    plateHint: plateHint(for: editing),
+                    onComplete: { toggle(editing) },
+                    onShowGuide: { showingRPEGuide = true }
+                )
             }
 
             Button {
@@ -348,6 +372,34 @@ private struct ExerciseCard: View {
             }
         }
         .card()
+        .sheet(isPresented: $showingRPEGuide) {
+            RPEGuideView()
+                .presentationDetents([.medium, .large])
+        }
+    }
+
+    /// Completes (or un-completes) a set; completing starts rest and moves to the next set.
+    private func toggle(_ set: SetLog) {
+        set.completedAt = set.isCompleted ? nil : .now
+        try? modelContext.save()
+        if set.isCompleted {
+            focusedSetID = nil
+            if !set.isWarmup { onSetCompleted() }
+        }
+    }
+
+    /// Next/previous weight you can actually load with your gym's plates,
+    /// dumbbells or stacks (falls back to 5 lb / 2.5 kg).
+    private func step(_ set: SetLog, up: Bool) {
+        let kind = ExerciseCatalog.exercise(id: exercise.exerciseID)?.load ?? libraryLoadKind
+        let current = gym.unit.fromKilograms(set.weightKg)
+        var next: Double?
+        if let kind, gym.has(kind) {
+            next = up ? gym.nextLoad(above: current + 0.001, on: kind) : gym.load(atMost: current - 0.001, on: kind)
+        }
+        let fallback = gym.unit == .kg ? 2.5 : 5
+        let value = next ?? max(0, current + (up ? fallback : -fallback))
+        set.weightKg = gym.unit.toKilograms(value)
     }
 
     private var isNewPR: Bool {
@@ -397,53 +449,42 @@ private struct ExerciseCard: View {
     }
 }
 
+/// One set as a compact line; tap to edit it in the SetEditor.
 private struct SetRow: View {
     @Bindable var set: SetLog
     let label: String
     let previous: String
     let unit: WeightUnit
-    let isCurrent: Bool
-    let onCompleted: () -> Void
+    let isEditing: Bool
+    let onTap: () -> Void
+    let onToggle: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 10) {
             Text(label)
                 .font(.headline)
                 .foregroundStyle(set.isWarmup ? Theme.recoveryModerate : Theme.primaryText)
-                .frame(width: 30, alignment: .leading)
-            Text(previous)
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            field {
-                TextField("0", value: weightBinding, format: .number.precision(.fractionLength(0...2)))
-                    .keyboardType(.decimalPad)
+                .frame(width: 26, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(set.weightKg > 0 || set.reps > 0 ? "\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)" : "Not set")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .foregroundStyle(set.weightKg > 0 || set.reps > 0 ? Theme.primaryText : Theme.secondaryText)
+                Text("Last: \(previous)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
             }
-            .frame(width: 64)
-            field {
-                TextField("0", value: $set.reps, format: .number)
-                    .keyboardType(.numberPad)
+            Spacer(minLength: 4)
+            if let rpe = set.rpe {
+                Text("RPE \(rpe.formatted())")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.lifting)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Theme.lifting.opacity(0.12), in: .capsule)
             }
-            .frame(width: 50)
-            Menu {
-                Button("None") { set.rpe = nil }
-                ForEach([6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0], id: \.self) { value in
-                    Button(value.formatted()) { set.rpe = value }
-                }
-            } label: {
-                field {
-                    Text(set.rpe.map { $0.formatted() } ?? (set.isWarmup ? "—" : "RPE"))
-                        .foregroundStyle(set.rpe == nil ? Theme.secondaryText : Theme.primaryText)
-                }
-            }
-            .frame(width: 50)
-            .accessibilityLabel("RPE")
-            Button {
-                set.completedAt = set.isCompleted ? nil : .now
-                if set.isCompleted && !set.isWarmup { onCompleted() }
-            } label: {
+            Button(action: onToggle) {
                 ZStack {
                     Circle()
                         .fill(set.isCompleted ? Theme.recoveryHigh : Color.clear)
@@ -454,37 +495,99 @@ private struct SetRow: View {
                             .foregroundStyle(.white)
                     }
                 }
-                .frame(width: 34, height: 34)
+                .frame(width: 36, height: 36)
+                .contentShape(.circle)
             }
             .buttonStyle(.plain)
             .sensoryFeedback(.success, trigger: set.isCompleted) { _, completed in completed }
-            .accessibilityLabel(set.isCompleted ? "Completed" : "Mark set complete")
+            .accessibilityLabel(set.isCompleted ? "Completed, tap to undo" : "Mark set complete")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(rowBackground, in: .rect(cornerRadius: 16))
         .overlay {
-            if isCurrent {
-                RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.lifting.opacity(0.6), lineWidth: 2)
+            if isEditing {
+                RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.lifting.opacity(0.7), lineWidth: 2)
             }
         }
+        .contentShape(.rect)
+        .onTapGesture(perform: onTap)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Edit this set")
     }
 
     private var rowBackground: Color {
         if set.isCompleted { return Theme.recoveryHigh.opacity(0.1) }
-        if isCurrent { return Theme.lifting.opacity(0.07) }
-        return Color.clear
+        if isEditing { return Theme.lifting.opacity(0.07) }
+        return Theme.cardRaised.opacity(0.5)
     }
+}
 
-    private func field<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .font(.headline)
-            .monospacedDigit()
-            .multilineTextAlignment(.center)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity)
-            .background(Theme.card, in: .rect(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.separator))
+/// Big, thumb-friendly controls for the set you're on: weight and reps with
+/// +/- (weights step to what your gym can load), RPE buttons and Complete.
+private struct SetEditor: View {
+    @Bindable var set: SetLog
+    let title: String
+    let unit: WeightUnit
+    let step: (Bool) -> Void
+    let plateHint: String?
+    let onComplete: () -> Void
+    let onShowGuide: () -> Void
+
+    @FocusState private var typing: Field?
+    private enum Field { case weight, reps }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title.uppercased())
+                .font(.caption.weight(.bold))
+                .tracking(1.2)
+                .foregroundStyle(Theme.lifting)
+            HStack(spacing: 12) {
+                NumberStepper(label: unit.rawValue) {
+                    TextField("0", value: weightBinding, format: .number.precision(.fractionLength(0...2)))
+                        .keyboardType(.decimalPad)
+                        .focused($typing, equals: .weight)
+                } minus: { step(false) } plus: { step(true) }
+                NumberStepper(label: "reps") {
+                    TextField("0", value: $set.reps, format: .number)
+                        .keyboardType(.numberPad)
+                        .focused($typing, equals: .reps)
+                } minus: { set.reps = max(0, set.reps - 1) } plus: { set.reps += 1 }
+            }
+            if let plateHint {
+                Label(plateHint, systemImage: "circle.grid.2x1")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if !set.isWarmup {
+                RPEPicker(rpe: $set.rpe, onShowGuide: onShowGuide)
+            }
+            Button(action: {
+                typing = nil
+                onComplete()
+            }) {
+                Label(set.isCompleted ? "Completed · tap to undo" : "Complete set", systemImage: set.isCompleted ? "arrow.uturn.backward" : "checkmark")
+                    .font(.headline)
+                    .foregroundStyle(set.isCompleted ? Theme.primaryText : .white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(set.isCompleted
+                                ? AnyShapeStyle(Theme.cardRaised)
+                                : AnyShapeStyle(LinearGradient(colors: [Theme.recoveryHighLight, Theme.recoveryHigh], startPoint: .leading, endPoint: .trailing)),
+                                in: .capsule)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(Theme.lifting.opacity(0.05), in: .rect(cornerRadius: 20))
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { typing = nil }
+            }
+        }
     }
 
     private var weightBinding: Binding<Double> {
@@ -492,6 +595,115 @@ private struct SetRow: View {
             get: { unit.display(set.weightKg) },
             set: { set.weightKg = unit.toKilograms($0) }
         )
+    }
+}
+
+/// [-]  value  [+] with large tap targets; tap the number to type.
+private struct NumberStepper<Field: View>: View {
+    let label: String
+    @ViewBuilder var field: Field
+    let minus: () -> Void
+    let plus: () -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 0) {
+                stepButton("minus", action: minus)
+                field
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .minimumScaleFactor(0.6)
+                stepButton("plus", action: plus)
+            }
+            .padding(4)
+            .background(Theme.card, in: .capsule)
+            .overlay(Capsule().strokeBorder(Theme.separator))
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func stepButton(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(Theme.lifting)
+                .frame(width: 44, height: 44)
+                .background(Theme.lifting.opacity(0.12), in: .circle)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: label)
+        .accessibilityLabel(icon == "plus" ? "Increase \(label)" : "Decrease \(label)")
+    }
+}
+
+/// Big 6-10 buttons plus a ½ toggle, with what the number means.
+private struct RPEPicker: View {
+    @Binding var rpe: Double?
+    let onShowGuide: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Effort (RPE)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Spacer()
+                Button(action: onShowGuide) {
+                    Label("What's RPE?", systemImage: "questionmark.circle")
+                        .font(.caption.weight(.semibold))
+                }
+            }
+            HStack(spacing: 6) {
+                ForEach([6, 7, 8, 9, 10], id: \.self) { value in
+                    let selected = rpe.map { Int($0.rounded(.down)) == value } ?? false
+                    Button {
+                        if selected && rpe == Double(value) { rpe = nil } else { rpe = Double(value) }
+                    } label: {
+                        Text("\(value)")
+                            .font(.title3.weight(.bold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .foregroundStyle(selected ? .white : Theme.primaryText)
+                            .background(selected
+                                        ? AnyShapeStyle(LinearGradient(colors: [Theme.strainLight, Theme.lifting], startPoint: .top, endPoint: .bottom))
+                                        : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Color.clear : Theme.separator))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("RPE \(value)")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+                Button {
+                    guard let current = rpe, current < 10 else { return }
+                    rpe = current.truncatingRemainder(dividingBy: 1) == 0 ? current + 0.5 : current - 0.5
+                } label: {
+                    Text("½")
+                        .font(.title3.weight(.bold))
+                        .frame(width: 44, height: 48)
+                        .foregroundStyle(isHalf ? .white : Theme.primaryText)
+                        .background(isHalf ? AnyShapeStyle(Theme.lifting) : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isHalf ? Color.clear : Theme.separator))
+                }
+                .buttonStyle(.plain)
+                .disabled(rpe == nil || rpe == 10)
+                .accessibilityLabel("Add a half point")
+            }
+            .sensoryFeedback(.selection, trigger: rpe)
+            Text(rpe.map { value in
+                let level = RPEScale.level(for: value)
+                return "\(RPEScale.summary(value)). \(level?.feel ?? "")"
+            } ?? "How hard was it? Tap the number of reps you had left: 8 = 2 more reps possible.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+    }
+
+    private var isHalf: Bool {
+        rpe.map { $0.truncatingRemainder(dividingBy: 1) != 0 } ?? false
     }
 }
 

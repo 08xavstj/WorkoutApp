@@ -51,6 +51,8 @@ targets:
         com.apple.developer.healthkit.access: []
         com.apple.security.application-groups:
           - group.com.lontraindustries.workoutapp
+        # Rest-timer alerts can break through Focus modes.
+        com.apple.developer.usernotifications.time-sensitive: true
     info:
       path: App/Info.plist
       properties:

@@ -100,4 +100,35 @@ struct StrainCalculatorTests {
         #expect(custom.maxHeartRate == 200)
         #expect(profile.maxHeartRate == 187)
     }
+
+    @Test func everydayLivingAddsLittleStrain() {
+        // Eight hours at 25% of reserve (standing, pottering about).
+        let samples = steady(bpm: bpm(atReserve: 0.25), minutes: 8 * 60, from: start)
+        let result = calculator.dailyStrain(heartRate: samples, strengthSessions: [], profile: profile)
+        #expect(result.strain == 0)
+    }
+
+    @Test func briskWalkIsLight() {
+        let samples = steady(bpm: bpm(atReserve: 0.35), minutes: 60, from: start)
+        let result = calculator.dailyStrain(heartRate: samples, strengthSessions: [], profile: profile)
+        #expect((10...30).contains(result.strain))
+    }
+
+    @Test func sparseReadingsDontFillLongGaps() {
+        // One reading every 8 minutes: each counts for at most 2 minutes.
+        let sparse = (0..<10).map { HeartRateSample(date: start.addingTimeInterval(Double($0) * 480), bpm: bpm(atReserve: 0.6)) }
+        let dense = steady(bpm: bpm(atReserve: 0.6), minutes: 19, from: start)
+        let sparseLoad = calculator.dailyStrain(heartRate: sparse, strengthSessions: [], profile: profile).totalLoad
+        let denseLoad = calculator.dailyStrain(heartRate: dense, strengthSessions: [], profile: profile).totalLoad
+        #expect(sparseLoad < denseLoad * 1.05)
+    }
+}
+
+struct RPEScaleTests {
+    @Test func describesRepsLeft() {
+        #expect(RPEScale.summary(8) == "RPE 8 · 2 reps left")
+        #expect(RPEScale.summary(9) == "RPE 9 · 1 rep left")
+        #expect(RPEScale.level(for: 6.5)?.rpe == 6 || RPEScale.level(for: 6.5)?.rpe == 7)
+        #expect(RPEScale.sessionLabel(8) == "Hard")
+    }
 }

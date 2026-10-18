@@ -6,6 +6,7 @@ struct WorkoutWidgetBundle: WidgetBundle {
     var body: some Widget {
         HRVWidget()
         MedsLiveActivityWidget()
+        WorkoutLiveActivityWidget()
     }
 }
 

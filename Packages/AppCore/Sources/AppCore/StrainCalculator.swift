@@ -1,6 +1,6 @@
 import Foundation
 
-/// Daily strain on a 0-21 scale, built from two kinds of load:
+/// Daily strain as a percentage (0-100), built from two kinds of load:
 ///
 /// 1. **Cardio load** - Banister TRIMP from heart rate (time x intensity,
 ///    weighted exponentially so hard minutes count much more than easy ones).
@@ -8,10 +8,16 @@ import Foundation
 ///    undercounts lifting because you rest between sets, so a gym session counts
 ///    as whichever is higher: its heart-rate load or its RPE load.
 ///
-/// Load maps onto 0-21 with a saturating curve, so going from 18 to 19 takes much
-/// more work than going from 8 to 9.
+/// Load maps onto 0-100% with a saturating curve, so going from 85% to 90% takes
+/// much more work than going from 40% to 45%.
+///
+/// Calibration (30-year-old man, resting 60, max 187):
+/// - an hour's run at 75% of heart-rate reserve ≈ 62%;
+/// - an hour of hard lifting (session RPE 8) ≈ 61%; 45 min at RPE 7 ≈ 46%;
+/// - a brisk 60-minute walk (35% of reserve) ≈ 20%;
+/// - a day of sitting, standing and light chores ≈ 0-10%.
 public struct StrainCalculator: Sendable {
-    /// Load at which strain reaches ~63% of the scale (about 13.3).
+    /// Load at which strain reaches ~63% of the scale.
     public var saturationLoad: Double = 126
     /// Converts sRPE units into TRIMP-equivalent units. Calibrated so a hard
     /// hour of lifting (RPE 8) lands close to a moderate hour-long run.
@@ -20,8 +26,15 @@ public struct StrainCalculator: Sendable {
     public var defaultRPE: Double = 6.5
     /// Gaps between heart-rate samples longer than this are not counted.
     public var maxSampleGap: TimeInterval = 10 * 60
-    /// Heart rate below this fraction of reserve is treated as resting.
-    public var minimumReserveFraction: Double = 0.2
+    /// The most time one heart-rate reading stands for. Watches sample all-day
+    /// heart rate every minute or two, so one high reading (e.g. standing up)
+    /// shouldn't fill a long gap after it.
+    public var maxMinutesPerSample: Double = 2
+    /// Heart rate below this fraction of reserve doesn't add strain. 30% is
+    /// the bottom of "light" intensity (ACSM); below it is everyday living
+    /// (sitting, standing, pottering), which Banister TRIMP wasn't designed
+    /// to count and which would otherwise pile up over a whole day.
+    public var minimumReserveFraction: Double = 0.3
 
     public init() {}
 
@@ -49,7 +62,7 @@ public struct StrainCalculator: Sendable {
         for (current, next) in zip(samples, samples.dropFirst()) {
             let gap = next.date.timeIntervalSince(current.date)
             guard gap > 0, gap <= maxSampleGap else { continue }
-            let minutes = gap / 60
+            let minutes = min(gap / 60, maxMinutesPerSample)
             let load = trimp(minutes: minutes, bpm: current.bpm, profile: profile)
 
             if let index = strengthSessions.firstIndex(where: { $0.contains(current.date) }) {
