@@ -237,10 +237,12 @@ final class VitalsModel {
         // MARK: Activity
         let stepSeries = get(try? await steps)
         var stepStat = makeStat("steps", .activity, "Steps", "shoeprints.fill", series: stepSeries, unit: "", digits: 0)
+        // The goal grows (or eases) with your usual day; see StepGoal.
+        let stepGoal = StepGoal.personal(dailySteps: stepSeries.filter { !calendar.isDateInToday($0.date) }.map(\.value))
         if let today = latestToday(stepSeries) {
-            stepStat.gauge = min(1, today.value / 10_000)
-            stepStat.status = today.value >= 10_000 ? "Goal reached" : "\(fmt(10_000 - today.value)) to 10k"
-            stepStat.tone = today.value >= 10_000 ? .good : .neutral
+            stepStat.gauge = min(1, today.value / stepGoal)
+            stepStat.status = today.value >= stepGoal ? "Goal reached" : "\(fmt(stepGoal - today.value)) to your \(fmt(stepGoal)) goal"
+            stepStat.tone = today.value >= stepGoal ? .good : .neutral
         } else {
             stepStat.value = stepSeries.isEmpty ? nil : "0"
         }

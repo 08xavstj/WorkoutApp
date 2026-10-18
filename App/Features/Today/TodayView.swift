@@ -266,7 +266,7 @@ private struct StrainGoalCard: View {
 
     var body: some View {
         let current = metrics.strain?.strain ?? 0
-        let target = metrics.targetStrain ?? 10...14
+        let target = metrics.targetStrain ?? StrainCalculator.targetStrain(forRecovery: 50)
         let status = StrainPlanner().status(current: current, target: target)
         let suggestions = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions)
         VStack(alignment: .leading, spacing: 16) {
@@ -292,6 +292,10 @@ private struct StrainGoalCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             StrainGoalBar(current: current, target: target)
+            Text(metrics.usualTrainingStrain.map { "Scaled to you: your training days usually reach \(whole($0))%, so the target moves as you get fitter or take time off." }
+                 ?? "Your target adapts to you after 6 training days in 4 weeks.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
 
             switch status {
             case .below:

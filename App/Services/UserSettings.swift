@@ -71,7 +71,18 @@ final class UserSettings {
     var age: Int { didSet { defaults.set(age, forKey: "age") } }
     var sex: BiologicalSex { didSet { defaults.set(sex.rawValue, forKey: "sex") } }
     /// 0 means "estimate from age".
+    /// Typed-in max heart rate. 0 = use the learned or estimated one.
     var maxHeartRate: Int { didSet { defaults.set(maxHeartRate, forKey: "maxHeartRate") } }
+    /// Highest believable heart rate seen in the last year (see `ObservedMaxHeartRate`).
+    var learnedMaxHeartRate: ObservedMaxHeartRate.Learned? {
+        didSet {
+            if let learnedMaxHeartRate, let data = try? JSONEncoder().encode(learnedMaxHeartRate) {
+                defaults.set(data, forKey: "learnedMaxHeartRate")
+            } else {
+                defaults.removeObject(forKey: "learnedMaxHeartRate")
+            }
+        }
+    }
     var weightUnit: WeightUnit { didSet { defaults.set(weightUnit.rawValue, forKey: "weightUnit") } }
     var coachMode: CoachMode { didSet { defaults.set(coachMode.rawValue, forKey: "coachMode") } }
     var appearance: AppAppearance { didSet { defaults.set(appearance.rawValue, forKey: "appearance") } }
@@ -109,6 +120,8 @@ final class UserSettings {
         age = defaults.object(forKey: "age") as? Int ?? 30
         sex = BiologicalSex(rawValue: defaults.string(forKey: "sex") ?? "") ?? .male
         maxHeartRate = defaults.integer(forKey: "maxHeartRate")
+        learnedMaxHeartRate = defaults.data(forKey: "learnedMaxHeartRate")
+            .flatMap { try? JSONDecoder().decode(ObservedMaxHeartRate.Learned.self, from: $0) }
         weightUnit = WeightUnit(rawValue: defaults.string(forKey: "weightUnit") ?? "") ?? .pounds
         coachMode = CoachMode(rawValue: defaults.string(forKey: "coachMode") ?? "") ?? .onDevice
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .light
@@ -161,12 +174,26 @@ final class UserSettings {
         if healthFilledFields != filled { healthFilledFields = filled }
     }
 
+    /// Age estimate of max heart rate (Tanaka).
+    var estimatedMaxHeartRate: Double { 208 - 0.7 * Double(age) }
+
+    /// Max heart rate learned from your workouts, when it beats the age estimate.
+    var learnedMaxOverride: Double? {
+        ObservedMaxHeartRate.override(learned: learnedMaxHeartRate, estimate: estimatedMaxHeartRate, now: .now)
+    }
+
     func heartRateProfile(restingHeartRate: Double?) -> HeartRateProfile {
         HeartRateProfile(
             age: age,
             sex: sex,
             restingHeartRate: restingHeartRate ?? 60,
-            maxHeartRateOverride: maxHeartRate > 0 ? Double(maxHeartRate) : nil
+            maxHeartRateOverride: maxHeartRate > 0 ? Double(maxHeartRate) : learnedMaxOverride
         )
+    }
+
+    /// Records the highest believable heart rate from new data.
+    func noteHeartRatePeak(_ peak: Double?) {
+        let updated = ObservedMaxHeartRate.update(learnedMaxHeartRate, peak: peak, at: .now)
+        if updated != learnedMaxHeartRate { learnedMaxHeartRate = updated }
     }
 }

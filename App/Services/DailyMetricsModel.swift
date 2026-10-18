@@ -32,6 +32,8 @@ final class DailyMetricsModel {
     private(set) var respiratoryRate: Double?
     private(set) var yesterdayStrain: Double?
     private(set) var weekStrain: [DayStrain] = []
+    /// What your training days usually reach over the last 4 weeks (nil while calibrating).
+    private(set) var usualTrainingStrain: Double?
     private(set) var cardioLoad: TrainingLoadCalculator.Result?
     private(set) var muscularLoad: TrainingLoadCalculator.Result?
     private(set) var activities: [ActivityItem] = []
@@ -136,11 +138,12 @@ final class DailyMetricsModel {
         return results
     }
 
-    /// Today's strain target. When the 7-day HRV average is below your normal
-    /// range, it's capped at an easy day (HRV-guided training).
+    /// Today's strain target, scaled to what your training days usually reach.
+    /// When the 7-day HRV average is below your normal range, it's capped at an
+    /// easy day (HRV-guided training).
     var targetStrain: ClosedRange<Double>? {
         guard let recovery else { return nil }
-        let target = StrainCalculator.targetStrain(forRecovery: recovery.score)
+        let target = StrainCalculator.targetStrain(forRecovery: recovery.score, usualTrainingStrain: usualTrainingStrain)
         return trainEasyToday ? min(target.lowerBound, 20)...min(target.upperBound, 45) : target
     }
 
@@ -251,6 +254,8 @@ final class DailyMetricsModel {
             }
             if let firstNeeded = needed.first {
                 let heartRate = try await health.heartRatePerMinute(from: firstNeeded, to: now)
+                // Learn max heart rate from real efforts (used from the next refresh).
+                settings.noteHeartRatePeak(ObservedMaxHeartRate.peak(heartRate))
                 let computed = await Self.computeDays(needed, heartRate: heartRate, sessions: sessions, profile: profile)
                 for (date, result) in computed {
                     dayCache[date] = (key(for: date), result)
@@ -263,6 +268,7 @@ final class DailyMetricsModel {
             strain = todayResult
             yesterdayStrain = days.first { calendar.isDate($0.0, inSameDayAs: yesterday) }?.1.strain
             weekStrain = days.suffix(7).map { DayStrain(date: $0.0, strain: $0.1.strain) }
+            usualTrainingStrain = StrainCalculator.usualTrainingStrain(days.dropLast().map(\.1.strain))
             let loadCalculator = TrainingLoadCalculator()
             cardioLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.cardioLoad))
             muscularLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.liftingLoad))

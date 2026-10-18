@@ -127,12 +127,9 @@ public struct StrainCalculator: Sendable {
         return -saturationLoad * log(1 - clamped / Self.maximum)
     }
 
-    /// Suggested strain range for today, based on recovery (0-100).
+    /// Suggested strain range for a regular trainee, based on recovery (0-100).
+    /// See `targetStrain(forRecovery:usualTrainingStrain:)` for the personal version.
     public static func targetStrain(forRecovery recovery: Int) -> ClosedRange<Double> {
-        switch recovery {
-        case ..<34: 20...45
-        case 34..<67: 45...65
-        default: 65...85
-        }
+        targetStrain(forRecovery: recovery, usualTrainingStrain: nil)
     }
 }

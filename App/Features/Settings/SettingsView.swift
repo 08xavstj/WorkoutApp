@@ -95,7 +95,9 @@ struct SettingsView: View {
                     }
                     .disabled(locked("sex"))
                     Stepper(
-                        settings.maxHeartRate == 0 ? "Max heart rate: estimate" : "Max heart rate: \(settings.maxHeartRate)",
+                        settings.maxHeartRate == 0
+                            ? (settings.learnedMaxOverride.map { "Max heart rate: \(Int($0)) (learned)" } ?? "Max heart rate: estimate")
+                            : "Max heart rate: \(settings.maxHeartRate)",
                         value: $settings.maxHeartRate,
                         in: 0...230,
                         step: 1
@@ -119,7 +121,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Profile")
                 } footer: {
-                    Text("Age and sex set your heart-rate zones, calorie estimate and body age. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in the Health app (profile → Health Details) or turn the switch off to type your own. Leave max heart rate on \"estimate\" unless you've measured it.")
+                    Text("Age and sex set your heart-rate zones, calorie estimate and body age. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in the Health app (profile → Health Details) or turn the switch off to type your own. Leave max heart rate at 0 and the app learns it from your hardest workouts; only type it if you've had it measured.")
                 }
 
                 Section {

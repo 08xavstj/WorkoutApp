@@ -32,7 +32,7 @@ enum TrainerSuggestions {
             ))
         }
         let current = metrics.strain?.strain ?? 0
-        let target = metrics.targetStrain ?? 10...14
+        let target = metrics.targetStrain ?? StrainCalculator.targetStrain(forRecovery: 50)
         let ranked = planner.rank(options, current: current, target: target)
         let bestStrength = ranked.first { $0.kind == .strength }
         let bestCardio = ranked.first { $0.kind == .cardio }
