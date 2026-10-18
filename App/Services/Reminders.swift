@@ -168,7 +168,7 @@ nonisolated enum Reminders {
 }
 
 private extension WidgetSnapshot {
-    func withUpdated(_ date: Date?) -> WidgetSnapshot {
+    nonisolated func withUpdated(_ date: Date?) -> WidgetSnapshot {
         var copy = self
         copy.updated = date ?? updated
         return copy
