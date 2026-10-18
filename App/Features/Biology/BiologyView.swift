@@ -9,6 +9,7 @@ struct BiologyView: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
     @Environment(VitalsModel.self) private var vitals
+    @Environment(CheckInStore.self) private var checkIns
     @Environment(\.healthClient) private var health
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
@@ -29,6 +30,7 @@ struct BiologyView: View {
                     }
                     .padding(.top, 8)
                     BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
+                    InsightsCard(insights: checkIns.insights, daysLeft: checkIns.daysUntilInsights)
                     hrvCard
                     ForEach(VitalsModel.Category.allCases) { category in
                         SectionTitle(text: category.rawValue)
@@ -88,6 +90,7 @@ struct BiologyView: View {
         let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now
         let recent = sessions.filter { !$0.isActive && $0.startedAt >= cutoff }.map(\.strainSummary)
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent)
+        await checkIns.refreshInsights(health: health, manualHRV: manual)
         await biology.refresh(health: health, settings: settings, manualHRV: manual, proteinTarget: metrics.proteinTarget)
     }
 
@@ -416,5 +419,44 @@ private struct FactorRow: View {
                 .frame(width: 56, alignment: .trailing)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// "What affects you": patterns between check-in answers and next-morning data.
+struct InsightsCard: View {
+    let insights: [CheckInInsights.Insight]
+    let daysLeft: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CardLabel(text: "What affects you", color: Theme.sleep)
+            if insights.isEmpty {
+                Text(daysLeft > 0
+                     ? "Do the morning and evening check-ins for \(daysLeft) more day\(daysLeft == 1 ? "" : "s") and your personal patterns appear here: what lowers your HRV, raises your resting heart rate or hurts your sleep."
+                     : "No clear patterns yet. Keep checking in; patterns need a few days with and without each habit.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            ForEach(insights.prefix(6)) { insight in
+                HStack(spacing: 10) {
+                    Image(systemName: insight.isGood ? "arrow.up.heart.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(insight.isGood ? Theme.recoveryHigh : Theme.recoveryModerate)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(insight.sentence)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.primaryText)
+                        Text("\(insight.daysWith) days with vs \(insight.daysWithout) without")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
+            if !insights.isEmpty {
+                Text("Patterns, not proof: other things can change on the same days.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .card(tint: Theme.sleep)
     }
 }

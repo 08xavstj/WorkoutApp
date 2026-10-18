@@ -17,6 +17,8 @@ struct WorkoutAppApp: App {
     @State private var recorder: LiveWorkoutRecorder
     @State private var router: AppRouter
     @State private var medications = MedicationsModel()
+    @State private var checkIns = CheckInStore()
+    @State private var muscles = MuscleModel()
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -54,6 +56,8 @@ struct WorkoutAppApp: App {
                 .environment(recorder)
                 .environment(router)
                 .environment(medications)
+                .environment(checkIns)
+                .environment(muscles)
                 .environment(\.healthClient, health)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)
@@ -98,6 +102,9 @@ struct RootView: View {
     @Environment(VitalsModel.self) private var vitals
     @Environment(AppRouter.self) private var router
     @Environment(MedicationsModel.self) private var medications
+    @Environment(CheckInStore.self) private var checkIns
+    @Environment(MuscleModel.self) private var muscles
+    @Environment(ExerciseLibrary.self) private var library
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(AppRefresher.self) private var refresher
     @Environment(\.healthClient) private var health
@@ -139,6 +146,9 @@ struct RootView: View {
         .sheet(isPresented: $router.showMedications) {
             MedicationsView()
         }
+        .sheet(item: $router.checkIn, onDismiss: scheduleCheckInReminders) { kind in
+            CheckInView(kind: kind)
+        }
         .sheet(item: $launcher.builderRequest) { request in
             WorkoutBuilderView(initialFocus: request.focus, initialMinutes: request.minutes)
         }
@@ -166,6 +176,7 @@ struct RootView: View {
                 }
             }
             scheduleHRVReminder()
+            scheduleCheckInReminders()
             await refreshMetrics()
             await Reminders.scheduleDoses()
             await Reminders.startMedsActivityIfNeeded()
@@ -188,6 +199,9 @@ struct RootView: View {
         .onChange(of: router.dosesVersion) { medications.reload() }
         .onChange(of: settings.hrvReminderOn) { scheduleHRVReminder() }
         .onChange(of: settings.hrvReminderMinutes) { scheduleHRVReminder() }
+        .onChange(of: settings.checkInRemindersOn) { scheduleCheckInReminders() }
+        .onChange(of: settings.morningCheckInMinutes) { scheduleCheckInReminders() }
+        .onChange(of: settings.eveningCheckInMinutes) { scheduleCheckInReminders() }
         .onChange(of: finishedSessionCount) {
             Task { await refreshMetrics() }
         }
@@ -219,6 +233,8 @@ struct RootView: View {
         metrics.proteinGramsPerKg = medications.proteinGramsPerKg
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent)
+        checkIns.recordSleepScore(metrics.sleep?.score)
+        await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health)
         let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
         Reminders.updateWidget(WidgetSnapshot(
             updated: .now,
@@ -227,6 +243,15 @@ struct RootView: View {
             recovery: metrics.recovery?.score,
             strain: metrics.strain?.strain
         ))
+    }
+
+    private func scheduleCheckInReminders() {
+        let enabled = settings.checkInRemindersOn
+        let morning = settings.morningCheckInMinutes
+        let evening = settings.eveningCheckInMinutes
+        let morningDone = checkIns.morning() != nil
+        let eveningDone = checkIns.evening() != nil
+        Task { await Reminders.scheduleCheckIns(enabled: enabled, morningMinutes: morning, eveningMinutes: evening, morningDone: morningDone, eveningDone: eveningDone) }
     }
 
     private func scheduleHRVReminder() {

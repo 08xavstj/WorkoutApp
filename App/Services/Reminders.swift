@@ -9,6 +9,7 @@ import WidgetKit
 final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var showHRVEntry = false
     var showMedications = false
+    var checkIn: CheckInKind?
     /// Bumped when doses change outside the app (Live Activity, notification).
     var dosesVersion = 0
 
@@ -17,6 +18,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         switch url.host() {
         case "hrv": showHRVEntry = true
         case "meds": showMedications = true
+        case "checkin": checkIn = url.lastPathComponent == "evening" ? .evening : .morning
         default: break
         }
     }
@@ -96,6 +98,41 @@ nonisolated enum Reminders {
             let request = UNNotificationRequest(identifier: ids[offset], content: content,
                                                 trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false))
             try? await center.add(request)
+        }
+    }
+
+    // MARK: Check-ins
+
+    /// Morning and evening check-in reminders for the next week, skipping ones already done.
+    static func scheduleCheckIns(enabled: Bool, morningMinutes: Int, eveningMinutes: Int, morningDone: Bool, eveningDone: Bool) async {
+        let center = UNUserNotificationCenter.current()
+        let ids = (0..<7).flatMap { ["checkin|m|\($0)", "checkin|e|\($0)"] }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        guard enabled, await requestPermission() else { return }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        for offset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+            for (kind, minutes, done) in [("m", morningMinutes, morningDone), ("e", eveningMinutes, eveningDone)] {
+                if offset == 0 && done { continue }
+                let fire = day.addingTimeInterval(TimeInterval(minutes * 60))
+                guard fire > .now else { continue }
+                let content = UNMutableNotificationContent()
+                if kind == "m" {
+                    content.title = "Morning check-in"
+                    content.body = "Last night's HRV and how you feel. 30 seconds."
+                    content.userInfo = ["link": "workoutapp://checkin/morning"]
+                } else {
+                    content.title = "Evening check-in"
+                    content.body = "Caffeine, drinks and stress today. 45 seconds."
+                    content.userInfo = ["link": "workoutapp://checkin/evening"]
+                }
+                content.sound = .default
+                let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+                let request = UNNotificationRequest(identifier: "checkin|\(kind)|\(offset)", content: content,
+                                                    trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false))
+                try? await center.add(request)
+            }
         }
     }
 

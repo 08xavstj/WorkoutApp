@@ -14,6 +14,16 @@ struct SettingsView: View {
         locked(field) ? " · Health" : ""
     }
 
+    private func minutesBinding(_ keyPath: ReferenceWritableKeyPath<UserSettings, Int>) -> Binding<Date> {
+        Binding(
+            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(settings[keyPath: keyPath] * 60)) },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                settings[keyPath: keyPath] = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+            }
+        )
+    }
+
     private var reminderTime: Binding<Date> {
         Binding(
             get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(settings.hrvReminderMinutes * 60)) },
@@ -85,7 +95,12 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("Morning HRV reminder", isOn: $settings.hrvReminderOn)
+                    Toggle("Check-in reminders", isOn: $settings.checkInRemindersOn)
+                    if settings.checkInRemindersOn {
+                        DatePicker("Morning", selection: minutesBinding(\.morningCheckInMinutes), displayedComponents: .hourAndMinute)
+                        DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
+                    }
+                    Toggle("Separate HRV reminder", isOn: $settings.hrvReminderOn)
                     if settings.hrvReminderOn {
                         DatePicker("Time", selection: reminderTime, displayedComponents: .hourAndMinute)
                     }
@@ -97,7 +112,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Reminders")
                 } footer: {
-                    Text("The HRV reminder is skipped on days you've already logged it. Medication reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → WorkoutApp.")
+                    Text("The morning check-in includes last night's HRV, so most people only need check-in reminders. Reminders are skipped once done. Medication reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → WorkoutApp.")
                 }
 
                 Section("Appearance") {

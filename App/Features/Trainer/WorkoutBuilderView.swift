@@ -14,6 +14,8 @@ struct WorkoutBuilderView: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(MedicationsModel.self) private var medications
+    @Environment(CheckInStore.self) private var checkIns
+    @Environment(MuscleModel.self) private var muscles
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     @State private var focus: WorkoutFocus?
@@ -97,8 +99,16 @@ struct WorkoutBuilderView: View {
         }
     }
 
+    /// Your pick, else what sore or tired muscles allow, else what you haven't trained lately.
     private var resolvedFocus: WorkoutFocus {
-        focus ?? WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))
+        focus ?? checkIns.suggestedFocus ?? muscles.suggestedFocus
+            ?? WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))
+    }
+
+    private var autoReason: String {
+        if checkIns.suggestedFocus != nil { return "because of the soreness you reported this morning" }
+        if muscles.suggestedFocus != nil { return "to rest the muscles that are still recovering" }
+        return "based on what you've trained recently"
     }
 
     private func rebuild() {
@@ -154,7 +164,7 @@ struct WorkoutBuilderView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            Text(focus == nil ? "Auto picks \(resolvedFocus.title.lowercased()) based on what you've trained recently." : resolvedFocus.muscles)
+            Text(focus == nil ? "Auto picks \(resolvedFocus.title.lowercased()) \(autoReason)." : resolvedFocus.muscles)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }

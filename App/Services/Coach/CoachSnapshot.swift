@@ -49,6 +49,8 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     var calorieBalance: Double?
     /// Medications the user takes, with their known effects on training data.
     var medications: [String]?
+    /// Today's check-in answers and personal patterns.
+    var checkIns: String?
 
     /// Food totals from Apple Health (logged in Cronometer or another food app).
     nonisolated struct Nutrition: Codable, Sendable, Equatable {
@@ -83,6 +85,7 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
         }
         var lines: [String] = []
         lines.append("Date: \(date.formatted(date: .complete, time: .omitted))")
+        if let checkIns { lines.append(checkIns) }
         if let medications, !medications.isEmpty {
             lines.append("Medications: " + medications.joined(separator: "; "))
         }

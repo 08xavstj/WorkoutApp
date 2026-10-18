@@ -28,6 +28,7 @@ struct TodayView: View {
                         HealthAccessCard(message: error)
                     }
                     ScoresCard()
+                    CheckInCard()
                     StrainGoalCard(sessions: sessions)
                     MedsTodayCard()
                     EnergyCard()
@@ -351,6 +352,54 @@ private struct SuggestionRow: View {
         .background(Theme.cardRaised, in: .rect(cornerRadius: 16))
         .accessibilityElement(children: .combine)
         .accessibilityHint(isStrength ? "Opens the workout builder" : "")
+    }
+}
+
+// MARK: - Check-in
+
+private struct CheckInCard: View {
+    @Environment(CheckInStore.self) private var store
+    @Environment(AppRouter.self) private var router
+
+    var body: some View {
+        let morningDone = store.morning() != nil
+        let eveningDone = store.evening() != nil
+        VStack(alignment: .leading, spacing: 12) {
+            CardLabel(text: "Daily check-in", color: Theme.sleep)
+            HStack(spacing: 10) {
+                button("Morning", icon: "sun.max.fill", done: morningDone, colors: [Theme.strainLight, Theme.strain]) {
+                    router.checkIn = .morning
+                }
+                button("Evening", icon: "moon.stars.fill", done: eveningDone, colors: [Theme.sleepLight, Theme.sleep]) {
+                    router.checkIn = .evening
+                }
+            }
+            if let advice = store.advice {
+                Label {
+                    Text(advice).font(.subheadline).foregroundStyle(Theme.primaryText)
+                } icon: {
+                    Image(systemName: "sparkle").foregroundStyle(Theme.sleep)
+                }
+            }
+        }
+        .card(tint: Theme.sleep)
+    }
+
+    private func button(_ title: String, icon: String, done: Bool, colors: [Color], action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: done ? "checkmark.circle.fill" : icon)
+                Text(done ? "\(title) done" : title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(done ? Theme.primaryText : .white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(done ? AnyShapeStyle(Theme.cardRaised) : AnyShapeStyle(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)), in: .capsule)
+        }
+        .buttonStyle(.plain)
     }
 }
 

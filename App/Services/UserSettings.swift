@@ -90,6 +90,9 @@ final class UserSettings {
     var hrvReminderOn: Bool { didSet { defaults.set(hrvReminderOn, forKey: "hrvReminderOn") } }
     /// Minutes after midnight for the reminder (default 7:30).
     var hrvReminderMinutes: Int { didSet { defaults.set(hrvReminderMinutes, forKey: "hrvReminderMinutes") } }
+    var checkInRemindersOn: Bool { didSet { defaults.set(checkInRemindersOn, forKey: "checkInRemindersOn") } }
+    var morningCheckInMinutes: Int { didSet { defaults.set(morningCheckInMinutes, forKey: "morningCheckInMinutes") } }
+    var eveningCheckInMinutes: Int { didSet { defaults.set(eveningCheckInMinutes, forKey: "eveningCheckInMinutes") } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -108,6 +111,9 @@ final class UserSettings {
         healthFilledFields = Set(defaults.stringArray(forKey: "healthFilledFields") ?? [])
         hrvReminderOn = defaults.bool(forKey: "hrvReminderOn")
         hrvReminderMinutes = defaults.object(forKey: "hrvReminderMinutes") as? Int ?? 7 * 60 + 30
+        checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
+        morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
+        eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30
     }
 
     /// Fills the profile from Apple Health (only fields Health actually has).
