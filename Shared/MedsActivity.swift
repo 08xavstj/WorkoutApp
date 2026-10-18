@@ -24,7 +24,7 @@ nonisolated struct MedsActivityAttributes: ActivityAttributes {
 }
 
 /// "Taken" button on the Live Activity and widget. Runs in the app's process.
-nonisolated struct TakeDoseIntent: LiveActivityIntent {
+struct TakeDoseIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Mark dose taken"
     static let description = IntentDescription("Marks a medication dose as taken.")
 
