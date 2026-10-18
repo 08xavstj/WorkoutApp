@@ -55,15 +55,17 @@ enum Theme {
         }
     }
 
-    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
-        Color(uiColor: UIColor { traits in
+    /// SwiftUI resolves colors on a background render thread, so the provider
+    /// closure must not be tied to the main actor (that crashed on launch).
+    nonisolated static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { @Sendable traits in
             UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
         })
     }
 }
 
 private extension UIColor {
-    convenience init(hex: UInt32) {
+    nonisolated convenience init(hex: UInt32) {
         self.init(
             red: CGFloat((hex >> 16) & 0xFF) / 255,
             green: CGFloat((hex >> 8) & 0xFF) / 255,
