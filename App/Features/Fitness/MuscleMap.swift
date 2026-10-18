@@ -6,11 +6,22 @@ import AppCore
 @Observable
 final class MuscleModel {
     private(set) var states: [Muscle: MuscleRecovery.State] = [:]
+    private(set) var deload: DeloadAdvisor.Advice?
 
     var suggestedFocus: WorkoutFocus? { MuscleRecovery.suggestedFocus(states) }
 
-    func refresh(sessions: [WorkoutSession], library: ExerciseLibrary, health: HealthKitClient?) async {
+    func refresh(sessions: [WorkoutSession], library: ExerciseLibrary, health: HealthKitClient?, hrvBelowNormal: Bool = false) async {
         let now = Date.now
+        // Best estimated 1RM per exercise per session, for the deload check.
+        let sixWeeks = now.addingTimeInterval(-42 * 86_400)
+        var lifts: [DeloadAdvisor.LiftPoint] = []
+        for session in sessions where session.startedAt >= sixWeeks {
+            for exercise in session.exercises {
+                let best = exercise.sets.filter { $0.isCompleted && !$0.isWarmup }.map(\.estimatedOneRepMax).max() ?? 0
+                if best > 0 { lifts.append(.init(exercise: exercise.name, date: session.startedAt, estimatedOneRepMax: best)) }
+            }
+        }
+        deload = DeloadAdvisor.evaluate(lifts, hrvBelowNormal: hrvBelowNormal, now: now)
         let cutoff = now.addingTimeInterval(-10 * 86_400)
         var sets: [MuscleRecovery.WorkSet] = []
         for session in sessions where session.startedAt >= cutoff {

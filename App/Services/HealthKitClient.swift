@@ -44,6 +44,19 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.dietaryFatTotal),
             HKQuantityType(.dietaryFiber),
             HKQuantityType(.dietaryWater),
+            // Vitamins and minerals (Cronometer writes these).
+            HKQuantityType(.dietaryVitaminC),
+            HKQuantityType(.dietaryVitaminD),
+            HKQuantityType(.dietaryZinc),
+            HKQuantityType(.dietaryIron),
+            HKQuantityType(.dietaryMagnesium),
+            HKQuantityType(.dietaryPotassium),
+            HKQuantityType(.dietarySodium),
+            HKQuantityType(.dietaryCalcium),
+            HKQuantityType(.dietaryVitaminB12),
+            HKQuantityType(.dietaryFolate),
+            HKQuantityType(.dietaryVitaminA),
+            HKQuantityType(.dietarySelenium),
             HKObjectType.workoutType(),
             HKCharacteristicType(.dateOfBirth),
             HKCharacteristicType(.biologicalSex)
@@ -224,6 +237,64 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             }
             return SleepSample(stage: stage, start: sample.startDate, end: sample.endDate)
         }
+    }
+
+    /// Bedtime and wake time for each of the last `nights` nights (first and
+    /// last asleep sample), for sleep consistency.
+    @concurrent
+    func sleepNights(nights: Int = 7) async throws -> [SleepConsistency.Night] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        guard let start = calendar.date(byAdding: .day, value: -nights, to: today)?.addingTimeInterval(-6 * 3600) else { return [] }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        let asleepValues: Set<Int> = [
+            HKCategoryValueSleepAnalysis.asleepCore.rawValue, HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
+            HKCategoryValueSleepAnalysis.asleepREM.rawValue, HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue
+        ]
+        var byNight: [Date: (Date, Date)] = [:]
+        for sample in try await descriptor.result(for: store) where asleepValues.contains(sample.value) {
+            let night = calendar.startOfDay(for: sample.startDate.addingTimeInterval(6 * 3600))
+            let current = byNight[night]
+            byNight[night] = (min(current?.0 ?? sample.startDate, sample.startDate), max(current?.1 ?? sample.endDate, sample.endDate))
+        }
+        return byNight.keys.sorted().compactMap { night in
+            guard let (bed, wake) = byNight[night], wake.timeIntervalSince(bed) >= 2 * 3600 else { return nil }
+            return SleepConsistency.Night(bedtime: bed, wake: wake)
+        }
+    }
+
+    /// Average daily vitamins and minerals over the last `days` days, counting
+    /// only days with food logged (800+ kcal).
+    @concurrent
+    func nutrientAverages(days: Int = 7) async throws -> (averages: [Micronutrients.Nutrient: Double], daysLogged: Int) {
+        let today = Calendar.current.startOfDay(for: .now)
+        let energy = try await dailySeries(.dietaryEnergyConsumed, unit: .kilocalorie(), days: days + 1, cumulative: true)
+        let loggedDays = Set(energy.filter { $0.date < today && $0.value >= 800 }.map(\.date))
+        guard !loggedDays.isEmpty else { return ([:], 0) }
+        let milligram = HKUnit.gramUnit(with: .milli)
+        let microgram = HKUnit.gramUnit(with: .micro)
+        let types: [(Micronutrients.Nutrient, HKQuantityTypeIdentifier, HKUnit)] = [
+            (.vitaminC, .dietaryVitaminC, milligram), (.vitaminD, .dietaryVitaminD, microgram),
+            (.zinc, .dietaryZinc, milligram), (.iron, .dietaryIron, milligram),
+            (.magnesium, .dietaryMagnesium, milligram), (.potassium, .dietaryPotassium, milligram),
+            (.sodium, .dietarySodium, milligram), (.calcium, .dietaryCalcium, milligram),
+            (.vitaminB12, .dietaryVitaminB12, microgram), (.folate, .dietaryFolate, microgram),
+            (.vitaminA, .dietaryVitaminA, microgram), (.selenium, .dietarySelenium, microgram),
+            (.fiber, .dietaryFiber, .gram()),
+        ]
+        var averages: [Micronutrients.Nutrient: Double] = [:]
+        for (nutrient, identifier, unit) in types {
+            let series = (try? await dailySeries(identifier, unit: unit, days: days + 1, cumulative: true)) ?? []
+            let logged = series.filter { loggedDays.contains($0.date) }
+            // Nothing at all usually means the food app doesn't export this nutrient.
+            guard !logged.isEmpty else { continue }
+            averages[nutrient] = logged.map(\.value).reduce(0, +) / Double(loggedDays.count)
+        }
+        return (averages, loggedDays.count)
     }
 
     /// Average hours asleep over the last `nights` nights (overlapping

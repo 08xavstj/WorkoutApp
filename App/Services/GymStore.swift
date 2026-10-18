@@ -24,7 +24,9 @@ final class GymStore {
         }
     }
 
-    var planner: WorkoutPlanner { WorkoutPlanner(gym: profile) }
+    /// Set from the user's goals (rep ranges and effort).
+    var style: TrainingStyle = .balanced
+    var planner: WorkoutPlanner { WorkoutPlanner(gym: profile, style: style) }
 
     func save(_ profile: GymProfile) {
         self.profile = profile

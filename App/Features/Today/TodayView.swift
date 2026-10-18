@@ -27,12 +27,15 @@ struct TodayView: View {
                     if let error = metrics.errorMessage {
                         HealthAccessCard(message: error)
                     }
+                    IllnessAlertCard()
                     ScoresCard()
+                    GoalsPromptCard()
                     CheckInCard()
                     ConditionsCard()
                     StrainGoalCard(sessions: sessions)
                     MedsTodayCard()
                     EnergyCard()
+                    HydrationCard()
                     HealthMonitor(onEnterHRV: { showingHRVEntry = true })
                     askCoachCard
                 }
@@ -368,6 +371,140 @@ private struct SuggestionRow: View {
     }
 }
 
+// MARK: - Illness watch
+
+private struct IllnessAlertCard: View {
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(CheckInStore.self) private var checkIns
+
+    var body: some View {
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
+        if let alert = vitals.illnessAlert(
+            metrics: metrics,
+            drinksLastNight: checkIns.evening(on: yesterday)?.drinks,
+            reportedSymptoms: checkIns.morning()?.isSick ?? false
+        ) {
+            let color = alert.level == .likely ? Theme.recoveryLow : Theme.recoveryModerate
+            let immune = Micronutrients.notes(metrics.micronutrients, area: .immune)
+            VStack(alignment: .leading, spacing: 10) {
+                Label(alert.level == .likely ? "Your body may be fighting something" : "Vitals above your normal",
+                      systemImage: "cross.case.fill")
+                    .font(.headline)
+                    .foregroundStyle(color)
+                Text(alert.message)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                HStack(spacing: 6) {
+                    ForEach(alert.signals, id: \.self) { Chip(text: $0, color: color) }
+                }
+                if !immune.isEmpty {
+                    Text("From your food log: " + immune.joined(separator: " ") + " Vitamin C, vitamin D and zinc support immune defences.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Text("Not a diagnosis. See a doctor if you feel unwell or it lasts.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .card(tint: color)
+        }
+    }
+}
+
+// MARK: - Goals
+
+private struct GoalsPromptCard: View {
+    @Environment(UserSettings.self) private var settings
+    @State private var showingGoals = false
+
+    var body: some View {
+        Group {
+            if !settings.goalsSet {
+                Button {
+                    showingGoals = true
+                } label: {
+                    HStack(spacing: 12) {
+                        IconBadge(systemName: "target", color: Theme.lifting, size: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Set your goals")
+                                .font(.headline)
+                                .foregroundStyle(Theme.primaryText)
+                            Text("Lose, maintain or gain; build muscle, strength or stamina. Sets your calories, protein and workouts.")
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.secondaryText)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.secondaryText)
+                    }
+                    .card(tint: Theme.lifting)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .sheet(isPresented: $showingGoals) { GoalsView() }
+    }
+}
+
+// MARK: - Water
+
+private struct HydrationCard: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(ConditionsModel.self) private var conditions
+    @Environment(UserSettings.self) private var settings
+
+    var body: some View {
+        let drank = metrics.nutritionToday?.waterLiters ?? 0
+        let exerciseMinutes = Double(metrics.activities.map(\.minutes).reduce(0, +))
+        let target = Hydration.target(sex: settings.sex, exerciseMinutes: exerciseMinutes, feelsLikeC: conditions.current?.feelsLike)
+        let assessment = Hydration.assess(drank: drank, target: target, hour: Calendar.current.component(.hour, from: .now))
+        let color: Color = switch assessment.status {
+        case .low: Theme.recoveryModerate
+        case .onTrack: Theme.oxygen
+        case .high: Theme.recoveryLow
+        }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                CardLabel(text: "Water", color: Theme.oxygen)
+                Spacer()
+                Chip(text: assessment.status.rawValue, color: color)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(drank.formatted(.number.precision(.fractionLength(1))))
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.primaryText)
+                Text("of \(target.liters.formatted(.number.precision(.fractionLength(1)))) L")
+                    .font(.headline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.track)
+                    Capsule()
+                        .fill(LinearGradient(colors: Theme.oxygenColors, startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(10, geo.size.width * min(1, drank / max(target.liters, 0.1))))
+                    // Where you'd be by now on an even pace.
+                    Rectangle()
+                        .fill(Theme.primaryText.opacity(0.35))
+                        .frame(width: 2, height: 16)
+                        .offset(x: geo.size.width * min(1, assessment.expectedByNow / max(target.liters, 0.1)) - 1)
+                }
+            }
+            .frame(height: 12)
+            ForEach(assessment.effects, id: \.self) { effect in
+                Text(effect)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Text("Target: \(target.base.formatted()) L base\(target.exercise > 0 ? " + \(target.exercise.formatted(.number.precision(.fractionLength(1)))) L for training" : "")\(target.heat > 0 ? " + \(target.heat.formatted()) L for heat" : ""). Includes water from food, as Cronometer counts it. The line marks an even pace for this time of day.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .card(tint: Theme.oxygen)
+    }
+}
+
 // MARK: - Weather
 
 private struct ConditionsCard: View {
@@ -549,20 +686,21 @@ private struct EnergyCard: View {
                 }
                 .accessibilityLabel("How calories are calculated")
             }
-            if let summary {
+            if let summary, let target = metrics.calorieTarget {
+                let left = target - (summary.eaten ?? 0)
                 HStack(alignment: .center, spacing: 20) {
                     GradientRing(
-                        progress: (summary.eaten ?? 0) / max(summary.projected, 1),
+                        progress: (summary.eaten ?? 0) / max(target, 1),
                         colors: Theme.nutritionColors,
                         lineWidth: 13
                     ) {
                         VStack(spacing: 0) {
-                            Text(whole(summary.left).formatted())
+                            Text(whole(abs(left)).formatted())
                                 .font(.system(size: 24, weight: .bold, design: .rounded))
                                 .monospacedDigit()
-                                .foregroundStyle(summary.left >= 0 ? Theme.primaryText : Theme.recoveryModerate)
+                                .foregroundStyle(left >= 0 ? Theme.primaryText : Theme.recoveryModerate)
                                 .minimumScaleFactor(0.6)
-                            Text(summary.left >= 0 ? "kcal left" : "kcal over")
+                            Text(left >= 0 ? "kcal left" : "kcal over")
                                 .font(.caption2)
                                 .foregroundStyle(Theme.secondaryText)
                         }
@@ -572,12 +710,10 @@ private struct EnergyCard: View {
                     VStack(alignment: .leading, spacing: 12) {
                         CalorieLine(icon: "fork.knife", color: Theme.nutrition, label: "Eaten", value: summary.eaten ?? 0)
                         CalorieLine(icon: "flame.fill", color: Theme.strain, label: "Burned so far", value: summary.burnedSoFar)
-                        CalorieLine(icon: "moon.fill", color: Theme.sleep, label: "Burn by midnight", value: summary.projected)
+                        CalorieLine(icon: "target", color: Theme.sleep, label: metrics.goals == nil ? "Maintenance" : "Daily target", value: target)
                     }
                 }
-                Text(summary.left >= 0
-                     ? "Eat about \(whole(summary.left).formatted()) more kcal today to maintain your weight."
-                     : "You've eaten \(whole(-summary.left).formatted()) kcal more than you'll burn today.")
+                Text(targetExplanation(left: left))
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             } else {
@@ -613,6 +749,19 @@ private struct EnergyCard: View {
             CalorieDetailsSheet()
                 .presentationDetents([.medium, .large])
         }
+    }
+
+    private func targetExplanation(left: Double) -> String {
+        let source = metrics.maintenance.map { "Your maintenance is \(whole($0.maintenance).formatted()) kcal, worked out from \($0.loggedDays) days of food and your weight trend." }
+            ?? "Maintenance is estimated from your watch until there are 2 weeks of food logs and weigh-ins."
+        let goal: String
+        if let goals = metrics.goals {
+            goal = "Goal: \(goals.title.lowercased())."
+        } else {
+            goal = "Set a goal in Settings to get a target."
+        }
+        let today = left >= 0 ? "About \(whole(left).formatted()) kcal left today." : "\(whole(-left).formatted()) kcal over today's target."
+        return "\(today) \(goal) \(source)"
     }
 }
 
@@ -696,12 +845,23 @@ private struct CalorieDetailsSheet: View {
                              : "Estimated: resting from \(metrics.energy?.bmrMethod ?? "your profile"), activity from heart rate and steps, plus about 10% of food eaten for digestion.")
                     }
                     Section {
-                        row("Eaten", summary.eaten ?? 0)
-                        row(summary.left >= 0 ? "Left to maintain" : "Over", abs(summary.left), bold: true)
+                        if let maintenance = metrics.maintenance {
+                            row("Maintenance (your data)", maintenance.maintenance, bold: true)
+                            row("Average eaten", maintenance.averageIntake)
+                            LabeledContent("Weight trend", value: "\(maintenance.weeklyChangeKg >= 0 ? "+" : "")\(maintenance.weeklyChangeKg.formatted(.number.precision(.fractionLength(2)))) kg/week")
+                        } else {
+                            Text("Needs 14+ days of food logged and 4+ weigh-ins over 10+ days in the last 4 weeks.")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        if let target = metrics.calorieTarget {
+                            row("Daily target", target, bold: true)
+                        }
+                        row("Eaten today", summary.eaten ?? 0)
                     } header: {
-                        Text("Food")
+                        Text("Your real maintenance")
                     } footer: {
-                        Text("Food comes from Cronometer through Apple Health. Eating less than \"burn by midnight\" means a deficit (weight loss over time).")
+                        Text("Wrist trackers are off by over 30% on calories burned, on average. Comparing what you eat (Cronometer) with how your weight moves gives a truer number: each kg of weight change is about 7,700 kcal.")
                     }
                 }
             }

@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var showingGym = false
     @State private var showingMeds = false
     @State private var showingLocation = false
+    @State private var showingGoals = false
 
     /// " · Health" when Apple Health filled this field.
     private func source(_ field: String) -> String {
@@ -50,6 +51,11 @@ struct SettingsView: View {
                         showingLocation = true
                     } label: {
                         LabeledContent("Where you live", value: settings.hasLocation ? settings.placeName : "Not set")
+                    }
+                    Button {
+                        showingGoals = true
+                    } label: {
+                        LabeledContent("Goals", value: settings.goalsSet ? settings.goals.title : "Not set")
                     }
                 } header: {
                     Text("You")
@@ -203,6 +209,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showingGym) { MyGymView() }
             .sheet(isPresented: $showingMeds) { MedicationsView() }
             .sheet(isPresented: $showingLocation) { LocationPicker() }
+            .sheet(isPresented: $showingGoals) { GoalsView() }
         }
     }
 }

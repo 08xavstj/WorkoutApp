@@ -13,6 +13,8 @@ struct CoachView: View {
     @Environment(MedicationsModel.self) private var medications
     @Environment(CheckInStore.self) private var checkIns
     @Environment(ConditionsModel.self) private var conditions
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(MuscleModel.self) private var muscles
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var draft = ""
@@ -217,7 +219,7 @@ struct CoachView: View {
             plan = gym.planner.plan(
                 focus: resolvedFocus,
                 minutes: minutes ?? lastPlan?.minutes ?? 45,
-                recovery: metrics.recovery?.score,
+                recovery: metrics.recoveryForTraining,
                 history: LiftHistory.make(from: sessions, unit: gym.profile.unit)
             )
         }
@@ -229,7 +231,41 @@ struct CoachView: View {
         snapshot.checkIns = checkIns.coachSummary
         snapshot.name = settings.name.isEmpty ? nil : settings.name
         snapshot.weather = conditions.coachSummary(place: settings.placeName)
+        snapshot.health = healthSummary
         await coach.send(text, snapshot: snapshot, settings: settings, plan: plan)
+    }
+}
+
+extension CoachView {
+    /// Everything newer the app knows, in a few lines for the coach.
+    var healthSummary: String {
+        var lines: [String] = []
+        if settings.goalsSet {
+            var line = "Goal: \(settings.goals.title)"
+            if let target = metrics.calorieTarget { line += ", calorie target \(whole(target)) kcal/day" }
+            if let protein = metrics.proteinTarget { line += ", protein \(whole(protein)) g/day" }
+            lines.append(line + ".")
+        }
+        if let maintenance = metrics.maintenance {
+            lines.append("Measured maintenance \(whole(maintenance.maintenance)) kcal/day from \(maintenance.loggedDays) days of food logs; weight trend \(maintenance.weeklyChangeKg.formatted(.number.precision(.fractionLength(2)))) kg/week.")
+        }
+        if let trend = metrics.recovery?.hrvTrend {
+            lines.append("7-day HRV \(whole(trend.average)) ms, normal range \(whole(trend.normalRange.lowerBound))-\(whole(trend.normalRange.upperBound)) ms (\(trend.status.rawValue)).\(metrics.trainEasyToday ? " HRV-guided: today should be easy." : "")")
+        }
+        if let consistency = metrics.sleepConsistency { lines.append("Sleep consistency \(consistency)/100.") }
+        if let water = metrics.nutritionToday?.waterLiters { lines.append("Water today \(water.formatted(.number.precision(.fractionLength(1)))) L.") }
+        let lowNutrients = metrics.micronutrients.filter { $0.kind != .ok }
+        if !lowNutrients.isEmpty {
+            lines.append("Vitamins/minerals (7-day avg vs target): " + lowNutrients.map { "\($0.nutrient.name) \(Int($0.percentOfTarget.rounded()))% (\($0.kind.rawValue))" }.joined(separator: ", ") + ".")
+        }
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
+        if let alert = vitals.illnessAlert(metrics: metrics, drinksLastNight: checkIns.evening(on: yesterday)?.drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false) {
+            lines.append("Illness watch (\(alert.level == .likely ? "likely" : "watch")): " + alert.signals.joined(separator: ", ") + ".")
+        }
+        if let deload = muscles.deload { lines.append("Deload suggested: stalled " + deload.stalledLifts.joined(separator: ", ") + ".") }
+        let tired = muscles.states.values.filter { $0.status == .fatigued }.map(\.muscle.name)
+        if !tired.isEmpty { lines.append("Fatigued muscles: " + tired.sorted().joined(separator: ", ") + ".") }
+        return lines.joined(separator: "\n")
     }
 }
 

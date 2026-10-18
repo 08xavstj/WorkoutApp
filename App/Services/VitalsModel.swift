@@ -11,6 +11,7 @@ final class VitalsModel {
 
     enum Category: String, CaseIterable, Identifiable {
         case heart = "Heart"
+        case sleep = "Sleep"
         case breathing = "Breathing & temperature"
         case activity = "Activity"
         case body = "Body"
@@ -38,6 +39,8 @@ final class VitalsModel {
     private(set) var bloodOxygen: Double?
     private(set) var intensityMinutes: IntensityMinutes.Result?
     private(set) var bodyAge: BodyAge.Result?
+    @ObservationIgnored private var respirationHistory: [DatedValue] = []
+    @ObservationIgnored private var wristTemperatureHistory: [DatedValue] = []
     private(set) var isLoading = false
     @ObservationIgnored private var isRefreshing = false
 
@@ -52,7 +55,8 @@ final class VitalsModel {
     /// - Parameters:
     ///   - profile: today's heart-rate profile (from the main refresh), if known.
     ///   - sessions: gym sessions logged in this app.
-    func refresh(health: HealthKitClient, settings: UserSettings, profile: HeartRateProfile?, sessions: [StrengthSessionSummary]) async {
+    func refresh(health: HealthKitClient, settings: UserSettings, profile: HeartRateProfile?, sessions: [StrengthSessionSummary],
+                 sleepConsistency: Int? = nil, sleepSpreadMinutes: Double? = nil) async {
         guard health.isAvailable, !isRefreshing else { return }
         isRefreshing = true
         isLoading = true
@@ -197,13 +201,16 @@ final class VitalsModel {
             gaugeRange: 85...100
         ))
         result.append(makeStat(
-            "respiration", .breathing, "Respiration", "wind", series: get(try? await respiration), unit: "brpm", digits: 1,
+            "respiration", .breathing, "Respiration", "wind", series: respirationSeries, unit: "brpm", digits: 1,
             status: { (12...20).contains($0) ? "Normal" : "Unusual" },
             tone: { (12...20).contains($0) ? .good : .caution },
             gaugeRange: 8...24
         ))
         let wrist = get(try? await wristTemp)
         let body = get(try? await bodyTemp)
+        let respirationSeries = get(try? await respiration)
+        respirationHistory = respirationSeries
+        wristTemperatureHistory = wrist
         if !wrist.isEmpty || body.isEmpty {
             let baseline = wrist.dropLast().suffix(14).map(\.value)
             let mean = baseline.isEmpty ? nil : baseline.reduce(0, +) / Double(baseline.count)
@@ -256,9 +263,17 @@ final class VitalsModel {
         let unit = settings.weightUnit
         let rawWeight = get(try? await weight)
         let weightSeries = rawWeight.map { DatedValue(date: $0.date, value: unit.display($0.value)) }
-        var weightStat = makeStat("weight", .body, "Weight", "scalemass.fill", series: weightSeries, unit: unit.rawValue, digits: 1)
-        if !weightSeries.isEmpty {
-            weightStat.status = Biomarkers.trend(weightSeries.suffix(30).map(\.value), threshold: 0.005).rawValue.capitalized
+        // Weight as a smoothed trend: daily readings swing 1-2 kg with water and food.
+        let trendKg = WeightTrend.smooth(rawWeight.map { DayValue(date: $0.date, value: $0.value) })
+        let trendSeries = trendKg.map { DatedValue(date: $0.date, value: unit.display($0.value)) }
+        var weightStat = makeStat("weight", .body, "Weight trend", "scalemass.fill", series: trendSeries, unit: unit.rawValue, digits: 1)
+        let monthAgo = now.addingTimeInterval(-28 * 86_400)
+        if let weekly = WeightTrend.weeklyChange(rawWeight.filter { $0.date >= monthAgo }.map { DayValue(date: $0.date, value: $0.value) }) {
+            let shown = unit.display(abs(weekly))
+            weightStat.status = abs(weekly) < 0.05 ? "Steady" : "\(weekly < 0 ? "−" : "+")\(shown.formatted(.number.precision(.fractionLength(1)))) \(unit.rawValue)/week"
+        }
+        if let lastReading = weightSeries.last {
+            weightStat.footnote = "Smoothed trend. Last scale reading: \(lastReading.value.formatted(.number.precision(.fractionLength(1)))) \(unit.rawValue). Daily weight swings 1-2 kg with water and food, so the trend is the number to watch."
         }
         result.append(weightStat)
         let fatSeries = get(try? await fat).map { DatedValue(date: $0.date, value: $0.value * 100) }
@@ -286,6 +301,23 @@ final class VitalsModel {
         }
         result.append(todayStat("water", "Water", "waterbottle.fill", series: get(try? await water), unit: "L", digits: 1, today: latestToday, category: .body))
 
+        // MARK: Sleep
+        let averageSleep = try? await sleepAverage
+        result.append(Stat(
+            id: "sleepAverage", category: .sleep, title: "Sleep, 7-night average", icon: "bed.double.fill",
+            value: averageSleep.map { Duration.seconds($0 * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
+            unit: "", status: averageSleep.map { $0 >= 7 ? "Enough" : "Short" }, tone: (averageSleep ?? 8) >= 7 ? .good : .caution,
+            gauge: averageSleep.map { min(1, $0 / 9) }
+        ))
+        result.append(Stat(
+            id: "consistency", category: .sleep, title: "Sleep consistency", icon: "clock.arrow.circlepath",
+            value: sleepConsistency.map { "\($0)" }, unit: "/ 100",
+            status: sleepSpreadMinutes.map { "Bed & wake vary ~\(Int($0.rounded())) min" },
+            tone: (sleepConsistency ?? 100) >= 70 ? .good : .caution,
+            gauge: sleepConsistency.map { Double($0) / 100 },
+            footnote: "Going to bed and waking at regular times predicted lower mortality more strongly than sleep length in 61,000 UK Biobank adults (Windred et al., Sleep 2024). It's 15% of your sleep score."
+        ))
+
         stats = result
 
         // Body age from the same data (30-day averages where it helps).
@@ -299,7 +331,7 @@ final class VitalsModel {
             sex: settings.sex,
             vo2Max: vo2Series.last?.value,
             restingHeartRate: average(rhrSeries, last: 14),
-            sleepHours: try? await sleepAverage,
+            sleepHours: averageSleep,
             dailySteps: average(fullDaySteps, last: 30),
             bodyFatPercent: fatSeries.last?.value,
             bmi: bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm)
@@ -310,6 +342,42 @@ final class VitalsModel {
         guard let weightKg, heightCm > 100 else { return nil }
         let meters = heightCm / 100
         return weightKg / (meters * meters)
+    }
+
+    // MARK: - Illness watch
+
+    /// Compares today's resting heart rate, breathing rate and temperature
+    /// with your normal.
+    func illnessAlert(metrics: DailyMetricsModel, drinksLastNight: Int?, reportedSymptoms: Bool) -> IllnessWatch.Alert? {
+        let respiration = respirationHistory.filter { !Calendar.current.isDateInToday($0.date) }.map(\.value)
+        let respirationBaseline = Self.meanSD(respiration)
+        let rhrBaseline: (mean: Double, sd: Double)? = {
+            guard let mean = metrics.baseline?.meanRHR, let sd = metrics.baseline?.sdRHR, (metrics.baseline?.nights ?? 0) >= 7 else { return nil }
+            return (mean, sd)
+        }()
+        var temperatureDelta: Double?
+        if let last = wristTemperatureHistory.last, Calendar.current.isDateInToday(last.date) {
+            let previous = wristTemperatureHistory.dropLast().suffix(14).map(\.value)
+            if previous.count >= 5 { temperatureDelta = last.value - previous.reduce(0, +) / Double(previous.count) }
+        }
+        return IllnessWatch.evaluate(.init(
+            restingHeartRate: metrics.restingHeartRate,
+            rhrBaseline: rhrBaseline,
+            respiratoryRate: metrics.respiratoryRate,
+            respiratoryBaseline: respiration.count >= 7 ? respirationBaseline : nil,
+            temperatureDelta: temperatureDelta,
+            hrvChangePercent: metrics.recovery?.hrvChangePercent,
+            drinksLastNight: drinksLastNight,
+            yesterdayStrain: metrics.yesterdayStrain,
+            reportedSymptoms: reportedSymptoms
+        ))
+    }
+
+    private static func meanSD(_ values: [Double]) -> (mean: Double, sd: Double)? {
+        guard values.count >= 2 else { return nil }
+        let mean = values.reduce(0, +) / Double(values.count)
+        let variance = values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count - 1)
+        return (mean, sqrt(variance))
     }
 
     // MARK: - Building stats

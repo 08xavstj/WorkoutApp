@@ -108,6 +108,7 @@ struct RootView: View {
     @Environment(MuscleModel.self) private var muscles
     @Environment(ConditionsModel.self) private var conditions
     @Environment(ExerciseLibrary.self) private var library
+    @Environment(GymStore.self) private var gym
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(AppRefresher.self) private var refresher
     @Environment(\.healthClient) private var health
@@ -203,6 +204,7 @@ struct RootView: View {
         .onChange(of: settings.hrvReminderOn) { scheduleHRVReminder() }
         .onChange(of: settings.hrvReminderMinutes) { scheduleHRVReminder() }
         .onChange(of: settings.checkInRemindersOn) { scheduleCheckInReminders() }
+        .onChange(of: settings.goals) { Task { await refreshMetrics() } }
         .onChange(of: settings.morningCheckInMinutes) { scheduleCheckInReminders() }
         .onChange(of: settings.eveningCheckInMinutes) { scheduleCheckInReminders() }
         .onChange(of: finishedSessionCount) {
@@ -233,12 +235,15 @@ struct RootView: View {
             .filter { !$0.isActive && $0.startedAt >= cutoff }
             .map(\.strainSummary)
         await settings.syncProfile(from: health)
-        metrics.proteinGramsPerKg = medications.proteinGramsPerKg
+        let goalProtein = settings.goalsSet ? GoalPlanner.proteinPerKg(settings.goals) : 1.6
+        metrics.proteinGramsPerKg = max(goalProtein, medications.proteinGramsPerKg)
+        gym.style = settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
-        await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent)
+        await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
+                             sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         checkIns.recordSleepScore(metrics.sleep?.score)
         await conditions.refresh(settings: settings)
-        await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health)
+        await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
         let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
         Reminders.updateWidget(WidgetSnapshot(
             updated: .now,

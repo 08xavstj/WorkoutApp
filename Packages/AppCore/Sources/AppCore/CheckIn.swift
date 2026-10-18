@@ -122,14 +122,17 @@ public struct CheckInDay: Sendable, Equatable {
     public var hrv: Double?
     public var restingHeartRate: Double?
     public var sleepScore: Double?
+    /// Litres of water logged the day before this morning.
+    public var waterLiters: Double?
 
-    public init(morning: Date, evening: EveningCheckIn?, checkIn: MorningCheckIn?, hrv: Double?, restingHeartRate: Double?, sleepScore: Double?) {
+    public init(morning: Date, evening: EveningCheckIn?, checkIn: MorningCheckIn?, hrv: Double?, restingHeartRate: Double?, sleepScore: Double?, waterLiters: Double? = nil) {
         self.morning = morning
         self.evening = evening
         self.checkIn = checkIn
         self.hrv = hrv
         self.restingHeartRate = restingHeartRate
         self.sleepScore = sleepScore
+        self.waterLiters = waterLiters
     }
 }
 
@@ -196,6 +199,7 @@ public enum CheckInInsights {
         Factor(id: "cold", name: "Cold plunge") { $0.evening?.coldPlunge },
         Factor(id: "lateWorkout", name: "A hard workout within an hour of bed") { $0.checkIn?.lateHardWorkout },
         Factor(id: "sick", name: "Feeling sick") { $0.checkIn.map(\.isSick) },
+        Factor(id: "lowWater", name: "Under 2 L of water") { $0.waterLiters.map { $0 < 2 } },
     ]
 
     /// Factors whose days differ by at least `minimumPercent`, with at least

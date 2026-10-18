@@ -113,7 +113,7 @@ struct WorkoutBuilderView: View {
 
     private func rebuild() {
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
-        plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recovery?.score, history: history)
+        plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history)
     }
 
     /// Replaces an exercise with the next option for the same movement.
@@ -246,7 +246,7 @@ struct PlannedExerciseRow: View {
                 Text(exercise.name)
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
-                Text("\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) @ RPE \(exercise.rpe.formatted())")
+                Text("\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · \(exercise.repsInReserve)")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                 if let load = exercise.load {

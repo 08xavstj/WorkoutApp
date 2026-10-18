@@ -88,9 +88,13 @@ final class CheckInStore {
     func refreshInsights(health: HealthKitClient, manualHRV: [Date: Double]) async {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
-        let vitals = DailyVitals.merging((try? await health.nightlyVitals(days: 90, endingOn: today)) ?? [], manualHRV: manualHRV)
+        let vitals = DailyVitals.merging((try? await health.nightlyVitals(days: 90, endingOn: today)) ?? [], manualHRV: manualHRV, manualOnlyHRV: true)
         var byMorning: [String: DailyVitals] = [:]
         for vital in vitals { byMorning[key(vital.date)] = vital }
+        var waterByDay: [String: Double] = [:]
+        for day in (try? await health.dailySeries(.dietaryWater, unit: .liter(), days: 91, cumulative: true)) ?? [] {
+            waterByDay[key(day.date)] = day.value
+        }
 
         var days: [CheckInDay] = []
         for offset in 0..<90 {
@@ -98,12 +102,14 @@ final class CheckInStore {
                   let previous = calendar.date(byAdding: .day, value: -1, to: morning) else { continue }
             let evening = saved.evenings[key(previous)]
             let checkIn = saved.mornings[key(morning)]
-            guard evening != nil || checkIn != nil else { continue }
+            let water = waterByDay[key(previous)]
+            guard evening != nil || checkIn != nil || water != nil else { continue }
             let vital = byMorning[key(morning)]
             days.append(CheckInDay(
                 morning: morning, evening: evening, checkIn: checkIn,
                 hrv: vital?.hrvMilliseconds, restingHeartRate: vital?.restingHeartRate,
-                sleepScore: saved.sleepScores[key(morning)]
+                sleepScore: saved.sleepScores[key(morning)],
+                waterLiters: water
             ))
         }
         insights = CheckInInsights.analyze(days)

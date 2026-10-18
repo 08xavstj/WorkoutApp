@@ -14,7 +14,7 @@ enum TrainerSuggestions {
     static func make(metrics: DailyMetricsModel, settings: UserSettings, sessions: [WorkoutSession]) -> [Suggestion] {
         let planner = StrainPlanner()
         let focus = WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))
-        let rpe = WorkoutPlanner.targetRPE(recovery: metrics.recovery?.score)
+        let rpe = WorkoutPlanner.targetRPE(recovery: metrics.recoveryForTraining)
         let profile = metrics.heartRateProfile ?? settings.heartRateProfile(restingHeartRate: nil)
         var options: [StrainPlanner.Option] = []
         for minutes in [30, 45, 60] {
@@ -49,8 +49,12 @@ enum TrainerSuggestions {
         guard let recovery = metrics.recovery else {
             return ("Wear your watch to sleep tonight to get recovery and daily coaching.", nil)
         }
-        let target = StrainCalculator.targetStrain(forRecovery: recovery.score)
+        guard let target = metrics.targetStrain else { return ("", nil) }
         let range = "\(Int(target.lowerBound))–\(Int(target.upperBound))%"
+        if metrics.trainEasyToday, let trend = recovery.hrvTrend {
+            return ("Your 7-day HRV (\(Int(trend.average.rounded())) ms) is below your normal range (\(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms). Make today easy: technique, mobility or Zone 2,",
+                    "under \(Int(target.upperBound))% strain.")
+        }
         let sleptWell = (metrics.sleep?.score ?? 80) >= 75
         switch recovery.status {
         case .high:

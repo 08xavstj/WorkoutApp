@@ -55,6 +55,8 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     var name: String?
     /// Local weather, air quality and daylight.
     var weather: String?
+    /// Goals, maintenance, HRV trend, hydration, vitamins/minerals, illness and deload notes.
+    var health: String?
 
     /// Food totals from Apple Health (logged in Cronometer or another food app).
     nonisolated struct Nutrition: Codable, Sendable, Equatable {
@@ -91,6 +93,7 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
         lines.append("Date: \(date.formatted(date: .complete, time: .omitted))")
         if let name, !name.isEmpty { lines.append("The user's name is \(name).") }
         if let weather { lines.append(weather) }
+        if let health { lines.append(health) }
         if let checkIns { lines.append(checkIns) }
         if let medications, !medications.isEmpty {
             lines.append("Medications: " + medications.joined(separator: "; "))

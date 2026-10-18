@@ -19,6 +19,7 @@ final class DailyMetricsModel {
         var start: Date
         var strainAdded: Double
         var isStrength: Bool
+        var minutes: Int = 0
     }
 
     private(set) var strain: StrainCalculator.Result?
@@ -44,6 +45,22 @@ final class DailyMetricsModel {
     private(set) var deviceActiveToday: Double?
     /// Average resting calories a day from the watch (recent full days).
     private(set) var watchRestingPerDay: Double?
+    /// Maintenance calories from food log + weight trend, once there's enough data.
+    private(set) var maintenance: AdaptiveTDEE.Result?
+    /// kg per week from the weight trend.
+    private(set) var weightTrendWeekly: Double?
+    private(set) var goals: Goals?
+    private(set) var sex: BiologicalSex = .male
+    private(set) var micronutrients: [Micronutrients.Finding] = []
+    private(set) var sleepConsistency: Int?
+    private(set) var sleepSpreadMinutes: Double?
+
+    /// Daily calorie target from your goal (or maintenance when no goal is set).
+    var calorieTarget: Double? {
+        guard let base = maintenance?.maintenance ?? calories?.projected else { return nil }
+        guard let goals, let weight = bodyMassKg else { return base }
+        return GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: sex)
+    }
 
     /// One consistent set of calorie numbers for the Home card.
     struct CalorieSummary: Equatable {
@@ -119,8 +136,21 @@ final class DailyMetricsModel {
         return results
     }
 
+    /// Today's strain target. When the 7-day HRV average is below your normal
+    /// range, it's capped at an easy day (HRV-guided training).
     var targetStrain: ClosedRange<Double>? {
-        recovery.map { StrainCalculator.targetStrain(forRecovery: $0.score) }
+        guard let recovery else { return nil }
+        let target = StrainCalculator.targetStrain(forRecovery: recovery.score)
+        return trainEasyToday ? min(target.lowerBound, 20)...min(target.upperBound, 45) : target
+    }
+
+    /// HRV-guided training: the 7-day HRV average is below your normal range.
+    var trainEasyToday: Bool { recovery?.hrvTrend?.status == .below }
+
+    /// Recovery to plan workouts with (lowered on HRV-guided easy days).
+    var recoveryForTraining: Int? {
+        guard let score = recovery?.score else { return nil }
+        return trainEasyToday ? min(score, 30) : score
     }
 
     /// The strain a planned session would add on top of today's strain.
@@ -177,9 +207,15 @@ final class DailyMetricsModel {
             async let vitalsTask = health.nightlyVitals(days: 31, endingOn: today)
             async let sleepTask = health.sleepSamples(forNightEnding: today)
             async let workoutsTask = health.externalWorkouts(from: today, to: now)
+            async let nightsTask = health.sleepNights(nights: 7)
             let (healthVitals, sleepSamples, externalWorkouts) = try await (vitalsTask, sleepTask, workoutsTask)
+            let nights = (try? await nightsTask) ?? []
+            sleepConsistency = SleepConsistency.score(nights)
+            sleepSpreadMinutes = SleepConsistency.spreadMinutes(nights)
 
-            let vitals = DailyVitals.merging(healthVitals, manualHRV: manualHRV, calendar: calendar)
+            // Typed-in Garmin HRV (RMSSD) and Apple Health HRV (SDNN) aren't
+            // comparable, so once you enter HRV, only entered values are used.
+            let vitals = DailyVitals.merging(healthVitals, manualHRV: manualHRV, manualOnlyHRV: true, calendar: calendar)
             let healthHadHRVToday = healthVitals.contains {
                 calendar.isDate($0.date, inSameDayAs: today) && $0.hrvMilliseconds != nil
             }
@@ -231,7 +267,7 @@ final class DailyMetricsModel {
             cardioLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.cardioLoad))
             muscularLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.liftingLoad))
 
-            sleep = sleepCalculator.score(samples: sleepSamples, previousDayStrain: yesterdayStrain)
+            sleep = sleepCalculator.score(samples: sleepSamples, previousDayStrain: yesterdayStrain, consistency: sleepConsistency)
             recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: sleep?.score)
 
             // Today's activities: logged lifts plus workouts from other apps.
@@ -271,6 +307,20 @@ final class DailyMetricsModel {
             deviceActiveToday = device?.active
             let watchResting = try? await measuredResting
             watchRestingPerDay = watchResting
+            goals = settings.goalsSet ? settings.goals : nil
+            sex = settings.sex
+
+            // Real maintenance from the food log and weight trend.
+            async let intakeSeries = health.dailySeries(.dietaryEnergyConsumed, unit: .kilocalorie(), days: 35, cumulative: true)
+            async let weightSeries = health.dailySeries(.bodyMass, unit: .gramUnit(with: .kilo), days: 35, cumulative: false)
+            async let nutrientTask = health.nutrientAverages(days: 7)
+            let intake = ((try? await intakeSeries) ?? []).filter { $0.date < today }.map { DayValue(date: $0.date, value: $0.value) }
+            let weights = ((try? await weightSeries) ?? []).map { DayValue(date: $0.date, value: $0.value) }
+            maintenance = AdaptiveTDEE.estimate(intake: intake, weights: weights, now: now)
+            weightTrendWeekly = WeightTrend.weeklyChange(weights.filter { $0.date >= today.addingTimeInterval(-28 * 86_400) })
+            if let nutrients = try? await nutrientTask {
+                micronutrients = Micronutrients.assess(averages: nutrients.averages, daysLogged: nutrients.daysLogged, sex: settings.sex)
+            }
             let stepResult = try? await stepCounts
             steps = stepResult?.total
 
@@ -323,7 +373,8 @@ final class DailyMetricsModel {
                 detail: "\(minutes) min · \(session.workingSets) sets",
                 start: session.start,
                 strainAdded: contribution(load),
-                isStrength: true
+                isStrength: true,
+                minutes: minutes
             ))
         }
         for workout in external {
@@ -340,7 +391,8 @@ final class DailyMetricsModel {
             items.append(ActivityItem(
                 id: "w\(workout.start.timeIntervalSince1970)",
                 name: workout.name, detail: detail, start: workout.start,
-                strainAdded: contribution(load), isStrength: workout.isStrength
+                strainAdded: contribution(load), isStrength: workout.isStrength,
+                minutes: workout.minutes
             ))
         }
         return items.sorted { $0.start < $1.start }

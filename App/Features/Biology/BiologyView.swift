@@ -32,6 +32,7 @@ struct BiologyView: View {
                     BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
                     InsightsCard(insights: checkIns.insights, daysLeft: checkIns.daysUntilInsights)
                     hrvCard
+                    MicronutrientsCard(findings: metrics.micronutrients)
                     ForEach(VitalsModel.Category.allCases) { category in
                         SectionTitle(text: category.rawValue)
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
@@ -89,7 +90,8 @@ struct BiologyView: View {
         }
         let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now
         let recent = sessions.filter { !$0.isActive && $0.startedAt >= cutoff }.map(\.strainSummary)
-        await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent)
+        await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
+                             sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         await checkIns.refreshInsights(health: health, manualHRV: manual)
         await biology.refresh(health: health, settings: settings, manualHRV: manual, proteinTarget: metrics.proteinTarget)
     }
@@ -120,7 +122,20 @@ struct BiologyView: View {
                     }
                 }
                 .foregroundStyle(Theme.primaryText)
+                if let trend = metrics.recovery?.hrvTrend {
+                    let color: Color = trend.status == .below ? Theme.recoveryModerate : Theme.recoveryHigh
+                    Text("7-day average \(Int(trend.average.rounded())) ms · normal \(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms · \(trend.status == .below ? "below normal: train easy" : (trend.status == .above ? "above normal" : "in range"))")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(color)
+                }
                 Chart {
+                    if let trend = metrics.recovery?.hrvTrend {
+                        RectangleMark(
+                            yStart: .value("Normal low", trend.normalRange.lowerBound),
+                            yEnd: .value("Normal high", trend.normalRange.upperBound)
+                        )
+                        .foregroundStyle(Theme.recoveryHigh.opacity(0.10))
+                    }
                     RuleMark(y: .value("Baseline", baseline))
                         .foregroundStyle(Theme.secondaryText.opacity(0.5))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
@@ -165,6 +180,7 @@ struct VitalTile: View {
     static func colors(for category: VitalsModel.Category) -> [Color] {
         switch category {
         case .heart: Theme.heartColors
+        case .sleep: Theme.sleepColors
         case .breathing: Theme.oxygenColors
         case .activity: Theme.strainColors
         case .body: Theme.nutritionColors
@@ -458,5 +474,73 @@ struct InsightsCard: View {
             }
         }
         .card(tint: Theme.sleep)
+    }
+}
+
+/// Vitamins and minerals from the food log, 7-day averages vs daily targets.
+struct MicronutrientsCard: View {
+    let findings: [Micronutrients.Finding]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                CardLabel(text: "Vitamins & minerals", color: Theme.nutrition)
+                Spacer()
+                Text("7-day average")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if findings.isEmpty {
+                Text("Log food in Cronometer for at least 4 days (with Apple Health sync on) to see how your vitamins and minerals compare with daily targets.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            ForEach(findings) { finding in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(finding.nutrient.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.primaryText)
+                        Spacer()
+                        Text("\(amount(finding.average)) / \(amount(finding.target)) \(finding.nutrient.unit)")
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(color(finding))
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Theme.track)
+                            Capsule()
+                                .fill(color(finding).gradient)
+                                .frame(width: max(6, geo.size.width * min(1, finding.percentOfTarget / 100)))
+                        }
+                    }
+                    .frame(height: 6)
+                    if let effect = finding.effect {
+                        Text(effect)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
+            if !findings.isEmpty {
+                Text("Targets: US Dietary Reference Intakes (NIH). Only nutrients your food app shares are shown. Food logs undercount supplements unless you log them too.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .card(tint: Theme.nutrition)
+    }
+
+    private func color(_ finding: Micronutrients.Finding) -> Color {
+        switch finding.kind {
+        case .low: Theme.recoveryModerate
+        case .ok: Theme.recoveryHigh
+        case .high: Theme.recoveryLow
+        }
+    }
+
+    private func amount(_ value: Double) -> String {
+        value >= 100 ? "\(Int(value.rounded()))" : value.formatted(.number.precision(.fractionLength(0...1)))
     }
 }

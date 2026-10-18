@@ -29,9 +29,10 @@ struct FitnessView: View {
                     .padding(.top, 8)
                     WeekStrip(days: metrics.weekStrain)
                     DayStrainCard()
+                    DeloadCard()
                     SectionTitle(text: "Muscles")
                     MuscleMapCard()
-                    SectionTitle(text: "Training Load")
+                    SectionTitle(text: "Training Load", trailing: "This week vs usual")
                     HStack(spacing: 12) {
                         LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.oxygenLight, Theme.oxygen, Theme.sleep])
                         LoadCard(title: "Muscular", result: metrics.muscularLoad, colors: [Theme.strainLight, Theme.strain, Theme.lifting])
@@ -214,7 +215,7 @@ private struct LoadCard: View {
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.primaryText)
                     if let result, result.status != .calibrating {
-                        Text("optimal \(whole(result.optimal.lowerBound))–\(whole(result.optimal.upperBound.rounded(.up)))")
+                        Text("usual \(whole(result.usual.lowerBound))–\(whole(result.usual.upperBound.rounded(.up)))")
                             .font(.caption2)
                             .foregroundStyle(Theme.secondaryText)
                             .lineLimit(1)
@@ -240,23 +241,27 @@ private struct LoadCard: View {
 
     private func band(maximum: Double) -> ClosedRange<Double>? {
         guard let result, result.status != .calibrating else { return nil }
-        return (result.optimal.lowerBound / maximum)...(result.optimal.upperBound / maximum)
+        return (result.usual.lowerBound / maximum)...(result.usual.upperBound / maximum)
     }
 
+    /// A description of this week vs your usual 4 weeks (not an injury prediction).
     private var statusText: String {
+        let percent = result?.ratio.map { " · \(Int((($0 - 1) * 100).rounded()) >= 0 ? "+" : "")\(Int((($0 - 1) * 100).rounded()))%" } ?? ""
         switch result?.status {
-        case .optimal: "Optimal"
-        case .low: "Low"
-        case .high: "High"
-        default: "Calibrating"
+        case .lighter: return "Lighter than usual" + percent
+        case .steady: return "Steady" + percent
+        case .building: return "Building" + percent
+        case .spike: return "Big jump" + percent
+        default: return "Learning your usual"
         }
     }
 
     private var statusColor: Color {
         switch result?.status {
-        case .optimal: Theme.recoveryHigh
-        case .high: Theme.recoveryModerate
-        case .low: Theme.strain
+        case .steady: Theme.recoveryHigh
+        case .building: Theme.strain
+        case .spike: Theme.recoveryModerate
+        case .lighter: Theme.oxygen
         default: Theme.secondaryText
         }
     }
@@ -357,5 +362,30 @@ private struct ZonesCard: View {
             }
         }
         .card()
+    }
+}
+
+/// Suggests a lighter week when lifts stall (and HRV is down).
+private struct DeloadCard: View {
+    @Environment(MuscleModel.self) private var muscles
+
+    var body: some View {
+        if let advice = muscles.deload {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(advice.strong ? "Time for a deload week" : "Consider a lighter week", systemImage: "arrow.down.right.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(advice.strong ? Theme.recoveryModerate : Theme.oxygen)
+                Text(advice.message)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                Text("Stalled: " + advice.stalledLifts.joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                Text("Deloads are standard in strength training (Bell et al., Sports Med Open 2023 consensus): keep the weights, cut sets by about half, for about a week.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .card(tint: advice.strong ? Theme.recoveryModerate : Theme.oxygen)
+        }
     }
 }
