@@ -57,7 +57,9 @@ final class DailyMetricsModel {
 
     @ObservationIgnored private var todaysHeartRate: [HeartRateSample] = []
 
-    var proteinTarget: Double? { NutritionTargets.proteinGrams(bodyMassKg: bodyMassKg) }
+    /// 1.6 g/kg, raised by some medications (see MedicationsModel).
+    var proteinGramsPerKg = 1.6
+    var proteinTarget: Double? { NutritionTargets.proteinGrams(bodyMassKg: bodyMassKg, gramsPerKg: proteinGramsPerKg) }
 
     /// Strain per day, computed off the main thread.
     @concurrent

@@ -10,6 +10,7 @@ struct CoachView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(GymStore.self) private var gym
     @Environment(WorkoutLauncher.self) private var launcher
+    @Environment(MedicationsModel.self) private var medications
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var draft = ""
@@ -218,10 +219,11 @@ struct CoachView: View {
                 history: LiftHistory.make(from: sessions, unit: gym.profile.unit)
             )
         }
-        let snapshot = CoachSnapshot.make(
+        var snapshot = CoachSnapshot.make(
             metrics: metrics, sessions: sessions, unit: settings.weightUnit,
             gymSummary: gym.isConfigured ? gym.planner.gymSummary() : nil, plan: plan
         )
+        snapshot.medications = medications.coachSummary
         await coach.send(text, snapshot: snapshot, settings: settings, plan: plan)
     }
 }

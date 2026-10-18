@@ -13,6 +13,7 @@ struct WorkoutBuilderView: View {
     @Environment(GymStore.self) private var gym
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(WorkoutLauncher.self) private var launcher
+    @Environment(MedicationsModel.self) private var medications
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     @State private var focus: WorkoutFocus?
@@ -28,6 +29,12 @@ struct WorkoutBuilderView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if !gym.isConfigured {
                         gymPrompt
+                    }
+                    if medications.has(.tendonCaution) {
+                        Label("A medication you take raises tendon injury risk. Skip jumps and sprints, and don't add weight in big jumps.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.primaryText)
+                            .card(tint: Theme.recoveryModerate)
                     }
                     focusPicker
                     durationPicker

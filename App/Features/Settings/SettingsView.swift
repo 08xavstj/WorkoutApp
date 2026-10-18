@@ -7,41 +7,69 @@ struct SettingsView: View {
     @Environment(GymStore.self) private var gym
     @Environment(\.dismiss) private var dismiss
     @State private var showingGym = false
+    @State private var showingMeds = false
+
+    /// " · Health" when Apple Health filled this field.
+    private func source(_ field: String) -> String {
+        locked(field) ? " · Health" : ""
+    }
+
+    private var reminderTime: Binding<Date> {
+        Binding(
+            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(settings.hrvReminderMinutes * 60)) },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                settings.hrvReminderMinutes = (parts.hour ?? 7) * 60 + (parts.minute ?? 30)
+            }
+        )
+    }
+
+    private func locked(_ field: String) -> Bool {
+        settings.profileFromHealth && settings.healthFilledFields.contains(field)
+    }
 
     var body: some View {
         @Bindable var settings = settings
         NavigationStack {
             Form {
                 Section {
-                    Stepper("Age: \(settings.age)", value: $settings.age, in: 13...100)
-                    Picker("Sex", selection: $settings.sex) {
+                    Toggle("Fill in from Apple Health", isOn: $settings.profileFromHealth)
+                        .onChange(of: settings.profileFromHealth) { _, on in
+                            if on, let health { Task { await settings.syncProfile(from: health) } }
+                        }
+                    Stepper("Age: \(settings.age)\(source("age"))", value: $settings.age, in: 13...100)
+                        .disabled(locked("age"))
+                    Picker("Sex\(source("sex"))", selection: $settings.sex) {
                         Text("Male").tag(BiologicalSex.male)
                         Text("Female").tag(BiologicalSex.female)
                     }
+                    .disabled(locked("sex"))
                     Stepper(
                         settings.maxHeartRate == 0 ? "Max heart rate: estimate" : "Max heart rate: \(settings.maxHeartRate)",
                         value: $settings.maxHeartRate,
                         in: 0...230,
                         step: 1
                     )
-                    LabeledContent("Height (if not in Health)") {
+                    LabeledContent("Height\(source("height"))") {
                         TextField("cm", value: $settings.heightCm, format: .number)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
+                            .disabled(locked("height"))
                         Text("cm").foregroundStyle(Theme.secondaryText)
                     }
-                    LabeledContent("Weight (if not in Health)") {
+                    LabeledContent("Weight\(source("weight"))") {
                         TextField("kg", value: $settings.weightKg, format: .number)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
+                            .disabled(locked("weight"))
                         Text("kg").foregroundStyle(Theme.secondaryText)
                     }
                 } header: {
                     Text("Profile")
                 } footer: {
-                    Text("Age and sex set your heart-rate zones and calorie estimate. Leave max heart rate on \"estimate\" unless you've measured it. Height and weight from Apple Health are used first.")
+                    Text("Age and sex set your heart-rate zones, calorie estimate and body age. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in the Health app (profile → Health Details) or turn the switch off to type your own. Leave max heart rate on \"estimate\" unless you've measured it.")
                 }
 
                 Section {
@@ -54,6 +82,22 @@ struct SettingsView: View {
                     Text("Trainer")
                 } footer: {
                     Text("Your equipment, plates and dumbbells, so planned weights are ones you can load.")
+                }
+
+                Section {
+                    Toggle("Morning HRV reminder", isOn: $settings.hrvReminderOn)
+                    if settings.hrvReminderOn {
+                        DatePicker("Time", selection: reminderTime, displayedComponents: .hourAndMinute)
+                    }
+                    Button {
+                        showingMeds = true
+                    } label: {
+                        LabeledContent("Medications", value: "Reminders & effects")
+                    }
+                } header: {
+                    Text("Reminders")
+                } footer: {
+                    Text("The HRV reminder is skipped on days you've already logged it. Medication reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → WorkoutApp.")
                 }
 
                 Section("Appearance") {
@@ -127,6 +171,7 @@ struct SettingsView: View {
                 }
             }
             .sheet(isPresented: $showingGym) { MyGymView() }
+            .sheet(isPresented: $showingMeds) { MedicationsView() }
         }
     }
 }

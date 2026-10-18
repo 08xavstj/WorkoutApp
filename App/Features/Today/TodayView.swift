@@ -29,6 +29,7 @@ struct TodayView: View {
                     }
                     ScoresCard()
                     StrainGoalCard(sessions: sessions)
+                    MedsTodayCard()
                     EnergyCard()
                     HealthMonitor(onEnterHRV: { showingHRVEntry = true })
                     askCoachCard
@@ -350,6 +351,36 @@ private struct SuggestionRow: View {
         .background(Theme.cardRaised, in: .rect(cornerRadius: 16))
         .accessibilityElement(children: .combine)
         .accessibilityHint(isStrength ? "Opens the workout builder" : "")
+    }
+}
+
+// MARK: - Medications
+
+/// Today's doses with tap-to-take, shown when the user has medications.
+private struct MedsTodayCard: View {
+    @Environment(MedicationsModel.self) private var meds
+    @Environment(AppRouter.self) private var router
+
+    var body: some View {
+        if !meds.todayDoses.isEmpty || !meds.notes.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    CardLabel(text: "Medications", color: Theme.lifting)
+                    Spacer()
+                    Button("See all") { router.showMedications = true }
+                        .font(.subheadline.weight(.semibold))
+                }
+                if !meds.todayDoses.isEmpty {
+                    TodayDosesList()
+                }
+                ForEach(meds.notes.prefix(2), id: \.self) { note in
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            .card(tint: Theme.lifting)
+        }
     }
 }
 

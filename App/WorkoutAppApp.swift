@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import AppCore
+import UserNotifications
 
 @main
 struct WorkoutAppApp: App {
@@ -14,6 +15,8 @@ struct WorkoutAppApp: App {
     @State private var launcher = WorkoutLauncher()
     @State private var refresher = AppRefresher()
     @State private var recorder: LiveWorkoutRecorder
+    @State private var router: AppRouter
+    @State private var medications = MedicationsModel()
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -21,6 +24,11 @@ struct WorkoutAppApp: App {
         let health = HealthKitClient()
         self.health = health
         _recorder = State(initialValue: LiveWorkoutRecorder(store: health.store))
+        // Notification taps and "Taken" buttons arrive through the router.
+        let router = AppRouter()
+        _router = State(initialValue: router)
+        UNUserNotificationCenter.current().delegate = router
+        Reminders.registerCategories()
         do {
             container = try ModelContainer(
                 for: Schema(versionedSchema: WorkoutSchema.self),
@@ -44,6 +52,8 @@ struct WorkoutAppApp: App {
                 .environment(launcher)
                 .environment(refresher)
                 .environment(recorder)
+                .environment(router)
+                .environment(medications)
                 .environment(\.healthClient, health)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)
@@ -86,6 +96,8 @@ struct RootView: View {
     @Environment(CoachModel.self) private var coach
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(VitalsModel.self) private var vitals
+    @Environment(AppRouter.self) private var router
+    @Environment(MedicationsModel.self) private var medications
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(AppRefresher.self) private var refresher
     @Environment(\.healthClient) private var health
@@ -96,6 +108,7 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var launcher = launcher
+        @Bindable var router = router
         TabView(selection: $selection) {
             Tab("Home", systemImage: "house", value: AppTab.today) {
                 TodayView(askCoach: { question in
@@ -115,6 +128,16 @@ struct RootView: View {
             Tab("Add", systemImage: "plus", value: AppTab.add, role: .search) {
                 QuickAddView()
             }
+        }
+        .onOpenURL { url in
+            router.open(url)
+        }
+        .sheet(isPresented: $router.showHRVEntry) {
+            HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
+                .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $router.showMedications) {
+            MedicationsView()
         }
         .sheet(item: $launcher.builderRequest) { request in
             WorkoutBuilderView(initialFocus: request.focus, initialMinutes: request.minutes)
@@ -142,7 +165,10 @@ struct RootView: View {
                     refresher.refreshSoon()
                 }
             }
+            scheduleHRVReminder()
             await refreshMetrics()
+            await Reminders.scheduleDoses()
+            await Reminders.startMedsActivityIfNeeded()
             // Keep today's numbers current while the app is open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(300))
@@ -150,12 +176,23 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await refreshMetrics() } }
+            if phase == .active {
+                medications.reload()
+                Task {
+                    await refreshMetrics()
+                    await Reminders.scheduleDoses()
+                    await Reminders.startMedsActivityIfNeeded()
+                }
+            }
         }
+        .onChange(of: router.dosesVersion) { medications.reload() }
+        .onChange(of: settings.hrvReminderOn) { scheduleHRVReminder() }
+        .onChange(of: settings.hrvReminderMinutes) { scheduleHRVReminder() }
         .onChange(of: finishedSessionCount) {
             Task { await refreshMetrics() }
         }
         .onChange(of: hrvReadings.map(\.milliseconds)) {
+            scheduleHRVReminder()
             Task { await refreshMetrics() }
         }
     }
@@ -178,7 +215,24 @@ struct RootView: View {
         let recent = sessions
             .filter { !$0.isActive && $0.startedAt >= cutoff }
             .map(\.strainSummary)
+        await settings.syncProfile(from: health)
+        metrics.proteinGramsPerKg = medications.proteinGramsPerKg
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent)
+        let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
+        Reminders.updateWidget(WidgetSnapshot(
+            updated: .now,
+            hrv: todayHRV?.milliseconds ?? metrics.hrv,
+            hrvDate: (todayHRV != nil || metrics.hrv != nil) ? Calendar.current.startOfDay(for: .now) : nil,
+            recovery: metrics.recovery?.score,
+            strain: metrics.strain?.strain
+        ))
+    }
+
+    private func scheduleHRVReminder() {
+        let loggedToday = hrvReadings.contains { Calendar.current.isDateInToday($0.date) }
+        let enabled = settings.hrvReminderOn
+        let minutes = settings.hrvReminderMinutes
+        Task { await Reminders.scheduleHRV(enabled: enabled, minutes: minutes, loggedToday: loggedToday) }
     }
 }

@@ -10,6 +10,7 @@ struct QuickAddView: View {
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
     @State private var showingHRV = false
     @State private var showingGym = false
+    @State private var showingMeds = false
 
     var body: some View {
         NavigationStack {
@@ -27,6 +28,9 @@ struct QuickAddView: View {
                     action("Log overnight HRV", "From Garmin Connect's HRV Status", "waveform.path.ecg", Theme.recoveryHigh) {
                         showingHRV = true
                     }
+                    action("Medications", "Doses, reminders and how they affect training", "pills.fill", Theme.heart) {
+                        showingMeds = true
+                    }
                     action("My Gym", gym.isConfigured ? gym.profile.name : "Set up your equipment and weights", "slider.horizontal.3", Theme.sleep) {
                         showingGym = true
                     }
@@ -43,6 +47,7 @@ struct QuickAddView: View {
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .background(Theme.background)
             .navigationTitle("Add")
+            .sheet(isPresented: $showingMeds) { MedicationsView() }
             .sheet(isPresented: $showingHRV) {
                 HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
                     .presentationDetents([.medium])

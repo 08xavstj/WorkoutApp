@@ -1,4 +1,5 @@
 import Foundation
+import HealthKit
 import SwiftUI
 import AppCore
 
@@ -81,6 +82,14 @@ final class UserSettings {
     var heightCm: Double { didSet { defaults.set(heightCm, forKey: "heightCm") } }
     /// Used when Apple Health has no weight. 0 = not set.
     var weightKg: Double { didSet { defaults.set(weightKg, forKey: "weightKg") } }
+    /// Copy age, sex, height and weight from Apple Health whenever the app syncs.
+    var profileFromHealth: Bool { didSet { defaults.set(profileFromHealth, forKey: "profileFromHealth") } }
+    /// Which profile fields Apple Health filled in last time (shown in Settings).
+    var healthFilledFields: Set<String> { didSet { defaults.set(Array(healthFilledFields), forKey: "healthFilledFields") } }
+    /// Daily "log your HRV" reminder.
+    var hrvReminderOn: Bool { didSet { defaults.set(hrvReminderOn, forKey: "hrvReminderOn") } }
+    /// Minutes after midnight for the reminder (default 7:30).
+    var hrvReminderMinutes: Int { didSet { defaults.set(hrvReminderMinutes, forKey: "hrvReminderMinutes") } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -95,6 +104,38 @@ final class UserSettings {
         hasOnboarded = defaults.bool(forKey: "hasOnboarded")
         heightCm = defaults.double(forKey: "heightCm")
         weightKg = defaults.double(forKey: "weightKg")
+        profileFromHealth = defaults.object(forKey: "profileFromHealth") as? Bool ?? true
+        healthFilledFields = Set(defaults.stringArray(forKey: "healthFilledFields") ?? [])
+        hrvReminderOn = defaults.bool(forKey: "hrvReminderOn")
+        hrvReminderMinutes = defaults.object(forKey: "hrvReminderMinutes") as? Int ?? 7 * 60 + 30
+    }
+
+    /// Fills the profile from Apple Health (only fields Health actually has).
+    func syncProfile(from health: HealthKitClient) async {
+        guard profileFromHealth else { return }
+        let characteristics = health.profileCharacteristics()
+        let height = try? await health.latest(.height, unit: .meterUnit(with: .centi))
+        let weight = try? await health.latestBodyMassKg()
+        var filled: Set<String> = []
+        if let value = characteristics.age, (13...100).contains(value) {
+            if age != value { age = value }
+            filled.insert("age")
+        }
+        if let value = characteristics.sex {
+            if sex != value { sex = value }
+            filled.insert("sex")
+        }
+        if let value = height ?? nil, value > 100 {
+            let rounded = (value * 10).rounded() / 10
+            if heightCm != rounded { heightCm = rounded }
+            filled.insert("height")
+        }
+        if let value = weight ?? nil, value > 30 {
+            let rounded = (value * 10).rounded() / 10
+            if weightKg != rounded { weightKg = rounded }
+            filled.insert("weight")
+        }
+        if healthFilledFields != filled { healthFilledFields = filled }
     }
 
     func heartRateProfile(restingHeartRate: Double?) -> HeartRateProfile {

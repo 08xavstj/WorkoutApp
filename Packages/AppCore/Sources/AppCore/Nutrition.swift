@@ -38,8 +38,9 @@ public struct NutritionDay: Sendable, Equatable {
 public enum NutritionTargets {
     /// Daily protein for someone lifting regularly: 1.6 g per kg of body weight,
     /// the level above which extra protein stops adding muscle (Morton et al., 2018).
-    public static func proteinGrams(bodyMassKg: Double?) -> Double? {
+    /// `gramsPerKg` can be raised, e.g. to 2.0 on weight-loss medication.
+    public static func proteinGrams(bodyMassKg: Double?, gramsPerKg: Double = 1.6) -> Double? {
         guard let bodyMassKg, bodyMassKg > 0 else { return nil }
-        return (bodyMassKg * 1.6).rounded()
+        return (bodyMassKg * gramsPerKg).rounded()
     }
 }
