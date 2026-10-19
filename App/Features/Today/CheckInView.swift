@@ -201,12 +201,12 @@ struct CheckInView: View {
         )
     }
 
-    /// A time that's only saved once you add it, so the form never shows a
-    /// time you didn't enter.
-    @ViewBuilder
     /// When you usually fall asleep (minutes after midnight), for the caffeine cut-off.
     private var usualBedtime: Int { CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes) }
 
+    /// A time that's only saved once you add it, so the form never shows a
+    /// time you didn't enter.
+    @ViewBuilder
     private func optionalTime(_ title: String, _ keyPath: WritableKeyPath<EveningCheckIn, Int?>, default value: Int) -> some View {
         if evening[keyPath: keyPath] == nil {
             Button("Add \(title.lowercased()) time") { evening[keyPath: keyPath] = value }
