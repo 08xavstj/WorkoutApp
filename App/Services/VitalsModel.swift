@@ -259,7 +259,7 @@ final class VitalsModel {
         let respirationSeries = get(try? await respiration)
         respirationHistory = Array(respirationSeries.suffix(31))
         result.append(makeStat(
-            "respiration", .breathing, "Respiration", "wind", series: respirationSeries, unit: "brpm", digits: 1,
+            "respiration", .breathing, "Breathing rate", "wind", series: respirationSeries, unit: "/min", digits: 1,
             status: { (12...20).contains($0) ? "Normal" : "Unusual" },
             tone: { (12...20).contains($0) ? .good : .caution },
             gaugeRange: 8...24

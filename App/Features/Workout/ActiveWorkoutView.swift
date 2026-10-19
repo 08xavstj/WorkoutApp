@@ -92,7 +92,7 @@ struct ActiveWorkoutView: View {
                     name: session.name, startedAt: session.startedAt, exercise: next.exercise, detail: next.detail
                 )
                 // Live heart rate from AirPods Pro 3 or a Bluetooth strap while this workout runs.
-                if !recorder.isRecording {
+                if recorder.sessionStart != session.startedAt {
                     await recorder.start(at: session.startedAt)
                 }
             }

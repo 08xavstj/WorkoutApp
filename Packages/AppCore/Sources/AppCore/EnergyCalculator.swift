@@ -8,7 +8,8 @@ import Foundation
 ///   muscular people), otherwise Mifflin-St Jeor (best general equation for adults).
 /// - Exercise: Keytel et al. (2005) heart-rate equation for minutes when heart
 ///   rate is clearly raised; for logged gym sessions, at least a MET-based floor
-///   (Ainsworth Compendium: vigorous resistance training ≈ 5 METs, moderate ≈ 3.5),
+///   (2024 Adult Compendium, Herrmann et al., J Sport Health Sci 2024: vigorous
+///   weight lifting 6.0 METs, moderate multi-exercise sessions 3.5),
 ///   because heart rate swings during lifting.
 /// - Everyday movement (NEAT): steps outside workouts, ~0.00057 kcal per step per kg.
 /// - Digestion (thermic effect of food): ~10% of calories eaten.
@@ -85,7 +86,7 @@ public struct EnergyCalculator: Sendable {
 
     /// Calories from a resistance session by METs, above resting.
     public func strengthKcal(minutes: Double, rpe: Double?, body: Body) -> Double {
-        let mets = (rpe ?? 7) >= 7 ? 5.0 : 3.5
+        let mets = (rpe ?? 7) >= 7 ? 6.0 : 3.5
         return max(0, (mets - 1) * body.weightKg * minutes / 60)
     }
 

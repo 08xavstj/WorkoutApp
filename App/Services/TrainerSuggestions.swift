@@ -26,7 +26,7 @@ enum TrainerSuggestions {
         }
         for minutes in [20, 30, 45] {
             options.append(StrainPlanner.Option(
-                id: "cardio-\(minutes)", kind: .cardio, title: "Zone 2 ride",
+                id: "cardio-\(minutes)", kind: .cardio, title: "Easy ride (can still talk)",
                 detail: "\(minutes) min · Cardio", minutes: Double(minutes),
                 load: planner.cardioLoad(minutes: Double(minutes), reserveFraction: 0.65, profile: profile)
             ))

@@ -108,7 +108,7 @@ struct FinishWorkoutSheet: View {
             return
         }
         if let end = session.endedAt {
-            if recorder.isRecording {
+            if recorder.isRecording && recorder.sessionStart == session.startedAt {
                 // The live session already holds the heart rate (AirPods / strap); save it with the workout.
                 if saveToHealth {
                     do {

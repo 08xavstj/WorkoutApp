@@ -148,9 +148,24 @@ struct SleepCalculatorTests {
         #expect(result.asleep == 7 * 3600)
     }
 
-    @Test func hardDayRaisesSleepNeed() {
-        #expect(calculator.sleepNeed(previousDayStrain: 86) > calculator.sleepNeed(previousDayStrain: 38))
+    @Test func sleepNeedIsNotTiedToStrain() {
+        #expect(calculator.sleepNeed(previousDayStrain: 86) == 8 * 3600)
         #expect(calculator.sleepNeed(previousDayStrain: nil) == 8 * 3600)
+    }
+
+    @Test func efficiencyGetsFullMarksFrom85Percent() throws {
+        // 7 h asleep in 8 h in bed (87.5%) scores the same as 7 h with no wake time.
+        let solid = [SleepSample(stage: .core, start: at(0), end: at(7))]
+        let withWake = [
+            SleepSample(stage: .core, start: at(0), end: at(3.5)),
+            SleepSample(stage: .awake, start: at(3.5), end: at(4)),
+            SleepSample(stage: .core, start: at(4), end: at(7.5)),
+            SleepSample(stage: .inBed, start: at(0), end: at(8)),
+        ]
+        let a = try #require(calculator.score(samples: solid))
+        let b = try #require(calculator.score(samples: withWake))
+        // b loses only the interruption, not efficiency.
+        #expect(a.score - b.score <= 2)
     }
 
     @Test func regularScheduleScoresHigherThanIrregular() throws {

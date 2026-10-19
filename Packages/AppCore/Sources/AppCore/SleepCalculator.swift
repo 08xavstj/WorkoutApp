@@ -2,12 +2,23 @@ import Foundation
 
 /// Scores one night of sleep 0-100 from Apple Health sleep stages.
 ///
-/// Weights: 50% time asleep vs. sleep need, 20% efficiency (asleep / in bed),
-/// 20% restorative sleep (deep + REM share), 10% interruptions.
+/// Weights (the app's choice; no study sets them): 50% time asleep vs. sleep
+/// need, 25% efficiency, 10% deep + REM share, 15% interruptions. With bed/wake
+/// regularity known: 45 / 20 / 10 / 10, plus 15% regularity.
+///
+/// - Need: 8 h by default. Adults need 7 h or more (Watson et al., Sleep 2015,
+///   AASM/SRS consensus); no study ties extra need to the previous day's
+///   training load, so strain doesn't change it.
+/// - Efficiency: 85% or more is good sleep quality (Ohayon et al., Sleep Health
+///   2017, National Sleep Foundation), so it gets full marks from 85% and
+///   none at 65%.
+/// - Deep + REM: weighted lightly because wrist trackers detect sleep well but
+///   stage it poorly (Chinoy et al., Sleep 2021; Schyvens et al., Sleep Adv 2025).
 public struct SleepCalculator: Sendable {
     public var baseSleepNeedHours: Double = 8
     /// Extra sleep needed per strain point (%) above 48 the previous day.
-    public var extraNeedPerStrainPoint: TimeInterval = 38
+    /// Off (0) by default: there's no research for a load-based sleep need.
+    public var extraNeedPerStrainPoint: TimeInterval = 0
     /// Deep + REM share of total sleep that earns full marks.
     public var targetRestorativeShare: Double = 0.40
     /// Awake periods at least this long count as an interruption.
@@ -91,16 +102,18 @@ public struct SleepCalculator: Sendable {
         let need = sleepNeed(previousDayStrain: previousDayStrain)
 
         let durationScore = min(1, asleep / need)
-        let efficiency = inBed > 0 ? min(1, asleep / inBed) : 0
+        let rawEfficiency = inBed > 0 ? min(1, asleep / inBed) : 0
+        let efficiency = min(1, max(0, (rawEfficiency - 0.65) / 0.20))
         let restorative = hasStages ? min(1, (deep + rem) / asleep / targetRestorativeShare) : 0.75
         let interruptionScore = max(0, 1 - Double(interruptions) / 8)
 
         let weighted: Double
         if let consistency {
-            weighted = 0.45 * durationScore + 0.15 * efficiency + 0.2 * restorative + 0.05 * interruptionScore
-                + 0.15 * Double(consistency) / 100
+            let regularity: Double = Double(consistency) / 100
+            weighted = 0.45 * durationScore + 0.2 * efficiency + 0.1 * restorative + 0.1 * interruptionScore
+                + 0.15 * regularity
         } else {
-            weighted = 0.5 * durationScore + 0.2 * efficiency + 0.2 * restorative + 0.1 * interruptionScore
+            weighted = 0.5 * durationScore + 0.25 * efficiency + 0.1 * restorative + 0.15 * interruptionScore
         }
         return Result(
             score: Int((weighted * 100).rounded()),
