@@ -286,7 +286,9 @@ public enum CheckInInsights {
         if x > (a + 1) / (a + b + 2) {
             return 1 - regularizedIncompleteBeta(x: 1 - x, a: b, b: a)
         }
-        let logFront = lgamma(a + b) - lgamma(a) - lgamma(b) + a * log(x) + b * log(1 - x)
+        let logGammas: Double = lgamma(a + b) - lgamma(a) - lgamma(b)
+        let logPowers: Double = a * log(x) + b * log(1 - x)
+        let logFront = logGammas + logPowers
         let front = exp(logFront) / a
         let tiny = 1e-300
         var f = 1.0, c = 1.0, d = 0.0
@@ -296,9 +298,13 @@ public enum CheckInInsights {
             if i == 0 {
                 numerator = 1
             } else if i % 2 == 0 {
-                numerator = (m * (b - m) * x) / ((a + 2 * m - 1) * (a + 2 * m))
+                let top: Double = m * (b - m) * x
+                let bottom: Double = (a + 2 * m - 1) * (a + 2 * m)
+                numerator = top / bottom
             } else {
-                numerator = -((a + m) * (a + b + m) * x) / ((a + 2 * m) * (a + 2 * m + 1))
+                let top: Double = (a + m) * (a + b + m) * x
+                let bottom: Double = (a + 2 * m) * (a + 2 * m + 1)
+                numerator = -top / bottom
             }
             d = 1 + numerator * d
             if abs(d) < tiny { d = tiny }
