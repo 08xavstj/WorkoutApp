@@ -1,8 +1,9 @@
 import Foundation
 import UIKit
 
-/// Front and side progress photos, kept only inside the app (never in the
-/// Photos library), plus the weekly Claude analysis of them.
+/// Front and side progress photos, kept only inside the app: never in the
+/// Photos library, and left out of iCloud and computer backups. Plus the
+/// optional weekly Claude analysis of them.
 @Observable
 final class ProgressPhotosModel {
     enum Pose: String, Codable, CaseIterable, Identifiable {
@@ -30,30 +31,44 @@ final class ProgressPhotosModel {
     private struct Index: Codable {
         var entries: [Entry] = []
         var analyses: [Analysis] = []
+        /// When the last analysis failed, so it isn't retried (and photos
+        /// re-sent) on every refresh.
+        var lastFailure: Date?
     }
 
     private(set) var entries: [Entry] = []
     private(set) var analyses: [Analysis] = []
     private(set) var isAnalyzing = false
     private(set) var analysisError: String?
+    private var lastFailure: Date?
 
     @ObservationIgnored private let folder: URL
-    @ObservationIgnored private let cloud = CloudCoach()
+    @ObservationIgnored private let cloud: CloudCoach
     @ObservationIgnored private var thumbnails: [String: UIImage] = [:]
 
-    init() {
-        folder = URL.applicationSupportDirectory.appending(path: "ProgressPhotos")
+    /// Wait this long after a failed analysis before trying again on its own.
+    static let retryDelay: TimeInterval = 24 * 3600
+
+    init(cloud: CloudCoach) {
+        self.cloud = cloud
+        var folder = URL.applicationSupportDirectory.appending(path: "ProgressPhotos")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Keep body photos out of iCloud and computer backups.
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? folder.setResourceValues(values)
+        self.folder = folder
         if let data = try? Data(contentsOf: indexURL), let index = try? JSONDecoder().decode(Index.self, from: data) {
             entries = index.entries
             analyses = index.analyses
+            lastFailure = index.lastFailure
         }
     }
 
     private var indexURL: URL { folder.appending(path: "index.json") }
 
     private func saveIndex() {
-        if let data = try? JSONEncoder().encode(Index(entries: entries, analyses: analyses)) {
+        if let data = try? JSONEncoder().encode(Index(entries: entries, analyses: analyses, lastFailure: lastFailure)) {
             // Encrypted at rest; unreadable while the phone is locked.
             try? data.write(to: indexURL, options: [.atomic, .completeFileProtection])
         }
@@ -118,7 +133,7 @@ final class ProgressPhotosModel {
         return small
     }
 
-    static func resized(_ image: UIImage, maxSide: CGFloat) -> UIImage {
+    nonisolated static func resized(_ image: UIImage, maxSide: CGFloat) -> UIImage {
         let size = image.size
         let scale = min(1, maxSide / max(size.width, size.height))
         let target = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
@@ -135,8 +150,10 @@ final class ProgressPhotosModel {
 
     /// Due when it's been a week since the last one, there are photos from at
     /// least 5 days apart, and one of them is from the last 3 days.
+    /// Not retried automatically for a day after a failure.
     var isAnalysisDue: Bool {
         if let last = latestAnalysis, Date.now.timeIntervalSince(last.date) < 7 * 86_400 { return false }
+        if let lastFailure, Date.now.timeIntervalSince(lastFailure) < Self.retryDelay { return false }
         return comparisonDays() != nil
     }
 
@@ -162,14 +179,16 @@ final class ProgressPhotosModel {
         analysisError = nil
         defer { isAnalyzing = false }
         let labels = Self.dayLabels(days)
-        var photos: [CloudCoach.Photo] = []
+        var files: [(label: String, path: String)] = []
         for day in days {
             for pose in Pose.allCases {
-                guard let entry = entry(day: day, pose: pose), let full = image(entry),
-                      let data = Self.resized(full, maxSide: 1024).jpegData(compressionQuality: 0.7) else { continue }
-                photos.append(.init(label: "\(labels[day] ?? day) (\(day)), \(pose.title.lowercased())", data: data.base64EncodedString()))
+                guard let entry = entry(day: day, pose: pose) else { continue }
+                files.append(("\(labels[day] ?? day) (\(day)), \(pose.title.lowercased())",
+                              folder.appending(path: entry.fileName).path(percentEncoded: false)))
             }
         }
+        // Decoding and re-encoding photos is slow; keep it off the main thread.
+        let photos = await Self.encodePhotos(files)
         guard photos.count >= 2 else {
             analysisError = "Not enough photos to compare yet."
             return
@@ -177,9 +196,21 @@ final class ProgressPhotosModel {
         do {
             let text = try await cloud.analyzeProgress(photos: photos, context: context, settings: settings)
             analyses.append(Analysis(date: .now, text: text, comparedDays: days))
+            lastFailure = nil
             saveIndex()
         } catch {
             analysisError = error.localizedDescription
+            lastFailure = .now
+            saveIndex()
+        }
+    }
+
+    @concurrent
+    nonisolated private static func encodePhotos(_ files: [(label: String, path: String)]) async -> [CloudCoach.Photo] {
+        files.compactMap { file in
+            guard let full = UIImage(contentsOfFile: file.path),
+                  let data = resized(full, maxSide: 1024).jpegData(compressionQuality: 0.7) else { return nil }
+            return CloudCoach.Photo(label: file.label, data: data.base64EncodedString())
         }
     }
 

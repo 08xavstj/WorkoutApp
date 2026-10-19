@@ -36,10 +36,11 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         let identifier = response.notification.request.identifier
         let action = response.actionIdentifier
         let link = response.notification.request.content.userInfo["link"] as? String
-        if let doseID = DoseNotifications.doseID(fromIdentifier: identifier) {
+        if let doseID = Reminders.doseID(fromIdentifier: identifier) {
             switch action {
             case DoseNotifications.takenAction:
                 MedicationStore.markTaken(doseID)
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Reminders.snoozeIdentifier(for: doseID)])
                 await MedsLiveActivity.refresh()
                 await MainActor.run { self.dosesVersion += 1 }
                 return
@@ -91,9 +92,8 @@ nonisolated enum Reminders {
         let today = calendar.startOfDay(for: .now)
         for offset in 0..<7 {
             if offset == 0 && loggedToday { continue }
-            guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
-            let fire = day.addingTimeInterval(TimeInterval(minutes * 60))
-            guard fire > .now else { continue }
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today),
+                  let fire = fireDate(day: day, minutes: minutes, calendar: calendar), fire > .now else { continue }
             let content = UNMutableNotificationContent()
             content.title = "Log last night's HRV"
             content.body = "Open Garmin Connect → HRV Status and add last night's average. Takes 10 seconds."
@@ -120,8 +120,7 @@ nonisolated enum Reminders {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
             for (kind, minutes, done) in [("m", morningMinutes, morningDone), ("e", eveningMinutes, eveningDone)] {
                 if offset == 0 && done { continue }
-                let fire = day.addingTimeInterval(TimeInterval(minutes * 60))
-                guard fire > .now else { continue }
+                guard let fire = fireDate(day: day, minutes: minutes, calendar: calendar), fire > .now else { continue }
                 let content = UNMutableNotificationContent()
                 if kind == "m" {
                     content.title = "Morning check-in"
@@ -143,26 +142,60 @@ nonisolated enum Reminders {
 
     // MARK: Medications
 
-    /// Reminders for every untaken dose over the next 3 days.
+    /// Snoozed reminders use their own prefix so rescheduling doesn't remove them.
+    static func snoozeIdentifier(for doseID: String) -> String { "dose-snooze|\(doseID)" }
+
+    /// The dose a notification is for, whether it's the scheduled one or a snooze.
+    static func doseID(fromIdentifier identifier: String) -> String? {
+        let snoozePrefix = "dose-snooze|"
+        if identifier.hasPrefix(snoozePrefix) { return String(identifier.dropFirst(snoozePrefix.count)) }
+        return DoseNotifications.doseID(fromIdentifier: identifier)
+    }
+
+    /// `minutes` after midnight on `day`, correct on daylight-saving change days.
+    static func fireDate(day: Date, minutes: Int, calendar: Calendar = .current) -> Date? {
+        calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day)
+    }
+
+    /// The most dose reminders kept pending. iOS keeps only 64 per app, and
+    /// check-ins (14), HRV (7), the rest timer and snoozes need room too.
+    static let maxPendingDoses = 38
+
+    /// Reminders for every untaken dose over the next 14 days (soonest first,
+    /// up to `maxPendingDoses`). Opening the app tops the queue back up.
     static func scheduleDoses() async {
         let center = UNUserNotificationCenter.current()
-        let pending = await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix("dose|") }
-        center.removePendingNotificationRequests(withIdentifiers: pending)
+        let pendingIDs = await center.pendingNotificationRequests().map(\.identifier)
+        let taken = MedicationStore.takenLog()
+        // Scheduled reminders are rebuilt; snoozes stay unless that dose was taken.
+        let stale = pendingIDs.filter { id in
+            if id.hasPrefix("dose|") { return true }
+            if id.hasPrefix("dose-snooze|"), let doseID = doseID(fromIdentifier: id) { return taken[doseID] != nil }
+            return false
+        }
+        center.removePendingNotificationRequests(withIdentifiers: stale)
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
-        let doses = (0..<3).flatMap { offset in
-            calendar.date(byAdding: .day, value: offset, to: today).map { MedicationStore.doses(on: $0) } ?? []
+        let now = Date.now
+        var upcoming: [(dose: Dose, fire: Date)] = []
+        for offset in 0..<14 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+            for dose in MedicationStore.doses(on: day) where taken[dose.id] == nil {
+                if let fire = fireDate(day: day, minutes: dose.minutes, calendar: calendar), fire > now {
+                    upcoming.append((dose, fire))
+                }
+            }
         }
-        guard !doses.isEmpty, await requestPermission() else { return }
-        let taken = MedicationStore.takenLog()
-        for dose in doses where dose.time > .now && taken[dose.id] == nil {
+        upcoming.sort { $0.fire < $1.fire }
+        guard !upcoming.isEmpty, await requestPermission() else { return }
+        for (dose, fire) in upcoming.prefix(maxPendingDoses) {
             let content = UNMutableNotificationContent()
             content.title = "Time for \(dose.name)"
             content.body = dose.dose.isEmpty ? "Tap Taken once you've had it." : "\(dose.dose) · Tap Taken once you've had it."
             content.sound = .default
             content.categoryIdentifier = DoseNotifications.category
             content.userInfo = ["link": "workoutapp://meds"]
-            let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: dose.time)
+            let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
             let request = UNNotificationRequest(identifier: DoseNotifications.identifier(for: dose.id), content: content,
                                                 trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false))
             try? await center.add(request)
@@ -176,7 +209,7 @@ nonisolated enum Reminders {
         content.sound = .default
         content.categoryIdentifier = DoseNotifications.category
         content.userInfo = ["link": "workoutapp://meds"]
-        let request = UNNotificationRequest(identifier: DoseNotifications.identifier(for: doseID), content: content,
+        let request = UNNotificationRequest(identifier: snoozeIdentifier(for: doseID), content: content,
                                             trigger: UNTimeIntervalNotificationTrigger(timeInterval: 600, repeats: false))
         try? await UNUserNotificationCenter.current().add(request)
     }

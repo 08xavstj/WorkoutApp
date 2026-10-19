@@ -1,17 +1,21 @@
 import Foundation
+import Security
 
 /// Coach powered by Claude, through the `coach` Supabase Edge Function in
 /// `supabase/functions/coach`. The Anthropic API key lives only on the server.
 ///
 /// The app signs in anonymously to Supabase so the function can require a
 /// logged-in user (turn on "Anonymous sign-ins" in Supabase Auth settings).
+/// The session is kept in the Keychain, so the app stays one user across
+/// launches (the server counts each user's daily requests). One instance is
+/// shared by the coach and the progress-photo analysis.
 final class CloudCoach {
     nonisolated struct Message: Codable, Sendable {
         let role: String // "user" or "assistant"
         let content: String
     }
 
-    nonisolated private struct Session: Decodable {
+    nonisolated private struct Session: Codable {
         let access_token: String
         let refresh_token: String
     }
@@ -26,7 +30,9 @@ final class CloudCoach {
         let error: String?
     }
 
-    private var auth: Session?
+    private var auth: Session? = SessionKeychain.load() {
+        didSet { SessionKeychain.save(auth) }
+    }
     private let urlSession = URLSession.shared
 
     /// A photo sent for the weekly progress analysis (base64 JPEG).
@@ -85,6 +91,10 @@ final class CloudCoach {
         let (data, response) = try await urlSession.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401 { throw CoachError.unauthorized }
+        if status == 429 {
+            let decoded = try? JSONDecoder().decode(ResponseBody.self, from: data)
+            throw CoachError.server(decoded?.error ?? "You've reached today's limit. Try again tomorrow.")
+        }
         let decoded = try? JSONDecoder().decode(ResponseBody.self, from: data)
         guard (200..<300).contains(status), let reply = decoded?.reply else {
             throw CoachError.server(decoded?.error ?? "The server returned an error (\(status)).")
@@ -143,4 +153,34 @@ enum CoachPrompt {
     Keep answers under 120 words. Give one clear recommendation.
     You are not a doctor; suggest seeing one for pain, illness or injury.
     """
+}
+
+/// The Supabase session in the Keychain (this device only, readable after first unlock).
+private nonisolated enum SessionKeychain {
+    private static let service = "WorkoutApp.supabase"
+    private static let account = "session"
+
+    private static var query: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service,
+         kSecAttrAccount as String: account]
+    }
+
+    static func load<T: Decodable>() -> T? {
+        var request = query
+        request[kSecReturnData as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(request as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+
+    static func save<T: Encodable>(_ value: T?) {
+        SecItemDelete(query as CFDictionary)
+        guard let value, let data = try? JSONEncoder().encode(value) else { return }
+        var item = query
+        item[kSecValueData as String] = data
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(item as CFDictionary, nil)
+    }
 }

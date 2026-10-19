@@ -32,8 +32,17 @@ final class OnDeviceCoach {
         if let unavailable = Self.availabilityMessage {
             throw CoachError.unavailable(unavailable)
         }
-        // Start a fresh session when the data changes, so the tools never serve stale numbers.
-        if session == nil || sessionSnapshot != snapshot {
+        // When the data changes, rebuild the tools with fresh numbers but keep
+        // the conversation so follow-ups ("make it 30 min") still make sense.
+        // The snapshot's timestamp changes every message, so it's ignored here.
+        if let current = session, let previous = sessionSnapshot {
+            var comparable = snapshot
+            comparable.date = previous.date
+            if comparable != previous {
+                session = LanguageModelSession(tools: tools(for: snapshot), transcript: current.transcript)
+                sessionSnapshot = snapshot
+            }
+        } else {
             session = makeSession(snapshot: snapshot)
             sessionSnapshot = snapshot
         }
@@ -49,11 +58,12 @@ final class OnDeviceCoach {
         }
     }
 
+    private func tools(for snapshot: CoachSnapshot) -> [any Tool] {
+        [TodayMetricsTool(snapshot: snapshot), RecentWorkoutsTool(snapshot: snapshot), TrainerTool(snapshot: snapshot)]
+    }
+
     private func makeSession(snapshot: CoachSnapshot) -> LanguageModelSession {
-        LanguageModelSession(
-            tools: [TodayMetricsTool(snapshot: snapshot), RecentWorkoutsTool(snapshot: snapshot), TrainerTool(snapshot: snapshot)],
-            instructions: CoachPrompt.onDeviceInstructions
-        )
+        LanguageModelSession(tools: tools(for: snapshot), instructions: CoachPrompt.onDeviceInstructions)
     }
 }
 

@@ -56,9 +56,13 @@ struct CoachView: View {
                 .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: coach.messages.count) {
+                .onChange(of: coach.messages.last?.id) {
                     guard let lastID = coach.messages.last?.id else { return }
                     withAnimation { proxy.scrollTo(lastID, anchor: .top) }
+                }
+                .onChange(of: coach.isThinking) { _, thinking in
+                    guard thinking else { return }
+                    withAnimation { proxy.scrollTo("thinking", anchor: .bottom) }
                 }
             }
             .background(alignment: .top) {
@@ -118,8 +122,10 @@ struct CoachView: View {
                 if let protein = metrics.nutritionToday?.proteinGrams {
                     ContextChip(color: Theme.nutrition, label: "Protein", value: "\(whole(protein)) g")
                 }
-                if let balance = metrics.energy?.balance {
-                    ContextChip(color: Theme.lifting, label: balance < 0 ? "Deficit" : "Surplus", value: "\(whole(abs(balance))) kcal")
+                // Same number as Home's calorie card: today's target minus food eaten.
+                if let target = metrics.calorieTarget, let eaten = metrics.calories?.eaten {
+                    let left = target - eaten
+                    ContextChip(color: Theme.lifting, label: left >= 0 ? "Left" : "Over", value: "\(whole(abs(left))) kcal")
                 }
             }
         }
@@ -210,9 +216,7 @@ struct CoachView: View {
 
     private func send(_ text: String) async {
         var plan: PlannedWorkout?
-        let lower = text.lowercased()
-        let wantsCardio = lower.contains("ride") || lower.contains("run") || lower.contains("cardio")
-        if CoachModel.isTrainingQuestion(text) && !wantsCardio {
+        if CoachModel.isTrainingQuestion(text) && !CoachModel.wantsCardio(text) {
             let (focus, minutes) = CoachModel.requestedFocusAndMinutes(text)
             let lastPlan = coach.messages.last { $0.plan != nil }?.plan
             let resolvedFocus = focus ?? lastPlan?.focus
@@ -305,7 +309,7 @@ private struct MessageView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
-                    .background(LinearGradient(colors: [Theme.strain, Theme.strainLight], startPoint: .leading, endPoint: .trailing), in: .rect(cornerRadius: 22))
+                    .background(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing), in: .rect(cornerRadius: 22))
             }
         case .coach:
             HStack(alignment: .top, spacing: 10) {
@@ -316,8 +320,7 @@ private struct MessageView: View {
                     .background(LinearGradient(colors: [Theme.strain, Theme.sleep], startPoint: .bottomLeading, endPoint: .topTrailing), in: .circle)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(LocalizedStringKey(message.text))
-                        .foregroundStyle(Theme.primaryText)
+                    CoachReplyText(text: message.text)
                         .textSelection(.enabled)
                     if let plan = message.plan {
                         PlanCard(plan: plan, onStart: onStart)
@@ -393,5 +396,81 @@ private struct PlanCard: View {
             text += " · \(load.formatted(.number.precision(.fractionLength(0...2)))) \(plan.unit.rawValue)"
         }
         return text
+    }
+}
+
+/// A coach reply with simple markdown: "#" headings, "- " / "1." lists,
+/// paragraphs, and inline bold/italic/code. Model text is never treated as
+/// a localization key.
+private struct CoachReplyText: View {
+    let text: String
+
+    private enum Block: Hashable {
+        case heading(String)
+        case bullet(marker: String, text: String)
+        case paragraph(String)
+    }
+
+    private var blocks: [Block] {
+        var result: [Block] = []
+        var paragraph: [String] = []
+        func flush() {
+            if !paragraph.isEmpty {
+                result.append(.paragraph(paragraph.joined(separator: "\n")))
+                paragraph = []
+            }
+        }
+        for raw in text.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty {
+                flush()
+            } else if line.hasPrefix("#") {
+                flush()
+                result.append(.heading(String(line.drop { $0 == "#" }).trimmingCharacters(in: .whitespaces)))
+            } else if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("• ") {
+                flush()
+                result.append(.bullet(marker: "•", text: String(line.dropFirst(2))))
+            } else if let match = line.firstMatch(of: /^(\d{1,2})[.)]\s+(.*)$/) {
+                flush()
+                result.append(.bullet(marker: "\(match.1).", text: String(match.2)))
+            } else {
+                paragraph.append(line)
+            }
+        }
+        flush()
+        return result
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .heading(let value):
+                    Text(Self.inline(value))
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                        .padding(.top, 2)
+                case .bullet(let marker, let value):
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(marker)
+                            .foregroundStyle(Theme.secondaryText)
+                            .monospacedDigit()
+                        Text(Self.inline(value))
+                            .foregroundStyle(Theme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                case .paragraph(let value):
+                    Text(Self.inline(value))
+                        .foregroundStyle(Theme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// Bold, italic, code and links within a line; plain text if it isn't valid markdown.
+    static func inline(_ value: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: value, options: options)) ?? AttributedString(value)
     }
 }

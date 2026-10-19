@@ -8,12 +8,15 @@ import WidgetKit
 struct WorkoutLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: WorkoutActivityAttributes.self) { context in
-            WorkoutLockScreenView(attributes: context.attributes, state: context.state)
+            WorkoutLockScreenView(attributes: context.attributes, state: context.state, isStale: context.isStale)
                 .padding(16)
                 .activityBackgroundTint(Color.white.opacity(0.92))
                 .activitySystemActionForegroundColor(WidgetPalette.ink)
         } dynamicIsland: { context in
-            let resting = context.state.restEndsAt.map { $0 > .now } ?? false
+            // Stale means the rest has ended (staleDate = rest end): show the workout again.
+            let resting = !context.isStale && (context.state.restEndsAt.map { $0 > .now } ?? false)
+            let restRange = context.state.restRange
+            let elapsedWidth: CGFloat = Date.now.timeIntervalSince(context.attributes.startedAt) >= 3600 ? 64 : 48
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Label(resting ? "Rest" : "Workout", systemImage: resting ? "timer" : "dumbbell.fill")
@@ -21,8 +24,8 @@ struct WorkoutLiveActivityWidget: Widget {
                         .foregroundStyle(WidgetPalette.orange)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if let ends = context.state.restEndsAt, resting {
-                        Text(timerInterval: Date.now...ends, countsDown: true)
+                    if let restRange, resting {
+                        Text(timerInterval: restRange, countsDown: true)
                             .font(.title2.weight(.bold))
                             .monospacedDigit()
                             .multilineTextAlignment(.trailing)
@@ -49,20 +52,20 @@ struct WorkoutLiveActivityWidget: Widget {
                 Image(systemName: resting ? "timer" : "dumbbell.fill")
                     .foregroundStyle(WidgetPalette.orange)
             } compactTrailing: {
-                if let ends = context.state.restEndsAt, resting {
-                    Text(timerInterval: Date.now...ends, countsDown: true)
+                if let restRange, resting {
+                    Text(timerInterval: restRange, countsDown: true)
                         .monospacedDigit()
                         .frame(width: 44)
                         .foregroundStyle(WidgetPalette.orange)
                 } else {
                     Text(context.attributes.startedAt, style: .timer)
                         .monospacedDigit()
-                        .frame(width: 52)
+                        .frame(width: elapsedWidth)
                         .foregroundStyle(.white)
                 }
             } minimal: {
-                if let ends = context.state.restEndsAt, resting {
-                    Text(timerInterval: Date.now...ends, countsDown: true)
+                if let restRange, resting {
+                    Text(timerInterval: restRange, countsDown: true)
                         .monospacedDigit()
                         .font(.caption2)
                         .foregroundStyle(WidgetPalette.orange)
@@ -78,9 +81,10 @@ struct WorkoutLiveActivityWidget: Widget {
 private struct WorkoutLockScreenView: View {
     let attributes: WorkoutActivityAttributes
     let state: WorkoutActivityAttributes.ContentState
+    let isStale: Bool
 
     var body: some View {
-        let resting = state.restEndsAt.map { $0 > .now } ?? false
+        let resting = !isStale && (state.restEndsAt.map { $0 > .now } ?? false)
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label(attributes.workoutName, systemImage: "dumbbell.fill")
@@ -95,13 +99,13 @@ private struct WorkoutLockScreenView: View {
                     .foregroundStyle(WidgetPalette.secondary)
                     .frame(width: 70, alignment: .trailing)
             }
-            if let ends = state.restEndsAt, resting {
+            if let restRange = state.restRange, resting {
                 HStack(alignment: .center, spacing: 14) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Rest")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(WidgetPalette.secondary)
-                        Text(timerInterval: Date.now...ends, countsDown: true)
+                        Text(timerInterval: restRange, countsDown: true)
                             .font(.system(size: 40, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(WidgetPalette.ink)
@@ -109,7 +113,7 @@ private struct WorkoutLockScreenView: View {
                     Spacer()
                     RestButtons(dark: false)
                 }
-                ProgressView(timerInterval: ends.addingTimeInterval(-state.restLength)...ends, countsDown: true) {
+                ProgressView(timerInterval: restRange, countsDown: true) {
                     EmptyView()
                 } currentValueLabel: {
                     EmptyView()

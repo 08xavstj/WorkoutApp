@@ -23,9 +23,15 @@ final class LiveWorkoutRecorder: NSObject {
         super.init()
     }
 
-    /// Starts recording for a gym session that began at `start`.
+    /// Starts recording for a gym session that began at `start`. A recording
+    /// left over from a different session is discarded first, so its start
+    /// time is never saved with this workout.
     func start(at start: Date) async {
-        guard !isRecording, HKHealthStore.isHealthDataAvailable() else { return }
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        if isRecording {
+            if sessionStart == start { return }
+            discard()
+        }
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = .traditionalStrengthTraining
         configuration.locationType = .indoor
@@ -95,7 +101,11 @@ final class LiveWorkoutRecorder: NSObject {
         maximumHeartRate = maximum ?? maximumHeartRate
     }
 
+    /// The session failed (e.g. the system ended it): stop showing it as live
+    /// so a new recording can start.
     fileprivate func fail(_ message: String) {
+        builder?.discardWorkout()
+        reset()
         problem = message
     }
 }

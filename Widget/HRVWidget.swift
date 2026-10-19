@@ -43,6 +43,13 @@ struct HRVWidgetView: View {
     let entry: HRVEntry
     @Environment(\.widgetFamily) private var family
 
+    /// The saved scores, only if the app updated them today. Yesterday's
+    /// strain and recovery would otherwise show as today's after midnight.
+    private var today: WidgetSnapshot? {
+        guard let snapshot = entry.snapshot, Calendar.current.isDate(snapshot.updated, inSameDayAs: entry.date) else { return nil }
+        return snapshot
+    }
+
     private var hrvToday: Double? {
         guard let snapshot = entry.snapshot, snapshot.hrvIsFromToday else { return nil }
         return snapshot.hrv
@@ -70,7 +77,7 @@ struct HRVWidgetView: View {
                         .foregroundStyle(WidgetPalette.ink)
                     Text("ms").font(.caption.weight(.semibold)).foregroundStyle(WidgetPalette.secondary)
                 }
-                if let recovery = entry.snapshot?.recovery {
+                if let recovery = today?.recovery {
                     Text("Recovery \(recovery)%")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(WidgetPalette.recovery(recovery))
@@ -90,12 +97,12 @@ struct HRVWidgetView: View {
             ZStack {
                 Circle().stroke(WidgetPalette.secondary.opacity(0.15), lineWidth: 10)
                 Circle()
-                    .trim(from: 0, to: Double(entry.snapshot?.recovery ?? 0) / 100)
-                    .stroke(AngularGradient(colors: [WidgetPalette.lime, WidgetPalette.recovery(entry.snapshot?.recovery)], center: .center),
+                    .trim(from: 0, to: Double(today?.recovery ?? 0) / 100)
+                    .stroke(AngularGradient(colors: [WidgetPalette.lime, WidgetPalette.recovery(today?.recovery)], center: .center),
                             style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 VStack(spacing: 0) {
-                    Text(entry.snapshot?.recovery.map { "\($0)%" } ?? "--")
+                    Text(today?.recovery.map { "\($0)%" } ?? "--")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundStyle(WidgetPalette.ink)
                     Text("Recovery").font(.caption2).foregroundStyle(WidgetPalette.secondary)
@@ -112,7 +119,7 @@ struct HRVWidgetView: View {
                         .font(.headline)
                         .foregroundStyle(WidgetPalette.ink)
                 }
-                if let strain = entry.snapshot?.strain {
+                if let strain = today?.strain {
                     Text("Strain \(Int(strain.rounded()))%")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(WidgetPalette.orange)
@@ -150,7 +157,7 @@ struct HRVWidgetView: View {
         VStack(alignment: .leading, spacing: 1) {
             Label("HRV", systemImage: "waveform.path.ecg").font(.caption.weight(.bold))
             if let hrv = hrvToday {
-                Text("\(Int(hrv.rounded())) ms · recovery \(entry.snapshot?.recovery.map { "\($0)%" } ?? "--")")
+                Text("\(Int(hrv.rounded())) ms · recovery \(today?.recovery.map { "\($0)%" } ?? "--")")
                     .font(.headline)
             } else {
                 Text("Tap to log last night's HRV").font(.headline)

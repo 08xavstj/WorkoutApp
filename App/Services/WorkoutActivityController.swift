@@ -18,7 +18,7 @@ enum WorkoutActivityController {
         )
         _ = try? Activity.request(
             attributes: WorkoutActivityAttributes(workoutName: name, startedAt: startedAt),
-            content: ActivityContent(state: state, staleDate: nil),
+            content: ActivityContent(state: state, staleDate: RestTimerStore.endsAt),
             pushType: nil
         )
     }
