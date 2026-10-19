@@ -21,6 +21,7 @@ struct WorkoutAppApp: App {
     @State private var muscles = MuscleModel()
     @State private var conditions = ConditionsModel()
     @State private var progressPhotos: ProgressPhotosModel
+    @State private var labs: LabsModel
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -42,6 +43,7 @@ struct WorkoutAppApp: App {
         let cloud = CloudCoach()
         _coach = State(initialValue: CoachModel(cloud: cloud))
         _progressPhotos = State(initialValue: ProgressPhotosModel(cloud: cloud))
+        _labs = State(initialValue: LabsModel(cloud: cloud))
         // Notification taps and "Taken" buttons arrive through the router.
         let router = AppRouter()
         _router = State(initialValue: router)
@@ -76,6 +78,7 @@ struct WorkoutAppApp: App {
                 .environment(muscles)
                 .environment(conditions)
                 .environment(progressPhotos)
+                .environment(labs)
                 .environment(\.healthClient, health)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)

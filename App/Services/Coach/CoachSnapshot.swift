@@ -57,6 +57,8 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     var weather: String?
     /// Goals, maintenance, HRV trend, hydration, vitamins/minerals, illness and deload notes.
     var health: String?
+    /// Latest blood-test results the user logged, flagged when outside the range.
+    var labs: [String]?
 
     /// Food totals from Apple Health (logged in Cronometer or another food app).
     nonisolated struct Nutrition: Codable, Sendable, Equatable {
@@ -97,6 +99,9 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
         if let checkIns { lines.append(checkIns) }
         if let medications, !medications.isEmpty {
             lines.append("Medications: " + medications.joined(separator: "; "))
+        }
+        if let labs, !labs.isEmpty {
+            lines.append("Lab results (latest of each; mention ones outside the range without diagnosing, and suggest discussing them with a doctor): " + labs.joined(separator: "; "))
         }
         lines.append("Strain today: \(fmt(strain)) % of 100 (target \(targetStrain ?? "n/a")). Cardio load \(fmt(cardioLoad, 0)), lifting load \(fmt(liftingLoad, 0)).")
         if let zoneMinutes {

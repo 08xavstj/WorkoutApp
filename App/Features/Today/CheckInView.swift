@@ -25,6 +25,8 @@ struct CheckInView: View {
     @State private var morning = MorningCheckIn(day: Calendar.current.startOfDay(for: .now))
     @State private var evening = EveningCheckIn(day: Calendar.current.startOfDay(for: .now))
     @State private var hrv: Double?
+    @State private var hrvSource = "Garmin"
+    @State private var showingCameraHRV = false
     /// Opens progress photos once this sheet has fully closed.
     @State private var openPhotosAfter = false
 
@@ -41,6 +43,12 @@ struct CheckInView: View {
             }
             .background(Theme.background)
             .navigationTitle(kind == .morning ? "Morning check-in" : "Evening check-in")
+            .sheet(isPresented: $showingCameraHRV) {
+                CameraHRVView { rmssd in
+                    hrv = rmssd
+                    hrvSource = "Camera"
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -71,6 +79,11 @@ struct CheckInView: View {
                 TextField("e.g. 52", value: $hrv, format: .number.precision(.fractionLength(0)))
                     .keyboardType(.numberPad)
                     .font(.title3.weight(.semibold))
+                Button {
+                    showingCameraHRV = true
+                } label: {
+                    Label(hrvSource == "Camera" ? "Measured with camera · measure again" : "Measure with camera (1 minute)", systemImage: "camera.fill")
+                }
             } header: {
                 Text("Last night's HRV (ms)")
             } footer: {
@@ -236,6 +249,7 @@ struct CheckInView: View {
         if let saved = store.morning() { morning = saved }
         if let saved = store.evening() { evening = saved }
         hrv = todayHRV?.milliseconds
+        hrvSource = todayHRV?.source ?? "Garmin"
     }
 
     private func save() {
@@ -244,8 +258,9 @@ struct CheckInView: View {
             if let hrv, hrv > 0 {
                 if let existing = todayHRV {
                     existing.milliseconds = hrv
+                    existing.source = hrvSource
                 } else {
-                    modelContext.insert(HRVReading(date: .now, milliseconds: hrv))
+                    modelContext.insert(HRVReading(date: .now, milliseconds: hrv, source: hrvSource))
                 }
                 try? modelContext.save()
             }

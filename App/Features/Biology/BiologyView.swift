@@ -33,6 +33,7 @@ struct BiologyView: View {
                     .padding(.top, 8)
                     BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
                     ProgressPhotosCard { router.showProgressPhotos = true }
+                    LabsCard()
                     InsightsCard(insights: checkIns.insights, daysLeft: checkIns.daysUntilInsights)
                     AlcoholEffectCard(findings: checkIns.alcoholFindings, nightsLogged: checkIns.alcoholNightsLogged)
                     hrvCard

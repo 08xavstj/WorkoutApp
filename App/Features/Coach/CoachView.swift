@@ -11,6 +11,7 @@ struct CoachView: View {
     @Environment(GymStore.self) private var gym
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(MedicationsModel.self) private var medications
+    @Environment(LabsModel.self) private var labs
     @Environment(CheckInStore.self) private var checkIns
     @Environment(ConditionsModel.self) private var conditions
     @Environment(VitalsModel.self) private var vitals
@@ -233,6 +234,7 @@ struct CoachView: View {
             gymSummary: gym.isConfigured ? gym.planner.gymSummary() : nil, plan: plan
         )
         snapshot.medications = medications.coachSummary
+        snapshot.labs = labs.coachSummary
         snapshot.checkIns = checkIns.coachSummary
         snapshot.name = settings.name.isEmpty ? nil : settings.name
         snapshot.weather = conditions.coachSummary(place: settings.placeName)

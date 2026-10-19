@@ -11,6 +11,8 @@ struct QuickAddView: View {
     @State private var showingHRV = false
     @State private var showingGym = false
     @State private var showingMeds = false
+    @State private var showingBloodPressure = false
+    @State private var showingLabs = false
     @Environment(AppRouter.self) private var router
 
     var body: some View {
@@ -35,6 +37,12 @@ struct QuickAddView: View {
                     action("Log overnight HRV", "From your watch's app", "waveform.path.ecg", Theme.recoveryHigh) {
                         showingHRV = true
                     }
+                    action("Blood pressure", "Log a cuff reading or run the 7-day home check", "heart.text.square", Theme.heart) {
+                        showingBloodPressure = true
+                    }
+                    action("Lab results", "Blood tests by hand or from a PDF", "testtube.2", Theme.sleep) {
+                        showingLabs = true
+                    }
                     action("Progress photos", "Front and side, compared weekly by Claude", "camera.fill", Theme.lifting) {
                         router.showProgressPhotos = true
                     }
@@ -58,6 +66,8 @@ struct QuickAddView: View {
             .background(Theme.background)
             .navigationTitle("Add")
             .sheet(isPresented: $showingMeds) { MedicationsView() }
+            .sheet(isPresented: $showingBloodPressure) { BloodPressureView() }
+            .sheet(isPresented: $showingLabs) { LabsView() }
             .sheet(isPresented: $showingHRV) {
                 HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
                     .presentationDetents([.medium])

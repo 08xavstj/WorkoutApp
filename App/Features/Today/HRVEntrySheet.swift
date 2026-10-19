@@ -7,6 +7,8 @@ struct HRVEntrySheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @State private var value: Double?
+    @State private var source = "Garmin"
+    @State private var showingCamera = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -20,7 +22,19 @@ struct HRVEntrySheet: View {
                 } header: {
                     Text("Last night's HRV (ms)")
                 } footer: {
-                    Text("Use last night's average from your watch's app (on Garmin: Garmin Connect → HRV Status). Enter it each morning for the most accurate recovery.")
+                    Text(source == "Camera"
+                         ? "Measured with your phone's camera just now."
+                         : "Use last night's average from your watch's app (on Garmin: Garmin Connect → HRV Status). Enter it each morning for the most accurate recovery.")
+                }
+                Section {
+                    Button {
+                        focused = false
+                        showingCamera = true
+                    } label: {
+                        Label("Measure with camera (1 minute)", systemImage: "camera.fill")
+                    }
+                } footer: {
+                    Text("No HRV from your watch? Measure it with your fingertip over the camera. Use one method every morning: camera spot checks and overnight watch averages aren't comparable.")
                 }
                 if let existing {
                     Section {
@@ -45,7 +59,18 @@ struct HRVEntrySheet: View {
             }
             .onAppear {
                 value = existing?.milliseconds
+                source = existing?.source ?? "Garmin"
                 focused = true
+            }
+            .onChange(of: value) { oldValue, newValue in
+                // Typing over a camera reading makes it a typed one.
+                if focused, oldValue != nil, newValue != oldValue { source = "Garmin" }
+            }
+            .sheet(isPresented: $showingCamera) {
+                CameraHRVView { rmssd in
+                    value = rmssd
+                    source = "Camera"
+                }
             }
         }
     }
@@ -54,8 +79,9 @@ struct HRVEntrySheet: View {
         guard let value, value > 0 else { return }
         if let existing {
             existing.milliseconds = value
+            existing.source = source
         } else {
-            modelContext.insert(HRVReading(date: .now, milliseconds: value))
+            modelContext.insert(HRVReading(date: .now, milliseconds: value, source: source))
         }
         try? modelContext.save()
         dismiss()
