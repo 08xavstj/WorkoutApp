@@ -119,8 +119,8 @@ extension StrainCalculator {
 /// - The +1,000 step is a behaviour choice: small, reachable goals are the ones
 ///   people keep.
 public enum StepGoal {
-    public static let floor = 7_000.0
-    public static let ceiling = 12_000.0
+    public static let minimumGoal = 7_000.0
+    public static let maximumGoal = 12_000.0
 
     /// Goal before there are two weeks of steps.
     public static func standard(age: Int) -> Double {
@@ -133,6 +133,6 @@ public enum StepGoal {
         guard days.count >= 14 else { return standard(age: age) }
         let median = days[days.count / 2]
         let goal = ((median + 1000) / 500).rounded() * 500
-        return min(ceiling, max(floor, goal))
+        return min(maximumGoal, max(minimumGoal, goal))
     }
 }
