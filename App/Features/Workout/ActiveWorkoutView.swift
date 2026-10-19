@@ -236,7 +236,7 @@ struct ActiveWorkoutView: View {
                     isDone: isDone,
                     isNext: isNext(exercise),
                     unit: workoutUnit,
-                    position: (session.orderedExercises.firstIndex { $0.persistentModelID == exercise.persistentModelID } ?? 0) + 1
+                    position: (session.orderedExercises.firstIndex(where: { $0.persistentModelID == exercise.persistentModelID }) ?? 0) + 1
                 )
             }
             .buttonStyle(.plain)

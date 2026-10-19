@@ -30,7 +30,7 @@ struct WorkoutDetailView: View {
                     let working = exercise.orderedSets.filter { !$0.isWarmup }
                     ForEach(exercise.orderedSets) { set in
                         HStack {
-                            Text(set.isWarmup ? "W" : "\((working.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1)")
+                            Text(set.isWarmup ? "W" : "\((working.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) ?? 0) + 1)")
                                 .foregroundStyle(set.isWarmup ? Theme.recoveryModerate : Theme.secondaryText)
                                 .frame(width: 28, alignment: .leading)
                             Text("\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)")
