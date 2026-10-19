@@ -26,7 +26,7 @@ struct QuickAddView: View {
                     action("Empty workout", "Add exercises as you go", "dumbbell.fill", Theme.strain) {
                         launcher.startEmpty(in: modelContext)
                     }
-                    action("Log overnight HRV", "From Garmin Connect's HRV Status", "waveform.path.ecg", Theme.recoveryHigh) {
+                    action("Log overnight HRV", "From your watch's app", "waveform.path.ecg", Theme.recoveryHigh) {
                         showingHRV = true
                     }
                     action("Progress photos", "Front and side, compared weekly by Claude", "camera.fill", Theme.lifting) {

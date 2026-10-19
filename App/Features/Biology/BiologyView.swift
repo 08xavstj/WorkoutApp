@@ -55,15 +55,21 @@ struct BiologyView: View {
                         }
                     }
                     if vitals.stats.isEmpty {
-                        Text(vitals.isLoading ? "Loading your health stats…" : "No health stats yet. Turn on Apple Health sharing in Garmin Connect (More → Settings → Connected Apps → Apple Health).")
+                        Text(vitals.isLoading ? "Loading your health stats…" : "No health stats yet. Turn on Apple Health sharing in your watch's app (Garmin Connect: More → Settings → Connected Apps → Apple Health).")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                             .card()
                     }
-                    Text("Garmin Connect shares heart rate, resting heart rate, sleep, steps, distance, floors, energy, workouts, and (on supported watches) blood oxygen and respiration with Apple Health. Body Battery, Garmin stress and HRV stay in Garmin Connect, so stress here is estimated from heart rate.")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                        .padding(.top, 4)
+                    DisclosureGroup("Using a Garmin?") {
+                        Text("Garmin Connect shares heart rate, resting heart rate, sleep, steps, distance, floors, energy, workouts, and (on supported watches) blood oxygen and respiration with Apple Health. Body Battery, Garmin stress and HRV stay in Garmin Connect, so stress here is estimated from heart rate and HRV can be added by hand.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .tint(Theme.secondaryText)
+                    .padding(.top, 4)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
@@ -93,7 +99,7 @@ struct BiologyView: View {
         )
         stat.chart = .bars
         stat.goal = metrics.proteinTarget
-        stat.about = "Protein logged in Cronometer each day. Your target comes from your goal and weight: about 1.6 g per kg helps build muscle with lifting, and more while losing weight (Morton et al., Br J Sports Med 2018)."
+        stat.about = "Protein logged in your food app each day. Your target comes from your goal and weight: about 1.6 g per kg helps build muscle with lifting, and more while losing weight (Morton et al., Br J Sports Med 2018)."
         return stat
     }
 
@@ -178,7 +184,7 @@ struct BiologyView: View {
                 }
                 .frame(height: 170)
             } else {
-                Text("No HRV yet. Garmin doesn't share HRV with Apple Health, so add last night's value with Add HRV on the Home screen.")
+                Text("No HRV yet. If your watch doesn't share HRV with Apple Health (Garmin doesn't), add last night's value with Add HRV on the Home tab.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -445,7 +451,7 @@ struct MicronutrientsCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             if findings.isEmpty {
-                Text("Log food in Cronometer for at least 4 days (with Apple Health sync on) to see how your vitamins and minerals compare with daily targets.")
+                Text("Log food in your food app for at least 4 days (with Apple Health sync on) to see how your vitamins and minerals compare with daily targets.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }

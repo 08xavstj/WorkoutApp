@@ -65,7 +65,7 @@ private struct HeartRateSourcesSection: View {
             if !loaded {
                 ProgressView()
             } else if sources.isEmpty {
-                Text("No heart rate recorded during this workout. Wear AirPods Pro 3 while logging, or sync Garmin Connect and pull to refresh.")
+                Text("No heart rate recorded during this workout. Wear AirPods Pro 3 while logging, or sync your watch's app and pull to refresh.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             } else {
@@ -104,7 +104,7 @@ private struct HeartRateSourcesSection: View {
         } header: {
             Text("Heart rate sources")
         } footer: {
-            Text("Garmin sends heart rate to Apple Health when Garmin Connect syncs, sometimes only as a summary for strength workouts. Open Garmin Connect, then come back here.")
+            Text("Some watches (like Garmin) send heart rate to Apple Health only when their app syncs, sometimes only as a summary for strength workouts. Open your watch's app, then come back here.")
         }
         .listRowBackground(Theme.card)
         .task { await load() }

@@ -20,7 +20,7 @@ struct HRVEntrySheet: View {
                 } header: {
                     Text("Last night's HRV (ms)")
                 } footer: {
-                    Text("In Garmin Connect, open HRV Status and use last night's average. Enter it each morning for the most accurate recovery.")
+                    Text("Use last night's average from your watch's app (on Garmin: Garmin Connect → HRV Status). Enter it each morning for the most accurate recovery.")
                 }
                 if let existing {
                     Section {

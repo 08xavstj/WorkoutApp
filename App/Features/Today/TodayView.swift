@@ -65,7 +65,7 @@ struct TodayView: View {
                 AppLogoHeader()
                 Spacer(minLength: 8)
                 SyncChip(isLoading: metrics.isLoading, lastUpdated: metrics.lastUpdated)
-                GlassIconButton(systemName: "person.fill", label: "Settings") {
+                GlassIconButton(systemName: "gearshape.fill", label: "Settings") {
                     showingSettings = true
                 }
             }
@@ -124,20 +124,23 @@ private struct SyncChip: View {
     let lastUpdated: Date?
 
     var body: some View {
+        // Plain status text (not a button): pull down to refresh.
         HStack(spacing: 6) {
             if isLoading {
                 ProgressView().controlSize(.mini)
                 Text("Syncing")
-            } else {
+            } else if let lastUpdated {
                 Circle().fill(Theme.recoveryHigh).frame(width: 8, height: 8)
-                Text(lastUpdated == nil ? "Not synced" : "Synced")
+                Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+            } else {
+                Circle().fill(Theme.secondaryText.opacity(0.5)).frame(width: 8, height: 8)
+                Text("Not synced yet")
             }
         }
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(lastUpdated == nil && !isLoading ? Theme.secondaryText : Theme.recoveryHigh)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular, in: .capsule)
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(Theme.secondaryText)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
     }
 }
 
@@ -183,10 +186,16 @@ private struct HealthAccessCard: View {
             Text("If you already answered, open the Health app → your profile picture → Apps → WorkoutApp, and tap Turn On All.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
-            Button("Allow access") {
-                Task { try? await health?.requestAuthorization() }
+            HStack {
+                Button("Allow access") {
+                    Task { try? await health?.requestAuthorization() }
+                }
+                .buttonStyle(.borderedProminent)
+                if let url = URL(string: "x-apple-health://") {
+                    Link("Open Health app", destination: url)
+                        .buttonStyle(.bordered)
+                }
             }
-            .buttonStyle(.borderedProminent)
         }
         .card()
     }
@@ -414,15 +423,16 @@ private struct IllnessAlertCard: View {
                 Label(alert.level == .likely ? "Your body may be fighting something" : "Vitals above your normal",
                       systemImage: "cross.case.fill")
                     .font(.headline)
-                    .foregroundStyle(color)
+                    .foregroundStyle(Theme.textColor(for: color))
                 Text(alert.message)
                     .font(.subheadline)
                     .foregroundStyle(Theme.primaryText)
-                HStack(spacing: 6) {
+                // Wraps onto more lines instead of squeezing long signals.
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 6, alignment: .leading)], alignment: .leading, spacing: 6) {
                     ForEach(alert.signals, id: \.self) { Chip(text: $0, color: color) }
                 }
                 if !immune.isEmpty {
-                    Text("From your food log: " + immune.joined(separator: " ") + " Vitamin C, vitamin D and zinc support immune defences.")
+                    Text("From your food log: " + immune.joined(separator: " "))
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -485,8 +495,18 @@ private struct HydrationCard: View {
         let color: Color = switch assessment.status {
         case .low: Theme.recoveryModerate
         case .onTrack: Theme.oxygen
-        case .high: Theme.recoveryLow
+        case .high: Theme.recoveryModerate
         }
+        let tracksWater = metrics.nutritionToday?.waterLiters != nil || metrics.nutritionYesterday?.waterLiters != nil
+        if !tracksWater {
+            HStack(spacing: 10) {
+                Image(systemName: "waterbottle.fill").foregroundStyle(Theme.oxygen)
+                Text("Log water in your food app to track it here. Today's target: \(target.liters.formatted(.number.precision(.fractionLength(1)))) L.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .card(tint: Theme.oxygen)
+        } else {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 CardLabel(text: "Water", color: Theme.oxygen)
@@ -520,11 +540,12 @@ private struct HydrationCard: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
-            Text("Target: \(target.base.formatted()) L base\(target.exercise > 0 ? " + \(target.exercise.formatted(.number.precision(.fractionLength(1)))) L for training" : "")\(target.heat > 0 ? " + \(target.heat.formatted()) L for heat" : ""). Includes water from food, as Cronometer counts it. The line marks an even pace for this time of day.")
+            Text("Target \(target.base.formatted()) L\(target.exercise > 0 ? " + \(target.exercise.formatted(.number.precision(.fractionLength(1)))) L training" : "")\(target.heat > 0 ? " + \(target.heat.formatted()) L heat" : ""). The line shows an even pace for now.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
         .card(tint: Theme.oxygen)
+        }
     }
 }
 
@@ -731,13 +752,12 @@ private struct EnergyCard: View {
                     }
                     .frame(width: 124, height: 124)
                     VStack(alignment: .leading, spacing: 12) {
-                        CalorieLine(icon: "fork.knife", color: Theme.nutrition, label: "Eaten", value: summary.eaten ?? 0)
-                        CalorieLine(icon: "flame.fill", color: Theme.strain, label: "Burned so far", value: summary.burnedSoFar)
                         CalorieLine(icon: "target", color: Theme.sleep, label: metrics.goals == nil ? "Maintenance" : "Daily target", value: target)
+                        CalorieLine(icon: "fork.knife", color: Theme.nutrition, label: "Eaten", value: summary.eaten ?? 0)
                     }
                 }
-                Text(targetExplanation(left: left))
-                    .font(.subheadline)
+                Text(left >= 0 ? "Left = daily target − eaten. Your burn is already in the target; tap ⓘ for details." : "Over = eaten − daily target. Tap ⓘ for details.")
+                    .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             } else {
                 Text("Add your weight in Apple Health (or Settings) to see calories burned.")
@@ -760,7 +780,7 @@ private struct EnergyCard: View {
                         Text("No food logged yet")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.primaryText)
-                        Text("Meals you log in Cronometer show up here\(metrics.proteinTarget.map { ". Protein goal: \(whole($0)) g" } ?? "").")
+                        Text("Meals you log in your food app (synced to Apple Health) show up here\(metrics.proteinTarget.map { ". Protein goal: \(whole($0)) g" } ?? "").")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -774,18 +794,6 @@ private struct EnergyCard: View {
         }
     }
 
-    private func targetExplanation(left: Double) -> String {
-        let source = metrics.maintenance.map { "Your maintenance is \(whole($0.maintenance).formatted()) kcal, worked out from \($0.loggedDays) days of food and your weight trend." }
-            ?? "Maintenance is estimated from your watch until there are 2 weeks of food logs and weigh-ins."
-        let goal: String
-        if let goals = metrics.goals {
-            goal = "Goal: \(goals.title.lowercased())."
-        } else {
-            goal = "Set a goal in Settings to get a target."
-        }
-        let today = left >= 0 ? "About \(whole(left).formatted()) kcal left today." : "\(whole(-left).formatted()) kcal over today's target."
-        return "\(today) \(goal) \(source)"
-    }
 }
 
 private struct CalorieLine: View {
@@ -853,7 +861,22 @@ private struct CalorieDetailsSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                if metrics.calories == nil {
+                    ContentUnavailableView(
+                        "No calorie data yet",
+                        systemImage: "flame",
+                        description: Text("Add your weight in Apple Health (or Settings) and wear your watch to see calories burned.")
+                    )
+                }
                 if let summary = metrics.calories {
+                    Section {
+                        Text(metrics.maintenance.map { "Your maintenance is \(whole($0.maintenance).formatted()) kcal, worked out from \($0.loggedDays) days of food and your weight trend." }
+                             ?? "Maintenance is estimated from your watch until there are 2 weeks of food logs and weigh-ins.")
+                        Text(metrics.goals.map { "Goal: \($0.title.lowercased()). Your daily target is maintenance adjusted for that goal." }
+                             ?? "Set your goals on the Home tab to turn maintenance into a daily target.")
+                    } header: {
+                        Text("Where your target comes from")
+                    }
                     Section {
                         row("Resting so far", summary.restingSoFar)
                         row("Active so far", summary.activeSoFar)
@@ -864,7 +887,7 @@ private struct CalorieDetailsSheet: View {
                         Text("Burned")
                     } footer: {
                         Text(summary.fromWatch
-                             ? "From your Garmin via Apple Health, so \"burned so far\" matches your watch. \"By midnight\" adds the resting calories your body will burn before the day ends; more activity adds to it."
+                             ? "From your watch via Apple Health, so \"burned so far\" matches your watch. \"By midnight\" adds the resting calories your body will burn before the day ends; more activity adds to it."
                              : "Estimated: resting from \(metrics.energy?.bmrMethod ?? "your profile"), activity from heart rate and steps, plus about 10% of food eaten for digestion.")
                     }
                     Section {
@@ -884,7 +907,7 @@ private struct CalorieDetailsSheet: View {
                     } header: {
                         Text("Your real maintenance")
                     } footer: {
-                        Text("Wrist trackers are off by over 30% on calories burned, on average. Comparing what you eat (Cronometer) with how your weight moves gives a truer number: each kg of weight change is about 7,700 kcal.")
+                        Text("Wrist trackers are off by over 30% on calories burned, on average. Comparing what you eat (from your food app) with how your weight moves gives a truer number: each kg of weight change is about 7,700 kcal.")
                     }
                 }
             }
@@ -913,26 +936,43 @@ private struct HealthMonitor: View {
     let onEnterHRV: () -> Void
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(VitalsModel.self) private var vitals
+    @State private var selected: VitalsModel.Stat?
 
     var body: some View {
         VStack(spacing: 12) {
             SectionTitle(text: "Health Monitor", trailing: summary.text, trailingColor: summary.color)
             HStack(spacing: 12) {
-                rhrTile
+                opens("rhr") { rhrTile }
                 hrvTile
             }
             HStack(spacing: 12) {
-                respiratoryTile
-                sleepTile
+                opens("respiration") { respiratoryTile }
+                opens("sleepAverage") { sleepTile }
             }
             HStack(spacing: 12) {
-                vitalTile("spo2", title: "Blood oxygen", color: Theme.oxygen, light: Theme.oxygenLight)
-                vitalTile("hrr", title: "HR recovery", color: Theme.heart, light: Theme.heartLight)
+                opens("spo2") { vitalTile("spo2", title: "Blood oxygen", color: Theme.oxygen, light: Theme.oxygenLight) }
+                opens("hrr") { vitalTile("hrr", title: "Heart rate recovery", color: Theme.heart, light: Theme.heartLight) }
             }
             HStack(spacing: 12) {
-                vitalTile("stress", title: "Stress", color: Theme.recoveryModerate, light: Theme.recoveryHighLight)
-                vitalTile("steps", title: "Steps", color: Theme.strain, light: Theme.strainLight)
+                opens("stress") { vitalTile("stress", title: "Stress (estimate)", color: Theme.recoveryModerate, light: Theme.recoveryModerateLight) }
+                opens("steps") { vitalTile("steps", title: "Steps", color: Theme.strain, light: Theme.strainLight) }
             }
+        }
+        .sheet(item: $selected) { stat in
+            VitalDetailView(stat: stat, colors: VitalTile.colors(for: stat.category))
+                .presentationDetents([.medium, .large])
+        }
+    }
+
+    /// Makes a tile open the same history view as on Biology, when that stat exists.
+    @ViewBuilder
+    private func opens<Content: View>(_ id: String, @ViewBuilder _ tile: () -> Content) -> some View {
+        if let stat = vitals.stat(id) {
+            Button { selected = stat } label: { tile() }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows history")
+        } else {
+            tile()
         }
     }
 
@@ -949,28 +989,35 @@ private struct HealthMonitor: View {
         )
     }
 
+    /// Everything on this card that's outside your normal today.
     private var summary: (text: String?, color: Color) {
         guard let recovery = metrics.recovery, recovery.isCalibrated else { return (nil, Theme.secondaryText) }
-        let flags = [(recovery.hrvChangePercent ?? 0) < -15, (recovery.restingHeartRateChange ?? 0) > 5].filter { $0 }.count
-        return flags == 0 ? ("All normal", Theme.recoveryHigh) : ("\(flags) to watch", Theme.recoveryModerate)
+        let flags = [
+            (recovery.hrvChangePercent ?? 0) < -15,
+            (recovery.restingHeartRateChange ?? 0) > 5,
+            metrics.respiratoryRate.map { !(12...20).contains($0) } ?? false,
+            metrics.sleep.map { $0.asleep < $0.need * 0.9 } ?? false,
+        ].filter { $0 }.count
+        return flags == 0 ? ("All normal", Theme.recoveryHighText) : ("\(flags) to watch", Theme.recoveryModerateText)
     }
 
-    /// Position of a value within baseline ± 2 SD, as 0...1.
+    /// Position of a value within baseline ± 2 SD, as 0...1. Nil (no gauge)
+    /// until there's a baseline, so the gauge never pretends to be normal.
     private func position(_ value: Double?, mean: Double?, sd: Double?) -> Double? {
-        guard let value, let mean, let sd, sd > 0 else { return value == nil ? nil : 0.5 }
+        guard let value, let mean, let sd, sd > 0 else { return nil }
         return min(1, max(0, (value - (mean - 2 * sd)) / (4 * sd)))
     }
 
     private var rhrTile: some View {
         let change = metrics.recovery?.restingHeartRateChange
         return MonitorTile(
-            title: "Resting HR",
+            title: "Resting heart rate",
             value: metrics.restingHeartRate.map { "\(whole($0.rounded()))" },
             unit: "bpm",
             status: change.map { delta in
                 delta <= 0
-                    ? TileStatus(text: "Lower", icon: "arrow.down", color: Theme.recoveryHigh)
-                    : TileStatus(text: "Higher", icon: "arrow.up", color: delta > 5 ? Theme.recoveryModerate : Theme.secondaryText)
+                    ? TileStatus(text: "Below normal", icon: "arrow.down", color: Theme.recoveryHighText)
+                    : TileStatus(text: "Above normal", icon: "arrow.up", color: delta > 5 ? Theme.recoveryModerateText : Theme.secondaryText)
             },
             gauge: position(metrics.restingHeartRate, mean: metrics.baseline?.meanRHR, sd: metrics.baseline?.sdRHR),
             color: Theme.heart,
@@ -987,8 +1034,8 @@ private struct HealthMonitor: View {
             unit: "ms",
             status: change.map { delta in
                 delta >= 0
-                    ? TileStatus(text: "Higher", icon: "arrow.up", color: Theme.recoveryHigh)
-                    : TileStatus(text: "Lower", icon: "arrow.down", color: delta < -15 ? Theme.recoveryModerate : Theme.secondaryText)
+                    ? TileStatus(text: "Above normal", icon: "arrow.up", color: Theme.recoveryHighText)
+                    : TileStatus(text: "Below normal", icon: "arrow.down", color: delta < -15 ? Theme.recoveryModerateText : Theme.secondaryText)
             },
             gauge: position(logValue, mean: metrics.baseline?.meanLogHRV, sd: metrics.baseline?.sdLogHRV),
             color: Theme.recoveryHigh,
@@ -1002,11 +1049,11 @@ private struct HealthMonitor: View {
         let rate = metrics.respiratoryRate
         let normal = rate.map { (12...20).contains($0) } ?? true
         return MonitorTile(
-            title: "Respiratory",
+            title: "Breathing rate",
             value: rate.map { $0.formatted(.number.precision(.fractionLength(1))) },
-            unit: "rpm",
+            unit: "/min",
             status: rate.map { _ in
-                normal ? TileStatus(text: "Normal", color: Theme.secondaryText) : TileStatus(text: "Check", color: Theme.recoveryModerate)
+                normal ? TileStatus(text: "Normal", color: Theme.secondaryText) : TileStatus(text: "Unusual", color: Theme.recoveryModerateText)
             },
             gauge: rate.map { min(1, max(0, ($0 - 8) / 16)) },
             color: Theme.oxygen,
@@ -1023,7 +1070,7 @@ private struct HealthMonitor: View {
             status: sleep.map { night in
                 night.asleep >= night.need * 0.9
                     ? TileStatus(text: "Normal", color: Theme.secondaryText)
-                    : TileStatus(text: "Short", color: Theme.recoveryModerate)
+                    : TileStatus(text: "Short", color: Theme.recoveryModerateText)
             },
             gauge: sleep.map { min(1, $0.asleep / max($0.need * 1.3, 1)) },
             color: Theme.sleep,
@@ -1055,8 +1102,9 @@ private struct MonitorTile: View {
                 Text(title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let value {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(value)
@@ -1076,9 +1124,9 @@ private struct MonitorTile: View {
                 }
                 if let actionTitle, let onAction {
                     Button(actionTitle, action: onAction)
-                        .font(.caption.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .frame(minHeight: 44)
                 } else if let status {
                     HStack(spacing: 3) {
                         if let icon = status.icon {

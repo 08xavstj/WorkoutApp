@@ -850,7 +850,7 @@ private struct LiveHeartRateBar: View {
                     Text(recorder.isRecording ? "Waiting for heart rate…" : "Live heart rate off")
                         .font(.headline)
                         .foregroundStyle(Theme.primaryText)
-                    Text(recorder.problem ?? "Wear AirPods Pro 3 (or connect a Bluetooth chest strap) to see heart rate here. It's saved with the workout so you can compare it with your Garmin.")
+                    Text(recorder.problem ?? "Wear AirPods Pro 3 (or connect a Bluetooth chest strap) to see heart rate here. It's saved with the workout so you can compare it with your watch.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
