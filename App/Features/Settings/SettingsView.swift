@@ -12,6 +12,8 @@ struct SettingsView: View {
     @State private var showingLocation = false
     @State private var showingGoals = false
     @State private var showingRPEGuide = false
+    /// 0 = automatic (from your goal). See RestPreferences.
+    @AppStorage(RestPreferences.globalKey) private var restSeconds = 0
 
     /// " · Health" when Apple Health filled this field.
     private func source(_ field: String) -> String {
@@ -151,10 +153,16 @@ struct SettingsView: View {
                     } label: {
                         LabeledContent("RPE guide", value: "What each number means")
                     }
+                    Picker("Rest timer", selection: $restSeconds) {
+                        Text("Automatic").tag(0)
+                        ForEach(RestTimer.choices, id: \.self) { seconds in
+                            Text(RestPreferences.label(seconds)).tag(seconds)
+                        }
+                    }
                 } header: {
                     Text("Trainer")
                 } footer: {
-                    Text("Your equipment, plates and dumbbells, so planned weights are ones you can load.")
+                    Text("Your equipment, plates and dumbbells, so planned weights are ones you can load. Automatic rest follows your goal: about 2 min on big lifts and 90 s on small ones for muscle, 3 min for strength. You can also set rest per exercise from its ••• menu during a workout.")
                 }
 
                 Section {

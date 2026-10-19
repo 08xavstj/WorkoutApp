@@ -30,8 +30,13 @@ struct FitnessView: View {
                     WeekStrip(days: metrics.weekStrain)
                     DayStrainCard()
                     DeloadCard()
+                    YourWorkoutsCard()
                     SectionTitle(text: "Muscles")
                     MuscleMapCard()
+                    WeeklySetsCard()
+                    SectionTitle(text: "Strength & cardio fitness")
+                    StrengthDaysCard()
+                    CardioFitnessCard()
                     SectionTitle(text: "Training Load", trailing: "Last 7 days vs usual")
                     HStack(spacing: 12) {
                         LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.oxygenLight, Theme.oxygen, Theme.sleep])

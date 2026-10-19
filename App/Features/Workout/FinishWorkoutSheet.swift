@@ -17,6 +17,7 @@ struct FinishWorkoutSheet: View {
     @State private var errorMessage: String?
     @State private var showingRPEGuide = false
     @State private var confirmingUnticked = false
+    @State private var saveAsTemplate = false
 
     var body: some View {
         NavigationStack {
@@ -42,6 +43,11 @@ struct FinishWorkoutSheet: View {
                 }
                 Section {
                     Toggle("Save to Apple Health", isOn: $saveToHealth)
+                    Toggle("Save as one of my workouts", isOn: $saveAsTemplate)
+                } footer: {
+                    if saveAsTemplate {
+                        Text("You can start it again from Add → My workouts, with weights suggested from today.")
+                    }
                 }
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(Theme.recoveryLowText)
@@ -106,6 +112,9 @@ struct FinishWorkoutSheet: View {
         } catch {
             errorMessage = "Couldn't save: \(error.localizedDescription)"
             return
+        }
+        if saveAsTemplate {
+            _ = WorkoutTemplate.from(session, in: modelContext)
         }
         if let end = session.endedAt {
             if recorder.isRecording && recorder.sessionStart == session.startedAt {

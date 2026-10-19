@@ -6,7 +6,9 @@ import AppCore
 struct WorkoutDetailView: View {
     let session: WorkoutSession
     @Environment(UserSettings.self) private var settings
+    @Environment(\.modelContext) private var modelContext
     @State private var reloadToken = 0
+    @State private var savedTemplate = false
 
     var body: some View {
         let unit = settings.weightUnit
@@ -43,6 +45,12 @@ struct WorkoutDetailView: View {
                             }
                         }
                     }
+                    NavigationLink {
+                        LiftProgressView(exerciseID: exercise.exerciseID, name: exercise.name)
+                    } label: {
+                        Label("Progress", systemImage: "chart.line.uptrend.xyaxis")
+                            .font(.subheadline)
+                    }
                 }
                 .listRowBackground(Theme.card)
             }
@@ -50,6 +58,21 @@ struct WorkoutDetailView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle(session.name)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    _ = WorkoutTemplate.from(session, in: modelContext)
+                    savedTemplate = true
+                } label: {
+                    Label("Save as my workout", systemImage: "square.and.arrow.down")
+                }
+            }
+        }
+        .alert("Saved to My workouts", isPresented: $savedTemplate) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Start it again any time from Add → My workouts.")
+        }
         // On the List itself: a Section's .refreshable is never used.
         .refreshable { reloadToken += 1 }
     }

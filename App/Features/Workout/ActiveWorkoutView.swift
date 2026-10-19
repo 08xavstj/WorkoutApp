@@ -18,6 +18,7 @@ struct ActiveWorkoutView: View {
     @State private var showingFinish = false
     @State private var showingDiscard = false
     @State private var expanded: Set<PersistentIdentifier> = []
+    @State private var savedTemplate = false
     @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
 
     var body: some View {
@@ -96,6 +97,11 @@ struct ActiveWorkoutView: View {
                     await recorder.start(at: session.startedAt)
                 }
             }
+            .alert("Saved to My workouts", isPresented: $savedTemplate) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Start it again any time from Add → My workouts. Weights will be suggested from what you lift.")
+            }
             .confirmationDialog("Discard this workout?", isPresented: $showingDiscard, titleVisibility: .visible) {
                 Button("Discard", role: .destructive) {
                     if recorder.sessionStart == session.startedAt { recorder.discard() }
@@ -114,6 +120,11 @@ struct ActiveWorkoutView: View {
         HStack {
             Menu {
                 Button("Minimize", systemImage: "chevron.down") { dismiss() }
+                Button("Save as my workout", systemImage: "square.and.arrow.down") {
+                    _ = WorkoutTemplate.from(session, in: modelContext)
+                    savedTemplate = true
+                }
+                .disabled(session.exercises.isEmpty)
                 Button("Discard workout", systemImage: "trash", role: .destructive) { showingDiscard = true }
             } label: {
                 Image(systemName: "chevron.down")
@@ -251,8 +262,8 @@ struct ActiveWorkoutView: View {
     }
 
     private func startRest(for exercise: ExerciseLog) {
-        let compound = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound ?? false
-        RestTimerStore.start(seconds: compound ? 150 : 90)
+        let seconds = RestPreferences.resolved(for: exercise.exerciseID, style: gym.style)
+        RestTimerStore.start(seconds: Double(seconds))
         let next = nextSetText()
         Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
     }
@@ -302,6 +313,9 @@ private struct ExerciseCard: View {
     @State private var focusedSetID: PersistentIdentifier?
     @State private var showingRPEGuide = false
     @State private var confirmingRemove = false
+    @State private var showingProgress = false
+    /// This exercise's own rest time (nil = automatic).
+    @State private var restSeconds: Int?
 
     var body: some View {
         let sets = exercise.orderedSets
@@ -333,6 +347,13 @@ private struct ExerciseCard: View {
                     if !isCurrent {
                         Button("Collapse", systemImage: "chevron.up", action: onCollapse)
                     }
+                    Button("Progress", systemImage: "chart.line.uptrend.xyaxis") { showingProgress = true }
+                    Menu("Rest: \(restSeconds.map(RestPreferences.label) ?? "automatic")", systemImage: "timer") {
+                        Button("Automatic (from your goal)") { setRest(nil) }
+                        ForEach(RestTimer.choices, id: \.self) { seconds in
+                            Button(RestPreferences.label(seconds)) { setRest(seconds) }
+                        }
+                    }
                     Button("Remove exercise", systemImage: "trash", role: .destructive) {
                         confirmingRemove = true
                     }
@@ -344,6 +365,17 @@ private struct ExerciseCard: View {
                         .contentShape(.rect)
                 }
                 .accessibilityLabel("Exercise options")
+                .sheet(isPresented: $showingProgress) {
+                    NavigationStack {
+                        LiftProgressView(exerciseID: exercise.exerciseID, name: exercise.name)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { showingProgress = false }
+                                }
+                            }
+                    }
+                }
+                .onAppear { restSeconds = RestPreferences.seconds(for: exercise.exerciseID) }
                 .confirmationDialog("Remove \(exercise.name) and its sets?", isPresented: $confirmingRemove, titleVisibility: .visible) {
                     Button("Remove", role: .destructive) {
                         modelContext.delete(exercise)
@@ -406,6 +438,11 @@ private struct ExerciseCard: View {
             RPEGuideView()
                 .presentationDetents([.medium, .large])
         }
+    }
+
+    private func setRest(_ seconds: Int?) {
+        RestPreferences.set(seconds, for: exercise.exerciseID)
+        restSeconds = seconds
     }
 
     /// Completes (or un-completes) a set; completing starts rest and moves to the next set.
