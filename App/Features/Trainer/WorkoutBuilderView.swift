@@ -22,6 +22,7 @@ struct WorkoutBuilderView: View {
     @State private var minutes = 45
     @State private var plan: PlannedWorkout?
     @State private var showingGym = false
+    @State private var didSetUp = false
 
     private let durations = [30, 45, 60, 75]
 
@@ -41,10 +42,19 @@ struct WorkoutBuilderView: View {
                     focusPicker
                     durationPicker
                     if let plan {
-                        summaryCard(plan)
-                        ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { index, exercise in
-                            PlannedExerciseRow(index: index + 1, exercise: exercise, unit: plan.unit) {
-                                swap(at: index)
+                        if plan.exercises.isEmpty {
+                            ContentUnavailableView(
+                                "Nothing fits this focus",
+                                systemImage: "dumbbell",
+                                description: Text("No exercises match this focus with your equipment. Pick another focus, or add equipment in My Gym.")
+                            )
+                        } else {
+                            summaryCard(plan)
+                            ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { index, exercise in
+                                PlannedExerciseRow(
+                                    index: index + 1, exercise: exercise, unit: plan.unit,
+                                    onSwap: canSwap(at: index, in: plan) ? { swap(at: index) } : nil
+                                )
                             }
                         }
                     }
@@ -90,6 +100,9 @@ struct WorkoutBuilderView: View {
                 MyGymView()
             }
             .onAppear {
+                // Only once, so coming back from My Gym doesn't reset your choices.
+                guard !didSetUp else { return }
+                didSetUp = true
                 focus = initialFocus
                 minutes = initialMinutes ?? 45
                 rebuild()
@@ -114,6 +127,13 @@ struct WorkoutBuilderView: View {
     private func rebuild() {
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
         plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history)
+    }
+
+    /// True when there's another exercise for the same movement to swap to.
+    private func canSwap(at index: Int, in plan: PlannedWorkout) -> Bool {
+        guard index < plan.exercises.count,
+              let slot = ExerciseCatalog.slot(for: plan.exercises[index].exerciseID) else { return false }
+        return gym.planner.alternatives(for: slot).count > 1
     }
 
     /// Replaces an exercise with the next option for the same movement.
@@ -194,14 +214,14 @@ struct WorkoutBuilderView: View {
                 .foregroundStyle(Theme.primaryText)
             HStack(spacing: 18) {
                 StatView(label: "Time", value: "~\(estimated) min")
-                StatView(label: "Effort", value: "RPE \(plan.targetRPE.formatted())")
-                StatView(label: "Strain", value: "≈+\(strainText(gain))", color: Theme.strain)
+                StatView(label: "Effort", value: "\(plan.targetRPE.formatted())/10")
+                StatView(label: "Strain", value: "≈+\(strainText(gain))", color: Theme.strainTextColor)
             }
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
-                Text("Lands you around \(strainText(landsAt)) strain (target \(whole(target.lowerBound))–\(whole(target.upperBound))%)\(inRange ? ", right on target." : ".")")
+                Text("Lands you around \(strainText(landsAt)) strain (target \(strainRangeText(target)))\(inRange ? ", right on target." : ".")")
                     .font(.subheadline)
-                    .foregroundStyle(inRange ? Theme.recoveryHigh : Theme.secondaryText)
+                    .foregroundStyle(inRange ? Theme.recoveryHighText : Theme.secondaryText)
             }
         }
         .card()
@@ -239,20 +259,20 @@ struct PlannedExerciseRow: View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(index)")
                 .font(.headline)
-                .foregroundStyle(Theme.lifting)
+                .foregroundStyle(Theme.liftingText)
                 .frame(width: 34, height: 34)
                 .background(Theme.lifting.opacity(0.12), in: .rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 4) {
                 Text(exercise.name)
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
-                Text("\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · \(exercise.repsInReserve)")
+                Text("\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · stop with \(exercise.repsInReserve.replacingOccurrences(of: " in reserve", with: " left"))")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                 if let load = exercise.load {
                     Text("\(load.formatted(.number.precision(.fractionLength(0...2)))) \(unit.rawValue)")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.strain)
+                        .foregroundStyle(Theme.strainTextColor)
                 }
                 if let note = exercise.note {
                     Text(note)
@@ -266,7 +286,7 @@ struct PlannedExerciseRow: View {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.secondaryText)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                         .background(Theme.cardRaised, in: .circle)
                 }
                 .buttonStyle(.plain)

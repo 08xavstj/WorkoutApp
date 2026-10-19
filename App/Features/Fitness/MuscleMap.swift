@@ -111,7 +111,7 @@ struct MuscleMapCard: View {
     @State private var mode = Mode.recovery
 
     enum Mode: String, CaseIterable, Identifiable {
-        case recovery = "Recovery"
+        case recovery = "Rest status"
         case volume = "This week"
         var id: String { rawValue }
     }
@@ -135,6 +135,8 @@ struct MuscleMapCard: View {
             }
             .frame(height: 300)
             .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilitySummary(states))
             legend
             details(states)
         }
@@ -156,7 +158,9 @@ struct MuscleMapCard: View {
         guard let state else { return Theme.bodyNeutral }
         switch mode {
         case .recovery:
-            guard state.lastTrained != nil, state.recovery < 99 else { return Theme.bodyNeutral }
+            // Grey = not trained recently; green = trained and ready again.
+            guard state.lastTrained != nil else { return Theme.bodyNeutral }
+            if state.recovery >= 99 { return Theme.recoveryHigh }
             switch state.status {
             case .fresh: return Theme.recoveryHigh
             case .recovering: return Theme.recoveryModerate
@@ -167,16 +171,29 @@ struct MuscleMapCard: View {
             case .none: return Theme.bodyNeutral
             case .low: return Theme.oxygenLight
             case .productive: return Theme.recoveryHigh
-            case .high: return Theme.recoveryLow
+            case .high: return Theme.strain
             }
         }
     }
 
+    /// What the figures show, for VoiceOver.
+    private func accessibilitySummary(_ states: [Muscle: MuscleRecovery.State]) -> String {
+        let trained = Muscle.allCases.compactMap { states[$0] }.filter { $0.lastTrained != nil }
+        guard !trained.isEmpty else { return "Body map: no muscles trained recently." }
+        let parts = trained.map { state in
+            mode == .recovery
+                ? "\(state.muscle.name) \(state.recovery >= 99 ? "ready" : (state.status == .fatigued ? "tired" : "recovering"))"
+                : "\(state.muscle.name) \(state.weeklySets.formatted(.number.precision(.fractionLength(0...1)))) sets"
+        }
+        return "Body map: " + parts.joined(separator: ", ")
+    }
+
     private var legend: some View {
         let items: [(String, Color)] = mode == .recovery
-            ? [("Fresh", Theme.recoveryHigh), ("Recovering", Theme.recoveryModerate), ("Fatigued", Theme.recoveryLow)]
-            : [("Under 10 sets", Theme.oxygenLight), ("10-20 sets", Theme.recoveryHigh), ("Over 20", Theme.recoveryLow)]
-        return HStack(spacing: 12) {
+            ? [("Ready", Theme.recoveryHigh), ("Recovering", Theme.recoveryModerate), ("Tired", Theme.recoveryLow), ("Not trained", Theme.bodyNeutral)]
+            : [("Under 10 sets", Theme.oxygenLight), ("10-20 sets", Theme.recoveryHigh), ("Over 20", Theme.strain)]
+        // Wraps at large text sizes instead of overflowing.
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], alignment: .leading, spacing: 6) {
             ForEach(items, id: \.0) { item in
                 HStack(spacing: 5) {
                     Circle().fill(item.1).frame(width: 9, height: 9)
@@ -196,20 +213,20 @@ struct MuscleMapCard: View {
         let under = all.filter { major.contains($0.muscle) && $0.volume != .productive && $0.volume != .high }
         VStack(alignment: .leading, spacing: 10) {
             if all.allSatisfy({ $0.lastTrained == nil }) {
-                Text("Log a gym session and the muscles you worked light up here, then fade back to grey as they recover.")
+                Text("Log a gym session and the muscles you worked light up here: red when tired, amber while recovering, green once ready again.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
             if !overworked.isEmpty {
                 row("exclamationmark.triangle.fill", Theme.recoveryLow,
                     "Overworked: \(overworked.map(\.muscle.name).joined(separator: ", "))",
-                    "Over 20 hard sets this week and not recovered. Give them 2-3 days or cut volume; more sets past this point add fatigue, not muscle.")
+                    "Over 20 hard sets (sets taken close to failure) this week and not recovered. Give them 2-3 days or cut volume; more sets past this point add fatigue, not muscle.")
             }
             if !resting.isEmpty {
                 row("hourglass", Theme.recoveryModerate, "Still recovering",
                     resting.prefix(4).map { state in
-                        let hours = state.hoursUntilFresh.map { " ~\(Int($0.rounded(.up)))h" } ?? ""
-                        return "\(state.muscle.name) \(Int(state.recovery))%\(hours)"
+                        let hours = state.hoursUntilFresh.map { " — ready in ~\(Int($0.rounded(.up))) h" } ?? ""
+                        return "\(state.muscle.name)\(hours)"
                     }.joined(separator: " · "))
             }
             if mode == .volume, !under.isEmpty, !all.allSatisfy({ $0.lastTrained == nil }) {

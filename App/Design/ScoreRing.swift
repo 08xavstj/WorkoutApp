@@ -513,7 +513,7 @@ struct Chip: View {
             .font(.caption.weight(.semibold))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .foregroundStyle(filled ? Color.white : color)
+            .foregroundStyle(filled ? Color.white : Theme.textColor(for: color))
             .background(filled ? color : color.opacity(0.13), in: .capsule)
     }
 }

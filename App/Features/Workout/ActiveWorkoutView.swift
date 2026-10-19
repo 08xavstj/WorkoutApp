@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import AppCore
 
 /// The live logging screen.
@@ -17,6 +18,7 @@ struct ActiveWorkoutView: View {
     @State private var showingFinish = false
     @State private var showingDiscard = false
     @State private var expanded: Set<PersistentIdentifier> = []
+    @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
 
     var body: some View {
         NavigationStack {
@@ -61,6 +63,15 @@ struct ActiveWorkoutView: View {
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .scrollDismissesKeyboard(.interactively)
+            // One keyboard "Done" for the whole screen (each set editor used to add its own).
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                }
+            }
             .background(alignment: .top) {
                 TopGlow(colors: [Theme.Wash.peach, Theme.Wash.rose, Theme.Wash.butter])
             }
@@ -119,7 +130,7 @@ struct ActiveWorkoutView: View {
                 Text("LIVE").tracking(1.5)
             }
             .font(.subheadline.weight(.bold))
-            .foregroundStyle(Theme.recoveryLow)
+            .foregroundStyle(Theme.recoveryLowText)
             Spacer()
             Button {
                 showingFinish = true
@@ -141,23 +152,30 @@ struct ActiveWorkoutView: View {
     private var titleBlock: some View {
         TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
             let elapsed = max(0, context.date.timeIntervalSince(session.startedAt))
+            let live = liveStrain(elapsed: elapsed)
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
                     TextField("Workout name", text: $session.name)
                         .font(.title.weight(.bold))
                         .foregroundStyle(Theme.primaryText)
                     Text(Duration.seconds(elapsed).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2))))
-                        .font(.system(size: 52, weight: .bold, design: .rounded))
+                        .font(.system(size: timerSize, weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.6)
                         .monospacedDigit()
                         .foregroundStyle(Theme.primaryText)
                     Text("Elapsed · \(finishedExercises) of \(session.exercises.count) exercises")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
+                    if session.workingSets.isEmpty {
+                        Text("Tick off a set to finish.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
                 }
                 Spacer()
-                GradientRing(progress: liveStrain(elapsed: elapsed) / 40, colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
+                GradientRing(progress: live / 40, colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
                     VStack(spacing: 0) {
-                        Text("+\(strainText(liveStrain(elapsed: elapsed)))")
+                        Text("+\(strainText(live))")
                             .font(.system(size: 26, weight: .bold, design: .rounded))
                             .monospacedDigit()
                         Text("strain")
@@ -190,6 +208,10 @@ struct ActiveWorkoutView: View {
         session.orderedExercises.first { exercise in exercise.sets.contains { !$0.isCompleted } }?.persistentModelID
     }
 
+    /// Weights in a workout show in the gym's unit, so the numbers, the +/-
+    /// steps and the plates to load all match what's on the bar.
+    private var workoutUnit: WeightUnit { gym.profile.unit == .kg ? .kilograms : .pounds }
+
     @ViewBuilder
     private func exerciseCard(_ exercise: ExerciseLog) -> some View {
         let isCurrent = exercise.persistentModelID == currentExerciseID
@@ -200,7 +222,7 @@ struct ActiveWorkoutView: View {
                 isCurrent: isCurrent,
                 previous: LiftHistory.previousSets(for: exercise.exerciseID, before: session.startedAt, in: sessions),
                 bestBefore: LiftHistory.bestOneRepMax(for: exercise.exerciseID, before: session.startedAt, in: sessions),
-                unit: settings.weightUnit,
+                unit: workoutUnit,
                 gym: gym.profile,
                 onSetCompleted: { startRest(for: exercise) },
                 onCollapse: { expanded.remove(exercise.persistentModelID) }
@@ -213,7 +235,8 @@ struct ActiveWorkoutView: View {
                     exercise: exercise,
                     isDone: isDone,
                     isNext: isNext(exercise),
-                    unit: settings.weightUnit
+                    unit: workoutUnit,
+                    position: (session.orderedExercises.firstIndex(where: { $0.persistentModelID == exercise.persistentModelID }) ?? 0) + 1
                 )
             }
             .buttonStyle(.plain)
@@ -242,7 +265,7 @@ struct ActiveWorkoutView: View {
             let set = sets[index]
             var detail = "Set \(index + 1) of \(sets.count)"
             if set.weightKg > 0 || set.reps > 0 {
-                detail += " · \(settings.weightUnit.format(set.weightKg)) \(settings.weightUnit.rawValue) × \(set.reps)"
+                detail += " · \(workoutUnit.format(set.weightKg)) \(workoutUnit.rawValue) × \(set.reps)"
             }
             return (exercise.name, detail)
         }
@@ -278,6 +301,7 @@ private struct ExerciseCard: View {
     /// The set open in the editor (defaults to the next set to do).
     @State private var focusedSetID: PersistentIdentifier?
     @State private var showingRPEGuide = false
+    @State private var confirmingRemove = false
 
     var body: some View {
         let sets = exercise.orderedSets
@@ -300,7 +324,7 @@ private struct ExerciseCard: View {
                 if isNewPR {
                     Label("New PR", systemImage: "star.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.lifting)
+                        .foregroundStyle(Theme.liftingText)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Theme.lifting.opacity(0.12), in: .capsule)
@@ -310,23 +334,29 @@ private struct ExerciseCard: View {
                         Button("Collapse", systemImage: "chevron.up", action: onCollapse)
                     }
                     Button("Remove exercise", systemImage: "trash", role: .destructive) {
-                        modelContext.delete(exercise)
-                        try? modelContext.save()
+                        confirmingRemove = true
                     }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.headline)
                         .foregroundStyle(Theme.secondaryText)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
                 .accessibilityLabel("Exercise options")
+                .confirmationDialog("Remove \(exercise.name) and its sets?", isPresented: $confirmingRemove, titleVisibility: .visible) {
+                    Button("Remove", role: .destructive) {
+                        modelContext.delete(exercise)
+                        try? modelContext.save()
+                    }
+                }
             }
 
-            ForEach(Array(sets.enumerated()), id: \.element.persistentModelID) { index, set in
+            ForEach(sets, id: \.persistentModelID) { set in
                 SetRow(
                     set: set,
                     label: set.isWarmup ? "W" : "\(workingNumber(set, in: sets))",
-                    previous: previousText(index: index),
+                    previous: set.isWarmup ? "" : previousText(index: workingNumber(set, in: sets) - 1),
                     unit: unit,
                     isEditing: set.persistentModelID == editing?.persistentModelID,
                     onTap: { focusedSetID = set.persistentModelID },
@@ -412,9 +442,11 @@ private struct ExerciseCard: View {
         (sets.filter { !$0.isWarmup }.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1
     }
 
+    /// Last session's working set with the same number (warm-ups don't count).
     private func previousText(index: Int) -> String {
-        guard index < previous.count else { return "–" }
-        let set = previous[index]
+        let working = previous.filter { !$0.isWarmup }
+        guard index >= 0, index < working.count else { return "" }
+        let set = working[index]
         return "\(unit.format(set.weightKg)) × \(set.reps)"
     }
 
@@ -470,16 +502,18 @@ private struct SetRow: View {
                     .font(.headline)
                     .monospacedDigit()
                     .foregroundStyle(set.weightKg > 0 || set.reps > 0 ? Theme.primaryText : Theme.secondaryText)
-                Text("Last: \(previous)")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(1)
+                if !previous.isEmpty {
+                    Text("Last: \(previous)")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             if let rpe = set.rpe {
                 Text("RPE \(rpe.formatted())")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.lifting)
+                    .foregroundStyle(Theme.liftingText)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Theme.lifting.opacity(0.12), in: .capsule)
@@ -496,7 +530,7 @@ private struct SetRow: View {
                             .foregroundStyle(.white)
                     }
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .contentShape(.circle)
             }
             .buttonStyle(.plain)
@@ -544,7 +578,7 @@ private struct SetEditor: View {
             Text(title.uppercased())
                 .font(.caption.weight(.bold))
                 .tracking(1.2)
-                .foregroundStyle(Theme.lifting)
+                .foregroundStyle(Theme.liftingText)
             HStack(spacing: 12) {
                 NumberStepper(label: unit.rawValue) {
                     TextField("0", value: weightBinding, format: .number.precision(.fractionLength(0...2)))
@@ -576,19 +610,13 @@ private struct SetEditor: View {
                     .padding(.vertical, 16)
                     .background(set.isCompleted
                                 ? AnyShapeStyle(Theme.cardRaised)
-                                : AnyShapeStyle(LinearGradient(colors: [Theme.recoveryHighLight, Theme.recoveryHigh], startPoint: .leading, endPoint: .trailing)),
+                                : AnyShapeStyle(LinearGradient(colors: Theme.recoveryButtonColors, startPoint: .leading, endPoint: .trailing)),
                                 in: .capsule)
             }
             .buttonStyle(.plain)
         }
         .padding(14)
         .background(Theme.lifting.opacity(0.05), in: .rect(cornerRadius: 20))
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { typing = nil }
-            }
-        }
     }
 
     private var weightBinding: Binding<Double> {
@@ -669,7 +697,7 @@ private struct RPEPicker: View {
                             .frame(maxWidth: .infinity, minHeight: 48)
                             .foregroundStyle(selected ? .white : Theme.primaryText)
                             .background(selected
-                                        ? AnyShapeStyle(LinearGradient(colors: [Theme.strainLight, Theme.lifting], startPoint: .top, endPoint: .bottom))
+                                        ? AnyShapeStyle(LinearGradient(colors: Theme.strainButtonColors, startPoint: .top, endPoint: .bottom))
                                         : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
                             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Color.clear : Theme.separator))
                     }
@@ -712,6 +740,8 @@ private struct CollapsedExerciseRow: View {
     let isDone: Bool
     let isNext: Bool
     let unit: WeightUnit
+    /// 1-based position in the workout.
+    var position: Int
 
     var body: some View {
         HStack(spacing: 14) {
@@ -722,7 +752,7 @@ private struct CollapsedExerciseRow: View {
                     .frame(width: 40, height: 40)
                     .background(Theme.recoveryHigh, in: .circle)
             } else {
-                Text("\(exercise.order + 1)")
+                Text("\(position)")
                     .font(.headline)
                     .foregroundStyle(Theme.secondaryText)
                     .frame(width: 40, height: 40)
@@ -785,11 +815,14 @@ private struct RestTimerPill: View {
                 pillButton("+15s") { onChange(15) }
                 Button("Skip") { onChange(nil) }
                     .font(.headline)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
+                    .buttonStyle(.plain)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(LinearGradient(colors: [Theme.strain, Theme.strainLight], startPoint: .leading, endPoint: .trailing), in: .capsule)
+            .padding(.vertical, 8)
+            .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
             .shadow(color: Theme.strain.opacity(0.3), radius: 12, y: 6)
             .onChange(of: remaining == 0) { _, finished in
                 if finished { onChange(nil) }
@@ -801,9 +834,10 @@ private struct RestTimerPill: View {
     private func pillButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
             .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .frame(minWidth: 44, minHeight: 44)
             .background(Color.white.opacity(0.2), in: .capsule)
+            .contentShape(.capsule)
             .buttonStyle(.plain)
     }
 }
@@ -842,7 +876,7 @@ private struct LiveHeartRateBar: View {
                     Text(recorder.isRecording ? "Waiting for heart rate…" : "Live heart rate off")
                         .font(.headline)
                         .foregroundStyle(Theme.primaryText)
-                    Text(recorder.problem ?? "Wear AirPods Pro 3 (or connect a Bluetooth chest strap) to see heart rate here. It's saved with the workout so you can compare it with your Garmin.")
+                    Text(recorder.problem ?? "Wear AirPods Pro 3 (or connect a Bluetooth chest strap) to see heart rate here. It's saved with the workout so you can compare it with your watch.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }

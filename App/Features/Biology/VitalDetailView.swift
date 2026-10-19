@@ -58,7 +58,7 @@ struct VitalDetailView: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                     if stat.value == nil && !hasHistory {
-                        Text("Nothing in Apple Health yet. If your Garmin records this, check that Garmin Connect's Apple Health sharing is on and that WorkoutApp can read it (Health app → profile → Apps → WorkoutApp).")
+                        Text("Nothing in Apple Health yet. If your watch records this, check that its app shares with Apple Health and that WorkoutApp can read it (Health app → profile → Apps → WorkoutApp).")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -262,7 +262,7 @@ struct VitalDetailView: View {
                     .annotation(position: .top, alignment: .trailing) {
                         Text("Goal \(number(goal))")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Theme.recoveryHigh)
+                            .foregroundStyle(Theme.recoveryHighText)
                     }
             }
             if let average {

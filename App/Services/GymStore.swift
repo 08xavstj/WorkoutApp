@@ -19,7 +19,8 @@ final class GymStore {
             profile = saved
             isConfigured = true
         } else {
-            profile = .commercialPounds
+            // Until My Gym is set up, match the unit chosen in Settings.
+            profile = defaults.string(forKey: "weightUnit") == "kg" ? .commercialKilograms : .commercialPounds
             isConfigured = false
         }
     }

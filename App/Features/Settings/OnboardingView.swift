@@ -8,17 +8,33 @@ struct OnboardingView: View {
     @State private var isRequesting = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Spacer()
-            Text("Your training, recovery and sleep in one place")
-                .font(.largeTitle.weight(.bold))
-            VStack(alignment: .leading, spacing: 16) {
-                row("flame.fill", Theme.strain, "Strain", "How hard your body worked today, 0-100%. Gym sessions count, not just cardio.")
-                row("bolt.heart.fill", Theme.recoveryHigh, "Recovery", "How ready you are, from your HRV, resting heart rate and sleep.")
-                row("moon.zzz.fill", Theme.sleep, "Sleep", "Time asleep against what you need, plus quality.")
-                row("sparkles", Theme.lifting, "Coach", "Ask what to do today. It knows your numbers and your workouts.")
+        // Scrolls at large text sizes; the buttons stay pinned at the bottom.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Your training, recovery and sleep in one place")
+                    .font(.largeTitle.weight(.bold))
+                    .padding(.top, 40)
+                VStack(alignment: .leading, spacing: 16) {
+                    row("flame.fill", Theme.strain, "Strain", "How hard your body worked today, 0-100%. Gym sessions count, not just cardio.")
+                    row("bolt.heart.fill", Theme.recoveryHigh, "Recovery", "How ready you are, from your heart rate variability (HRV), resting heart rate and sleep.")
+                    row("moon.zzz.fill", Theme.sleep, "Sleep", "Time asleep against what you need, plus quality.")
+                    row("sparkles", Theme.lifting, "Coach", "Ask what to do today. It knows your numbers and your workouts.")
+                }
             }
-            Spacer()
+            .padding(24)
+            .lockedToScreenWidth()
+        }
+        .safeAreaInset(edge: .bottom) {
+            buttons
+                .padding(.horizontal, 24)
+                .padding(.bottom, 12)
+                .background(Theme.background)
+        }
+        .background(Theme.background)
+    }
+
+    private var buttons: some View {
+        VStack(spacing: 12) {
             Button {
                 Task { await allowHealth() }
             } label: {
@@ -35,10 +51,8 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .multilineTextAlignment(.center)
             Button("Not now") { finish() }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 44)
         }
-        .padding(24)
-        .background(Theme.background)
     }
 
     private func row(_ icon: String, _ color: Color, _ title: String, _ detail: String) -> some View {

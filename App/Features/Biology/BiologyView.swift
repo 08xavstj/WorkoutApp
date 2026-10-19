@@ -55,15 +55,21 @@ struct BiologyView: View {
                         }
                     }
                     if vitals.stats.isEmpty {
-                        Text(vitals.isLoading ? "Loading your health stats…" : "No health stats yet. Turn on Apple Health sharing in Garmin Connect (More → Settings → Connected Apps → Apple Health).")
+                        Text(vitals.isLoading ? "Loading your health stats…" : "No health stats yet. Turn on Apple Health sharing in your watch's app (Garmin Connect: More → Settings → Connected Apps → Apple Health).")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                             .card()
                     }
-                    Text("Garmin Connect shares heart rate, resting heart rate, sleep, steps, distance, floors, energy, workouts, and (on supported watches) blood oxygen and respiration with Apple Health. Body Battery, Garmin stress and HRV stay in Garmin Connect, so stress here is estimated from heart rate.")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                        .padding(.top, 4)
+                    DisclosureGroup("Using a Garmin?") {
+                        Text("Garmin Connect shares heart rate, resting heart rate, sleep, steps, distance, floors, energy, workouts, and (on supported watches) blood oxygen and respiration with Apple Health. Body Battery, Garmin stress and HRV stay in Garmin Connect, so stress here is estimated from heart rate and HRV can be added by hand.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .tint(Theme.secondaryText)
+                    .padding(.top, 4)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
@@ -93,7 +99,7 @@ struct BiologyView: View {
         )
         stat.chart = .bars
         stat.goal = metrics.proteinTarget
-        stat.about = "Protein logged in Cronometer each day. Your target comes from your goal and weight: about 1.6 g per kg helps build muscle with lifting, and more while losing weight (Morton et al., Br J Sports Med 2018)."
+        stat.about = "Protein logged in your food app each day. Your target comes from your goal and weight: about 1.6 g per kg helps build muscle with lifting, and more while losing weight (Morton et al., Br J Sports Med 2018)."
         return stat
     }
 
@@ -178,7 +184,7 @@ struct BiologyView: View {
                 }
                 .frame(height: 170)
             } else {
-                Text("No HRV yet. Garmin doesn't share HRV with Apple Health, so add last night's value with Add HRV on the Home screen.")
+                Text("No HRV yet. If your watch doesn't share HRV with Apple Health (Garmin doesn't), add last night's value with Add HRV on the Home tab.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -297,10 +303,11 @@ struct BodyAgeCard: View {
             }
             if let result {
                 let younger = result.difference <= 0
-                let tone = younger ? Theme.recoveryHigh : Theme.recoveryModerate
+                let tone = younger ? Theme.recoveryHighText : Theme.recoveryModerateText
                 HStack(alignment: .center, spacing: 18) {
+                    // A full ring in the result's color: green when younger, amber when older.
                     GradientRing(
-                        progress: min(1, result.bodyAge / 80),
+                        progress: 1,
                         colors: younger ? [Theme.recoveryHighLight, Theme.recoveryHigh] : [Theme.recoveryModerateLight, Theme.recoveryModerate],
                         lineWidth: 12
                     ) {
@@ -326,7 +333,7 @@ struct BodyAgeCard: View {
                         Text("than your age (\(result.age))")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
-                        Text(younger ? "Your habits are adding years. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
+                        Text(younger ? "Your habits are taking years off. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -336,11 +343,11 @@ struct BodyAgeCard: View {
                         FactorRow(factor: factor)
                     }
                 }
-                Text("Based on VO₂ max (fitness age, HUNT study), resting heart rate, sleep, steps and body fat or BMI, using published mortality research. Not a medical test.")
+                Text("Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. An estimate, not a medical test.")
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
             } else {
-                Text(isLoading ? "Working it out…" : "Needs at least two of: VO₂ max, resting heart rate, sleep, steps, body fat or BMI. Wear your Garmin day and night and add your height and weight in Settings.")
+                Text(isLoading ? "Working it out…" : "Needs at least two of: VO₂ max, resting heart rate, sleep, steps, body fat or BMI. Wear your watch day and night and add your height and weight in Settings.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -444,7 +451,7 @@ struct MicronutrientsCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             if findings.isEmpty {
-                Text("Log food in Cronometer for at least 4 days (with Apple Health sync on) to see how your vitamins and minerals compare with daily targets.")
+                Text("Log food in your food app for at least 4 days (with Apple Health sync on) to see how your vitamins and minerals compare with daily targets.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }

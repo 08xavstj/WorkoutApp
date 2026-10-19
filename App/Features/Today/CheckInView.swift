@@ -25,6 +25,8 @@ struct CheckInView: View {
     @State private var morning = MorningCheckIn(day: Calendar.current.startOfDay(for: .now))
     @State private var evening = EveningCheckIn(day: Calendar.current.startOfDay(for: .now))
     @State private var hrv: Double?
+    /// Opens progress photos once this sheet has fully closed.
+    @State private var openPhotosAfter = false
 
     var body: some View {
         NavigationStack {
@@ -49,27 +51,37 @@ struct CheckInView: View {
                 }
             }
             .onAppear(perform: load)
+            .onDisappear {
+                if openPhotosAfter { router.showProgressPhotos = true }
+            }
         }
+    }
+
+    /// True when last night's HRV already came from Apple Health, so there's no need to ask.
+    private var hrvFromHealth: Bool {
+        metrics.hrv != nil && !metrics.hrvIsManual
     }
 
     // MARK: Morning
 
     @ViewBuilder
     private var morningQuestions: some View {
-        Section {
-            TextField("e.g. 52", value: $hrv, format: .number.precision(.fractionLength(0)))
-                .keyboardType(.numberPad)
-                .font(.title3.weight(.semibold))
-        } header: {
-            Text("Last night's HRV (ms)")
-        } footer: {
-            Text("From Garmin Connect → HRV Status. Optional, but it makes recovery accurate.")
+        if !hrvFromHealth {
+            Section {
+                TextField("e.g. 52", value: $hrv, format: .number.precision(.fractionLength(0)))
+                    .keyboardType(.numberPad)
+                    .font(.title3.weight(.semibold))
+            } header: {
+                Text("Last night's HRV (ms)")
+            } footer: {
+                Text("Optional, from your watch's app (on Garmin: Garmin Connect → HRV Status). It makes recovery more accurate.")
+            }
         }
         Section("How rested do you feel?") {
             ScalePicker(value: $morning.rested, labels: ["Exhausted", "Tired", "OK", "Good", "Great"], color: Theme.sleep)
         }
         Section {
-            ScalePicker(value: $morning.soreness, range: 0...10, color: Theme.lifting)
+            ScalePicker(value: $morning.soreness, range: 0...10, color: Theme.lifting, endLabels: ("None", "Very sore"))
             if (morning.soreness ?? 0) > 0 {
                 ChipFlow(options: MorningCheckIn.BodyArea.allCases, selection: $morning.soreAreas, label: \.rawValue, color: Theme.lifting)
             }
@@ -87,19 +99,6 @@ struct CheckInView: View {
             Text("Feeling sick?")
         } footer: {
             Text("Leave empty if you feel fine.")
-        }
-        Section {
-            Button {
-                save()
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(400))
-                    router.showProgressPhotos = true
-                }
-            } label: {
-                Label("Take progress photos", systemImage: "camera.fill")
-            }
-        } footer: {
-            Text("Saves your answers so far, then opens the camera for your front and side photos.")
         }
         Section("Woke up during the night?") {
             Picker("Wakings", selection: $morning.nightWakings) {
@@ -122,6 +121,16 @@ struct CheckInView: View {
                 Text("Resting heart rate rises and HRV dips before a period; this stops it reading as poor recovery.")
             }
         }
+        Section {
+            Button {
+                openPhotosAfter = true
+                save()
+            } label: {
+                Label("Save and take progress photos", systemImage: "camera.fill")
+            }
+        } footer: {
+            Text("Saves your answers, then opens the camera for your front and side photos.")
+        }
     }
 
     // MARK: Evening
@@ -142,7 +151,7 @@ struct CheckInView: View {
             }
             .scrollIndicators(.hidden)
             if (evening.caffeineMg ?? 0) > 0 {
-                DatePicker("Last caffeine", selection: minutesBinding(\.lastCaffeineMinutes, default: 13 * 60), displayedComponents: .hourAndMinute)
+                optionalTime("Last caffeine", \.lastCaffeineMinutes, default: 13 * 60)
             }
         } header: {
             Text("Caffeine today")
@@ -152,14 +161,14 @@ struct CheckInView: View {
         Section("Alcohol") {
             Stepper("\(evening.drinks ?? 0) drinks", value: Binding(get: { evening.drinks ?? 0 }, set: { evening.drinks = $0 }), in: 0...20)
             if (evening.drinks ?? 0) > 0 {
-                DatePicker("Last drink", selection: minutesBinding(\.lastDrinkMinutes, default: 21 * 60), displayedComponents: .hourAndMinute)
+                optionalTime("Last drink", \.lastDrinkMinutes, default: 21 * 60)
             }
         }
         Section("Stress today") {
             ScalePicker(value: $evening.stress, labels: ["Calm", "Low", "Some", "High", "Very high"], color: Theme.recoveryModerate)
         }
         Section("Food") {
-            DatePicker("Last meal", selection: minutesBinding(\.lastMealMinutes, default: 19 * 60), displayedComponents: .hourAndMinute)
+            optionalTime("Last meal", \.lastMealMinutes, default: 19 * 60)
         }
         Section("Anything else today?") {
             Toggle("Nicotine or vaping", isOn: boolBinding(\.nicotine))
@@ -184,6 +193,26 @@ struct CheckInView: View {
                 evening[keyPath: keyPath] = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
             }
         )
+    }
+
+    /// A time that's only saved once you add it, so the form never shows a
+    /// time you didn't enter.
+    @ViewBuilder
+    private func optionalTime(_ title: String, _ keyPath: WritableKeyPath<EveningCheckIn, Int?>, default value: Int) -> some View {
+        if evening[keyPath: keyPath] == nil {
+            Button("Add \(title.lowercased()) time") { evening[keyPath: keyPath] = value }
+        } else {
+            HStack {
+                DatePicker(title, selection: minutesBinding(keyPath, default: value), displayedComponents: .hourAndMinute)
+                Button {
+                    evening[keyPath: keyPath] = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.secondaryText)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Remove \(title.lowercased()) time")
+            }
+        }
     }
 
     private func boolBinding(_ keyPath: WritableKeyPath<EveningCheckIn, Bool?>) -> Binding<Bool> {
@@ -238,6 +267,8 @@ struct ScalePicker: View {
     var range: ClosedRange<Int> = 1...5
     var labels: [String] = []
     let color: Color
+    /// Words for the two ends of a numeric scale, e.g. ("None", "Very sore").
+    var endLabels: (String, String)?
 
     var body: some View {
         VStack(spacing: 6) {
@@ -249,17 +280,28 @@ struct ScalePicker: View {
                     } label: {
                         Text("\(number)")
                             .font(.subheadline.weight(.bold))
-                            .frame(maxWidth: .infinity, minHeight: 34)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                             .foregroundStyle(selected ? .white : Theme.primaryText)
-                            .background(selected ? AnyShapeStyle(LinearGradient(colors: [color.opacity(0.7), color], startPoint: .top, endPoint: .bottom)) : AnyShapeStyle(Theme.cardRaised), in: .rect(cornerRadius: 9))
+                            .background(selected ? AnyShapeStyle(color) : AnyShapeStyle(Theme.cardRaised), in: .rect(cornerRadius: 9))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(labels.count == range.count ? "\(number), \(labels[number - range.lowerBound])" : "\(number)")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
+            }
+            if let endLabels {
+                HStack {
+                    Text(endLabels.0)
+                    Spacer()
+                    Text(endLabels.1)
+                }
+                .font(.caption2)
+                .foregroundStyle(Theme.secondaryText)
             }
             if let value, labels.count == range.count {
                 Text(labels[value - range.lowerBound])
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(color)
+                    .foregroundStyle(Theme.textColor(for: color))
             }
         }
     }
@@ -295,6 +337,7 @@ struct ChipFlow<Option: Hashable>: View {
                         .background(selected ? color : Theme.cardRaised, in: .capsule)
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
     }

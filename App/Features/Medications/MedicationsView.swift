@@ -134,7 +134,7 @@ struct TodayDosesList: View {
                         if taken, let at = meds.taken[dose.id] {
                             Text("Taken \(at.formatted(date: .omitted, time: .shortened))")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(Theme.recoveryHigh)
+                                .foregroundStyle(Theme.recoveryHighText)
                         } else if dose.time < .now {
                             Chip(text: "Due", color: Theme.lifting)
                         }
@@ -210,7 +210,7 @@ struct MedicationEditor: View {
                     TextField("Dose (e.g. 25 mg)", text: $medication.dose)
                     if let drug = MedicationKnowledge.match(medication.name) {
                         Label("Recognised: \(drug.name)", systemImage: "checkmark.seal.fill")
-                            .foregroundStyle(Theme.recoveryHigh)
+                            .foregroundStyle(Theme.recoveryHighText)
                             .font(.subheadline)
                     }
                 }
@@ -381,10 +381,17 @@ struct MedicationDetailView: View {
         }
     }
 
+    /// Label text is long and clinical, so each section starts collapsed.
     private func labelSection(_ title: String, _ text: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(color)
-            Text(text).font(.caption).foregroundStyle(Theme.primaryText)
+        DisclosureGroup {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(Theme.primaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+        } label: {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textColor(for: color))
         }
+        .tint(Theme.secondaryText)
     }
 }

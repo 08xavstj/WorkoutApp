@@ -95,10 +95,10 @@ struct RPEGuideView: View {
 
     private func color(for rpe: Double) -> Color {
         switch rpe {
-        case 9.5...: Theme.recoveryLow
-        case 8...: Theme.lifting
-        case 7...: Theme.recoveryModerate
-        default: Theme.recoveryHigh
+        case 9.5...: Theme.recoveryLowText
+        case 8...: Theme.liftingText
+        case 7...: Theme.recoveryModerateText
+        default: Theme.recoveryHighText
         }
     }
 

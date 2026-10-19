@@ -11,6 +11,7 @@ struct MyGymView: View {
     @State private var rangeFrom: Double = 5
     @State private var rangeTo: Double = 50
     @State private var rangeStep: Double = 5
+    @State private var pendingUnit: LoadUnit?
 
     private let toggleable = EquipmentKind.allCases.filter { $0 != .bodyweight }
 
@@ -19,7 +20,10 @@ struct MyGymView: View {
             Form {
                 Section {
                     TextField("Name", text: $draft.name)
-                    Picker("Plates and stacks are in", selection: $draft.unit) {
+                    Picker("Plates and stacks are in", selection: Binding(
+                        get: { draft.unit },
+                        set: { newUnit in if newUnit != draft.unit { pendingUnit = newUnit } }
+                    )) {
                         Text("Pounds (lb)").tag(LoadUnit.lb)
                         Text("Kilograms (kg)").tag(LoadUnit.kg)
                     }
@@ -78,6 +82,7 @@ struct MyGymView: View {
                         } label: {
                             Label("Add plate size", systemImage: "plus.circle")
                         }
+                        .buttonStyle(.borderless)
                     } header: {
                         Text("Plates (pairs)")
                     } footer: {
@@ -100,20 +105,24 @@ struct MyGymView: View {
                                 }
                                 newDumbbell = nil
                             }
+                            .buttonStyle(.borderless)
                         }
-                        HStack {
-                            TextField("From", value: $rangeFrom, format: .number).keyboardType(.decimalPad)
-                            TextField("To", value: $rangeTo, format: .number).keyboardType(.decimalPad)
-                            TextField("Step", value: $rangeStep, format: .number).keyboardType(.decimalPad)
-                            Button("Fill range") {
+                        HStack(alignment: .bottom) {
+                            labeledNumber("From", $rangeFrom)
+                            labeledNumber("To", $rangeTo)
+                            labeledNumber("Step", $rangeStep)
+                            Button("Add range") {
                                 guard rangeStep > 0, rangeTo >= rangeFrom else { return }
-                                draft.dumbbells = stride(from: rangeFrom, through: rangeTo + 0.001, by: rangeStep).map { $0 }
+                                // Adds to what's there (rounded so float steps don't make near-duplicates).
+                                let range = stride(from: rangeFrom, through: rangeTo + 0.001, by: rangeStep).map { ($0 * 100).rounded() / 100 }
+                                draft.dumbbells = Array(Set(draft.dumbbells + range)).sorted()
                             }
+                            .buttonStyle(.borderless)
                         }
                     } header: {
                         Text("Dumbbells (\(draft.dumbbells.count) weights)")
                     } footer: {
-                        Text("Weight per dumbbell. Use Fill range for a full rack, or add odd sizes one at a time.")
+                        Text("Weight per dumbbell. Use Add range for a full rack, or add odd sizes one at a time. Touch and hold a weight to remove it.")
                     }
                 }
 
@@ -132,6 +141,7 @@ struct MyGymView: View {
                                 }
                                 newKettlebell = nil
                             }
+                            .buttonStyle(.borderless)
                         }
                     }
                 }
@@ -153,6 +163,19 @@ struct MyGymView: View {
                 }
             }
             .navigationTitle("My Gym")
+            .confirmationDialog(
+                "Switch to \(pendingUnit == .kg ? "kilograms" : "pounds")?",
+                isPresented: Binding(get: { pendingUnit != nil }, set: { if !$0 { pendingUnit = nil } }),
+                titleVisibility: .visible
+            ) {
+                if let unit = pendingUnit {
+                    Button("Use standard \(unit.rawValue) plates and dumbbells") { switchUnit(to: unit, standard: true) }
+                    Button("Convert my current weights") { switchUnit(to: unit, standard: false) }
+                }
+                Button("Cancel", role: .cancel) { pendingUnit = nil }
+            } message: {
+                Text("Plates and dumbbells come in different sizes in kg and lb.")
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -168,6 +191,40 @@ struct MyGymView: View {
             }
             .onAppear { draft = gym.profile }
         }
+    }
+
+    /// Switches unit. Plates and dumbbells come in different sizes in kg and lb,
+    /// so either load the standard set for the new unit or convert the numbers.
+    private func switchUnit(to unit: LoadUnit, standard: Bool) {
+        if standard {
+            let preset: GymProfile = unit == .kg ? .commercialKilograms : .commercialPounds
+            draft.barbellWeight = preset.barbellWeight
+            draft.ezBarWeight = preset.ezBarWeight
+            draft.smithBarWeight = preset.smithBarWeight
+            draft.plates = preset.plates
+            draft.dumbbells = preset.dumbbells
+            draft.kettlebells = preset.kettlebells
+            draft.cableStack = preset.cableStack
+            draft.machineStack = preset.machineStack
+        } else {
+            let from = draft.unit
+            func convert(_ value: Double) -> Double {
+                (unit.fromKilograms(from.toKilograms(value)) * 4).rounded() / 4
+            }
+            draft.barbellWeight = convert(draft.barbellWeight)
+            draft.ezBarWeight = convert(draft.ezBarWeight)
+            draft.smithBarWeight = convert(draft.smithBarWeight)
+            draft.plates = draft.plates.map { PlateCount(weight: convert($0.weight), pairs: $0.pairs) }
+            draft.dumbbells = draft.dumbbells.map(convert)
+            draft.kettlebells = draft.kettlebells.map(convert)
+            draft.cableStack.start = convert(draft.cableStack.start)
+            draft.cableStack.step = convert(draft.cableStack.step)
+            draft.cableStack.max = convert(draft.cableStack.max)
+            draft.machineStack.start = convert(draft.machineStack.start)
+            draft.machineStack.step = convert(draft.machineStack.step)
+            draft.machineStack.max = convert(draft.machineStack.max)
+        }
+        draft.unit = unit
     }
 
     private func apply(_ preset: GymProfile) {
@@ -188,6 +245,13 @@ struct MyGymView: View {
         }
     }
 
+    private func labeledNumber(_ title: String, _ value: Binding<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption2).foregroundStyle(Theme.secondaryText)
+            TextField(title, value: value, format: .number).keyboardType(.decimalPad)
+        }
+    }
+
     private func stackSection(_ title: String, stack: Binding<WeightStack>) -> some View {
         Section {
             weightField("Lightest", value: stack.start)
@@ -204,20 +268,16 @@ struct MyGymView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(weights, id: \.self) { weight in
-                    Button {
-                        remove(weight)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(weight.formatted())
-                            Image(systemName: "xmark").font(.caption2.weight(.bold))
-                        }
+                    // Touch and hold to remove, so scrolling can't delete a weight by accident.
+                    Text(weight.formatted())
                         .font(.footnote.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Theme.cardRaised, in: .capsule)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Remove \(weight.formatted())")
+                        .contextMenu {
+                            Button("Remove \(weight.formatted())", systemImage: "trash", role: .destructive) { remove(weight) }
+                        }
+                        .accessibilityAction(named: "Remove") { remove(weight) }
                 }
             }
         }
