@@ -216,7 +216,7 @@ struct EnergyTests {
             heartRate: [], strengthSessions: [session], stepsOutsideWorkouts: 0, intake: nil,
             dayStart: start, now: start.addingTimeInterval(11 * 3600)
         )
-        #expect(abs(result.exercise - 3 * 4 * 74.3) < 0.5)
+        #expect(abs(result.exercise - 3 * 5 * 74.3) < 0.5)
     }
 
     @Test func liftingFloorAppliesWhenHeartRateIsLow() {
@@ -227,6 +227,6 @@ struct EnergyTests {
             heartRate: [], strengthSessions: [session], stepsOutsideWorkouts: 0, intake: nil,
             dayStart: start, now: start.addingTimeInterval(7200)
         )
-        #expect(abs(result.exercise - 4 * 74.3) < 0.5) // (5 - 1) METs × kg × 1 h
+        #expect(abs(result.exercise - 5 * 74.3) < 0.5) // (6 - 1) METs × kg × 1 h
     }
 }
