@@ -228,15 +228,15 @@ final class VitalsModel {
 
         if let stress = derived.stressToday {
             result.append(Stat(
-                id: "stress", category: .heart, title: "Stress (estimate)", icon: "brain.head.profile",
-                value: "\(stress.score)", unit: "", status: StressEstimate.label(for: stress.score),
-                tone: stress.score < 26 ? .good : (stress.score < 51 ? .neutral : .caution),
+                id: "stress", category: .heart, title: "Heart rate above resting", icon: "heart.text.square",
+                value: "\(stress.score)", unit: "/ 100", status: StressEstimate.label(for: stress.score),
+                tone: .neutral,
                 gauge: Double(stress.score) / 100,
                 series: derived.stressByDay,
-                footnote: "From heart rate above resting outside workouts. Garmin's stress score uses HRV, which it doesn't share with Apple Health."
+                footnote: "Experimental. Garmin's stress score uses HRV, which it doesn't share with Apple Health."
             ))
         } else {
-            result.append(Stat(id: "stress", category: .heart, title: "Stress (estimate)", icon: "brain.head.profile", unit: "",
+            result.append(Stat(id: "stress", category: .heart, title: "Heart rate above resting", icon: "heart.text.square", unit: "/ 100",
                                footnote: "Needs about 30 minutes of daytime heart rate."))
         }
 
@@ -294,7 +294,7 @@ final class VitalsModel {
         let stepSeries = get(try? await steps)
         var stepStat = makeStat("steps", .activity, "Steps", "shoeprints.fill", series: stepSeries, unit: "", digits: 0)
         // The goal grows (or eases) with your usual day; see StepGoal.
-        let stepGoal = StepGoal.personal(dailySteps: stepSeries.filter { !calendar.isDateInToday($0.date) }.suffix(28).map(\.value))
+        let stepGoal = StepGoal.personal(dailySteps: stepSeries.filter { !calendar.isDateInToday($0.date) }.suffix(28).map(\.value), age: settings.age)
         stepStat.goal = stepGoal
         if let today = latestToday(stepSeries) {
             stepStat.gauge = min(1, today.value / stepGoal)
@@ -414,7 +414,9 @@ final class VitalsModel {
             sleepHours: averageSleep,
             dailySteps: average(fullDaySteps, last: 30),
             bodyFatPercent: fatSeries.last?.value,
-            bmi: bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm)
+            bmi: bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm),
+            vo2MaxAgeDays: vo2Series.last.map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 },
+            bodyCompositionAgeDays: (fatSeries.last ?? bmiSeries.last ?? rawWeight.last).map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 }
         ))
     }
 
@@ -477,8 +479,7 @@ final class VitalsModel {
             stat.about = "How many beats your heart rate drops in the first minute after exercise. Bigger drops mean better fitness; a drop of 12 bpm or less was linked with higher mortality (Cole et al., N Engl J Med 1999)."
         case "stress":
             stat.chart = .bars
-            stat.normalRange = 0...25
-            stat.about = "Estimated from how far your heart rate sits above resting when you're not exercising. 0-25 is calm. It's a rough guide, not a medical measure."
+            stat.about = "Experimental: how far your heart rate sits above your resting rate while you're awake and not exercising (0 = at resting, 100 = far above). Caffeine, heat, digestion, standing and stress all raise it, and no study has validated heart rate alone as a stress score, so read it as a rough trend."
         case "vo2":
             stat.about = "How much oxygen your body can use at full effort: the best single measure of aerobic fitness. Higher fitness is strongly linked with longer life (Mandsager et al., JAMA Netw Open 2018). Watches estimate it from runs and walks with heart rate."
             stat.defaultDays = 90
@@ -494,7 +495,7 @@ final class VitalsModel {
             stat.chart = .bars
             stat.about = "Minutes logged in mindfulness or breathing apps."
         case "steps":
-            stat.about = "Steps each day. In a meta-analysis of 15 studies, risk of death kept falling up to about 8,000-10,000 steps a day for adults under 60 (Paluch et al., Lancet Public Health 2022). Your goal follows your usual day."
+            stat.about = "Steps each day. 7,000 a day was linked with about half the risk of death of 2,000, with smaller gains beyond (Ding et al., Lancet Public Health 2025); risk kept falling to about 8,000-10,000 for adults under 60 (Paluch et al., 2022). Your goal starts at 8,000 (7,000 from age 60) and then follows your usual day, never below 7,000."
         case "distance":
             stat.about = "Walking and running distance each day."
         case "floors":

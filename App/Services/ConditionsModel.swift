@@ -19,17 +19,56 @@ final class ConditionsModel {
         do {
             current = try await WeatherClient.conditions(latitude: settings.latitude, longitude: settings.longitude)
             errorMessage = nil
+            recordHotDay()
         } catch {
             errorMessage = "Couldn't load the weather."
         }
     }
 
+    /// Today's forecast heat: the warmer of "feels like" now and the day's high.
+    var forecastFeelsLikeC: Double? {
+        current.map { max($0.feelsLike, $0.high ?? $0.feelsLike) }
+    }
+
+    /// Days (start of day) that reached `HeatAdvice.hotFeelsLikeC`, for heat acclimation.
+    private(set) var hotDays: Set<Date> = ConditionsModel.loadHotDays()
+    /// Hot days in the last 14 that had training; set by the app after a refresh.
+    var heatTrainingDays = 0
+
+    private static let hotDaysKey = "hotDays"
+
+    private static func loadHotDays() -> Set<Date> {
+        let stamps = UserDefaults.standard.array(forKey: hotDaysKey) as? [Double] ?? []
+        return Set(stamps.map { Date(timeIntervalSince1970: $0) })
+    }
+
+    private func recordHotDay() {
+        guard let feels = forecastFeelsLikeC, feels >= HeatAdvice.hotFeelsLikeC else { return }
+        let today = Calendar.current.startOfDay(for: .now)
+        let cutoff = today.addingTimeInterval(-30 * 86_400)
+        guard !hotDays.contains(today) else { return }
+        var days = hotDays.filter { $0 >= cutoff }
+        days.insert(today)
+        hotDays = days
+        UserDefaults.standard.set(days.map(\.timeIntervalSince1970), forKey: Self.hotDaysKey)
+    }
+
     var tips: [WeatherAdvice.Tip] {
         guard let current else { return [] }
-        return WeatherAdvice.tips(for: .init(
+        var tips = WeatherAdvice.tips(for: .init(
             feelsLikeC: current.feelsLike, humidity: current.humidity, uvIndexMax: current.uvIndexMax,
-            usAQI: current.usAQI, daylightHours: current.daylightHours, precipitationChance: current.precipitationChance
+            usAQI: current.usAQI, daylightHours: current.daylightHours, precipitationChance: current.precipitationChance,
+            sunrise: current.sunrise, sunset: current.sunset
         ))
+        // On hot days, explain the lower strain target and acclimation instead.
+        if let heat = HeatAdvice.advice(feelsLikeC: forecastFeelsLikeC, heatTrainingDays: heatTrainingDays) {
+            if let index = tips.firstIndex(where: { $0.id == "heat" }) {
+                tips[index].text = heat
+            } else {
+                tips.insert(WeatherAdvice.Tip(id: "heat", level: .caution, text: heat), at: 0)
+            }
+        }
+        return tips
     }
 
     /// One line for the AI coach.

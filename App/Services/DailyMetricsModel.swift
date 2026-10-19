@@ -34,6 +34,10 @@ final class DailyMetricsModel {
     private(set) var weekStrain: [DayStrain] = []
     /// What your training days usually reach over the last 4 weeks (nil while calibrating).
     private(set) var usualTrainingStrain: Double?
+    /// Days in the last 4 weeks with training (strain 25%+), for heat acclimation.
+    private(set) var recentTrainingDays: Set<Date> = []
+    /// When you fell asleep on recent nights, for the caffeine cut-off.
+    private(set) var recentBedtimes: [Date] = []
     private(set) var cardioLoad: TrainingLoadCalculator.Result?
     private(set) var muscularLoad: TrainingLoadCalculator.Result?
     private(set) var activities: [ActivityItem] = []
@@ -114,7 +118,20 @@ final class DailyMetricsModel {
 
     /// 1.6 g/kg, raised by some medications (see MedicationsModel).
     var proteinGramsPerKg = 1.6
-    var proteinTarget: Double? { NutritionTargets.proteinGrams(bodyMassKg: bodyMassKg, gramsPerKg: proteinGramsPerKg) }
+    /// A medication's protein floor (g/kg), if any.
+    var medicationProteinPerKg: Double?
+    private(set) var bodyFatPercent: Double?
+    private(set) var heightCm: Double?
+    /// Daily protein from the goal: lean mass when losing and body fat is known,
+    /// goal or adjusted weight otherwise (see `GoalPlanner.proteinGrams`).
+    var proteinTarget: Double? {
+        guard goals != nil else { return NutritionTargets.proteinGrams(bodyMassKg: bodyMassKg, gramsPerKg: proteinGramsPerKg) }
+        return GoalPlanner.proteinGrams(goals: goals, bodyMassKg: bodyMassKg, bodyFatPercent: bodyFatPercent,
+                                        heightCm: heightCm, minimumPerKg: medicationProteinPerKg)
+    }
+
+    /// Heat-day change to the strain target's upper end (negative on hot days).
+    var heatAdjustment: Double = 0
 
     /// Highest sustained heart rate inside workouts, computed off the main thread.
     @concurrent
@@ -156,7 +173,8 @@ final class DailyMetricsModel {
     var targetStrain: ClosedRange<Double>? {
         guard let recovery else { return nil }
         let target = StrainCalculator.targetStrain(forRecovery: recovery.score, usualTrainingStrain: usualTrainingStrain)
-        return trainEasyToday ? min(target.lowerBound, 20)...min(target.upperBound, 45) : target
+        let base = trainEasyToday ? min(target.lowerBound, 20)...min(target.upperBound, 45) : target
+        return HeatAdvice.adjustTarget(base, by: heatAdjustment)
     }
 
     /// HRV-guided training: the 7-day HRV average is below your normal range.
@@ -228,6 +246,7 @@ final class DailyMetricsModel {
             let (healthVitals, sleepSamples, externalWorkouts) = try await (vitalsTask, sleepTask, workoutsTask)
             let nights = (try? await nightsTask) ?? []
             sleepConsistency = SleepConsistency.score(nights)
+            recentBedtimes = nights.map(\.bedtime)
             sleepSpreadMinutes = SleepConsistency.spreadMinutes(nights)
 
             // Typed-in Garmin HRV (RMSSD) and Apple Health HRV (SDNN) aren't
@@ -290,6 +309,7 @@ final class DailyMetricsModel {
             yesterdayStrain = days.first { calendar.isDate($0.0, inSameDayAs: yesterday) }?.1.strain
             weekStrain = days.suffix(7).map { DayStrain(date: $0.0, strain: $0.1.strain) }
             usualTrainingStrain = StrainCalculator.usualTrainingStrain(days.dropLast().map(\.1.strain))
+            recentTrainingDays = Set(days.filter { $0.1.strain >= 25 }.map(\.0))
             let loadCalculator = TrainingLoadCalculator()
             cardioLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.cardioLoad))
             muscularLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.liftingLoad))
@@ -325,6 +345,8 @@ final class DailyMetricsModel {
             bodyMassKg = healthWeight ?? (settings.weightKg > 0 ? settings.weightKg : nil)
             let heightCm = (try? await height) ?? (settings.heightCm > 0 ? settings.heightCm : nil)
             let bodyFatPercent = (try? await bodyFat).map { $0 * 100 }
+            self.bodyFatPercent = bodyFatPercent
+            self.heightCm = heightCm
             // Last night's average, or the latest reading if the watch logs it at other times.
             let overnight = try? await respiratory
             let latestRespiratory = try? await recentRespiratory

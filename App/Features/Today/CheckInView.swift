@@ -152,11 +152,17 @@ struct CheckInView: View {
             .scrollIndicators(.hidden)
             if (evening.caffeineMg ?? 0) > 0 {
                 optionalTime("Last caffeine", \.lastCaffeineMinutes, default: 13 * 60)
+                if let minutes = evening.lastCaffeineMinutes,
+                   CaffeineTiming.isTooLate(minutes: minutes, mg: evening.caffeineMg ?? 0, bedtimeMinutes: usualBedtime) {
+                    Label("Later than your cut-off for a \(CaffeineTiming.clockText(usualBedtime)) bedtime; it may cost sleep tonight.", systemImage: "moon.zzz.fill")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.recoveryModerateText)
+                }
             }
         } header: {
             Text("Caffeine today")
         } footer: {
-            Text("Caffeine lasts about 5 hours in the body; 400 mg even 6 hours before bed cut sleep by over an hour in one study.")
+            Text("For your usual \(CaffeineTiming.clockText(usualBedtime)) bedtime: last coffee by \(CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: usualBedtime, mg: 100))), pre-workout by \(CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: usualBedtime, mg: 200))). In a review of 24 studies, caffeine closer to bed than that cut sleep by about 45 minutes.")
         }
         Section("Alcohol") {
             Stepper("\(evening.drinks ?? 0) drinks", value: Binding(get: { evening.drinks ?? 0 }, set: { evening.drinks = $0 }), in: 0...20)
@@ -198,6 +204,9 @@ struct CheckInView: View {
     /// A time that's only saved once you add it, so the form never shows a
     /// time you didn't enter.
     @ViewBuilder
+    /// When you usually fall asleep (minutes after midnight), for the caffeine cut-off.
+    private var usualBedtime: Int { CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes) }
+
     private func optionalTime(_ title: String, _ keyPath: WritableKeyPath<EveningCheckIn, Int?>, default value: Int) -> some View {
         if evening[keyPath: keyPath] == nil {
             Button("Add \(title.lowercased()) time") { evening[keyPath: keyPath] = value }

@@ -124,8 +124,12 @@ public struct CheckInDay: Sendable, Equatable {
     public var sleepScore: Double?
     /// Litres of water logged the day before this morning.
     public var waterLiters: Double?
+    /// When you fell asleep that night, minutes after the evening's midnight
+    /// (over 1440 after midnight, e.g. 1500 = 1:00 am). Nil if unknown.
+    public var bedtimeMinutes: Int?
 
-    public init(morning: Date, evening: EveningCheckIn?, checkIn: MorningCheckIn?, hrv: Double?, restingHeartRate: Double?, sleepScore: Double?, waterLiters: Double? = nil) {
+    public init(morning: Date, evening: EveningCheckIn?, checkIn: MorningCheckIn?, hrv: Double?, restingHeartRate: Double?, sleepScore: Double?,
+                waterLiters: Double? = nil, bedtimeMinutes: Int? = nil) {
         self.morning = morning
         self.evening = evening
         self.checkIn = checkIn
@@ -133,6 +137,7 @@ public struct CheckInDay: Sendable, Equatable {
         self.restingHeartRate = restingHeartRate
         self.sleepScore = sleepScore
         self.waterLiters = waterLiters
+        self.bedtimeMinutes = bedtimeMinutes
     }
 }
 
@@ -187,10 +192,13 @@ public enum CheckInInsights {
         Factor(id: "drinks2", name: "2+ drinks") { $0.evening?.drinks.map { $0 >= 2 } },
         Factor(id: "anyAlcohol", name: "Any alcohol") { $0.evening?.drinks.map { $0 >= 1 } },
         Factor(id: "caffeine300", name: "300 mg+ caffeine") { $0.evening?.caffeineMg.map { $0 >= 300 } },
-        Factor(id: "lateCaffeine", name: "Caffeine after 2 pm") { day in
+        // Gardiner et al., Sleep Med Rev 2023: a coffee within ~8.8 h of bed costs sleep.
+        Factor(id: "lateCaffeine", name: "Caffeine within 9 h of bed") { day in
             guard let evening = day.evening else { return nil }
-            if (evening.caffeineMg ?? 0) == 0 { return false }
-            return evening.lastCaffeineMinutes.map { $0 >= 14 * 60 }
+            let mg = evening.caffeineMg ?? 0
+            if mg == 0 { return false }
+            let bedtime = day.bedtimeMinutes ?? CaffeineTiming.defaultBedtimeMinutes
+            return evening.lastCaffeineMinutes.map { CaffeineTiming.isTooLate(minutes: $0, mg: mg, bedtimeMinutes: bedtime) }
         },
         Factor(id: "lateMeal", name: "Eating after 9 pm") { $0.evening?.lastMealMinutes.map { $0 >= 21 * 60 } },
         Factor(id: "stress", name: "A stressful day (4-5)") { $0.evening?.stress.map { $0 >= 4 } },

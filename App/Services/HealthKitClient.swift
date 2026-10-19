@@ -44,6 +44,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.dietaryFatTotal),
             HKQuantityType(.dietaryFiber),
             HKQuantityType(.dietaryWater),
+            HKQuantityType(.dietaryCaffeine),
+            HKQuantityType(.numberOfAlcoholicBeverages),
             // Vitamins and minerals (Cronometer writes these).
             HKQuantityType(.dietaryVitaminC),
             HKQuantityType(.dietaryVitaminD),
@@ -610,4 +612,22 @@ nonisolated struct HeartRateSource: Sendable, Identifiable {
     var name: String
     var samples: [HeartRateSample]
     var id: String { name }
+}
+
+// MARK: - Timed samples (caffeine, protein per meal)
+
+extension HealthKitClient {
+    /// Individual samples with their times (not daily totals), e.g. each
+    /// caffeine or protein entry a food app wrote. Values in `unit`.
+    @concurrent
+    func timedSamples(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, from start: Date, to end: Date) async throws -> [DatedValue] {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: HKQuantityType(identifier), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        return try await descriptor.result(for: store).map {
+            DatedValue(date: $0.startDate, value: $0.quantity.doubleValue(for: unit))
+        }
+    }
 }

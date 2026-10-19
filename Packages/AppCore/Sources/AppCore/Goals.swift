@@ -57,8 +57,11 @@ extension Goals.Focus {
 /// - Rate of gain: about 0.25-0.5% a week; bigger surpluses mostly add fat
 ///   (Iraki et al., Sports 2019).
 /// - Protein: 1.6 g/kg builds muscle (Morton et al., BJSM 2018); in a deficit
-///   or recomposition, 2.2 g/kg helps keep muscle (Helms 2014; Barakat et al.,
-///   Strength Cond J 2020).
+///   or recomposition, more helps keep muscle: 2.3-3.1 g per kg of *lean* mass
+///   (Helms 2014; Barakat et al., Strength Cond J 2020). Grams per kg of total
+///   weight overshoot for people with more body fat, so the target uses lean
+///   mass when body fat is known, otherwise the goal weight or an adjusted
+///   body weight when BMI is over 30.
 public enum GoalPlanner {
     /// Daily calorie target from maintenance and the goal.
     public static func calorieTarget(maintenance: Double, bodyMassKg: Double, goals: Goals, sex: BiologicalSex) -> Double {
@@ -77,6 +80,44 @@ public enum GoalPlanner {
     public static func proteinPerKg(_ goals: Goals) -> Double {
         if goals.weight == .lose { return 2.2 }
         return goals.focuses.contains(.muscle) || goals.focuses.contains(.strength) ? 1.6 : 1.2
+    }
+
+    /// Lean-mass protein in a deficit: the middle of Helms' 2.3-3.1 g/kg range.
+    public static let deficitProteinPerKgLeanMass = 2.6
+
+    /// The weight protein is worked out from: current weight, or an adjusted
+    /// body weight when BMI is over 30 (weight at BMI 25 plus 40% of the
+    /// excess), or the goal weight when losing if that's lower.
+    public static func proteinReferenceWeight(goals: Goals?, bodyMassKg: Double, heightCm: Double?) -> Double {
+        var reference = bodyMassKg
+        if let heightCm, heightCm > 100 {
+            let meters = heightCm / 100
+            let atBMI25 = 25 * meters * meters
+            if bodyMassKg / (meters * meters) > 30 {
+                reference = atBMI25 + 0.4 * (bodyMassKg - atBMI25)
+            }
+        }
+        if let goals, goals.weight == .lose, let target = goals.targetWeightKg, target > 0 {
+            reference = min(reference, target)
+        }
+        return reference
+    }
+
+    /// Daily protein in grams for the goal.
+    /// - Parameter minimumPerKg: a floor per kg of reference weight (e.g. 2.0
+    ///   for some medications).
+    public static func proteinGrams(goals: Goals?, bodyMassKg: Double?, bodyFatPercent: Double?,
+                                    heightCm: Double?, minimumPerKg: Double? = nil) -> Double? {
+        guard let bodyMassKg, bodyMassKg > 0 else { return nil }
+        let reference = proteinReferenceWeight(goals: goals, bodyMassKg: bodyMassKg, heightCm: heightCm)
+        let grams: Double
+        if let goals, goals.weight == .lose, let fat = bodyFatPercent, fat > 3, fat < 60 {
+            grams = bodyMassKg * (1 - fat / 100) * deficitProteinPerKgLeanMass
+        } else {
+            grams = reference * (goals.map(proteinPerKg) ?? 1.6)
+        }
+        let floor = reference * (minimumPerKg ?? 0)
+        return max(grams, floor).rounded()
     }
 
     /// Allowed weekly rates (% body weight) for the picker.

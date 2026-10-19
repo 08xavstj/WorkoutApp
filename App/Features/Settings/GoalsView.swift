@@ -89,13 +89,20 @@ struct GoalsView: View {
                     if let target = calorieTarget {
                         LabeledContent("Calories", value: "\(whole(target).formatted()) kcal/day")
                     }
-                    if let weight = metrics.bodyMassKg {
-                        LabeledContent("Protein", value: "\(whole(weight * GoalPlanner.proteinPerKg(goals))) g/day")
+                    if let protein = GoalPlanner.proteinGrams(goals: goals, bodyMassKg: metrics.bodyMassKg, bodyFatPercent: metrics.bodyFatPercent,
+                                                              heightCm: metrics.heightCm, minimumPerKg: metrics.medicationProteinPerKg) {
+                        LabeledContent("Protein", value: "\(whole(protein)) g/day")
                     }
                     if let weeks = weeksToTarget {
                         LabeledContent("Time to target", value: "~\(Int(weeks.rounded(.up))) weeks")
                     }
                     LabeledContent("Workouts", value: styleLabel)
+                    if let weekly = metrics.weightTrendWeekly, let weight = metrics.bodyMassKg,
+                       let warning = WeightPace.message(WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: weight, goals: goals)) {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.recoveryModerateText)
+                    }
                 }
             }
             .navigationTitle("Your goals")

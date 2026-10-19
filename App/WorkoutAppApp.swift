@@ -250,12 +250,16 @@ struct RootView: View {
         await settings.syncProfile(from: health)
         let goalProtein = settings.goalsSet ? GoalPlanner.proteinPerKg(settings.goals) : 1.6
         metrics.proteinGramsPerKg = max(goalProtein, medications.proteinGramsPerKg ?? 0)
+        metrics.medicationProteinPerKg = medications.proteinGramsPerKg
         gym.style = settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         checkIns.recordSleepScore(metrics.sleep?.score)
         await conditions.refresh(settings: settings)
+        // Hot days lower the strain target (less once you're heat-acclimatised).
+        conditions.heatTrainingDays = HeatAdvice.heatTrainingDays(hotDays: conditions.hotDays, trainingDays: metrics.recentTrainingDays)
+        metrics.heatAdjustment = HeatAdvice.targetAdjustment(feelsLikeC: conditions.forecastFeelsLikeC, heatTrainingDays: conditions.heatTrainingDays)
         // Weekly photo analysis, only if turned on, Claude is set up and it's due.
         // Runs on its own so a slow upload doesn't hold up the rest of the refresh.
         if settings.weeklyPhotoAnalysis, !settings.supabaseURL.isEmpty, !settings.supabaseAnonKey.isEmpty,

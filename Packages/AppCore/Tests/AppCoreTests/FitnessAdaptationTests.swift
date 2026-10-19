@@ -59,13 +59,14 @@ struct AdaptiveTargetTests {
 }
 
 struct StepGoalTests {
-    @Test func needsTwoWeeksOfData() {
-        #expect(StepGoal.personal(dailySteps: [5000, 6000]) == 10_000)
+    @Test func startsByAgeUntilTwoWeeksOfData() {
+        #expect(StepGoal.personal(dailySteps: [5000, 6000], age: 30) == 8_000)
+        #expect(StepGoal.personal(dailySteps: [5000, 6000], age: 65) == 7_000)
     }
 
-    @Test func growsWithYourHabit() {
+    @Test func growsWithYourHabitFromASevenThousandFloor() {
         #expect(StepGoal.personal(dailySteps: Array(repeating: 7_200, count: 20)) == 8_000)
-        #expect(StepGoal.personal(dailySteps: Array(repeating: 3_000, count: 20)) == 6_000)
+        #expect(StepGoal.personal(dailySteps: Array(repeating: 3_000, count: 20)) == 7_000)
         #expect(StepGoal.personal(dailySteps: Array(repeating: 15_000, count: 20)) == 12_000)
     }
 }

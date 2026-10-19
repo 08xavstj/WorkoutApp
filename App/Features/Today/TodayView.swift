@@ -36,6 +36,7 @@ struct TodayView: View {
                     MedsTodayCard()
                     EnergyCard()
                     HydrationCard()
+                    HabitsCard()
                     HealthMonitor(onEnterHRV: { showingHRVEntry = true })
                     askCoachCard
                 }
@@ -979,7 +980,7 @@ private struct HealthMonitor: View {
                 opens("hrr") { vitalTile("hrr", title: "Heart rate recovery", color: Theme.heart, light: Theme.heartLight) }
             }
             HStack(spacing: 12) {
-                opens("stress") { vitalTile("stress", title: "Stress (estimate)", color: Theme.recoveryModerate, light: Theme.recoveryModerateLight) }
+                opens("stress") { vitalTile("stress", title: "HR above resting", color: Theme.recoveryModerate, light: Theme.recoveryModerateLight) }
                 opens("steps") { vitalTile("steps", title: "Steps", color: Theme.strain, light: Theme.strainLight) }
             }
         }

@@ -34,6 +34,7 @@ struct BiologyView: View {
                     BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
                     ProgressPhotosCard { router.showProgressPhotos = true }
                     InsightsCard(insights: checkIns.insights, daysLeft: checkIns.daysUntilInsights)
+                    AlcoholEffectCard(findings: checkIns.alcoholFindings, nightsLogged: checkIns.alcoholNightsLogged)
                     hrvCard
                     MicronutrientsCard(findings: metrics.micronutrients)
                     ForEach(VitalsModel.Category.allCases) { category in
@@ -297,9 +298,9 @@ struct BodyAgeCard: View {
             HStack {
                 CardLabel(text: "Body age")
                 Spacer()
-                Text("Estimate")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
+                Text(result?.confidence.label ?? "Estimate")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(result?.confidence == .high ? Theme.recoveryHighText : Theme.secondaryText)
             }
             if let result {
                 let younger = result.difference <= 0
@@ -338,12 +339,15 @@ struct BodyAgeCard: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                 }
-                VStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("What's moving it")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
                     ForEach(result.factors) { factor in
                         FactorRow(factor: factor)
                     }
                 }
-                Text("Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. An estimate, not a medical test.")
+                Text("\(result.confidence.label): \(result.confidenceReason) Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. An estimate, not a medical test.")
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
             } else {

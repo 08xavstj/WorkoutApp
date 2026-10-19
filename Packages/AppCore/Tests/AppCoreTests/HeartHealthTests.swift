@@ -37,7 +37,7 @@ struct HeartHealthTests {
         let high = try #require(StressEstimate.estimate(tense, profile: profile, calendar: calendar))
         #expect(low.score < 26)
         #expect(high.score > 75)
-        #expect(StressEstimate.label(for: low.score) == "Resting")
+        #expect(StressEstimate.label(for: low.score) == "Near resting")
     }
 
     @Test func stressSkipsWorkoutsAndNight() {

@@ -107,19 +107,32 @@ extension StrainCalculator {
 
 // MARK: - Steps
 
-/// A step goal that grows with you: about 1,000 above your usual day, between
-/// 6,000 and 12,000. Each extra 1,000 steps a day lowers risk until about
-/// 8,000-10,000 for adults under 60 (Paluch et al., Lancet Public Health 2022),
-/// and small, reachable goals are the ones people keep.
+/// A step goal that grows with you: about 1,000 above your usual day, from
+/// 7,000 up to 12,000.
+///
+/// - 7,000 a day vs 2,000 was linked with about half the risk of death, and
+///   gains past 7,000 were modest (Ding et al., Lancet Public Health 2025), so
+///   7,000 is the floor.
+/// - Risk falls until about 8,000-10,000 a day under 60 and 6,000-8,000 from 60
+///   (Paluch et al., Lancet Public Health 2022), so the starting goal is 8,000
+///   under 60 and 7,000 from 60.
+/// - The +1,000 step is a behaviour choice: small, reachable goals are the ones
+///   people keep.
 public enum StepGoal {
-    public static let standard = 10_000.0
+    public static let floor = 7_000.0
+    public static let ceiling = 12_000.0
+
+    /// Goal before there are two weeks of steps.
+    public static func standard(age: Int) -> Double {
+        age >= 60 ? 7_000 : 8_000
+    }
 
     /// - Parameter dailySteps: full days only (not today), ideally 28.
-    public static func personal(dailySteps: [Double]) -> Double {
+    public static func personal(dailySteps: [Double], age: Int = 30) -> Double {
         let days = dailySteps.filter { $0 > 0 }.sorted()
-        guard days.count >= 14 else { return standard }
+        guard days.count >= 14 else { return standard(age: age) }
         let median = days[days.count / 2]
         let goal = ((median + 1000) / 500).rounded() * 500
-        return min(12_000, max(6_000, goal))
+        return min(ceiling, max(floor, goal))
     }
 }

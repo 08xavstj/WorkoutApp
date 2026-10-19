@@ -46,10 +46,11 @@ public enum HeartRateRecovery {
     }
 }
 
-/// A stress estimate from heart rate alone, 0-100. It averages how far heart
-/// rate sits above resting during waking hours, leaving out workouts.
-/// Garmin's own stress score uses HRV, which Garmin doesn't share with Apple
-/// Health, so this is an approximation and is labelled as one.
+/// "Heart rate above resting", 0-100 (experimental): how far heart rate sits
+/// above resting during waking hours, leaving out workouts. It's shown as
+/// that, not as stress: no study has validated heart-rate elevation alone as a
+/// stress score, and caffeine, heat, posture and digestion all raise it.
+/// (Garmin's stress score uses HRV, which Garmin doesn't share with Apple Health.)
 public enum StressEstimate {
     public struct Result: Sendable, Equatable {
         public var score: Int
@@ -95,7 +96,7 @@ public enum StressEstimate {
         return Result(score: Int(mean.rounded()), minutes: Int(total.rounded()), bands: bands.map { $0 / total })
     }
 
-    /// 0-25 rest, 26-50 low, 51-75 medium, 76-100 high (the bands Garmin uses).
+    /// Quarters of the 0-100 scale, for labels only (no research sets these).
     static func band(for score: Double) -> Int {
         switch score {
         case ..<26: 0
@@ -106,7 +107,7 @@ public enum StressEstimate {
     }
 
     public static func label(for score: Int) -> String {
-        ["Resting", "Low", "Medium", "High"][band(for: Double(score))]
+        ["Near resting", "Slightly raised", "Raised", "Well above resting"][band(for: Double(score))]
     }
 }
 

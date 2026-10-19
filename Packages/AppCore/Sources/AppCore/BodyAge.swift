@@ -38,9 +38,14 @@ public enum BodyAge {
         public var dailySteps: Double?
         public var bodyFatPercent: Double?
         public var bmi: Double?
+        /// How old the VO₂ max reading is, in days (nil if unknown).
+        public var vo2MaxAgeDays: Int?
+        /// How old the body fat or BMI reading is, in days (nil if unknown).
+        public var bodyCompositionAgeDays: Int?
 
         public init(age: Int, sex: BiologicalSex, vo2Max: Double? = nil, restingHeartRate: Double? = nil,
-                    sleepHours: Double? = nil, dailySteps: Double? = nil, bodyFatPercent: Double? = nil, bmi: Double? = nil) {
+                    sleepHours: Double? = nil, dailySteps: Double? = nil, bodyFatPercent: Double? = nil, bmi: Double? = nil,
+                    vo2MaxAgeDays: Int? = nil, bodyCompositionAgeDays: Int? = nil) {
             self.age = age
             self.sex = sex
             self.vo2Max = vo2Max
@@ -49,7 +54,45 @@ public enum BodyAge {
             self.dailySteps = dailySteps
             self.bodyFatPercent = bodyFatPercent
             self.bmi = bmi
+            self.vo2MaxAgeDays = vo2MaxAgeDays
+            self.bodyCompositionAgeDays = bodyCompositionAgeDays
         }
+    }
+
+    /// How much to trust the number: more factors and fresher readings mean
+    /// more confidence. VO₂ max moves the estimate most, so without a recent
+    /// one it can't be "high".
+    public enum Confidence: String, Sendable, Equatable {
+        case high, medium, low
+
+        public var label: String {
+            switch self {
+            case .high: "High confidence"
+            case .medium: "Medium confidence"
+            case .low: "Low confidence"
+            }
+        }
+    }
+
+    public static func confidence(_ inputs: Inputs, factorCount: Int) -> (Confidence, reason: String) {
+        var level: Confidence = factorCount >= 5 ? .high : (factorCount >= 3 ? .medium : .low)
+        var reasons: [String] = []
+        if inputs.vo2Max == nil {
+            if level == .high { level = .medium }
+            reasons.append("no VO₂ max yet (the biggest factor)")
+        } else if let days = inputs.vo2MaxAgeDays, days > 90 {
+            level = level == .high ? .medium : .low
+            reasons.append("VO₂ max is \(days / 30) months old")
+        }
+        if let days = inputs.bodyCompositionAgeDays, days > 90 {
+            if level == .high { level = .medium }
+            reasons.append("body fat/BMI is \(days / 30) months old")
+        }
+        if factorCount < 5 { reasons.append("\(factorCount) of 6 factors measured") }
+        guard !reasons.isEmpty else { return (level, "Based on recent readings for most factors.") }
+        let joined = reasons.joined(separator: "; ")
+        let reason = joined.prefix(1).uppercased() + String(joined.dropFirst()) + "."
+        return (level, reason)
     }
 
     public struct Factor: Sendable, Equatable, Identifiable {
@@ -63,7 +106,10 @@ public enum BodyAge {
     public struct Result: Sendable, Equatable {
         public var bodyAge: Double
         public var age: Int
+        /// Biggest effect first: what's moving your body age.
         public var factors: [Factor]
+        public var confidence: Confidence = .medium
+        public var confidenceReason: String = ""
         /// Negative = younger than your age.
         public var difference: Double { bodyAge - Double(age) }
     }
@@ -118,7 +164,9 @@ public enum BodyAge {
         guard factors.count >= 2 else { return nil }
         let total = clamp(factors.map(\.years).reduce(0, +), -20, 20)
         let bodyAge = max(18, age + total)
-        return Result(bodyAge: (bodyAge * 10).rounded() / 10, age: inputs.age, factors: factors.sorted { abs($0.years) > abs($1.years) })
+        let trust = Self.confidence(inputs, factorCount: factors.count)
+        return Result(bodyAge: (bodyAge * 10).rounded() / 10, age: inputs.age, factors: factors.sorted { abs($0.years) > abs($1.years) },
+                      confidence: trust.0, confidenceReason: trust.reason)
     }
 
     /// Years added by a mortality hazard ratio, if risk doubles every 8 years.

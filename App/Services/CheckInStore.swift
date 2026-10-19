@@ -15,6 +15,10 @@ final class CheckInStore {
     private var saved = Saved()
     private(set) var insights: [CheckInInsights.Insight] = []
     private(set) var daysUntilInsights = 14
+    /// Your next-morning numbers after drinking vs not.
+    private(set) var alcoholFindings: [AlcoholEffect.Finding] = []
+    /// Nights with a known drink count (0 or more), for the empty state.
+    private(set) var alcoholNightsLogged = 0
 
     @ObservationIgnored private let fileURL: URL = {
         let folder = URL.applicationSupportDirectory
@@ -95,6 +99,19 @@ final class CheckInStore {
         for day in (try? await health.dailySeries(.dietaryWater, unit: .liter(), days: 91, cumulative: true)) ?? [] {
             waterByDay[key(day.date)] = day.value
         }
+        // Drinks your food app logged (used when there's no evening check-in).
+        var drinksByDay: [String: Int] = [:]
+        for day in (try? await health.dailySeries(.numberOfAlcoholicBeverages, unit: .count(), days: 91, cumulative: true)) ?? [] {
+            drinksByDay[key(day.date)] = Int(day.value.rounded())
+        }
+        // When you fell asleep, by morning.
+        var bedtimeByMorning: [String: Int] = [:]
+        for night in (try? await health.sleepNights(nights: 90)) ?? [] {
+            let morning = calendar.startOfDay(for: night.wake)
+            guard let evening = calendar.date(byAdding: .day, value: -1, to: morning) else { continue }
+            bedtimeByMorning[key(morning)] = Int(night.bedtime.timeIntervalSince(evening) / 60)
+        }
+        var alcoholNights: [AlcoholEffect.Night] = []
 
         var days: [CheckInDay] = []
         for offset in 0..<90 {
@@ -103,17 +120,26 @@ final class CheckInStore {
             let evening = saved.evenings[key(previous)]
             let checkIn = saved.mornings[key(morning)]
             let water = waterByDay[key(previous)]
-            guard evening != nil || checkIn != nil || water != nil else { continue }
             let vital = byMorning[key(morning)]
+            if let drinks = evening?.drinks ?? drinksByDay[key(previous)] {
+                alcoholNights.append(AlcoholEffect.Night(
+                    morning: morning, drinks: drinks, restingHeartRate: vital?.restingHeartRate,
+                    hrv: vital?.hrvMilliseconds, sleepScore: saved.sleepScores[key(morning)]
+                ))
+            }
+            guard evening != nil || checkIn != nil || water != nil else { continue }
             days.append(CheckInDay(
                 morning: morning, evening: evening, checkIn: checkIn,
                 hrv: vital?.hrvMilliseconds, restingHeartRate: vital?.restingHeartRate,
                 sleepScore: saved.sleepScores[key(morning)],
-                waterLiters: water
+                waterLiters: water,
+                bedtimeMinutes: bedtimeByMorning[key(morning)]
             ))
         }
         insights = CheckInInsights.analyze(days)
         daysUntilInsights = CheckInInsights.daysUntilReady(days)
+        alcoholFindings = AlcoholEffect.compare(alcoholNights)
+        alcoholNightsLogged = alcoholNights.count
     }
 
     /// Short summary for the AI coach.
