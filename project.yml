@@ -72,13 +72,15 @@ targets:
           body weight and food log (for example from Cronometer) to calculate your
           daily scores and give coaching advice.
         NSCameraUsageDescription: >-
-          WorkoutApp uses the camera for your front and side progress photos. They are
-          saved only inside the app, not in your Photos library.
+          WorkoutApp uses the camera for your front and side progress photos (saved only
+          inside the app, not in your Photos library) and, with the flashlight, to measure
+          your heart rate variability from your fingertip.
         NSLocationWhenInUseUsageDescription: >-
           WorkoutApp uses your location once to get local weather, air quality and
           daylight hours for training advice. You can type your city instead.
         NSHealthUpdateUsageDescription: >-
-          WorkoutApp saves the gym workouts you log to Apple Health.
+          WorkoutApp saves the gym workouts and blood pressure readings you log to Apple
+          Health.
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

@@ -56,6 +56,17 @@ final class CloudCoach {
         try await call(function: "progress", body: ProgressBody(photos: photos, context: context), settings: settings)
     }
 
+    nonisolated private struct LabsBody: Encodable {
+        let pdf: String
+        let filename: String
+    }
+
+    /// Reads lab results from a PDF via the `labs` Edge Function. Returns JSON
+    /// text (`{"markers": [...], "collectionDate": ...}`); the PDF isn't stored.
+    func extractLabs(pdfBase64: String, filename: String, settings: UserSettings) async throws -> String {
+        try await call(function: "labs", body: LabsBody(pdf: pdfBase64, filename: filename), settings: settings)
+    }
+
     private func call<Body: Encodable>(function: String, body: Body, settings: UserSettings) async throws -> String {
         let base = settings.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let anonKey = settings.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines)

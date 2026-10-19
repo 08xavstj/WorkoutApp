@@ -65,7 +65,9 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     private var shareTypes: Set<HKSampleType> {
         // Heart rate and energy are written by the live workout session (AirPods Pro 3 / chest strap).
-        [HKObjectType.workoutType(), HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned)]
+        [HKObjectType.workoutType(), HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned),
+         // Home blood pressure readings you type in.
+         HKQuantityType(.bloodPressureSystolic), HKQuantityType(.bloodPressureDiastolic)]
     }
 
     @concurrent

@@ -6,3 +6,6 @@ verify_jwt = true
 
 [functions.progress]
 verify_jwt = true
+
+[functions.labs]
+verify_jwt = true

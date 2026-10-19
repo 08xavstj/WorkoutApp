@@ -3,13 +3,15 @@ import Charts
 import AppCore
 
 /// A stat's history: pick a range, see each day, the average for that range
-/// (dashed line), the typical range or goal, and tap any day for its value.
+/// (dashed line), your personal normal band with a 7-day average line, the
+/// typical range or goal, and tap any day for its value.
 struct VitalDetailView: View {
     let stat: VitalsModel.Stat
     let colors: [Color]
     @Environment(\.dismiss) private var dismiss
     @State private var days: Int
     @State private var selectedDate: Date?
+    @State private var showingBloodPressure = false
 
     init(stat: VitalsModel.Stat, colors: [Color]) {
         self.stat = stat
@@ -24,6 +26,18 @@ struct VitalDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
+                    if stat.id == "bp" {
+                        Button {
+                            showingBloodPressure = true
+                        } label: {
+                            Label("Log a reading · 7-day home check", systemImage: "heart.text.square")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .background(LinearGradient(colors: [Theme.heart, Theme.lifting], startPoint: .leading, endPoint: .trailing), in: .capsule)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     if hasHistory {
                         if rangeOptions.count > 1 {
                             Picker("Range", selection: $days) {
@@ -75,6 +89,7 @@ struct VitalDetailView: View {
                 }
             }
             .onChange(of: days) { selectedDate = nil }
+            .sheet(isPresented: $showingBloodPressure) { BloodPressureView() }
         }
     }
 
@@ -92,10 +107,56 @@ struct VitalDetailView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
             }
-            if let status = stat.status {
-                Chip(text: status, color: VitalTile.color(for: stat.tone))
+            HStack(spacing: 8) {
+                if let status = stat.status {
+                    Chip(text: status, color: VitalTile.color(for: stat.tone))
+                }
+                if let normalText {
+                    Chip(text: normalText, color: Theme.secondaryText)
+                }
+            }
+            if band == nil, !isWindows, hasHistory {
+                Text("Your normal range appears in \(bandDaysLeft) more day\(bandDaysLeft == 1 ? "" : "s"): it's built from 2+ weeks of readings, not counting the latest week.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
             }
         }
+    }
+
+    // MARK: Your normal
+
+    private var dayValues: [DayValue] { stat.series.map { DayValue(date: $0.date, value: $0.value) } }
+
+    /// Mean ± 1 SD of the previous 30-60 days, leaving out the latest week.
+    private var band: PersonalBaseline.Band? {
+        isWindows ? nil : PersonalBaseline.band(dayValues)
+    }
+
+    private var bandDaysLeft: Int { PersonalBaseline.daysUntilReady(dayValues) }
+
+    /// 7-day rolling average, for the days in the chosen range.
+    private var rolling: [DatedValue] {
+        PersonalBaseline.rollingAverage(dayValues)
+            .filter { $0.date >= rangeStart }
+            .map { DatedValue(date: $0.date, value: $0.value) }
+    }
+
+    /// "7-day avg 6% above your normal" (daily totals leave out today, which isn't over).
+    private var normalText: String? {
+        guard let band,
+              let recent = PersonalBaseline.recentAverage(dayValues, excludingToday: stat.chart == .bars) else { return nil }
+        switch PersonalBaseline.position(recent, in: band) {
+        case .within:
+            return "Within your normal"
+        case .above, .below:
+            guard let percent = PersonalBaseline.percentFromNormal(recent, band: band) else { return nil }
+            return "7-day avg \(Int(abs(percent).rounded()))% \(percent >= 0 ? "above" : "below") your normal"
+        }
+    }
+
+    private func isOutsideNormal(_ value: Double) -> Bool {
+        guard let band else { return false }
+        return PersonalBaseline.position(value, in: band) != .within
     }
 
     // MARK: Data in range
@@ -218,7 +279,11 @@ struct VitalDetailView: View {
         Chart {
             if let range = stat.normalRange {
                 RectangleMark(yStart: .value("Typical low", range.lowerBound), yEnd: .value("Typical high", range.upperBound))
-                    .foregroundStyle(Theme.recoveryHigh.opacity(0.10))
+                    .foregroundStyle(Theme.recoveryHigh.opacity(0.06))
+            }
+            if let band {
+                RectangleMark(yStart: .value("Your normal low", band.low), yEnd: .value("Your normal high", band.high))
+                    .foregroundStyle(main.opacity(0.14))
             }
             ForEach(points) { point in
                 if stat.chart == .bars {
@@ -241,6 +306,22 @@ struct VitalDetailView: View {
                             .foregroundStyle(main)
                             .symbolSize(isSelected(point.date) ? 80 : 18)
                     }
+                }
+            }
+            if band != nil {
+                ForEach(points.filter { isOutsideNormal($0.value) }) { point in
+                    PointMark(x: .value("Day", point.date, unit: .day), y: .value("Outside your normal", point.value))
+                        .foregroundStyle(Theme.primaryText.opacity(0.75))
+                        .symbol(.circle)
+                        .symbolSize(22)
+                }
+            }
+            if rolling.count > 1 {
+                ForEach(rolling) { point in
+                    LineMark(x: .value("Day", point.date, unit: .day), y: .value("7-day average", point.value), series: .value("Line", "rolling"))
+                        .foregroundStyle(Theme.primaryText.opacity(0.55))
+                        .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .interpolationMethod(.monotone)
                 }
             }
             ForEach(secondaryPoints) { point in
@@ -386,8 +467,14 @@ struct VitalDetailView: View {
         if stat.goal != nil {
             items.append(LegendItem(title: "Goal", color: Theme.recoveryHigh, isLine: true))
         }
+        if band != nil {
+            items.append(LegendItem(title: "Your normal", color: main.opacity(0.35), isLine: false))
+        }
+        if rolling.count > 1 && !isWindows {
+            items.append(LegendItem(title: "7-day avg", color: Theme.primaryText.opacity(0.55), isLine: true))
+        }
         if stat.normalRange != nil {
-            items.append(LegendItem(title: "Typical range", color: Theme.recoveryHigh.opacity(0.35), isLine: false))
+            items.append(LegendItem(title: "Typical range", color: Theme.recoveryHigh.opacity(0.25), isLine: false))
         }
         if !stat.secondary.isEmpty {
             items.append(LegendItem(
@@ -402,7 +489,7 @@ struct VitalDetailView: View {
     @ViewBuilder
     private var legend: some View {
         if !legendItems.isEmpty {
-            HStack(spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 4) {
                 ForEach(legendItems) { item in
                     HStack(spacing: 4) {
                         Capsule()
@@ -415,7 +502,12 @@ struct VitalDetailView: View {
                     }
                 }
             }
-            .minimumScaleFactor(0.8)
+            if band != nil {
+                Text("Your normal is your average ± 1 standard deviation over the previous 2 months, not counting the latest week. Dots mark days outside it.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
