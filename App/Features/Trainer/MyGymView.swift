@@ -82,6 +82,7 @@ struct MyGymView: View {
                         } label: {
                             Label("Add plate size", systemImage: "plus.circle")
                         }
+                        .buttonStyle(.borderless)
                     } header: {
                         Text("Plates (pairs)")
                     } footer: {
@@ -104,20 +105,24 @@ struct MyGymView: View {
                                 }
                                 newDumbbell = nil
                             }
+                            .buttonStyle(.borderless)
                         }
-                        HStack {
-                            TextField("From", value: $rangeFrom, format: .number).keyboardType(.decimalPad)
-                            TextField("To", value: $rangeTo, format: .number).keyboardType(.decimalPad)
-                            TextField("Step", value: $rangeStep, format: .number).keyboardType(.decimalPad)
-                            Button("Fill range") {
+                        HStack(alignment: .bottom) {
+                            labeledNumber("From", $rangeFrom)
+                            labeledNumber("To", $rangeTo)
+                            labeledNumber("Step", $rangeStep)
+                            Button("Add range") {
                                 guard rangeStep > 0, rangeTo >= rangeFrom else { return }
-                                draft.dumbbells = stride(from: rangeFrom, through: rangeTo + 0.001, by: rangeStep).map { $0 }
+                                // Adds to what's there (rounded so float steps don't make near-duplicates).
+                                let range = stride(from: rangeFrom, through: rangeTo + 0.001, by: rangeStep).map { ($0 * 100).rounded() / 100 }
+                                draft.dumbbells = Array(Set(draft.dumbbells + range)).sorted()
                             }
+                            .buttonStyle(.borderless)
                         }
                     } header: {
                         Text("Dumbbells (\(draft.dumbbells.count) weights)")
                     } footer: {
-                        Text("Weight per dumbbell. Use Fill range for a full rack, or add odd sizes one at a time.")
+                        Text("Weight per dumbbell. Use Add range for a full rack, or add odd sizes one at a time. Touch and hold a weight to remove it.")
                     }
                 }
 
@@ -136,6 +141,7 @@ struct MyGymView: View {
                                 }
                                 newKettlebell = nil
                             }
+                            .buttonStyle(.borderless)
                         }
                     }
                 }
@@ -239,6 +245,13 @@ struct MyGymView: View {
         }
     }
 
+    private func labeledNumber(_ title: String, _ value: Binding<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption2).foregroundStyle(Theme.secondaryText)
+            TextField(title, value: value, format: .number).keyboardType(.decimalPad)
+        }
+    }
+
     private func stackSection(_ title: String, stack: Binding<WeightStack>) -> some View {
         Section {
             weightField("Lightest", value: stack.start)
@@ -255,20 +268,16 @@ struct MyGymView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(weights, id: \.self) { weight in
-                    Button {
-                        remove(weight)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(weight.formatted())
-                            Image(systemName: "xmark").font(.caption2.weight(.bold))
-                        }
+                    // Touch and hold to remove, so scrolling can't delete a weight by accident.
+                    Text(weight.formatted())
                         .font(.footnote.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Theme.cardRaised, in: .capsule)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Remove \(weight.formatted())")
+                        .contextMenu {
+                            Button("Remove \(weight.formatted())", systemImage: "trash", role: .destructive) { remove(weight) }
+                        }
+                        .accessibilityAction(named: "Remove") { remove(weight) }
                 }
             }
         }

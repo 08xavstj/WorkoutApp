@@ -7,6 +7,8 @@ struct WorkoutHistoryView: View {
     @Environment(UserSettings.self) private var settings
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
+    @State private var pendingDelete: IndexSet?
+
     private var finished: [WorkoutSession] { sessions.filter { !$0.isActive } }
 
     var body: some View {
@@ -24,12 +26,24 @@ struct WorkoutHistoryView: View {
                     SessionRow(session: session, unit: settings.weightUnit)
                 }
             }
-            .onDelete(perform: delete)
+            .onDelete { pendingDelete = $0 }
             .listRowBackground(Theme.card)
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("History")
+        .confirmationDialog(
+            "Delete this workout?",
+            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let offsets = pendingDelete { delete(at: offsets) }
+                pendingDelete = nil
+            }
+        } message: {
+            Text("Its sets and strain are removed. This can't be undone.")
+        }
         .navigationDestination(for: WorkoutSession.self) { session in
             WorkoutDetailView(session: session)
         }

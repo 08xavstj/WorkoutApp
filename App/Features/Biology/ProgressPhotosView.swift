@@ -22,7 +22,7 @@ struct ProgressPhotosView: View {
                     if photos.days.count >= 2 { compareCard }
                     analysisCard(weekly: $settings.weeklyPhotoAnalysis)
                     if !photos.days.isEmpty { timeline }
-                    Text("Photos are saved only inside WorkoutApp, encrypted on your iPhone, and never added to your Photos library. For the weekly analysis, the photos being compared are sent to Claude through your own server for that one request and aren't stored there.")
+                    Text("Photos are saved only inside WorkoutApp, encrypted on your iPhone, and never added to your Photos library. For the weekly analysis, the photos being compared are sent to Claude through the app's secure server for that one request and aren't stored there.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -295,6 +295,7 @@ private struct PhotoViewer: View {
     let entry: ProgressPhotosModel.Entry
     @Environment(ProgressPhotosModel.self) private var photos
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmingDelete = false
 
     var body: some View {
         NavigationStack {
@@ -313,10 +314,17 @@ private struct PhotoViewer: View {
                 }
                 ToolbarItem(placement: .destructiveAction) {
                     Button("Delete", role: .destructive) {
-                        photos.delete(entry)
-                        dismiss()
+                        confirmingDelete = true
                     }
                 }
+            }
+            .confirmationDialog("Delete this photo?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    photos.delete(entry)
+                    dismiss()
+                }
+            } message: {
+                Text("It's only stored in this app, so it can't be recovered.")
             }
         }
     }

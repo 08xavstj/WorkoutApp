@@ -381,10 +381,17 @@ struct MedicationDetailView: View {
         }
     }
 
+    /// Label text is long and clinical, so each section starts collapsed.
     private func labelSection(_ title: String, _ text: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(color)
-            Text(text).font(.caption).foregroundStyle(Theme.primaryText)
+        DisclosureGroup {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(Theme.primaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+        } label: {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textColor(for: color))
         }
+        .tint(Theme.secondaryText)
     }
 }
