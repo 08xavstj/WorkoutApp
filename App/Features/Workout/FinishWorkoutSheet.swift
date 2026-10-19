@@ -24,7 +24,7 @@ struct FinishWorkoutSheet: View {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("How hard was it?")
+                            Text("Workout effort (1–10)")
                             Spacer()
                             Text("\(Int(rpe)) / 10 · \(RPEScale.sessionLabel(Int(rpe)))")
                                 .monospacedDigit()

@@ -276,6 +276,8 @@ private struct StrainGoalCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
     @Environment(WorkoutLauncher.self) private var launcher
+    /// Big number that still grows with Dynamic Type.
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 48
 
     var body: some View {
         if let target = metrics.targetStrain {
@@ -310,7 +312,7 @@ private struct StrainGoalCard: View {
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(strainText(current))
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .font(.system(size: heroSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
                 Text("target \(strainRangeText(target))")
@@ -575,9 +577,10 @@ private struct ConditionsCard: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    HStack(spacing: 8) {
-                        if let uv = c.uvIndexMax { pill("sun.max", "UV \(Int(uv.rounded()))") }
-                        if let aqi = c.usAQI { pill("aqi.medium", "AQI \(Int(aqi))") }
+                    // Wraps at large text sizes.
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 8) {
+                        if let uv = c.uvIndexMax { pill("sun.max", "UV \(Int(uv.rounded())) · \(uvWord(uv))") }
+                        if let aqi = c.usAQI { pill("aqi.medium", "Air \(Int(aqi)) · \(airWord(Double(aqi)))") }
                         if let daylight = c.daylightHours { pill("sunrise", String(format: "%.1f h light", daylight)) }
                     }
                     if let sunrise = c.sunrise, let sunset = c.sunset {
@@ -618,6 +621,28 @@ private struct ConditionsCard: View {
             }
         }
         .sheet(isPresented: $showingPicker) { LocationPicker() }
+    }
+
+    /// WHO UV index categories.
+    private func uvWord(_ uv: Double) -> String {
+        switch uv {
+        case ..<3: "Low"
+        case ..<6: "Moderate"
+        case ..<8: "High"
+        case ..<11: "Very high"
+        default: "Extreme"
+        }
+    }
+
+    /// US EPA air quality index categories.
+    private func airWord(_ aqi: Double) -> String {
+        switch aqi {
+        case ...50: "Good"
+        case ...100: "Moderate"
+        case ...150: "Unhealthy for some"
+        case ...200: "Unhealthy"
+        default: "Very unhealthy"
+        }
     }
 
     private func pill(_ icon: String, _ text: String) -> some View {

@@ -18,6 +18,7 @@ struct ActiveWorkoutView: View {
     @State private var showingFinish = false
     @State private var showingDiscard = false
     @State private var expanded: Set<PersistentIdentifier> = []
+    @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
 
     var body: some View {
         NavigationStack {
@@ -158,7 +159,8 @@ struct ActiveWorkoutView: View {
                         .font(.title.weight(.bold))
                         .foregroundStyle(Theme.primaryText)
                     Text(Duration.seconds(elapsed).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2))))
-                        .font(.system(size: 52, weight: .bold, design: .rounded))
+                        .font(.system(size: timerSize, weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.6)
                         .monospacedDigit()
                         .foregroundStyle(Theme.primaryText)
                     Text("Elapsed · \(finishedExercises) of \(session.exercises.count) exercises")

@@ -108,6 +108,7 @@ private struct WeekStrip: View {
 private struct DayStrainCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(WorkoutLauncher.self) private var launcher
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 60
 
     var body: some View {
         let current = metrics.strain?.strain ?? 0
@@ -130,7 +131,8 @@ private struct DayStrainCard: View {
             ) {
                 VStack(spacing: 2) {
                     Text(strainText(current))
-                        .font(.system(size: 60, weight: .bold, design: .rounded))
+                        .font(.system(size: min(heroSize, 76), weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.6)
                         .monospacedDigit()
                         .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
                     Text("day strain")
@@ -334,14 +336,23 @@ private struct ActivityCard: View {
 private struct ZonesCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
 
-    private let names = ["Warm-up", "Fat burn", "Aerobic", "Threshold", "Max"]
+    private let names = ["Easy", "Light", "Aerobic", "Threshold", "Max"]
+
+    /// Heart-rate range for zone 1-5 (50-60%, ... 90-100% of heart-rate reserve).
+    private func bpmRange(_ index: Int) -> String? {
+        guard let profile = metrics.heartRateProfile else { return nil }
+        let reserve = profile.maxHeartRate - profile.restingHeartRate
+        let low = profile.restingHeartRate + (0.5 + 0.1 * Double(index)) * reserve
+        let high = profile.restingHeartRate + (0.6 + 0.1 * Double(index)) * reserve
+        return "\(whole(low))–\(whole(high))"
+    }
 
     var body: some View {
         let minutes = metrics.strain?.zoneMinutes ?? [0, 0, 0, 0, 0]
         let total = minutes.reduce(0, +)
         let peak = max(minutes.max() ?? 1, 1)
         VStack(alignment: .leading, spacing: 14) {
-            Text(total > 0 ? "\(whole(total)) min in zones today" : "No time in heart-rate zones yet today")
+            Text(total > 0 ? "\(whole(total)) min in zones today (numbers under each bar are bpm)" : "No time in heart-rate zones yet today")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
             HStack(alignment: .bottom, spacing: 12) {
@@ -366,6 +377,14 @@ private struct ZonesCard: View {
                             .foregroundStyle(Theme.secondaryText)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
+                        if let range = bpmRange(index) {
+                            Text(range)
+                                .font(.caption2)
+                                .monospacedDigit()
+                                .foregroundStyle(Theme.secondaryText)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .combine)
