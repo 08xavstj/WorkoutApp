@@ -20,6 +20,10 @@ public struct EnergyCalculator: Sendable {
     /// Keytel is validated for exercise; below this fraction of heart-rate reserve
     /// a minute counts as rest/everyday movement instead.
     public var exerciseReserveThreshold: Double = 0.30
+    /// The most time one heart-rate reading stands for (as in StrainCalculator).
+    public var maxMinutesPerSample: Double = 2
+    /// Steps per raised-heart-rate minute already covered by heart-rate calories.
+    public var stepsPerRaisedMinute: Double = 100
 
     public init() {}
 
@@ -117,25 +121,36 @@ public struct EnergyCalculator: Sendable {
         // Exercise from heart rate: Keytel gross minus resting, for raised-HR minutes.
         let samples = heartRate.sorted { $0.date < $1.date }
         var hrExercise = 0.0
+        var raisedMinutesOutside = 0.0
         var sessionHR = Array(repeating: 0.0, count: strengthSessions.count)
         for (current, next) in zip(samples, samples.dropFirst()) {
             let gap = next.date.timeIntervalSince(current.date)
             guard gap > 0, gap <= 600 else { continue }
             guard profile.reserveFraction(for: current.bpm) >= exerciseReserveThreshold else { continue }
-            let kcal = max(0, keytelKcalPerMinute(bpm: current.bpm, body: body) - bmrPerMinute) * gap / 60
+            // One reading stands for at most 2 minutes (as in StrainCalculator),
+            // so a single raised reading before a sync gap isn't 10 minutes of exercise.
+            let minutes = min(gap / 60, maxMinutesPerSample)
+            let kcal = max(0, keytelKcalPerMinute(bpm: current.bpm, body: body) - bmrPerMinute) * minutes
             if let index = strengthSessions.firstIndex(where: { $0.contains(current.date) }) {
                 sessionHR[index] += kcal
             } else {
                 hrExercise += kcal
+                raisedMinutesOutside += minutes
             }
         }
         var exercise = hrExercise
         for (index, session) in strengthSessions.enumerated() {
-            let floor = strengthKcal(minutes: session.duration / 60, rpe: session.sessionRPE, body: body)
+            // Capped like sRPE load, so a session left running overnight doesn't add thousands of kcal.
+            let floor = strengthKcal(minutes: min(session.duration / 60, 180), rpe: session.sessionRPE, body: body)
             exercise += max(sessionHR[index], floor)
         }
 
-        let movement = max(0, stepsOutsideWorkouts) * kcalPerStepPerKg * body.weightKg
+        // Steps taken during raised-heart-rate minutes are already in the
+        // heart-rate calories, so they aren't counted again as movement.
+        // About 100 steps a minute is a brisk, moderate-intensity walk
+        // (Tudor-Locke et al., Br J Sports Med 2020).
+        let stepsInRaisedMinutes = min(max(0, stepsOutsideWorkouts), raisedMinutesOutside * stepsPerRaisedMinute)
+        let movement = max(0, stepsOutsideWorkouts - stepsInRaisedMinutes) * kcalPerStepPerKg * body.weightKg
         let digestion = (intake ?? 0) * thermicEffect
 
         return Result(

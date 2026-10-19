@@ -245,7 +245,7 @@ struct RootView: View {
             .map(\.strainSummary)
         await settings.syncProfile(from: health)
         let goalProtein = settings.goalsSet ? GoalPlanner.proteinPerKg(settings.goals) : 1.6
-        metrics.proteinGramsPerKg = max(goalProtein, medications.proteinGramsPerKg)
+        metrics.proteinGramsPerKg = max(goalProtein, medications.proteinGramsPerKg ?? 0)
         gym.style = settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,

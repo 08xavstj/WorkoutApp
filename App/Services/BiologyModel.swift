@@ -40,8 +40,10 @@ final class BiologyModel {
         let rhrSeries = vitals.compactMap { v in v.restingHeartRate.map { DatedValue(date: v.date, value: $0) } }
 
         if !hrvSeries.isEmpty {
-            let values = hrvSeries.map(\.value)
-            hrvBaseline = values.reduce(0, +) / Double(values.count)
+            // Geometric mean (mean of ln HRV), the same baseline Recovery uses;
+            // HRV is skewed, so a plain average is pulled up by high nights.
+            let logs = hrvSeries.map(\.value).filter { $0 > 0 }.map { log($0) }
+            hrvBaseline = logs.isEmpty ? nil : exp(logs.reduce(0, +) / Double(logs.count))
             let recent = hrvSeries.suffix(30).map(\.value)
             let earlier = hrvSeries.dropLast(30).suffix(30).map(\.value)
             if !recent.isEmpty, !earlier.isEmpty {
@@ -89,12 +91,14 @@ final class BiologyModel {
             let label = Biomarkers.vo2MaxLabel(last.value, age: settings.age, sex: settings.sex)
             result.append(Marker(
                 id: "vo2", name: "VO₂ max", value: fmt(last.value), unit: "", status: label,
-                tone: label == "Poor" || label == "Fair" ? .caution : .good, series: vo2
+                tone: label == "Poor" ? .caution : .good, series: vo2
             ))
         }
         let protein = ((try? await proteinTask) ?? []).filter { $0.value > 0 }
         if !protein.isEmpty {
-            let week = protein.suffix(7).map(\.value)
+            // Full days only: today is still being logged.
+            let fullDays = protein.filter { !Calendar.current.isDateInToday($0.date) }
+            let week = (fullDays.isEmpty ? protein : fullDays).suffix(7).map(\.value)
             let avg = week.reduce(0, +) / Double(week.count)
             let onTarget = proteinTarget.map { avg >= $0 * 0.9 } ?? true
             result.append(Marker(

@@ -115,6 +115,11 @@ public enum IllnessWatch {
         public static func == (a: Inputs, b: Inputs) -> Bool {
             a.restingHeartRate == b.restingHeartRate && a.respiratoryRate == b.respiratoryRate
                 && a.temperatureDelta == b.temperatureDelta && a.hrvChangePercent == b.hrvChangePercent
+                && a.rhrBaseline?.mean == b.rhrBaseline?.mean && a.rhrBaseline?.sd == b.rhrBaseline?.sd
+                && a.respiratoryBaseline?.mean == b.respiratoryBaseline?.mean
+                && a.respiratoryBaseline?.sd == b.respiratoryBaseline?.sd
+                && a.drinksLastNight == b.drinksLastNight && a.yesterdayStrain == b.yesterdayStrain
+                && a.reportedSymptoms == b.reportedSymptoms
         }
     }
 
@@ -150,12 +155,14 @@ public enum IllnessWatch {
         var level: Level = bodySignals >= 2 || (bodySignals >= 1 && inputs.reportedSymptoms) ? .likely : .watch
         let explained = (inputs.drinksLastNight ?? 0) >= 2 || (inputs.yesterdayStrain ?? 0) >= 80
         if explained && !inputs.reportedSymptoms && bodySignals < 3 { level = .watch }
-        guard bodySignals > 0 || level == .likely else { return nil }
 
         var message: String
         switch level {
         case .likely:
             message = "Your body may be fighting something. Keep today easy, sleep early and drink fluids. If you feel unwell, skip hard training."
+        case .watch where bodySignals == 0:
+            // Symptoms you reported, with vitals still normal.
+            message = "You said you're feeling unwell. Your vitals look normal so far, but keep today easy and see how you feel."
         case .watch:
             message = "Some of your vitals are up compared with your normal. Worth an easier day and an eye on how you feel."
         }

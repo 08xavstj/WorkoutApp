@@ -101,6 +101,33 @@ struct SleepCalculatorTests {
         #expect(result.interruptions == 0)
     }
 
+    @Test func afternoonNapIsNotPartOfTheNight() throws {
+        let night = [
+            SleepSample(stage: .core, start: at(0), end: at(4)),
+            SleepSample(stage: .deep, start: at(4), end: at(5)),
+            SleepSample(stage: .core, start: at(5), end: at(8)),
+        ]
+        let nap = SleepSample(stage: .core, start: at(14), end: at(14.7))
+        let alone = try #require(calculator.score(samples: night))
+        let withNap = try #require(calculator.score(samples: night + [nap]))
+        #expect(withNap.asleep == 8 * 3600)
+        #expect(withNap.wakeTime == at(8))
+        #expect(withNap.score == alone.score)
+    }
+
+    @Test func sessionsSplitOnLongGaps() {
+        let intervals = [
+            DateInterval(start: at(0), end: at(3)),
+            DateInterval(start: at(3.5), end: at(7)),
+            DateInterval(start: at(2), end: at(3.2)), // overlapping second source
+            DateInterval(start: at(13), end: at(14)),
+        ]
+        let sessions = SleepSessions.sessions(intervals)
+        #expect(sessions.count == 2)
+        #expect(abs((SleepSessions.main(intervals)?.asleep ?? 0) - 6.7 * 3600) < 1)
+        #expect(SleepSessions.main(intervals)?.end == at(7))
+    }
+
     @Test func shortBrokenNightScoresLow() throws {
         let samples = [
             SleepSample(stage: .core, start: at(0), end: at(1.5)),
@@ -143,6 +170,20 @@ struct SleepCalculatorTests {
         #expect(good == 100)
         #expect(bad < 50)
         #expect(SleepConsistency.score(Array(regular.prefix(3)), calendar: calendar) == nil)
+    }
+
+    @Test func lateWakeTimesNearNoonDontWrap() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let base = calendar.date(from: DateComponents(year: 2027, month: 1, day: 4, hour: 4))!
+        // Asleep 4:00, waking at 11:50 or 12:10 on alternate days.
+        let nights = (0..<6).map { day in
+            let bed = base.addingTimeInterval(Double(day) * 86_400)
+            return SleepConsistency.Night(bedtime: bed, wake: bed.addingTimeInterval(7 * 3600 + 50 * 60 + Double(day % 2) * 1200))
+        }
+        let spread = try #require(SleepConsistency.spreadMinutes(nights, calendar: calendar))
+        #expect(spread < 10)
+        #expect(SleepConsistency.score(nights, calendar: calendar) == 100)
     }
 
     @Test func consistencyCountsInTheSleepScore() throws {

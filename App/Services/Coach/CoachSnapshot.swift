@@ -210,9 +210,11 @@ extension CoachSnapshot {
             recentWorkouts: Array(workouts),
             gym: gymSummary,
             suggestedWorkout: plan.map(Self.describe),
-            caloriesBurnedSoFar: metrics.energy?.burnedSoFar,
-            caloriesProjected: metrics.energy?.projectedTotal,
-            calorieBalance: metrics.energy?.balance
+            // The same numbers Home shows (the watch's own calories when available).
+            caloriesBurnedSoFar: metrics.calories?.burnedSoFar ?? metrics.energy?.burnedSoFar,
+            caloriesProjected: metrics.calories?.projected ?? metrics.energy?.projectedTotal,
+            calorieBalance: metrics.calories.flatMap { summary in summary.eaten.map { $0 - summary.projected } }
+                ?? metrics.energy?.balance
         )
     }
 }

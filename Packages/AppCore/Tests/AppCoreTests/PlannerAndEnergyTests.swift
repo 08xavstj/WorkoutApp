@@ -191,9 +191,32 @@ struct EnergyTests {
             body: body, profile: profile, heartRate: run, strengthSessions: [],
             stepsOutsideWorkouts: 8000, intake: 2400, dayStart: start, now: start.addingTimeInterval(86_399)
         )
-        #expect((2600...3300).contains(result.projectedTotal))
+        // The run's steps aren't counted twice (heart rate already covers them).
+        #expect((2450...3300).contains(result.projectedTotal))
+        #expect(result.everydayMovement < 8000 * calc.kcalPerStepPerKg * body.weightKg)
         #expect(result.digestion == 240)
         #expect(result.balance! < 0)
+    }
+
+    @Test func oneRaisedReadingBeforeASyncGapIsTwoMinutes() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let profile = HeartRateProfile(age: 30, sex: .male, restingHeartRate: 55)
+        let samples = [HeartRateSample(date: start, bpm: 150), HeartRateSample(date: start.addingTimeInterval(540), bpm: 70)]
+        let result = calc.estimate(body: body, profile: profile, heartRate: samples, strengthSessions: [],
+                                   stepsOutsideWorkouts: 0, intake: nil, dayStart: start, now: start.addingTimeInterval(3600))
+        let perMinute = calc.keytelKcalPerMinute(bpm: 150, body: body) - calc.bmr(body).kcal / 1440
+        #expect(abs(result.exercise - 2 * perMinute) < 0.5)
+    }
+
+    @Test func sessionLeftRunningIsCapped() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let session = StrengthSessionSummary(start: start, end: start.addingTimeInterval(10 * 3600), sessionRPE: 8)
+        let result = calc.estimate(
+            body: body, profile: HeartRateProfile(age: 30, sex: .male, restingHeartRate: 55),
+            heartRate: [], strengthSessions: [session], stepsOutsideWorkouts: 0, intake: nil,
+            dayStart: start, now: start.addingTimeInterval(11 * 3600)
+        )
+        #expect(abs(result.exercise - 3 * 4 * 74.3) < 0.5)
     }
 
     @Test func liftingFloorAppliesWhenHeartRateIsLow() {

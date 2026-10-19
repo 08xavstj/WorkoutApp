@@ -74,23 +74,25 @@ public enum StressEstimate {
         wakingHours: Range<Int> = 7..<22,
         calendar: Calendar = .current
     ) -> Result? {
-        var scores: [Double] = []
-        for sample in samples {
+        let sorted = samples.sorted { $0.date < $1.date }
+        let weights = HeartRateMinutes.weights(sorted)
+        var scores: [(score: Double, minutes: Double)] = []
+        for (sample, minutes) in zip(sorted, weights) {
             let hour = calendar.component(.hour, from: sample.date)
             guard wakingHours.contains(hour), !windows.contains(where: { $0.contains(sample.date) }) else { continue }
             let elevation = profile.reserveFraction(for: sample.bpm)
             // Above zone 1 you're moving, not stressed.
             guard elevation < 0.5 else { continue }
-            scores.append(min(1, elevation / fullScale) * 100)
+            scores.append((min(1, elevation / fullScale) * 100, minutes))
         }
-        guard scores.count >= 30 else { return nil }
+        let total = scores.map(\.minutes).reduce(0, +)
+        guard total >= 30 else { return nil }
         var bands = [0.0, 0, 0, 0]
-        for score in scores {
-            bands[band(for: score)] += 1
+        for entry in scores {
+            bands[band(for: entry.score)] += entry.minutes
         }
-        let total = Double(scores.count)
-        let mean = scores.reduce(0, +) / total
-        return Result(score: Int(mean.rounded()), minutes: scores.count, bands: bands.map { $0 / total })
+        let mean = scores.map { $0.score * $0.minutes }.reduce(0, +) / total
+        return Result(score: Int(mean.rounded()), minutes: Int(total.rounded()), bands: bands.map { $0 / total })
     }
 
     /// 0-25 rest, 26-50 low, 51-75 medium, 76-100 high (the bands Garmin uses).
@@ -125,23 +127,41 @@ public enum IntensityMinutes {
 
     public static let weeklyGoal = 150
 
-    /// - Parameter samples: one heart-rate value per minute.
+    /// - Parameter samples: heart rate, ideally one value per minute. Sparser
+    /// data (a watch sampling every 1-2 minutes) is weighted by the gap to the
+    /// next reading, up to 2 minutes, as in `StrainCalculator`.
     public static func count(_ samples: [HeartRateSample], profile: HeartRateProfile) -> Result {
-        var minutes = Set<Int>()
-        var moderate = 0
-        var vigorous = 0
-        for sample in samples {
-            // Count each clock minute once even if samples are denser.
-            let minute = Int(sample.date.timeIntervalSince1970 / 60)
-            guard minutes.insert(minute).inserted else { continue }
+        let sorted = samples.sorted { $0.date < $1.date }
+        var moderate = 0.0
+        var vigorous = 0.0
+        for (sample, minutes) in zip(sorted, HeartRateMinutes.weights(sorted)) {
             let fraction = profile.reserveFraction(for: sample.bpm)
             if fraction >= 0.6 {
-                vigorous += 1
+                vigorous += minutes
             } else if fraction >= 0.4 {
-                moderate += 1
+                moderate += minutes
             }
         }
-        return Result(moderate: moderate, vigorous: vigorous)
+        return Result(moderate: Int(moderate.rounded()), vigorous: Int(vigorous.rounded()))
+    }
+}
+
+/// How many minutes each heart-rate reading stands for.
+enum HeartRateMinutes {
+    /// For readings sorted by time: the gap to the next reading in minutes,
+    /// capped at `cap` (gaps longer than `maxGap` count only as one minute).
+    /// Denser-than-minute data counts its share, so it isn't double counted.
+    /// The last reading counts as one minute.
+    static func weights(_ sorted: [HeartRateSample], cap: Double = 2, maxGap: TimeInterval = 10 * 60) -> [Double] {
+        guard !sorted.isEmpty else { return [] }
+        var result: [Double] = []
+        result.reserveCapacity(sorted.count)
+        for (current, next) in zip(sorted, sorted.dropFirst()) {
+            let gap = next.date.timeIntervalSince(current.date)
+            result.append(gap > maxGap ? 1 : min(cap, max(0, gap) / 60))
+        }
+        result.append(1)
+        return result
     }
 }
 

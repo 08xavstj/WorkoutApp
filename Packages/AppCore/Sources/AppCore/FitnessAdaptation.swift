@@ -10,19 +10,34 @@ import Foundation
 /// are off by ±10 bpm for many people (Tanaka et al., J Am Coll Cardiol 2001),
 /// and every zone and strain number depends on max heart rate.
 public enum ObservedMaxHeartRate {
-    /// Highest believable heart rate in per-minute data: a minute only counts
-    /// if a neighbouring minute (within 2 minutes) was within 5 bpm of it, so a
-    /// single bad reading (e.g. a loose strap) can't set your max.
-    public static func peak(_ samples: [HeartRateSample]) -> Double? {
+    /// Highest believable heart rate in per-minute data: the lowest value of
+    /// the best run of 3+ consecutive minutes (each within 2 minutes of the
+    /// next and within 5 bpm of the run's first value). A single bad reading,
+    /// or two, can't set your max.
+    public static func peak(_ samples: [HeartRateSample], sustainedMinutes: Int = 3) -> Double? {
         let sorted = samples.filter { (90...230).contains($0.bpm) }.sorted { $0.date < $1.date }
+        guard sorted.count >= sustainedMinutes else { return nil }
         var best: Double?
-        for (current, next) in zip(sorted, sorted.dropFirst()) {
-            guard next.date.timeIntervalSince(current.date) <= 120,
-                  abs(next.bpm - current.bpm) <= 5 else { continue }
-            let confirmed = min(current.bpm, next.bpm)
-            if confirmed > (best ?? 0) { best = confirmed }
+        for start in 0...(sorted.count - sustainedMinutes) {
+            var low = sorted[start].bpm
+            var ok = true
+            for index in (start + 1)..<(start + sustainedMinutes) {
+                let previous = sorted[index - 1], current = sorted[index]
+                guard current.date.timeIntervalSince(previous.date) <= 120,
+                      abs(current.bpm - sorted[start].bpm) <= 5 else { ok = false; break }
+                low = min(low, current.bpm)
+            }
+            if ok, low > (best ?? 0) { best = low }
         }
         return best
+    }
+
+    /// Peaks far above the age estimate are almost always sensor errors
+    /// (e.g. an optical sensor locking onto running cadence), so they're
+    /// ignored rather than trusted for a year. The estimate's SD is about
+    /// 10 bpm (Tanaka et al. 2001), so +15 allows genuinely high maxes.
+    public static func plausible(_ peak: Double, estimate: Double) -> Double? {
+        peak <= estimate + 15 ? peak : nil
     }
 
     public struct Learned: Sendable, Equatable, Codable {

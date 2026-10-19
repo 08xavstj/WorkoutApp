@@ -22,7 +22,7 @@ Resting energy uses **Katch-McArdle** when Apple Health has your body-fat % (bet
 
 ### How the scores work (`Packages/AppCore`)
 
-- **Strain (0-21)**: cardio load from heart rate (Banister TRIMP), plus **lifting load** = session RPE x minutes (Foster sRPE). A gym session counts as whichever is higher, its heart-rate load or its RPE load, so lifting isn't undercounted and nothing is counted twice. Load maps onto 0-21 with a curve that flattens near the top.
+- **Strain (0-100%)**: cardio load from heart rate (Banister TRIMP), plus **lifting load** = session RPE x minutes (Foster sRPE). A gym session counts as whichever is higher, its heart-rate load or its RPE load, so lifting isn't undercounted and nothing is counted twice. Load maps onto 0-100% with a curve that flattens near the top.
 - **Recovery (0-100%)**: last night's HRV and resting heart rate compared with your own 30-day baseline (z-scores), plus sleep. Needs about 4 nights of data to calibrate.
 - **Sleep (0-100)**: time asleep vs. need (need goes up after hard days), efficiency, deep + REM share, interruptions. Overlapping iPhone/Watch records are merged.
 

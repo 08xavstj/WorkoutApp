@@ -9,12 +9,17 @@ struct ObservedMaxHeartRateTests {
         bpms.enumerated().map { HeartRateSample(date: start.addingTimeInterval(Double($0.offset) * 60), bpm: $0.element) }
     }
 
-    @Test func ignoresASingleSpike() {
-        #expect(ObservedMaxHeartRate.peak(minutes([150, 210, 152, 155])) == 152)
+    @Test func ignoresShortSpikes() {
+        #expect(ObservedMaxHeartRate.peak(minutes([150, 210, 208, 152, 155, 153])) == 152)
     }
 
-    @Test func confirmedPeakCounts() {
-        #expect(ObservedMaxHeartRate.peak(minutes([170, 188, 191, 180])) == 188)
+    @Test func sustainedPeakCounts() {
+        #expect(ObservedMaxHeartRate.peak(minutes([170, 188, 191, 189, 175])) == 188)
+    }
+
+    @Test func implausiblePeaksAreIgnored() {
+        #expect(ObservedMaxHeartRate.plausible(200, estimate: 187) == 200)
+        #expect(ObservedMaxHeartRate.plausible(205, estimate: 187) == nil)
     }
 
     @Test func keepsTheHigherPeakAndExpiresAfterAYear() {

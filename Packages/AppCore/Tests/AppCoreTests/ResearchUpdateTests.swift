@@ -100,6 +100,12 @@ struct WellbeingTests {
         #expect(alert.message.contains("Alcohol"))
     }
 
+    @Test func symptomsAloneGiveAWatchAlert() throws {
+        let alert = try #require(IllnessWatch.evaluate(.init(restingHeartRate: 55, rhrBaseline: (54, 1.5), reportedSymptoms: true)))
+        #expect(alert.level == .watch)
+        #expect(alert.signals.isEmpty)
+    }
+
     @Test func normalVitalsNoAlert() {
         #expect(IllnessWatch.evaluate(.init(restingHeartRate: 55, rhrBaseline: (54, 1.5))) == nil)
     }
