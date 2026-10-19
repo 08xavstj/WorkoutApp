@@ -247,9 +247,6 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// Bedtime and wake time of the main sleep for each of the last `nights`
-    /// nights, for sleep consistency (naps are left out; see `sleepHistory`).
-    @concurrent
     /// Overnight HRV as RMSSD (ms) computed from Apple Watch beat-to-beat
     /// recordings taken during each night's main sleep, keyed by the morning.
     /// Empty for watches that don't share beat-to-beat data (e.g. Garmin).
