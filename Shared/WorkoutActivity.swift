@@ -20,6 +20,15 @@ nonisolated struct WorkoutActivityAttributes: ActivityAttributes {
     var startedAt: Date
 }
 
+extension WorkoutActivityAttributes.ContentState {
+    /// From when the rest started to when it ends. Always a valid range, unlike
+    /// `now...end`, which traps if the rest ends between two reads of the clock.
+    nonisolated var restRange: ClosedRange<Date>? {
+        guard let restEndsAt else { return nil }
+        return restEndsAt.addingTimeInterval(-max(1, restLength))...restEndsAt
+    }
+}
+
 /// The rest timer, kept in the App Group so the app and the Live Activity's
 /// buttons (+15s, Skip) change the same timer.
 nonisolated enum RestTimerStore {

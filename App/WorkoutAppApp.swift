@@ -10,7 +10,7 @@ struct WorkoutAppApp: App {
     @State private var metrics = DailyMetricsModel()
     @State private var biology = BiologyModel()
     @State private var vitals = VitalsModel()
-    @State private var coach = CoachModel()
+    @State private var coach: CoachModel
     @State private var gym = GymStore()
     @State private var launcher = WorkoutLauncher()
     @State private var refresher = AppRefresher()
@@ -20,7 +20,7 @@ struct WorkoutAppApp: App {
     @State private var checkIns = CheckInStore()
     @State private var muscles = MuscleModel()
     @State private var conditions = ConditionsModel()
-    @State private var progressPhotos = ProgressPhotosModel()
+    @State private var progressPhotos: ProgressPhotosModel
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -28,6 +28,10 @@ struct WorkoutAppApp: App {
         let health = HealthKitClient()
         self.health = health
         _recorder = State(initialValue: LiveWorkoutRecorder(store: health.store))
+        // One Claude client (and one signed-in Supabase user) for the coach and photo analysis.
+        let cloud = CloudCoach()
+        _coach = State(initialValue: CoachModel(cloud: cloud))
+        _progressPhotos = State(initialValue: ProgressPhotosModel(cloud: cloud))
         // Notification taps and "Taken" buttons arrive through the router.
         let router = AppRouter()
         _router = State(initialValue: router)
@@ -252,10 +256,12 @@ struct RootView: View {
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         checkIns.recordSleepScore(metrics.sleep?.score)
         await conditions.refresh(settings: settings)
-        // Weekly photo analysis, when due and Claude is set up.
+        // Weekly photo analysis, only if turned on, Claude is set up and it's due.
+        // Runs on its own so a slow upload doesn't hold up the rest of the refresh.
         if settings.weeklyPhotoAnalysis, !settings.supabaseURL.isEmpty, !settings.supabaseAnonKey.isEmpty,
            progressPhotos.isAnalysisDue, !progressPhotos.isAnalyzing {
-            await analyzeProgressPhotos()
+            let context = progressContext()
+            Task { await progressPhotos.analyze(context: context, settings: settings) }
         }
         await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
         let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }

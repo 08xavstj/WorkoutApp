@@ -140,7 +140,7 @@ final class UserSettings {
         longitude = defaults.double(forKey: "longitude")
         goals = defaults.data(forKey: "goals").flatMap { try? JSONDecoder().decode(Goals.self, from: $0) } ?? Goals()
         goalsSet = defaults.bool(forKey: "goalsSet")
-        weeklyPhotoAnalysis = defaults.object(forKey: "weeklyPhotoAnalysis") as? Bool ?? true
+        weeklyPhotoAnalysis = defaults.object(forKey: "weeklyPhotoAnalysis") as? Bool ?? false
         checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
         morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30
