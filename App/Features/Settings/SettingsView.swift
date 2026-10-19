@@ -94,14 +94,27 @@ struct SettingsView: View {
                         Text("Female").tag(BiologicalSex.female)
                     }
                     .disabled(locked("sex"))
-                    Stepper(
-                        settings.maxHeartRate == 0
-                            ? (settings.learnedMaxOverride.map { "Max heart rate: \(Int($0)) (learned)" } ?? "Max heart rate: estimate")
-                            : "Max heart rate: \(settings.maxHeartRate)",
-                        value: $settings.maxHeartRate,
-                        in: 0...230,
-                        step: 1
-                    )
+                    LabeledContent("Max heart rate") {
+                        HStack(spacing: 4) {
+                            TextField(
+                                settings.learnedMaxOverride.map { "\(Int($0)) learned" } ?? "\(Int(settings.estimatedMaxHeartRate)) est.",
+                                value: Binding<Int?>(
+                                    get: { settings.maxHeartRate > 0 ? settings.maxHeartRate : nil },
+                                    set: { settings.maxHeartRate = min(230, max(0, $0 ?? 0)) }
+                                ),
+                                format: .number
+                            )
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 110)
+                            Text("bpm").foregroundStyle(Theme.secondaryText)
+                        }
+                    }
+                    if settings.maxHeartRate == 0, settings.learnedMaxOverride != nil {
+                        Button("Reset learned max heart rate", role: .destructive) {
+                            settings.resetLearnedMaxHeartRate()
+                        }
+                    }
                     LabeledContent("Height\(source("height"))") {
                         TextField("cm", value: $settings.heightCm, format: .number)
                             .keyboardType(.decimalPad)
@@ -111,17 +124,20 @@ struct SettingsView: View {
                         Text("cm").foregroundStyle(Theme.secondaryText)
                     }
                     LabeledContent("Weight\(source("weight"))") {
-                        TextField("kg", value: $settings.weightKg, format: .number)
+                        TextField(settings.weightUnit.rawValue, value: Binding(
+                            get: { (settings.weightUnit.display(settings.weightKg) * 10).rounded() / 10 },
+                            set: { settings.weightKg = settings.weightUnit.toKilograms($0) }
+                        ), format: .number)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
                             .disabled(locked("weight"))
-                        Text("kg").foregroundStyle(Theme.secondaryText)
+                        Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
                     }
                 } header: {
                     Text("Profile")
                 } footer: {
-                    Text("Age and sex set your heart-rate zones, calorie estimate and body age. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in the Health app (profile → Health Details) or turn the switch off to type your own. Leave max heart rate at 0 and the app learns it from your hardest workouts; only type it if you've had it measured.")
+                    Text("Age and sex set your heart-rate zones, calorie estimate and body age. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in the Health app (profile → Health Details) or turn the switch off to type your own. Leave max heart rate blank and the app learns it from your hardest workouts; only type it if you've had it measured.")
                 }
 
                 Section {
@@ -196,16 +212,18 @@ struct SettingsView: View {
                             .foregroundStyle(Theme.recoveryModerateText)
                     }
                     if settings.coachMode == .cloud {
-                        TextField("Supabase URL (https://xyz.supabase.co)", text: $settings.supabaseURL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                        SecureField("Supabase anon key", text: $settings.supabaseAnonKey)
+                        DisclosureGroup("Advanced: server") {
+                            TextField("Supabase URL (https://xyz.supabase.co)", text: $settings.supabaseURL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.URL)
+                            SecureField("Supabase anon key", text: $settings.supabaseAnonKey)
+                        }
                     }
                 } header: {
                     Text("AI coach")
                 } footer: {
-                    Text("On-device is free and private. Claude gives deeper answers and runs through your own Supabase server, so your Anthropic key never ships in the app. See README.")
+                    Text("On-device is free and private. Claude gives deeper answers and runs through the app's secure server.")
                 }
 
                 Section {
