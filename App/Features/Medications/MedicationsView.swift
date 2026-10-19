@@ -134,7 +134,7 @@ struct TodayDosesList: View {
                         if taken, let at = meds.taken[dose.id] {
                             Text("Taken \(at.formatted(date: .omitted, time: .shortened))")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(Theme.recoveryHigh)
+                                .foregroundStyle(Theme.recoveryHighText)
                         } else if dose.time < .now {
                             Chip(text: "Due", color: Theme.lifting)
                         }
@@ -210,7 +210,7 @@ struct MedicationEditor: View {
                     TextField("Dose (e.g. 25 mg)", text: $medication.dose)
                     if let drug = MedicationKnowledge.match(medication.name) {
                         Label("Recognised: \(drug.name)", systemImage: "checkmark.seal.fill")
-                            .foregroundStyle(Theme.recoveryHigh)
+                            .foregroundStyle(Theme.recoveryHighText)
                             .font(.subheadline)
                     }
                 }

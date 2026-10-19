@@ -163,7 +163,7 @@ struct ProgressPhotosView: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             if let error = photos.analysisError {
-                Text(error).font(.caption).foregroundStyle(Theme.recoveryModerate)
+                Text(error).font(.caption).foregroundStyle(Theme.recoveryModerateText)
             }
             Toggle("Analyze automatically each week", isOn: weekly)
                 .font(.subheadline)

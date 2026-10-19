@@ -41,6 +41,31 @@ enum Theme {
     static let oxygen = adaptive(light: 0x2F80FF, dark: 0x5C9DFF)
     static let oxygenLight = adaptive(light: 0x5FE3F0, dark: 0x7DEAF4)
 
+    // Darker versions of the accents for text on light cards (4.5:1+ contrast
+    // on white). In dark mode the normal accents are already bright enough.
+    static let recoveryHighText = adaptive(light: 0x15803D, dark: 0x3EDB84)
+    static let recoveryModerateText = adaptive(light: 0xB45309, dark: 0xFFC53D)
+    static let recoveryLowText = adaptive(light: 0xC81E3A, dark: 0xFF5C77)
+    static let strainTextColor = adaptive(light: 0xC2410C, dark: 0xFF8E3C)
+    static let liftingText = adaptive(light: 0xBE185D, dark: 0xFF6B97)
+
+    // Deep gradients for buttons with white text (both stops dark enough).
+    static let recoveryDeep = adaptive(light: 0x15803D, dark: 0x16A34A)
+    static let sleepDeep = adaptive(light: 0x4338CA, dark: 0x5B5BF0)
+    static var strainButtonColors: [Color] { [strainTextColor, lifting] }
+    static var recoveryButtonColors: [Color] { [recoveryHigh, recoveryDeep] }
+    static var sleepButtonColors: [Color] { [sleep, sleepDeep] }
+
+    /// Accent color to use for text of a given tone.
+    static func textColor(for accent: Color) -> Color {
+        if accent == recoveryHigh { return recoveryHighText }
+        if accent == recoveryModerate { return recoveryModerateText }
+        if accent == recoveryLow { return recoveryLowText }
+        if accent == strain { return strainTextColor }
+        if accent == lifting { return liftingText }
+        return accent
+    }
+
     static var strainColors: [Color] { [strainLight, strain] }
     static var sleepColors: [Color] { [sleepLight, sleep] }
     static var liftingColors: [Color] { [liftingLight, lifting] }

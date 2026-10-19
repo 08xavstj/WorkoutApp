@@ -118,7 +118,7 @@ private struct DayStrainCard: View {
                 if let target {
                     Text("Target \(whole(target.lowerBound))–\(whole(target.upperBound))%")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.recoveryHigh)
+                        .foregroundStyle(Theme.recoveryHighText)
                 }
             }
             ArcGauge(
@@ -168,7 +168,7 @@ private struct DayStrainCard: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "sparkle")
                         .foregroundStyle(Theme.recoveryHigh)
-                    let bold = Text(lead).fontWeight(.semibold).foregroundStyle(Theme.recoveryHigh)
+                    let bold = Text(lead).fontWeight(.semibold).foregroundStyle(Theme.recoveryHighText)
                     Text("\(bold) \(rest)")
                         .foregroundStyle(Theme.primaryText)
                         .multilineTextAlignment(.leading)

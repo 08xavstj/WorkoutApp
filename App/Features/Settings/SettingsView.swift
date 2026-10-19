@@ -193,7 +193,7 @@ struct SettingsView: View {
                     if settings.coachMode == .onDevice, let message = OnDeviceCoach.availabilityMessage {
                         Text(message)
                             .font(.footnote)
-                            .foregroundStyle(Theme.recoveryModerate)
+                            .foregroundStyle(Theme.recoveryModerateText)
                     }
                     if settings.coachMode == .cloud {
                         TextField("Supabase URL (https://xyz.supabase.co)", text: $settings.supabaseURL)

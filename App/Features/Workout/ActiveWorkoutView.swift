@@ -119,7 +119,7 @@ struct ActiveWorkoutView: View {
                 Text("LIVE").tracking(1.5)
             }
             .font(.subheadline.weight(.bold))
-            .foregroundStyle(Theme.recoveryLow)
+            .foregroundStyle(Theme.recoveryLowText)
             Spacer()
             Button {
                 showingFinish = true
@@ -300,7 +300,7 @@ private struct ExerciseCard: View {
                 if isNewPR {
                     Label("New PR", systemImage: "star.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.lifting)
+                        .foregroundStyle(Theme.liftingText)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Theme.lifting.opacity(0.12), in: .capsule)
@@ -479,7 +479,7 @@ private struct SetRow: View {
             if let rpe = set.rpe {
                 Text("RPE \(rpe.formatted())")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.lifting)
+                    .foregroundStyle(Theme.liftingText)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Theme.lifting.opacity(0.12), in: .capsule)
@@ -544,7 +544,7 @@ private struct SetEditor: View {
             Text(title.uppercased())
                 .font(.caption.weight(.bold))
                 .tracking(1.2)
-                .foregroundStyle(Theme.lifting)
+                .foregroundStyle(Theme.liftingText)
             HStack(spacing: 12) {
                 NumberStepper(label: unit.rawValue) {
                     TextField("0", value: weightBinding, format: .number.precision(.fractionLength(0...2)))
@@ -576,7 +576,7 @@ private struct SetEditor: View {
                     .padding(.vertical, 16)
                     .background(set.isCompleted
                                 ? AnyShapeStyle(Theme.cardRaised)
-                                : AnyShapeStyle(LinearGradient(colors: [Theme.recoveryHighLight, Theme.recoveryHigh], startPoint: .leading, endPoint: .trailing)),
+                                : AnyShapeStyle(LinearGradient(colors: Theme.recoveryButtonColors, startPoint: .leading, endPoint: .trailing)),
                                 in: .capsule)
             }
             .buttonStyle(.plain)
@@ -669,7 +669,7 @@ private struct RPEPicker: View {
                             .frame(maxWidth: .infinity, minHeight: 48)
                             .foregroundStyle(selected ? .white : Theme.primaryText)
                             .background(selected
-                                        ? AnyShapeStyle(LinearGradient(colors: [Theme.strainLight, Theme.lifting], startPoint: .top, endPoint: .bottom))
+                                        ? AnyShapeStyle(LinearGradient(colors: Theme.strainButtonColors, startPoint: .top, endPoint: .bottom))
                                         : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
                             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Color.clear : Theme.separator))
                     }
@@ -785,11 +785,14 @@ private struct RestTimerPill: View {
                 pillButton("+15s") { onChange(15) }
                 Button("Skip") { onChange(nil) }
                     .font(.headline)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
+                    .buttonStyle(.plain)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(LinearGradient(colors: [Theme.strain, Theme.strainLight], startPoint: .leading, endPoint: .trailing), in: .capsule)
+            .padding(.vertical, 8)
+            .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
             .shadow(color: Theme.strain.opacity(0.3), radius: 12, y: 6)
             .onChange(of: remaining == 0) { _, finished in
                 if finished { onChange(nil) }
@@ -801,9 +804,10 @@ private struct RestTimerPill: View {
     private func pillButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
             .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .frame(minWidth: 44, minHeight: 44)
             .background(Color.white.opacity(0.2), in: .capsule)
+            .contentShape(.capsule)
             .buttonStyle(.plain)
     }
 }

@@ -26,7 +26,7 @@ struct LocationPicker: View {
                         }
                     }
                     if let problem = finder.problem {
-                        Text(problem).font(.footnote).foregroundStyle(Theme.recoveryModerate)
+                        Text(problem).font(.footnote).foregroundStyle(Theme.recoveryModerateText)
                     }
                 }
                 Section {

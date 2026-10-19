@@ -239,7 +239,7 @@ struct PlannedExerciseRow: View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(index)")
                 .font(.headline)
-                .foregroundStyle(Theme.lifting)
+                .foregroundStyle(Theme.liftingText)
                 .frame(width: 34, height: 34)
                 .background(Theme.lifting.opacity(0.12), in: .rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 4) {
@@ -252,7 +252,7 @@ struct PlannedExerciseRow: View {
                 if let load = exercise.load {
                     Text("\(load.formatted(.number.precision(.fractionLength(0...2)))) \(unit.rawValue)")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.strain)
+                        .foregroundStyle(Theme.strainTextColor)
                 }
                 if let note = exercise.note {
                     Text(note)

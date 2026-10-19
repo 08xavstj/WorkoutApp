@@ -27,7 +27,7 @@ struct FinishWorkoutSheet: View {
                             Spacer()
                             Text("\(Int(rpe)) / 10 · \(RPEScale.sessionLabel(Int(rpe)))")
                                 .monospacedDigit()
-                                .foregroundStyle(Theme.lifting)
+                                .foregroundStyle(Theme.liftingText)
                         }
                         Slider(value: $rpe, in: 1...10, step: 1)
                             .tint(Theme.lifting)
@@ -43,7 +43,7 @@ struct FinishWorkoutSheet: View {
                     Toggle("Save to Apple Health", isOn: $saveToHealth)
                 }
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(Theme.recoveryLow)
+                    Text(errorMessage).foregroundStyle(Theme.recoveryLowText)
                 }
             }
             .navigationTitle("Finish workout")

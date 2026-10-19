@@ -14,7 +14,7 @@ struct ExercisePickerView: View {
         NavigationStack {
             List {
                 if let error = library.loadError {
-                    Text(error).foregroundStyle(Theme.recoveryLow)
+                    Text(error).foregroundStyle(Theme.recoveryLowText)
                 }
                 ForEach(library.search(searchText, muscle: muscle)) { exercise in
                     HStack {

@@ -238,7 +238,7 @@ private struct ScoresCard: View {
                     .font(.caption.weight(.semibold))
                     .textCase(.uppercase)
                     .tracking(1.2)
-                    .foregroundStyle(Theme.strain)
+                    .foregroundStyle(Theme.strainTextColor)
                 if let highlight = coaching.highlight {
                     let lead = Text(coaching.text).foregroundStyle(Theme.primaryText)
                     let accent = Text(highlight).foregroundStyle(Theme.strain).fontWeight(.semibold)
@@ -320,7 +320,7 @@ private struct StrainGoalCard: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 15)
-                        .background(LinearGradient(colors: [Theme.strainLight, Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing), in: .capsule)
+                        .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
                         .shadow(color: Theme.strain.opacity(0.35), radius: 10, y: 5)
                 }
                 .buttonStyle(.plain)
@@ -361,7 +361,7 @@ private struct SuggestionRow: View {
             Text("+\(strainText(suggestion.option.gain))")
                 .font(.headline)
                 .monospacedDigit()
-                .foregroundStyle(Theme.strain)
+                .foregroundStyle(Theme.strainTextColor)
             if isStrength {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
@@ -602,10 +602,10 @@ private struct CheckInCard: View {
         VStack(alignment: .leading, spacing: 12) {
             CardLabel(text: "Daily check-in", color: Theme.sleep)
             HStack(spacing: 10) {
-                button("Morning", icon: "sun.max.fill", done: morningDone, colors: [Theme.strainLight, Theme.strain]) {
+                button("Morning", icon: "sun.max.fill", done: morningDone, colors: Theme.strainButtonColors) {
                     router.checkIn = .morning
                 }
-                button("Evening", icon: "moon.stars.fill", done: eveningDone, colors: [Theme.sleepLight, Theme.sleep]) {
+                button("Evening", icon: "moon.stars.fill", done: eveningDone, colors: Theme.sleepButtonColors) {
                     router.checkIn = .evening
                 }
             }

@@ -262,7 +262,7 @@ struct VitalDetailView: View {
                     .annotation(position: .top, alignment: .trailing) {
                         Text("Goal \(number(goal))")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Theme.recoveryHigh)
+                            .foregroundStyle(Theme.recoveryHighText)
                     }
             }
             if let average {
