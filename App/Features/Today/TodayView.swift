@@ -205,7 +205,7 @@ private struct ScoresCard: View {
                     title: "Strain",
                     value: metrics.strain.map { "\(whole($0.strain))" } ?? "--",
                     unit: metrics.strain == nil ? "" : "%",
-                    subtitle: metrics.targetStrain.map { "Goal \(whole($0.lowerBound))–\(whole($0.upperBound))%" } ?? "Day strain",
+                    subtitle: metrics.targetStrain.map { "Goal \(strainRangeText($0))" } ?? "Day strain",
                     progress: (metrics.strain?.strain ?? 0) / StrainCalculator.maximum,
                     colors: Theme.strainColors,
                     size: 100
@@ -215,7 +215,11 @@ private struct ScoresCard: View {
                     title: "Recovery",
                     value: metrics.recovery.map { "\($0.score)" } ?? "--",
                     unit: metrics.recovery == nil ? "" : "%",
-                    subtitle: metrics.recovery.map { $0.status.rawValue.capitalized },
+                    subtitle: metrics.recovery.map { result in
+                        guard !result.isCalibrated else { return result.status.rawValue.capitalized }
+                        let left = max(1, RecoveryCalculator().minimumBaselineDays - (metrics.baseline?.nights ?? 0))
+                        return "Learning · \(left) more night\(left == 1 ? "" : "s")"
+                    },
                     progress: Double(metrics.recovery?.score ?? 0) / 100,
                     colors: Theme.recoveryColors(for: metrics.recovery?.score),
                     size: 100
@@ -224,7 +228,7 @@ private struct ScoresCard: View {
                 ScoreRing(
                     title: "Sleep",
                     value: metrics.sleep.map { "\($0.score)" } ?? "--",
-                    unit: metrics.sleep == nil ? "" : "%",
+                    unit: "",
                     subtitle: metrics.sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
                     progress: Double(metrics.sleep?.score ?? 0) / 100,
                     colors: Theme.sleepColors,
@@ -241,7 +245,7 @@ private struct ScoresCard: View {
                     .foregroundStyle(Theme.strainTextColor)
                 if let highlight = coaching.highlight {
                     let lead = Text(coaching.text).foregroundStyle(Theme.primaryText)
-                    let accent = Text(highlight).foregroundStyle(Theme.strain).fontWeight(.semibold)
+                    let accent = Text(highlight).foregroundStyle(Theme.strainTextColor).fontWeight(.semibold)
                     Text("\(lead) \(accent)")
                         .font(.body)
                 } else {
@@ -265,11 +269,24 @@ private struct StrainGoalCard: View {
     @Environment(WorkoutLauncher.self) private var launcher
 
     var body: some View {
+        if let target = metrics.targetStrain {
+            content(target: target)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                CardLabel(text: "Strain goal")
+                Text("No target yet. Wear your watch to sleep so the app can set today's strain target from your recovery.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .card(tint: Theme.strain)
+        }
+    }
+
+    private func content(target: ClosedRange<Double>) -> some View {
         let current = metrics.strain?.strain ?? 0
-        let target = metrics.targetStrain ?? StrainCalculator.targetStrain(forRecovery: 50)
         let status = StrainPlanner().status(current: current, target: target)
         let suggestions = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions)
-        VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 16) {
             HStack {
                 CardLabel(text: "Strain goal")
                 Spacer()
@@ -287,13 +304,13 @@ private struct StrainGoalCard: View {
                     .font(.system(size: 48, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
-                Text("target \(whole(target.lowerBound))–\(whole(target.upperBound))%")
+                Text("target \(strainRangeText(target))")
                     .font(.title3)
                     .foregroundStyle(Theme.secondaryText)
             }
             StrainGoalBar(current: current, target: target)
-            Text(metrics.usualTrainingStrain.map { "Scaled to you: your training days usually reach \(whole($0))%, so the target moves as you get fitter or take time off." }
-                 ?? "Your target adapts to you after 6 training days in 4 weeks.")
+            Text(metrics.usualTrainingStrain.map { "Based on your usual training days (\(whole($0))%)." }
+                 ?? "Adapts to you after 6 training days.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
 
@@ -301,15 +318,17 @@ private struct StrainGoalCard: View {
             case .below:
                 CardLabel(text: "Suggested to close the gap")
                 ForEach(suggestions) { suggestion in
-                    Button {
-                        if suggestion.option.kind == .strength {
+                    if suggestion.option.kind == .strength {
+                        Button {
                             launcher.openBuilder(focus: suggestion.focus, minutes: suggestion.minutes)
+                        } label: {
+                            SuggestionRow(suggestion: suggestion)
                         }
-                    } label: {
+                        .buttonStyle(.plain)
+                    } else {
+                        // Cardio is done on the watch, so this row is information only.
                         SuggestionRow(suggestion: suggestion)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(suggestion.option.kind == .cardio)
                 }
                 Button {
                     let strength = suggestions.first { $0.option.kind == .strength }
@@ -350,10 +369,10 @@ private struct SuggestionRow: View {
                 size: 42
             )
             VStack(alignment: .leading, spacing: 2) {
-                Text(suggestion.option.title)
+                Text(isStrength ? suggestion.option.title : "Easy ride (you can still talk)")
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
-                Text(suggestion.option.detail)
+                Text(isStrength ? suggestion.option.detail : "\(suggestion.minutes) min · track it on your watch")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }

@@ -164,6 +164,11 @@ func strainText(_ value: Double) -> String {
     "\(whole(value))%"
 }
 
+/// A strain range as shown everywhere, e.g. "45–65%".
+func strainRangeText(_ range: ClosedRange<Double>) -> String {
+    "\(whole(range.lowerBound))–\(whole(range.upperBound))%"
+}
+
 /// Rounds for display. Unlike `Int(_:)`, never crashes on NaN or infinity.
 func whole(_ value: Double) -> Int {
     value.isFinite ? Int(value.rounded()) : 0

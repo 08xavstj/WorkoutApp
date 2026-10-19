@@ -32,7 +32,7 @@ struct FitnessView: View {
                     DeloadCard()
                     SectionTitle(text: "Muscles")
                     MuscleMapCard()
-                    SectionTitle(text: "Training Load", trailing: "This week vs usual")
+                    SectionTitle(text: "Training Load", trailing: "Last 7 days vs usual")
                     HStack(spacing: 12) {
                         LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.oxygenLight, Theme.oxygen, Theme.sleep])
                         LoadCard(title: "Muscular", result: metrics.muscularLoad, colors: [Theme.strainLight, Theme.strain, Theme.lifting])
@@ -66,8 +66,8 @@ private struct WeekStrip: View {
     var body: some View {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
-        // Three days back, today, three days ahead.
-        let dates = (-3...3).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
+        // The last 7 days, today last.
+        let dates = (-6...0).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
         HStack(spacing: 6) {
             ForEach(dates, id: \.self) { date in
                 let isToday = calendar.isDate(date, inSameDayAs: today)
@@ -75,7 +75,7 @@ private struct WeekStrip: View {
                 VStack(spacing: 6) {
                     Text(date.formatted(.dateTime.weekday(.narrow)))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(isToday ? Theme.strain : Theme.secondaryText)
+                        .foregroundStyle(isToday ? Theme.strainTextColor : Theme.secondaryText)
                     if date > today {
                         Circle()
                             .strokeBorder(Theme.secondaryText.opacity(0.35), style: StrokeStyle(lineWidth: 2.5, dash: [3, 3]))
@@ -96,7 +96,8 @@ private struct WeekStrip: View {
                 .frame(maxWidth: .infinity)
                 .background(isToday ? Theme.card : Color.clear, in: .rect(cornerRadius: 18))
                 .shadow(color: isToday ? Color.black.opacity(0.07) : .clear, radius: 9, y: 4)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(isToday ? "Today" : date.formatted(.dateTime.weekday(.wide).day())), strain \(strain.map { strainText($0) } ?? "no data")")
             }
         }
     }
@@ -116,7 +117,7 @@ private struct DayStrainCard: View {
                 CardLabel(text: "Day strain")
                 Spacer()
                 if let target {
-                    Text("Target \(whole(target.lowerBound))–\(whole(target.upperBound))%")
+                    Text("Target \(strainRangeText(target))")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.recoveryHighText)
                 }
@@ -162,23 +163,31 @@ private struct DayStrainCard: View {
                     return ("Above target:", "take it easy for the rest of the day so you recover for tomorrow.")
                 }
             }()
-            Button {
-                if case .below = status { launcher.openBuilder() }
-            } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "sparkle")
-                        .foregroundStyle(Theme.recoveryHigh)
-                    let bold = Text(lead).fontWeight(.semibold).foregroundStyle(Theme.recoveryHighText)
-                    Text("\(bold) \(rest)")
-                        .foregroundStyle(Theme.primaryText)
-                        .multilineTextAlignment(.leading)
-                    Spacer(minLength: 0)
+            let isBelow: Bool = { if case .below = status { return true } else { return false } }()
+            let message = HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "sparkle")
+                    .foregroundStyle(Theme.recoveryHigh)
+                let bold = Text(lead).fontWeight(.semibold).foregroundStyle(Theme.recoveryHighText)
+                Text("\(bold) \(rest)")
+                    .foregroundStyle(Theme.primaryText)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                if isBelow {
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
                 }
-                .font(.subheadline)
-                .padding(14)
-                .background(Theme.recoveryHigh.opacity(0.1), in: .rect(cornerRadius: 16))
             }
-            .buttonStyle(.plain)
+            .font(.subheadline)
+            .padding(14)
+            .background(Theme.recoveryHigh.opacity(0.1), in: .rect(cornerRadius: 16))
+            if isBelow {
+                Button { launcher.openBuilder() } label: { message }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Plan a workout")
+            } else {
+                message
+            }
         } else {
             Text("Wear your watch to sleep so the app can set a daily strain target from your recovery.")
                 .font(.subheadline)
@@ -214,8 +223,11 @@ private struct LoadCard: View {
                     Text(result.map { $0.value.formatted(.number.precision(.fractionLength(0))) } ?? "–")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.primaryText)
+                    Text("avg daily strain")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.secondaryText)
                     if let result, result.status != .calibrating {
-                        Text("usual \(whole(result.usual.lowerBound))–\(whole(result.usual.upperBound.rounded(.up)))")
+                        Text("your usual \(whole(result.usual.lowerBound))–\(whole(result.usual.upperBound.rounded(.up)))")
                             .font(.caption2)
                             .foregroundStyle(Theme.secondaryText)
                             .lineLimit(1)
@@ -246,21 +258,20 @@ private struct LoadCard: View {
 
     /// A description of this week vs your usual 4 weeks (not an injury prediction).
     private var statusText: String {
-        let percent = result?.ratio.map { " · \(Int((($0 - 1) * 100).rounded()) >= 0 ? "+" : "")\(Int((($0 - 1) * 100).rounded()))%" } ?? ""
         switch result?.status {
-        case .lighter: return "Lighter than usual" + percent
-        case .steady: return "Steady" + percent
-        case .building: return "Building" + percent
-        case .spike: return "Big jump" + percent
+        case .lighter: return "Lighter than usual"
+        case .steady: return "About your usual"
+        case .building: return "A bit more than usual"
+        case .spike: return "Much more than usual"
         default: return "Learning your usual"
         }
     }
 
     private var statusColor: Color {
         switch result?.status {
-        case .steady: Theme.recoveryHigh
-        case .building: Theme.strain
-        case .spike: Theme.recoveryModerate
+        case .steady: Theme.recoveryHighText
+        case .building: Theme.strainTextColor
+        case .spike: Theme.recoveryModerateText
         case .lighter: Theme.oxygen
         default: Theme.secondaryText
         }
@@ -277,7 +288,7 @@ private struct ActivityCard: View {
         VStack(alignment: .leading, spacing: 0) {
             if metrics.activities.isEmpty {
                 HStack(spacing: 12) {
-                    IconBadge(systemName: "zzz", color: Theme.secondaryText, size: 44)
+                    IconBadge(systemName: "figure.run", color: Theme.secondaryText, size: 44)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("No workouts yet today")
                             .font(.headline)

@@ -297,10 +297,11 @@ struct BodyAgeCard: View {
             }
             if let result {
                 let younger = result.difference <= 0
-                let tone = younger ? Theme.recoveryHigh : Theme.recoveryModerate
+                let tone = younger ? Theme.recoveryHighText : Theme.recoveryModerateText
                 HStack(alignment: .center, spacing: 18) {
+                    // A full ring in the result's color: green when younger, amber when older.
                     GradientRing(
-                        progress: min(1, result.bodyAge / 80),
+                        progress: 1,
                         colors: younger ? [Theme.recoveryHighLight, Theme.recoveryHigh] : [Theme.recoveryModerateLight, Theme.recoveryModerate],
                         lineWidth: 12
                     ) {
@@ -326,7 +327,7 @@ struct BodyAgeCard: View {
                         Text("than your age (\(result.age))")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
-                        Text(younger ? "Your habits are adding years. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
+                        Text(younger ? "Your habits are taking years off. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -336,11 +337,11 @@ struct BodyAgeCard: View {
                         FactorRow(factor: factor)
                     }
                 }
-                Text("Based on VO₂ max (fitness age, HUNT study), resting heart rate, sleep, steps and body fat or BMI, using published mortality research. Not a medical test.")
+                Text("Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. An estimate, not a medical test.")
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
             } else {
-                Text(isLoading ? "Working it out…" : "Needs at least two of: VO₂ max, resting heart rate, sleep, steps, body fat or BMI. Wear your Garmin day and night and add your height and weight in Settings.")
+                Text(isLoading ? "Working it out…" : "Needs at least two of: VO₂ max, resting heart rate, sleep, steps, body fat or BMI. Wear your watch day and night and add your height and weight in Settings.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
