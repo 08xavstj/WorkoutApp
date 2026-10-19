@@ -99,10 +99,9 @@ final class SetLog {
 
     var isCompleted: Bool { completedAt != nil }
 
-    /// Estimated one-rep max (Epley).
+    /// Estimated one-rep max (Epley, counting reps left from the set's RPE).
     var estimatedOneRepMax: Double {
-        guard reps > 0 else { return 0 }
-        return reps == 1 ? weightKg : weightKg * (1 + Double(reps) / 30)
+        OneRepMax.estimate(weight: weightKg, reps: reps, rpe: rpe)
     }
 }
 

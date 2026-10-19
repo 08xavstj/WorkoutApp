@@ -36,8 +36,9 @@ public struct NutritionDay: Sendable, Equatable {
 }
 
 public enum NutritionTargets {
-    /// Daily protein for someone lifting regularly: 1.6 g per kg of body weight,
-    /// the level above which extra protein stops adding muscle (Morton et al., 2018).
+    /// Daily protein for someone lifting regularly: 1.6 g per kg of body weight
+    /// covers most people; up to 2.2 g/kg may help some (Morton et al., Br J
+    /// Sports Med 2018: breakpoint 1.62 g/kg, 95% CI 1.03-2.20).
     /// `gramsPerKg` can be raised, e.g. to 2.0 on weight-loss medication.
     public static func proteinGrams(bodyMassKg: Double?, gramsPerKg: Double = 1.6) -> Double? {
         guard let bodyMassKg, bodyMassKg > 0 else { return nil }

@@ -6,22 +6,28 @@ import Foundation
 ///
 /// How each factor turns into years:
 /// - Fitness (VO₂ max) is the biggest. "Fitness age" from the HUNT study
-///   (Nes et al. 2013): the age at which an average healthy person has your
+///   (Nes et al., Med Sci Sports Exerc 2014): the age at which an average healthy person has your
 ///   VO₂ max. Average VO₂ max falls about 0.40 ml/kg/min a year for men
 ///   (54.4 at 25) and 0.30 for women (43.0 at 25). It counts at 60 % weight
-///   because the other factors overlap with it.
+///   because the other factors overlap with it (the 60% is the app's choice).
 /// - Mortality hazards from the other studies become years with the Gompertz
 ///   rule that the risk of dying doubles about every 8 years:
-///   years = 8 × log2(hazard ratio).
+///   years = 8 × log2(hazard ratio) ("effective age", Spiegelhalter, BMC Med
+///   Inform Decis Mak 2016).
 ///   - Resting heart rate: hazard 1.09 per 10 bpm above 60 (Zhang et al. 2016),
 ///     about 1 year per 10 bpm.
-///   - Sleep: under 7 h, hazard 1.12 for under 6 h (Cappuccio et al. 2010),
-///     about 1.3 years per missing hour. Over 9 h, hazard 1.30.
-///   - Steps: risk keeps falling up to about 8-10k steps a day (Paluch et al.
-///     2022). About 0.6 years per 1,000 steps from 7,000, capped.
-///   - Body fat (or BMI if body fat is unknown): BMI hazards from the Global
-///     BMI Mortality Collaboration (2016). BMI overrates muscular people, so
-///     body fat is preferred.
+///   - Sleep: short sleep (mostly defined as under 6 h) had hazard 1.12 vs
+///     7-8 h (Cappuccio et al., Sleep 2010). That compares whole groups, so
+///     it's applied once (about 1.3 years), not per missing hour. Long sleep
+///     (9 h+) is linked with higher risk too, but is thought to be a sign of
+///     ill health rather than a cause, so it adds no years and is flagged instead.
+///   - Steps: risk falls up to about 8-10k steps a day under 60 and 6-8k from
+///     60, then flattens (Paluch et al., Lancet Public Health 2022). About 0.6
+///     years per 1,000 steps from 7,000 (6,000 from age 60), with no extra
+///     credit past the plateau.
+///   - BMI hazards (never-smokers, vs 22.5-25) from the Global BMI Mortality
+///     Collaboration (Lancet 2016). Body-fat bands are an app heuristic (no
+///     mortality study by body-fat %), used because BMI overrates muscular people.
 public enum BodyAge {
     public struct Inputs: Sendable, Equatable {
         public var age: Int
@@ -79,18 +85,15 @@ public enum BodyAge {
             factors.append(Factor(name: "Resting heart rate", years: years, detail: "\(Int(rhr.rounded())) bpm"))
         }
         if let hours = inputs.sleepHours, hours > 2 {
-            let years: Double
-            if hours < 7 {
-                years = min(3, (7 - hours) * gompertzYears(hazard: 1.12))
-            } else if hours > 9 {
-                years = min(3, (hours - 9) * gompertzYears(hazard: 1.30))
-            } else {
-                years = -0.5
-            }
-            factors.append(Factor(name: "Sleep", years: years, detail: "\(format(hours)) h a night"))
+            let years = hours < 6 ? gompertzYears(hazard: 1.12) : 0
+            let detail = hours >= 9
+                ? "\(format(hours)) h a night. Regularly sleeping 9 h+ can be a sign of poor sleep or illness; worth mentioning to a doctor if you still feel tired"
+                : "\(format(hours)) h a night"
+            factors.append(Factor(name: "Sleep", years: years, detail: detail))
         }
         if let steps = inputs.dailySteps, steps > 0 {
-            let years = clamp(-(steps - 7000) / 1000 * 0.6, -2.5, 4)
+            let (reference, plateau) = inputs.age < 60 ? (7000.0, 10_000.0) : (6000.0, 8000.0)
+            let years = clamp(-(min(steps, plateau) - reference) / 1000 * 0.6, -2.5, 4)
             factors.append(Factor(name: "Daily steps", years: years, detail: "\(Int(steps.rounded())) a day"))
         }
         if let fat = inputs.bodyFatPercent, fat > 3, fat < 60 {
@@ -101,11 +104,13 @@ public enum BodyAge {
             let hazard: Double
             switch bmi {
             case ..<18.5: hazard = 1.51
+            case ..<20: hazard = 1.13
             case ..<25: hazard = 1.0
             case ..<27.5: hazard = 1.07
             case ..<30: hazard = 1.20
             case ..<35: hazard = 1.45
-            default: hazard = 1.94
+            case ..<40: hazard = 1.94
+            default: hazard = 2.76
             }
             factors.append(Factor(name: "BMI", years: gompertzYears(hazard: hazard), detail: format(bmi)))
         }

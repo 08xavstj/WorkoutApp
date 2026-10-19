@@ -6,14 +6,19 @@ import Foundation
 /// Each input becomes a z-score (how many "normal days" away from your average).
 /// HRV above baseline is good; resting heart rate above baseline is bad.
 ///
-/// HRV counts twice: the 7-day rolling average of ln HRV against your normal
-/// range (baseline mean ± 0.5 SD, the "smallest worthwhile change"), which is
-/// the method validated for guiding training (Plews et al. 2012-2013;
-/// Javaloyes et al., IJSPP 2019), and last night's value, so a bad night
-/// still shows.
+/// The HRV trend rule is from research: the 7-day rolling average of ln HRV
+/// against your normal range (baseline mean ± 0.5 SD, the "smallest
+/// worthwhile change") is the method used to guide training in trials (Plews
+/// et al., Eur J Appl Physiol 2012; Javaloyes et al., IJSPP 2019, with a
+/// 4-week baseline). Last night's HRV also counts a little so a bad night
+/// shows. The 0-100 score itself (weights, the curve and the 34/67 bands) is
+/// the app's own summary, not a validated clinical score.
+///
+/// Each signal needs 14 nights before it's used, since a baseline from a few
+/// nights is mostly noise.
 public struct RecoveryCalculator: Sendable {
     public var baselineDays: Int = 30
-    public var minimumBaselineDays: Int = 4
+    public var minimumBaselineDays: Int = 14
     public var hrvTrendWeight: Double = 0.35
     public var hrvWeight: Double = 0.20
     public var restingHeartRateWeight: Double = 0.25
@@ -55,6 +60,8 @@ public struct RecoveryCalculator: Sendable {
         public var meanRHR: Double?
         public var sdRHR: Double?
         public var nights: Int
+        public var hrvNights: Int = 0
+        public var rhrNights: Int = 0
     }
 
     public func baseline(from history: [DailyVitals]) -> Baseline {
@@ -63,7 +70,8 @@ public struct RecoveryCalculator: Sendable {
         let rhr = recent.compactMap(\.restingHeartRate).filter { $0 > 0 }
         let (meanH, sdH) = Self.meanAndSD(logHRV)
         let (meanR, sdR) = Self.meanAndSD(rhr)
-        return Baseline(meanLogHRV: meanH, sdLogHRV: sdH, meanRHR: meanR, sdRHR: sdR, nights: max(logHRV.count, rhr.count))
+        return Baseline(meanLogHRV: meanH, sdLogHRV: sdH, meanRHR: meanR, sdRHR: sdR, nights: max(logHRV.count, rhr.count),
+                        hrvNights: logHRV.count, rhrNights: rhr.count)
     }
 
     /// - Parameters:
@@ -73,6 +81,8 @@ public struct RecoveryCalculator: Sendable {
     public func score(today: DailyVitals, history: [DailyVitals], sleepScore: Int?) -> Result? {
         let base = baseline(from: history)
         let calibrated = base.nights >= minimumBaselineDays
+        let hrvReady = base.hrvNights >= minimumBaselineDays
+        let rhrReady = base.rhrNights >= minimumBaselineDays
 
         var combined = 0.0
         var weightUsed = 0.0
@@ -83,7 +93,7 @@ public struct RecoveryCalculator: Sendable {
         // 7-day rolling ln HRV (tonight + up to 6 previous nights).
         let lastWeek = ([today] + history.sorted { $0.date > $1.date }.prefix(6))
             .compactMap(\.hrvMilliseconds).filter { $0 > 0 }.map { log($0) }
-        if lastWeek.count >= 3, let mean = base.meanLogHRV, let sd = base.sdLogHRV, calibrated {
+        if lastWeek.count >= 3, let mean = base.meanLogHRV, let sd = base.sdLogHRV, hrvReady {
             let rolling = lastWeek.reduce(0, +) / Double(lastWeek.count)
             let swc = 0.5 * max(sd, 0.05)
             let status: HRVTrend.Status = rolling < mean - swc ? .below : (rolling > mean + swc ? .above : .within)
@@ -100,14 +110,14 @@ public struct RecoveryCalculator: Sendable {
             weightUsed += hrvTrendWeight
         }
 
-        if let hrv = today.hrvMilliseconds, hrv > 0, let mean = base.meanLogHRV, let sd = base.sdLogHRV, calibrated {
+        if let hrv = today.hrvMilliseconds, hrv > 0, let mean = base.meanLogHRV, let sd = base.sdLogHRV, hrvReady {
             // Floor the SD so a very steady baseline doesn't make small changes look huge.
             let z = (log(hrv) - mean) / max(sd, 0.10)
             combined += hrvWeight * Self.clampZ(z)
             weightUsed += hrvWeight
             hrvChange = (hrv / exp(mean) - 1) * 100
         }
-        if let rhr = today.restingHeartRate, rhr > 0, let mean = base.meanRHR, let sd = base.sdRHR, calibrated {
+        if let rhr = today.restingHeartRate, rhr > 0, let mean = base.meanRHR, let sd = base.sdRHR, rhrReady {
             let z = (rhr - mean) / max(sd, 1.5)
             combined -= restingHeartRateWeight * Self.clampZ(z)
             weightUsed += restingHeartRateWeight

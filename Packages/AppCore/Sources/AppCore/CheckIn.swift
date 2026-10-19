@@ -202,10 +202,25 @@ public enum CheckInInsights {
         Factor(id: "lowWater", name: "Under 2 L of water") { $0.waterLiters.map { $0 < 2 } },
     ]
 
-    /// Factors whose days differ by at least `minimumPercent`, with at least
-    /// `minimumDays` days on each side. Biggest effects first.
-    public static func analyze(_ days: [CheckInDay], minimumDays: Int = 3, minimumPercent: Double = 5) -> [Insight] {
-        var insights: [Insight] = []
+    /// Factors that really seem to change an outcome for you.
+    ///
+    /// A pattern is shown only when:
+    /// - there are at least `minimumDays` days with and without the factor;
+    /// - the difference is bigger than your normal day-to-day swing (half a
+    ///   standard deviation, the "smallest worthwhile change" used for HRV
+    ///   monitoring; Plews et al., Sports Med 2013);
+    /// - a Welch t-test says it's unlikely to be chance, after correcting for
+    ///   testing many factor/outcome pairs at once (Benjamini-Hochberg false
+    ///   discovery rate, `falseDiscoveryRate`).
+    /// Alcohol's effect on overnight HRV is well documented and usually shows
+    /// up (Pietilä et al., JMIR Ment Health 2018).
+    public static func analyze(_ days: [CheckInDay], minimumDays: Int = 7, falseDiscoveryRate: Double = 0.1) -> [Insight] {
+        struct Candidate {
+            var insight: Insight
+            var p: Double
+        }
+        var candidates: [Candidate] = []
+        var testsRun = 0
         for factor in factors {
             for outcome in Outcome.allCases {
                 var with: [Double] = []
@@ -215,19 +230,86 @@ public enum CheckInInsights {
                     if present { with.append(value) } else { without.append(value) }
                 }
                 guard with.count >= minimumDays, without.count >= minimumDays else { continue }
-                let meanWith = with.reduce(0, +) / Double(with.count)
-                let meanWithout = without.reduce(0, +) / Double(without.count)
+                testsRun += 1
+                let (meanWith, varWith) = meanVariance(with)
+                let (meanWithout, varWithout) = meanVariance(without)
                 guard meanWithout > 0 else { continue }
+                let pooledSD = sqrt((varWith + varWithout) / 2)
+                let difference = meanWith - meanWithout
+                // Bigger than a normal day-to-day swing.
+                guard abs(difference) >= 0.5 * pooledSD, abs(difference) > 0 else { continue }
+                let p = welchPValue(meanA: meanWith, varA: varWith, nA: with.count,
+                                    meanB: meanWithout, varB: varWithout, nB: without.count)
                 let change = (meanWith / meanWithout - 1) * 100
-                guard abs(change) >= minimumPercent else { continue }
-                insights.append(Insight(
+                candidates.append(Candidate(insight: Insight(
                     factor: factor.name, outcome: outcome, percentChange: change,
                     daysWith: with.count, daysWithout: without.count,
                     isGood: (change > 0) == outcome.higherIsBetter
-                ))
+                ), p: p))
             }
         }
-        return insights.sorted { abs($0.percentChange) > abs($1.percentChange) }
+        // Benjamini-Hochberg: keep the k smallest p-values where p(k) <= k/m * q.
+        let m = Double(max(testsRun, 1))
+        let sorted = candidates.sorted { $0.p < $1.p }
+        var keep = 0
+        for (index, candidate) in sorted.enumerated() where candidate.p <= Double(index + 1) / m * falseDiscoveryRate {
+            keep = index + 1
+        }
+        return sorted.prefix(keep).map(\.insight).sorted { abs($0.percentChange) > abs($1.percentChange) }
+    }
+
+    static func meanVariance(_ values: [Double]) -> (Double, Double) {
+        let mean = values.reduce(0, +) / Double(values.count)
+        guard values.count > 1 else { return (mean, 0) }
+        let variance = values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count - 1)
+        return (mean, variance)
+    }
+
+    /// Two-sided p-value of Welch's t-test.
+    static func welchPValue(meanA: Double, varA: Double, nA: Int, meanB: Double, varB: Double, nB: Int) -> Double {
+        let a = varA / Double(nA)
+        let b = varB / Double(nB)
+        let se = sqrt(a + b)
+        guard se > 0 else { return meanA == meanB ? 1 : 0 }
+        let t = abs(meanA - meanB) / se
+        let dfDenominator = (a * a) / Double(nA - 1) + (b * b) / Double(nB - 1)
+        let df = dfDenominator > 0 ? (a + b) * (a + b) / dfDenominator : Double(nA + nB - 2)
+        // P(|T| > t) = I_x(df/2, 1/2) with x = df / (df + t²).
+        return regularizedIncompleteBeta(x: df / (df + t * t), a: df / 2, b: 0.5)
+    }
+
+    /// I_x(a, b) via its continued fraction (modified Lentz method).
+    static func regularizedIncompleteBeta(x: Double, a: Double, b: Double) -> Double {
+        guard x > 0 else { return 0 }
+        guard x < 1 else { return 1 }
+        // Use the symmetry I_x(a,b) = 1 - I_{1-x}(b,a) where the fraction converges faster.
+        if x > (a + 1) / (a + b + 2) {
+            return 1 - regularizedIncompleteBeta(x: 1 - x, a: b, b: a)
+        }
+        let logFront = lgamma(a + b) - lgamma(a) - lgamma(b) + a * log(x) + b * log(1 - x)
+        let front = exp(logFront) / a
+        let tiny = 1e-300
+        var f = 1.0, c = 1.0, d = 0.0
+        for i in 0...300 {
+            let m = Double(i / 2)
+            let numerator: Double
+            if i == 0 {
+                numerator = 1
+            } else if i % 2 == 0 {
+                numerator = (m * (b - m) * x) / ((a + 2 * m - 1) * (a + 2 * m))
+            } else {
+                numerator = -((a + m) * (a + b + m) * x) / ((a + 2 * m) * (a + 2 * m + 1))
+            }
+            d = 1 + numerator * d
+            if abs(d) < tiny { d = tiny }
+            d = 1 / d
+            c = 1 + numerator / c
+            if abs(c) < tiny { c = tiny }
+            let step = c * d
+            f *= step
+            if abs(1 - step) < 1e-10 { break }
+        }
+        return min(1, max(0, front * (f - 1)))
     }
 
     /// Days of check-ins still needed before patterns are shown.

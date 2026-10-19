@@ -43,7 +43,11 @@ public enum Muscle: String, CaseIterable, Sendable, Codable {
 ///   about twice a week).
 /// - Weekly volume: about 10-20 hard sets a muscle a week builds the most
 ///   muscle (Schoenfeld et al., J Sports Sci 2017; Baz-Valle et al., J Hum
-///   Kinet 2022). Above about 20, extra sets add fatigue more than growth.
+///   Kinet 2022). More can still add muscle with diminishing returns (Pelland
+///   et al., Sports Med 2026), so 20+ is "high: fine if you recover", and a
+///   muscle is only flagged when high volume meets poor recovery. Recovery
+///   times are a model built on the commonly taught 48-72 h window, not a
+///   measured value; soreness check-ins override them.
 public enum MuscleRecovery {
     /// One working set, with the muscles of its exercise.
     public struct WorkSet: Sendable, Equatable {

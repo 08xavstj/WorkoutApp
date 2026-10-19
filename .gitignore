@@ -27,3 +27,4 @@ Widget/WorkoutWidget.entitlements
 
 # Your Apple team + bundle ID (written by scripts/set-signing.sh)
 Config/Signing.local.xcconfig
+.claude/worktrees/

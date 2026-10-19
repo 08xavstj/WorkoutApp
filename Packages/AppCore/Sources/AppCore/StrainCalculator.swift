@@ -17,12 +17,13 @@ import Foundation
 /// - a brisk 60-minute walk (35% of reserve) ≈ 20%;
 /// - a day of sitting, standing and light chores ≈ 0-10%.
 public struct StrainCalculator: Sendable {
-    /// Load at which strain reaches ~63% of the scale.
+    /// Load at which strain reaches ~63% of the scale. This and `rpeToTrimp`
+    /// are the app's calibration choices; no study defines them.
     public var saturationLoad: Double = 126
     /// Converts sRPE units into TRIMP-equivalent units. Calibrated so a hard
     /// hour of lifting (RPE 8) lands close to a moderate hour-long run.
     public var rpeToTrimp: Double = 0.25
-    /// RPE assumed when a session has neither a session RPE nor set RPEs.
+    /// Session RPE assumed when the workout wasn't rated.
     public var defaultRPE: Double = 6.5
     /// Gaps between heart-rate samples longer than this are not counted.
     public var maxSampleGap: TimeInterval = 10 * 60
@@ -100,14 +101,9 @@ public struct StrainCalculator: Sendable {
 
     /// Session-RPE load for a gym session, in TRIMP-equivalent units.
     public func rpeLoad(for session: StrengthSessionSummary) -> Double {
-        let rpe: Double
-        if let sessionRPE = session.sessionRPE {
-            rpe = sessionRPE
-        } else if !session.setRPEs.isEmpty {
-            rpe = session.setRPEs.reduce(0, +) / Double(session.setRPEs.count)
-        } else {
-            rpe = defaultRPE
-        }
+        // Session RPE (Foster's CR-10 rating of the whole workout) only. Set RPEs
+        // are a different scale (reps in reserve), so they don't stand in for it.
+        let rpe = session.sessionRPE ?? defaultRPE
         let minutes = min(session.duration / 60, 180)
         return min(10, max(1, rpe)) * minutes * rpeToTrimp
     }

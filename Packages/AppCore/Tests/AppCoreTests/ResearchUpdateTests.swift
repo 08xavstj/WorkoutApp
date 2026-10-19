@@ -136,8 +136,10 @@ struct MicronutrientTests {
     }
 
     @Test func ironTargetIsHigherForWomen() {
-        let findings = Micronutrients.assess(averages: [.iron: 9], daysLogged: 7, sex: .female)
+        // Below the women's EAR (8.1 mg) is low; the same intake is fine for men.
+        let findings = Micronutrients.assess(averages: [.iron: 7], daysLogged: 7, sex: .female)
         #expect(findings.first?.kind == .low)
+        #expect(Micronutrients.assess(averages: [.iron: 7], daysLogged: 7, sex: .male).first?.kind == .ok)
     }
 
     @Test func needsFourDaysOfLogging() {

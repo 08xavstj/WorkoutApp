@@ -94,11 +94,29 @@ public enum Biomarkers {
         }
     }
 
-    /// Rough VO2 max bands for adults, adjusted by age.
+    /// Median treadmill VO₂ max by age decade from the FRIEND registry
+    /// (Kaminsky et al., Mayo Clin Proc 2015): 20s, 30s, ... 70s.
+    static let friendMedians: [BiologicalSex: [Double]] = [
+        .male: [48.0, 42.4, 37.8, 32.6, 28.2, 24.4],
+        .female: [37.6, 30.2, 26.7, 23.4, 20.0, 18.3],
+    ]
+
+    /// Median VO₂ max for an age, interpolated between decade midpoints.
+    public static func medianVO2Max(age: Int, sex: BiologicalSex) -> Double {
+        let medians = friendMedians[sex] ?? friendMedians[.male]!
+        let position = min(Double(medians.count - 1), max(0, (Double(age) - 25) / 10))
+        let lower = Int(position.rounded(.down))
+        let upper = min(medians.count - 1, lower + 1)
+        let fraction = position - Double(lower)
+        return medians[lower] + (medians[upper] - medians[lower]) * fraction
+    }
+
+    /// VO₂ max compared with people your age and sex: around the FRIEND
+    /// median is "Good". The band widths (80/95/110/125% of the median) are
+    /// the app's choice. Watch VO₂ max is an estimate.
     public static func vo2MaxLabel(_ value: Double, age: Int, sex: BiologicalSex) -> String {
-        let ageDrop = Double(max(0, age - 30)) * 0.3
-        let base: [Double] = sex == .male ? [37, 42, 47, 52] : [31, 35, 40, 45]
-        let cut = base.map { $0 - ageDrop }
+        let median = medianVO2Max(age: age, sex: sex)
+        let cut = [0.8, 0.95, 1.1, 1.25].map { $0 * median }
         switch value {
         case ..<cut[0]: return "Poor"
         case ..<cut[1]: return "Fair"

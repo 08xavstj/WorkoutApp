@@ -3,9 +3,10 @@ import Foundation
 /// Training tips from today's weather, air quality and daylight.
 ///
 /// - Heat: heart rate runs higher and performance drops as it gets hot and
-///   humid; ACSM advises extra fluids and easing off in the heat (Armstrong et
-///   al., ACSM position stand on exertional heat illness, Med Sci Sports Exerc
-///   2007). "Feels like" (apparent temperature) is used as a stand-in for heat stress.
+///   humid; ACSM advises extra fluids and easing off in the heat (Roberts et
+///   al., ACSM expert consensus on exertional heat illness, Curr Sports Med Rep
+///   2021). ACSM uses wet-bulb globe temperature; "feels like" (apparent
+///   temperature) stands in for it here, so the thresholds are approximate.
 /// - Air quality: US EPA AQI guidance: over 100, sensitive people should cut
 ///   long or hard outdoor exertion; over 150, everyone should.
 /// - UV: WHO UV index guidance: protection from 3, avoid midday sun from 8.
@@ -47,7 +48,7 @@ public enum WeatherAdvice {
         var tips: [Tip] = []
         if let feels = c.feelsLikeC {
             if feels >= 35 {
-                tips.append(Tip(id: "heat", level: .warning, text: "Very hot (feels \(Int(feels.rounded()))°C): train indoors or early, drink before you're thirsty, and expect heart rate 10+ bpm higher."))
+                tips.append(Tip(id: "heat", level: .warning, text: "Very hot (feels \(Int(feels.rounded()))°C): train indoors or early, drink before you're thirsty, and expect a higher heart rate at your usual pace."))
             } else if feels >= 28 {
                 tips.append(Tip(id: "heat", level: .caution, text: "Warm (feels \(Int(feels.rounded()))°C): bring extra water and expect a higher heart rate outdoors."))
             } else if feels <= -10 {

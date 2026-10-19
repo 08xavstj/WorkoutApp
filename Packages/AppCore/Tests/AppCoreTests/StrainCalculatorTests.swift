@@ -66,11 +66,11 @@ struct StrainCalculatorTests {
         #expect(abs(withSession.totalLoad - withoutSession.totalLoad) < 0.001)
     }
 
-    @Test func rpeFallsBackToSetAverageThenDefault() {
+    @Test func setRPEsDontStandInForSessionRPE() {
         let end = start.addingTimeInterval(3600)
         let fromSets = StrengthSessionSummary(start: start, end: end, setRPEs: [7, 9])
         let fromDefault = StrengthSessionSummary(start: start, end: end)
-        #expect(calculator.rpeLoad(for: fromSets) == 8 * 60 * calculator.rpeToTrimp)
+        #expect(calculator.rpeLoad(for: fromSets) == calculator.defaultRPE * 60 * calculator.rpeToTrimp)
         #expect(calculator.rpeLoad(for: fromDefault) == calculator.defaultRPE * 60 * calculator.rpeToTrimp)
     }
 

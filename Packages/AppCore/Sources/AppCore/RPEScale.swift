@@ -51,3 +51,20 @@ public enum RPEScale {
         }
     }
 }
+
+/// Estimated one-rep max from a set, counting the reps you had left.
+///
+/// Epley: 1RM = weight x (1 + reps/30), where reps means reps to failure. With
+/// the reps-in-reserve RPE scale, reps to failure = reps done + (10 - RPE)
+/// (Zourdos et al., J Strength Cond Res 2016). Ignoring RPE would make a set
+/// of 8 at RPE 8 look like a max effort and under-prescribe the next session.
+/// Rep-max equations lose accuracy past ~10-12 reps, so effective reps are
+/// capped at 15.
+public enum OneRepMax {
+    public static func estimate(weight: Double, reps: Int, rpe: Double?) -> Double {
+        guard reps > 0, weight > 0 else { return 0 }
+        let repsLeft = rpe.map { max(0, min(4, 10 - $0)) } ?? 0
+        let toFailure = min(15, Double(reps) + repsLeft)
+        return toFailure <= 1 ? weight : weight * (1 + toFailure / 30)
+    }
+}
