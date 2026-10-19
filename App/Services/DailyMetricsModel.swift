@@ -54,8 +54,18 @@ final class DailyMetricsModel {
     private(set) var goals: Goals?
     private(set) var sex: BiologicalSex = .male
     private(set) var micronutrients: [Micronutrients.Finding] = []
+    /// Sleep Regularity Index (0-100) over the last week.
     private(set) var sleepConsistency: Int?
     private(set) var sleepSpreadMinutes: Double?
+    /// Hours behind your sleep need over the last 14 nights.
+    private(set) var sleepDebt: SleepDebt.Result?
+    /// Nightly sleep for the last month (newest last), for history charts.
+    private(set) var sleepNights: [SleepNight] = []
+    /// "RMSSD" when HRV comes from Garmin, the camera or Apple Watch beat-to-beat
+    /// data; "SDNN" when only Apple Health's own HRV is available. Never mixed.
+    private(set) var hrvMetric: String?
+    /// Sick / rest mode (from settings): strain targets and training nudges pause.
+    var restMode = false
 
     /// Daily calorie target from your goal (or maintenance when no goal is set).
     var calorieTarget: Double? {
@@ -154,7 +164,7 @@ final class DailyMetricsModel {
     /// When the 7-day HRV average is below your normal range, it's capped at an
     /// easy day (HRV-guided training).
     var targetStrain: ClosedRange<Double>? {
-        guard let recovery else { return nil }
+        guard !restMode, let recovery else { return nil }
         let target = StrainCalculator.targetStrain(forRecovery: recovery.score, usualTrainingStrain: usualTrainingStrain)
         return trainEasyToday ? min(target.lowerBound, 20)...min(target.upperBound, 45) : target
     }
@@ -165,7 +175,43 @@ final class DailyMetricsModel {
     /// Recovery to plan workouts with (lowered on HRV-guided easy days).
     var recoveryForTraining: Int? {
         guard let score = recovery?.score else { return nil }
+        if restMode { return min(score, 20) }
         return trainEasyToday ? min(score, 30) : score
+    }
+
+    /// What moved recovery: the score's own inputs plus context the score
+    /// doesn't include (sleep debt, yesterday's training, drinks, illness signs).
+    func recoveryContributors(drinksLastNight: Int?, illness: IllnessWatch.Alert?) -> [RecoveryContributor] {
+        var items = recovery?.contributors ?? []
+        if let debt = sleepDebt, debt.level == .moderate || debt.level == .high {
+            items.append(RecoveryContributor(
+                id: "sleepDebt", name: "Sleep debt",
+                detail: "\(debt.hours.formatted(.number.precision(.fractionLength(1)))) h behind your sleep need over the last two weeks. Sleep debt builds up slowly and you feel it less than it affects you.",
+                effect: .lowers
+            ))
+        }
+        if let strain = yesterdayStrain, strain >= 70 {
+            items.append(RecoveryContributor(
+                id: "yesterday", name: "Yesterday's training",
+                detail: "Strain \(Int(strain.rounded()))%: a hard day usually lowers HRV and raises resting heart rate the next morning.",
+                effect: .lowers
+            ))
+        }
+        if let drinks = drinksLastNight, drinks >= 1 {
+            items.append(RecoveryContributor(
+                id: "alcohol", name: "Alcohol",
+                detail: "\(drinks) drink\(drinks == 1 ? "" : "s") last night. Alcohol lowers overnight HRV and raises heart rate, more with each drink (Pietilä et al., JMIR Ment Health 2018).",
+                effect: .lowers
+            ))
+        }
+        if let illness, illness.level == .major {
+            items.append(RecoveryContributor(
+                id: "illness", name: "Illness signs",
+                detail: illness.signals.joined(separator: ", ") + ".",
+                effect: .lowers
+            ))
+        }
+        return items
     }
 
     /// The strain a planned session would add on top of today's strain.
@@ -224,15 +270,23 @@ final class DailyMetricsModel {
             async let vitalsTask = health.nightlyVitals(days: 31, endingOn: today)
             async let sleepTask = health.sleepSamples(forNightEnding: today)
             async let workoutsTask = health.externalWorkouts(from: today, to: now)
-            async let nightsTask = health.sleepNights(nights: 7)
+            async let nightsTask = health.sleepHistory(nights: 31)
             let (healthVitals, sleepSamples, externalWorkouts) = try await (vitalsTask, sleepTask, workoutsTask)
             let nights = (try? await nightsTask) ?? []
-            sleepConsistency = SleepConsistency.score(nights)
-            sleepSpreadMinutes = SleepConsistency.spreadMinutes(nights)
+            sleepNights = nights
+            let lastWeek = Array(nights.suffix(8))
+            sleepConsistency = lastWeek.regularityScore
+            sleepSpreadMinutes = SleepConsistency.spreadMinutes(lastWeek.map { SleepConsistency.Night(bedtime: $0.bedtime, wake: $0.wake) })
+            restMode = settings.isRestMode
+            sleepDebt = SleepDebt.compute(nightlyHours: nights.map(\.hoursAsleep), needHours: settings.sleepNeedHours)
 
-            // Typed-in Garmin HRV (RMSSD) and Apple Health HRV (SDNN) aren't
-            // comparable, so once you enter HRV, only entered values are used.
-            let vitals = DailyVitals.merging(healthVitals, manualHRV: manualHRV, manualOnlyHRV: true, calendar: calendar)
+            // RMSSD (typed-in Garmin values, camera readings, Apple Watch
+            // beat-to-beat) and Apple Health's SDNN aren't comparable, so once
+            // any RMSSD exists, only RMSSD is used; typed values win per night.
+            let beatToBeat = await health.nightlyRMSSD(nights: nights)
+            let rmssd = beatToBeat.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+            hrvMetric = rmssd.isEmpty ? (healthVitals.contains { $0.hrvMilliseconds != nil } ? "SDNN" : nil) : "RMSSD"
+            let vitals = DailyVitals.merging(healthVitals, manualHRV: rmssd, manualOnlyHRV: true, calendar: calendar)
             // Today's HRV is the typed one when you entered a value for today
             // (typed values replace Health's, see `merging`).
             let typedToday = manualHRV.contains { calendar.isDate($0.key, inSameDayAs: today) && $0.value > 0 }
@@ -294,6 +348,8 @@ final class DailyMetricsModel {
             cardioLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.cardioLoad))
             muscularLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.liftingLoad))
 
+            var sleepCalculator = self.sleepCalculator
+            sleepCalculator.baseSleepNeedHours = settings.sleepNeedHours
             sleep = sleepCalculator.score(samples: sleepSamples, previousDayStrain: yesterdayStrain, consistency: sleepConsistency)
             recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: sleep?.score)
 

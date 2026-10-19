@@ -52,6 +52,8 @@ public struct RecoveryCalculator: Sendable {
         public var baselineRestingHeartRate: Double?
         /// False until there are enough nights to build a baseline.
         public var isCalibrated: Bool
+        /// What pushed the score up or down, biggest effect first.
+        public var contributors: [RecoveryContributor] = []
     }
 
     public struct Baseline: Sendable, Equatable {
@@ -89,6 +91,7 @@ public struct RecoveryCalculator: Sendable {
         var hrvChange: Double?
         var rhrChange: Double?
         var trend: HRVTrend?
+        var contributors: [RecoveryContributor] = []
 
         // 7-day rolling ln HRV (tonight + up to 6 previous nights).
         let lastWeek = ([today] + history.sorted { $0.date > $1.date }.prefix(6))
@@ -108,6 +111,27 @@ public struct RecoveryCalculator: Sendable {
             let z = (rolling - mean) / max(sd, 0.10)
             combined += hrvTrendWeight * Self.clampZ(z)
             weightUsed += hrvTrendWeight
+            let rangeText = "\(Int(exp(mean - swc).rounded()))-\(Int(exp(mean + swc).rounded())) ms"
+            let averageText = "Your 7-day average (\(Int(exp(rolling).rounded())) ms)"
+            let trendDetail: String
+            let trendEffect: RecoveryContributor.Effect
+            switch status {
+            case .below:
+                trendDetail = "\(averageText) is below your normal range (\(rangeText)): a sign to train easier."
+                trendEffect = .lowers
+            case .above:
+                trendDetail = "\(averageText) is above your normal range (\(rangeText))."
+                trendEffect = .raises
+            case .within:
+                trendDetail = "\(averageText) is within your normal range (\(rangeText))."
+                trendEffect = .neutral
+            }
+            contributors.append(RecoveryContributor(
+                id: "hrvTrend", name: "7-day HRV",
+                detail: trendDetail,
+                effect: trendEffect,
+                weight: hrvTrendWeight * abs(Self.clampZ(z))
+            ))
         }
 
         if let hrv = today.hrvMilliseconds, hrv > 0, let mean = base.meanLogHRV, let sd = base.sdLogHRV, hrvReady {
@@ -116,17 +140,34 @@ public struct RecoveryCalculator: Sendable {
             combined += hrvWeight * Self.clampZ(z)
             weightUsed += hrvWeight
             hrvChange = (hrv / exp(mean) - 1) * 100
+            let change = Int(((hrv / exp(mean) - 1) * 100).rounded())
+            contributors.append(RecoveryContributor(
+                id: "hrv", name: "Last night's HRV",
+                detail: "\(Int(hrv.rounded())) ms, \(change >= 0 ? "+" : "")\(change)% vs your usual \(Int(exp(mean).rounded())) ms.",
+                effect: Self.effect(z), weight: hrvWeight * abs(Self.clampZ(z))
+            ))
         }
         if let rhr = today.restingHeartRate, rhr > 0, let mean = base.meanRHR, let sd = base.sdRHR, rhrReady {
             let z = (rhr - mean) / max(sd, 1.5)
             combined -= restingHeartRateWeight * Self.clampZ(z)
             weightUsed += restingHeartRateWeight
             rhrChange = rhr - mean
+            let difference = Int((rhr - mean).rounded())
+            contributors.append(RecoveryContributor(
+                id: "rhr", name: "Resting heart rate",
+                detail: "\(Int(rhr.rounded())) bpm, \(difference >= 0 ? "+" : "")\(difference) vs your usual \(Int(mean.rounded())). Higher than usual often means stress, alcohol, illness or hard training.",
+                effect: Self.effect(-z), weight: restingHeartRateWeight * abs(Self.clampZ(z))
+            ))
         }
         if let sleepScore {
             let z = (Double(sleepScore) - 75) / 12
             combined += sleepWeight * Self.clampZ(z)
             weightUsed += sleepWeight
+            contributors.append(RecoveryContributor(
+                id: "sleep", name: "Sleep",
+                detail: "Sleep score \(sleepScore) of 100.",
+                effect: Self.effect(z), weight: sleepWeight * abs(Self.clampZ(z))
+            ))
         }
         guard weightUsed > 0 else { return nil }
 
@@ -143,7 +184,8 @@ public struct RecoveryCalculator: Sendable {
             restingHeartRateChange: rhrChange,
             baselineHRV: base.meanLogHRV.map { exp($0) },
             baselineRestingHeartRate: base.meanRHR,
-            isCalibrated: calibrated
+            isCalibrated: calibrated,
+            contributors: contributors.sorted { $0.weight > $1.weight }
         )
     }
 
@@ -157,11 +199,38 @@ public struct RecoveryCalculator: Sendable {
 
     static func clampZ(_ z: Double) -> Double { min(3, max(-3, z)) }
 
+    /// Small changes (under a third of a normal day's swing) count as neutral.
+    static func effect(_ z: Double) -> RecoveryContributor.Effect {
+        z > 0.33 ? .raises : (z < -0.33 ? .lowers : .neutral)
+    }
+
     static func meanAndSD(_ values: [Double]) -> (Double?, Double?) {
         guard !values.isEmpty else { return (nil, nil) }
         let mean = values.reduce(0, +) / Double(values.count)
         guard values.count > 1 else { return (mean, nil) }
         let variance = values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count - 1)
         return (mean, sqrt(variance))
+    }
+}
+
+/// One thing that moved recovery, in plain words.
+public struct RecoveryContributor: Sendable, Equatable, Identifiable {
+    public enum Effect: String, Sendable {
+        case raises, lowers, neutral
+    }
+
+    public var id: String
+    public var name: String
+    public var detail: String
+    public var effect: Effect
+    /// How much it moved the score (for ordering); 0 for context-only items.
+    public var weight: Double
+
+    public init(id: String, name: String, detail: String, effect: Effect, weight: Double = 0) {
+        self.id = id
+        self.name = name
+        self.detail = detail
+        self.effect = effect
+        self.weight = weight
     }
 }

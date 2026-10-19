@@ -385,13 +385,37 @@ final class VitalsModel {
         sleepStat.defaultDays = 7
         sleepStat.nights = nights
         result.append(sleepStat)
+
+        // Sleep debt each night: the running deficit over the 14 nights before it.
+        let need = settings.sleepNeedHours
+        let hours = nights.map(\.hoursAsleep)
+        var debtSeries: [DatedValue] = []
+        for index in nights.indices {
+            let window = Array(hours[max(0, index - 13)...index])
+            if let debt = SleepDebt.compute(nightlyHours: window, needHours: need) {
+                debtSeries.append(DatedValue(date: nights[index].date, value: debt.hours))
+            }
+        }
+        let currentDebt = SleepDebt.compute(nightlyHours: hours, needHours: need)
+        var debtStat = Stat(
+            id: "sleepDebt", category: .sleep, title: "Sleep debt", icon: "hourglass",
+            value: currentDebt.map { Duration.seconds($0.hours * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
+            unit: "", status: currentDebt.map { $0.level == .none ? "Caught up" : $0.level.rawValue },
+            tone: (currentDebt?.hours ?? 0) < 3 ? .good : .caution,
+            gauge: currentDebt.map { min(1, $0.hours / 10) },
+            series: debtSeries,
+            footnote: currentDebt?.plan
+        )
+        debtStat.isHours = true
+        debtStat.defaultDays = 30
+        result.append(debtStat)
         var consistencyStat = Stat(
             id: "consistency", category: .sleep, title: "Sleep consistency", icon: "clock.arrow.circlepath",
             value: sleepConsistency.map { "\($0)" }, unit: "/ 100",
-            status: sleepSpreadMinutes.map { "Bed & wake vary ~\(Int($0.rounded())) min" },
+            status: sleepSpreadMinutes.map { "Bed & wake times vary ~\(Int($0.rounded())) min" },
             tone: (sleepConsistency ?? 100) >= 70 ? .good : .caution,
             gauge: sleepConsistency.map { Double($0) / 100 },
-            footnote: "It's 15% of your sleep score."
+            footnote: "Sleep Regularity Index over the last week. It's 15% of your sleep score."
         )
         consistencyStat.chart = .sleepWindows
         consistencyStat.nights = nights
@@ -529,7 +553,10 @@ final class VitalsModel {
         case "sleepAverage":
             stat.about = "Hours actually asleep each night (not time in bed). Adults need 7 or more hours a night (Watson et al., Sleep 2015, AASM/SRS consensus). The dashed line is the average for the range you pick."
         case "consistency":
-            stat.about = "Each bar is one night, from falling asleep to waking. The more the bars line up, the higher your score. Regular sleep timing predicted lower mortality more strongly than sleep length in 61,000 UK Biobank adults (Windred et al., Sleep 2024)."
+            stat.about = "The Sleep Regularity Index: the chance you're in the same state (asleep or awake) at any moment as at the same time the day before. 100 means identical days. Each bar is one night, from falling asleep to waking; the more they line up, the higher it is. A higher index predicted lower mortality more strongly than sleep length in 61,000 UK Biobank adults (Windred et al., Sleep 2024)."
+        case "sleepDebt":
+            stat.chart = .bars
+            stat.about = "How far behind your sleep need you are over the last 14 nights. Short nights add to it and longer nights pay it back. Two weeks of 6-hour nights impaired attention as much as a night without sleep, while people felt only a little sleepy (Van Dongen et al., Sleep 2003). Set your sleep need in Settings."
         default:
             break
         }

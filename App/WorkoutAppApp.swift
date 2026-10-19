@@ -13,7 +13,7 @@ struct WorkoutAppApp: App {
     @State private var coach: CoachModel
     @State private var gym = GymStore()
     @State private var launcher = WorkoutLauncher()
-    @State private var refresher = AppRefresher()
+    @State private var refresher: AppRefresher
     @State private var recorder: LiveWorkoutRecorder
     @State private var router: AppRouter
     @State private var medications = MedicationsModel()
@@ -27,6 +27,16 @@ struct WorkoutAppApp: App {
     init() {
         let health = HealthKitClient()
         self.health = health
+        // Register for Health updates at launch (also when iOS wakes the app in
+        // the background after a Garmin sync), so scores and the widget refresh.
+        let refresher = AppRefresher()
+        _refresher = State(initialValue: refresher)
+        if health.isAvailable {
+            health.enableBackgroundDelivery()
+            health.observeChanges {
+                Task { @MainActor in refresher.refreshSoon() }
+            }
+        }
         _recorder = State(initialValue: LiveWorkoutRecorder(store: health.store))
         // One Claude client (and one signed-in Supabase user) for the coach and photo analysis.
         let cloud = CloudCoach()
@@ -181,13 +191,8 @@ struct RootView: View {
             // After an update adds new health stats, ask for just those.
             if settings.hasOnboarded {
                 await health?.requestAuthorizationIfNeeded()
-            }
-            // Refresh when Garmin Connect (or anything else) writes new data to Health.
-            let refresher = refresher
-            health?.observeChanges {
-                Task { @MainActor in
-                    refresher.refreshSoon()
-                }
+                // Takes effect only once Health access is granted (safe to repeat).
+                health?.enableBackgroundDelivery()
             }
             scheduleHRVReminder()
             scheduleCheckInReminders()
@@ -218,6 +223,8 @@ struct RootView: View {
         .onChange(of: settings.hrvReminderMinutes) { scheduleHRVReminder() }
         .onChange(of: settings.checkInRemindersOn) { scheduleCheckInReminders() }
         .onChange(of: settings.goals) { Task { await refreshMetrics() } }
+        .onChange(of: settings.restModeUntil) { metrics.restMode = settings.isRestMode }
+        .onChange(of: settings.sleepNeedHours) { Task { await refreshMetrics() } }
         .onChange(of: settings.morningCheckInMinutes) { scheduleCheckInReminders() }
         .onChange(of: settings.eveningCheckInMinutes) { scheduleCheckInReminders() }
         .onChange(of: finishedSessionCount) {

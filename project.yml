@@ -49,6 +49,8 @@ targets:
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
+        # Lets HealthKit wake the app after new data (e.g. a Garmin sync).
+        com.apple.developer.healthkit.background-delivery: true
         com.apple.security.application-groups:
           - group.com.lontraindustries.workoutapp
         # Rest-timer alerts can break through Focus modes.
