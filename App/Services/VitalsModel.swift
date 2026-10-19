@@ -316,6 +316,7 @@ final class VitalsModel {
             series: derived.intensityByDay,
             footnote: "\(intensity.moderate) moderate + \(intensity.vigorous) vigorous ×2, from heart rate. Goal 150 a week."
         ))
+        result.append(Self.strengthDaysStat(sessions: sessions, now: now))
         result.append(todayStat("active", "Active energy", "flame.fill", series: get(try? await active), unit: "kcal", digits: 0, today: latestToday))
         result.append(todayStat("resting", "Resting energy", "battery.75percent", series: get(try? await resting), unit: "kcal", digits: 0, today: latestToday))
 

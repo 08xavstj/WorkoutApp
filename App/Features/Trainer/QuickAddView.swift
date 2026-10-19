@@ -26,6 +26,12 @@ struct QuickAddView: View {
                     action("Empty workout", "Add exercises as you go", "dumbbell.fill", Theme.strain) {
                         launcher.startEmpty(in: modelContext)
                     }
+                    NavigationLink {
+                        MyWorkoutsView()
+                    } label: {
+                        row("My workouts", "Build your own and save them to reuse", "list.bullet.rectangle.portrait.fill", Theme.sleep)
+                    }
+                    .buttonStyle(.plain)
                     action("Log overnight HRV", "From your watch's app", "waveform.path.ecg", Theme.recoveryHigh) {
                         showingHRV = true
                     }

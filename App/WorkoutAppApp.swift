@@ -39,7 +39,7 @@ struct WorkoutAppApp: App {
         Reminders.registerCategories()
         do {
             container = try ModelContainer(
-                for: Schema(versionedSchema: WorkoutSchema.self),
+                for: Schema(versionedSchema: WorkoutSchemaV2.self),
                 migrationPlan: WorkoutMigrationPlan.self
             )
         } catch {

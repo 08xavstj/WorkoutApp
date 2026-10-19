@@ -128,7 +128,18 @@ nonisolated enum WorkoutSchema: VersionedSchema {
     }
 }
 
+/// Adds custom workout templates. Existing models are unchanged, so the
+/// move from 1.0.0 is a lightweight migration.
+nonisolated enum WorkoutSchemaV2: VersionedSchema {
+    static let versionIdentifier = Schema.Version(1, 1, 0)
+    static var models: [any PersistentModel.Type] {
+        WorkoutSchema.models + [WorkoutTemplate.self, TemplateExercise.self]
+    }
+}
+
 nonisolated enum WorkoutMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [WorkoutSchema.self] }
-    static var stages: [MigrationStage] { [] }
+    static var schemas: [any VersionedSchema.Type] { [WorkoutSchema.self, WorkoutSchemaV2.self] }
+    static var stages: [MigrationStage] {
+        [.lightweight(fromVersion: WorkoutSchema.self, toVersion: WorkoutSchemaV2.self)]
+    }
 }

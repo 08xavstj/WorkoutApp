@@ -112,14 +112,40 @@ final class WorkoutLauncher {
 
     /// Creates a session pre-filled with the plan's exercises and sets.
     func start(_ plan: PlannedWorkout, in context: ModelContext) {
-        let session = WorkoutSession(name: plan.title)
+        start(name: plan.title, exercises: plan.exercises, unit: plan.unit, in: context)
+    }
+
+    /// Starts one of your own workouts. Your exercises, sets, reps and any
+    /// weights you set are used as they are; missing weights are suggested
+    /// from your history (loadable with your gym's plates where it knows how).
+    func start(_ template: WorkoutTemplate, gym: GymStore, sessions: [WorkoutSession], library: ExerciseLibrary, in context: ModelContext) {
+        let unit = gym.profile.unit
+        let history = LiftHistory.make(from: sessions, unit: unit)
+        let items = template.orderedExercises.map { exercise in
+            TemplateItem(
+                exerciseID: exercise.exerciseID,
+                name: exercise.name,
+                sets: exercise.sets,
+                reps: exercise.reps,
+                rpe: exercise.targetRPE,
+                weight: exercise.weightKg.map { unit.fromKilograms($0) },
+                libraryLoad: EquipmentKind.fromLibrary(library.exercise(id: exercise.exerciseID)?.equipment)
+            )
+        }
+        let planned = gym.planner.prescribe(template: items, history: history)
+        template.lastUsedAt = .now
+        start(name: template.name, exercises: planned, unit: unit, in: context)
+    }
+
+    private func start(name: String, exercises: [PlannedExercise], unit: LoadUnit, in context: ModelContext) {
+        let session = WorkoutSession(name: name)
         context.insert(session)
-        for (order, planned) in plan.exercises.enumerated() {
+        for (order, planned) in exercises.enumerated() {
             let log = ExerciseLog(exerciseID: planned.exerciseID, name: planned.name, order: order)
             log.session = session
             context.insert(log)
-            let weightKg = planned.load.map { plan.unit.toKilograms($0) } ?? 0
-            for index in 0..<planned.sets {
+            let weightKg = planned.load.map { unit.toKilograms($0) } ?? 0
+            for index in 0..<max(1, planned.sets) {
                 let set = SetLog(order: index, weightKg: weightKg, reps: planned.reps.upperBound, rpe: nil)
                 set.exercise = log
                 context.insert(set)

@@ -39,6 +39,27 @@ struct WorkoutBuilderView: View {
                             .foregroundStyle(Theme.primaryText)
                             .card(tint: Theme.recoveryModerate)
                     }
+                    NavigationLink {
+                        MyWorkoutsView(onStart: { dismiss() })
+                    } label: {
+                        HStack(spacing: 12) {
+                            IconBadge(systemName: "list.bullet.rectangle.portrait.fill", color: Theme.sleep, size: 40)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Rather do your own?")
+                                    .font(.headline)
+                                    .foregroundStyle(Theme.primaryText)
+                                Text("Start one of your workouts, build a new one, or start empty")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        .card()
+                    }
+                    .buttonStyle(.plain)
                     focusPicker
                     durationPicker
                     if let plan {
