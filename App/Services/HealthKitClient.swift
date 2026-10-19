@@ -7,6 +7,8 @@ import AppCore
 // HKHealthStore is documented as thread-safe, hence @unchecked.
 nonisolated final class HealthKitClient: @unchecked Sendable {
     let store = HKHealthStore()
+    /// Beat-to-beat RMSSD for finished nights, so they're read only once.
+    private let rmssdCache = RMSSDCache()
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -15,6 +17,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.heartRate),
             HKQuantityType(.restingHeartRate),
             HKQuantityType(.heartRateVariabilitySDNN),
+            // Beat-to-beat timings (Apple Watch), to compute RMSSD like Garmin does.
+            HKSeriesType.heartbeat(),
             HKQuantityType(.activeEnergyBurned),
             HKCategoryType(.sleepAnalysis),
             HKQuantityType(.bodyMass),
@@ -244,6 +248,59 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Bedtime and wake time of the main sleep for each of the last `nights`
     /// nights, for sleep consistency (naps are left out; see `sleepHistory`).
     @concurrent
+    /// Overnight HRV as RMSSD (ms) computed from Apple Watch beat-to-beat
+    /// recordings taken during each night's main sleep, keyed by the morning.
+    /// Empty for watches that don't share beat-to-beat data (e.g. Garmin).
+    @concurrent
+    func nightlyRMSSD(nights allNights: [SleepNight]) async -> [Date: Double] {
+        let today = Calendar.current.startOfDay(for: .now)
+        var known = rmssdCache.values(for: allNights.map(\.date))
+        // Only nights not read before (today's is always re-read: the watch syncs late).
+        let nights = allNights.filter { known[$0.date] == nil || $0.date >= today }
+        guard let first = nights.map(\.bedtime).min(), let last = nights.map(\.wake).max() else {
+            return known.compactMapValues { $0 }
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: first, end: last)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.sample(type: HKSeriesType.heartbeat(), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        guard let samples = try? await descriptor.result(for: store) else { return known.compactMapValues { $0 } }
+        var valuesByNight: [Date: [Double]] = [:]
+        for case let series as HKHeartbeatSeriesSample in samples {
+            guard let night = nights.first(where: { series.startDate >= $0.bedtime && series.endDate <= $0.wake }) else { continue }
+            guard let beats = try? await heartbeats(series), let value = BeatToBeat.rmssd(beats, minimumSeconds: 50) else { continue }
+            valuesByNight[night.date, default: []].append(value)
+        }
+        // Apple records about a minute at a time; RMSSD needs ~3 minutes of
+        // clean beats, so a night needs several recordings.
+        for night in nights {
+            let values = valuesByNight[night.date] ?? []
+            let value: Double? = values.count >= 3 ? values.sorted()[values.count / 2] : nil
+            known[night.date] = .some(value)
+            if night.date < today { rmssdCache.store(value, for: night.date) }
+        }
+        return known.compactMapValues { $0 }
+    }
+
+    /// The beats in one heartbeat series.
+    private func heartbeats(_ series: HKHeartbeatSeriesSample) async throws -> [BeatToBeat.Beat] {
+        let collector = BeatCollector()
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKHeartbeatSeriesQuery(heartbeatSeries: series) { _, time, precededByGap, done, error in
+                if let error {
+                    collector.finish { continuation.resume(throwing: error) }
+                    return
+                }
+                collector.append(BeatToBeat.Beat(time: time, precededByGap: precededByGap))
+                if done {
+                    collector.finish { continuation.resume(returning: collector.beats) }
+                }
+            }
+            store.execute(query)
+        }
+    }
+
     func sleepNights(nights: Int = 7) async throws -> [SleepConsistency.Night] {
         try await sleepHistory(nights: nights).map { SleepConsistency.Night(bedtime: $0.bedtime, wake: $0.wake) }
     }
@@ -315,7 +372,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             guard let main = SleepSessions.main(byNight[night] ?? []) else { return nil }
             let hours = main.asleep / 3600
             guard hours >= 2 else { return nil }
-            return SleepNight(date: night, hoursAsleep: hours, bedtime: main.start, wake: main.end)
+            return SleepNight(date: night, hoursAsleep: hours, bedtime: main.start, wake: main.end, intervals: main.intervals)
         }
     }
 
@@ -529,6 +586,18 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     /// Calls `onChange` whenever new steps, energy, heart rate, breathing or
     /// sleep data lands in Apple Health (e.g. after Garmin Connect syncs).
+    /// Lets HealthKit wake the app when new data arrives (e.g. a Garmin sync),
+    /// so scores and the widget update without opening the app.
+    func enableBackgroundDelivery() {
+        let types: [HKObjectType] = [
+            HKQuantityType(.heartRate), HKQuantityType(.restingHeartRate), HKCategoryType(.sleepAnalysis),
+            HKQuantityType(.heartRateVariabilitySDNN), HKQuantityType(.stepCount)
+        ]
+        for type in types {
+            store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
+        }
+    }
+
     func observeChanges(_ onChange: @escaping @Sendable () -> Void) {
         let types: [HKSampleType] = [
             HKQuantityType(.stepCount), HKQuantityType(.activeEnergyBurned), HKQuantityType(.heartRate),
@@ -587,7 +656,20 @@ nonisolated struct SleepNight: Sendable, Identifiable, Equatable {
     var hoursAsleep: Double
     var bedtime: Date
     var wake: Date
+    /// The main sleep's asleep intervals (for the Sleep Regularity Index).
+    var intervals: [DateInterval] = []
     var id: Date { date }
+}
+
+extension Array where Element == SleepNight {
+    /// Sleep Regularity Index (0-100) over these nights, if there are enough.
+    nonisolated var regularityScore: Int? {
+        guard let first = self.map(\.date).min() else { return nil }
+        // Noon before the first morning, through noon today.
+        let start = first.addingTimeInterval(-12 * 3600)
+        let days = Int((Date.now.timeIntervalSince(start) / 86_400).rounded(.down))
+        return SleepRegularity.score(asleep: flatMap(\.intervals), start: start, days: days)
+    }
 }
 
 nonisolated struct DatedValue: Sendable, Identifiable, Equatable {
@@ -629,5 +711,52 @@ extension HealthKitClient {
         return try await descriptor.result(for: store).map {
             DatedValue(date: $0.startDate, value: $0.quantity.doubleValue(for: unit))
         }
+    }
+}
+
+/// Collects beats from an HKHeartbeatSeriesQuery, whose handler runs on a
+/// HealthKit queue, and makes sure the continuation resumes only once.
+nonisolated private final class BeatCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [BeatToBeat.Beat] = []
+    private var finished = false
+
+    var beats: [BeatToBeat.Beat] {
+        lock.lock(); defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ beat: BeatToBeat.Beat) {
+        lock.lock(); defer { lock.unlock() }
+        storage.append(beat)
+    }
+
+    func finish(_ resume: () -> Void) {
+        lock.lock()
+        let first = !finished
+        finished = true
+        lock.unlock()
+        if first { resume() }
+    }
+}
+
+/// Remembers each finished night's RMSSD (or that there was none).
+nonisolated private final class RMSSDCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [Date: Double?] = [:]
+
+    /// Known nights only; a stored nil means "read, no beat-to-beat data".
+    func values(for nights: [Date]) -> [Date: Double?] {
+        lock.lock(); defer { lock.unlock() }
+        var result: [Date: Double?] = [:]
+        for night in nights {
+            if let value = storage[night] { result[night] = value }
+        }
+        return result
+    }
+
+    func store(_ value: Double?, for night: Date) {
+        lock.lock(); defer { lock.unlock() }
+        storage[night] = .some(value)
     }
 }

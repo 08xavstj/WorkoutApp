@@ -111,6 +111,18 @@ final class UserSettings {
     var goalsSet: Bool { didSet { defaults.set(goalsSet, forKey: "goalsSet") } }
     /// Claude compares progress photos once a week.
     var weeklyPhotoAnalysis: Bool { didSet { defaults.set(weeklyPhotoAnalysis, forKey: "weeklyPhotoAnalysis") } }
+    /// Hours of sleep you need a night (for the sleep score and sleep debt). Adults: 7+.
+    var sleepNeedHours: Double { didSet { defaults.set(sleepNeedHours, forKey: "sleepNeedHours") } }
+    /// Rest mode (sick or resting) is on until this time.
+    var restModeUntil: Date? { didSet { defaults.set(restModeUntil, forKey: "restModeUntil") } }
+
+    /// Sick / rest mode: strain targets, workout nudges and reminders to train pause.
+    var isRestMode: Bool { (restModeUntil ?? .distantPast) > .now }
+
+    /// Turns rest mode on for `days` days (it switches itself off after that), or off.
+    func setRestMode(_ on: Bool, days: Int = 3) {
+        restModeUntil = on ? Calendar.current.date(byAdding: .day, value: days, to: .now) : nil
+    }
     var checkInRemindersOn: Bool { didSet { defaults.set(checkInRemindersOn, forKey: "checkInRemindersOn") } }
     var morningCheckInMinutes: Int { didSet { defaults.set(morningCheckInMinutes, forKey: "morningCheckInMinutes") } }
     var eveningCheckInMinutes: Int { didSet { defaults.set(eveningCheckInMinutes, forKey: "eveningCheckInMinutes") } }
@@ -141,6 +153,9 @@ final class UserSettings {
         goals = defaults.data(forKey: "goals").flatMap { try? JSONDecoder().decode(Goals.self, from: $0) } ?? Goals()
         goalsSet = defaults.bool(forKey: "goalsSet")
         weeklyPhotoAnalysis = defaults.object(forKey: "weeklyPhotoAnalysis") as? Bool ?? false
+        let need = defaults.double(forKey: "sleepNeedHours")
+        sleepNeedHours = need >= 6 && need <= 11 ? need : 8
+        restModeUntil = defaults.object(forKey: "restModeUntil") as? Date
         checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
         morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30

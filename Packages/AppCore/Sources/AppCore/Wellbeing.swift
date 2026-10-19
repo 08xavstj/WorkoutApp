@@ -80,9 +80,15 @@ public enum Hydration {
 
 /// Flags when resting heart rate, breathing rate or temperature rise above your
 /// own baseline together, a pattern that often comes before feeling sick
-/// (Mishra et al., Nat Biomed Eng 2020: 63% of COVID-19 cases flagged before
-/// symptoms; Quer et al., Nat Med 2021, DETECT study). Alcohol and very hard
-/// training cause the same signs, so those are noted.
+/// (Mishra et al., Nat Biomed Eng 2020: 63% of 32 COVID-19 cases flagged
+/// before symptoms, retrospective; Quer et al., Nat Med 2020, DETECT study:
+/// sensors plus symptoms worked better than resting heart rate alone).
+///
+/// One raised signal is common on a normal day, so it's only a "minor sign"
+/// shown quietly. Two or more signals together (reported symptoms count as one)
+/// are "major signs" and raise an alert, the multi-signal approach that cuts
+/// false alarms. Alcohol and very hard training cause the same changes, so they
+/// lower the level unless you also feel unwell.
 public enum IllnessWatch {
     public struct Inputs: Sendable, Equatable {
         public var restingHeartRate: Double?
@@ -124,8 +130,18 @@ public enum IllnessWatch {
     }
 
     public enum Level: Int, Sendable, Comparable {
-        case watch = 1, likely = 2
+        /// One signal: shown quietly, no alert.
+        case minor = 1
+        /// Two or more signals together.
+        case major = 2
         public static func < (a: Level, b: Level) -> Bool { a.rawValue < b.rawValue }
+
+        public var label: String {
+            switch self {
+            case .minor: "Minor signs"
+            case .major: "Major signs"
+            }
+        }
     }
 
     public struct Alert: Sendable, Equatable {
@@ -151,20 +167,21 @@ public enum IllnessWatch {
             signals.append("HRV \(Int(hrv.rounded()))%")
         }
         let bodySignals = signals.count
-        guard bodySignals > 0 || inputs.reportedSymptoms else { return nil }
-        var level: Level = bodySignals >= 2 || (bodySignals >= 1 && inputs.reportedSymptoms) ? .likely : .watch
+        let total = bodySignals + (inputs.reportedSymptoms ? 1 : 0)
+        guard total > 0 else { return nil }
+        var level: Level = total >= 2 ? .major : .minor
         let explained = (inputs.drinksLastNight ?? 0) >= 2 || (inputs.yesterdayStrain ?? 0) >= 80
-        if explained && !inputs.reportedSymptoms && bodySignals < 3 { level = .watch }
+        if explained && !inputs.reportedSymptoms && bodySignals < 3 { level = .minor }
+        if inputs.reportedSymptoms { signals.append("You feel unwell") }
 
         var message: String
         switch level {
-        case .likely:
-            message = "Your body may be fighting something. Keep today easy, sleep early and drink fluids. If you feel unwell, skip hard training."
-        case .watch where bodySignals == 0:
-            // Symptoms you reported, with vitals still normal.
+        case .major:
+            message = "Several signs together suggest your body may be fighting something. Keep today easy, sleep early and drink fluids. Consider rest mode until you feel better."
+        case .minor where bodySignals == 0:
             message = "You said you're feeling unwell. Your vitals look normal so far, but keep today easy and see how you feel."
-        case .watch:
-            message = "Some of your vitals are up compared with your normal. Worth an easier day and an eye on how you feel."
+        case .minor:
+            message = "One of your vitals is up compared with your normal. On its own that's common; keep an eye on how you feel."
         }
         if explained {
             message += " Alcohol or yesterday's hard training can also cause this."

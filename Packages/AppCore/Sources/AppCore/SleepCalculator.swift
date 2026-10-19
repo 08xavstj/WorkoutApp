@@ -151,9 +151,10 @@ public struct SleepCalculator: Sendable {
     }
 }
 
-/// How regular bed and wake times are, 0-100. A simplified version of the
-/// Sleep Regularity Index: the spread (SD) of bedtimes and wake times over the
-/// last week. 20 minutes or less scores 100; 2 hours or more scores 0.
+/// How much bed and wake times vary (their spread, as a circular SD), shown
+/// next to the Sleep Regularity Index (`SleepRegularity`), which is what the
+/// sleep score uses. `score` maps the spread to 0-100 (20 min or less = 100,
+/// 2 h or more = 0) for callers without minute-level sleep data.
 public enum SleepConsistency {
     public struct Night: Sendable, Equatable {
         public var bedtime: Date

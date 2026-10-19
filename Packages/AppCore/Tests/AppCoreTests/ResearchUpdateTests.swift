@@ -87,7 +87,7 @@ struct WellbeingTests {
             restingHeartRate: 62, rhrBaseline: (54, 1.5),
             respiratoryRate: 16.5, respiratoryBaseline: (14.5, 0.4)
         )))
-        #expect(alert.level == .likely)
+        #expect(alert.level == .major)
         #expect(alert.signals.count == 2)
     }
 
@@ -96,14 +96,21 @@ struct WellbeingTests {
             restingHeartRate: 62, rhrBaseline: (54, 1.5),
             respiratoryRate: 16.5, respiratoryBaseline: (14.5, 0.4), drinksLastNight: 4
         )))
-        #expect(alert.level == .watch)
+        #expect(alert.level == .minor)
         #expect(alert.message.contains("Alcohol"))
     }
 
     @Test func symptomsAloneGiveAWatchAlert() throws {
         let alert = try #require(IllnessWatch.evaluate(.init(restingHeartRate: 55, rhrBaseline: (54, 1.5), reportedSymptoms: true)))
-        #expect(alert.level == .watch)
-        #expect(alert.signals.isEmpty)
+        #expect(alert.level == .minor)
+        #expect(alert.signals == ["You feel unwell"])
+    }
+
+    @Test func oneSignalPlusSymptomsIsMajor() throws {
+        let alert = try #require(IllnessWatch.evaluate(.init(restingHeartRate: 62, rhrBaseline: (54, 1.5), reportedSymptoms: true)))
+        #expect(alert.level == .major)
+        let alone = try #require(IllnessWatch.evaluate(.init(restingHeartRate: 62, rhrBaseline: (54, 1.5))))
+        #expect(alone.level == .minor)
     }
 
     @Test func normalVitalsNoAlert() {

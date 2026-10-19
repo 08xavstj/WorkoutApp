@@ -92,7 +92,9 @@ final class CheckInStore {
     func refreshInsights(health: HealthKitClient, manualHRV: [Date: Double]) async {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
-        let vitals = DailyVitals.merging((try? await health.nightlyVitals(days: 90, endingOn: today)) ?? [], manualHRV: manualHRV, manualOnlyHRV: true)
+        let nights = (try? await health.sleepHistory(nights: 90)) ?? []
+        let rmssd = await health.nightlyRMSSD(nights: nights).merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+        let vitals = DailyVitals.merging((try? await health.nightlyVitals(days: 90, endingOn: today)) ?? [], manualHRV: rmssd, manualOnlyHRV: true)
         var byMorning: [String: DailyVitals] = [:]
         for vital in vitals { byMorning[key(vital.date)] = vital }
         var waterByDay: [String: Double] = [:]

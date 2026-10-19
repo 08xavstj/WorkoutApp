@@ -46,6 +46,9 @@ enum TrainerSuggestions {
     /// One or two sentences for the coaching line under the rings.
     @MainActor
     static func coachingLine(metrics: DailyMetricsModel) -> (text: String, highlight: String?) {
+        if metrics.restMode {
+            return ("Rest mode is on, so there's no strain target today. Sleep, fluids and an easy walk if you feel up to it.", nil)
+        }
         guard let recovery = metrics.recovery else {
             return ("Wear your watch to sleep tonight to get recovery and daily coaching.", nil)
         }

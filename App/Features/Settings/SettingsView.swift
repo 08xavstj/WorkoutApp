@@ -190,6 +190,20 @@ struct SettingsView: View {
                     Text("The morning check-in includes last night's HRV, so most people only need check-in reminders. Reminders are skipped once done. Medication and creatine reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → WorkoutApp.")
                 }
 
+                Section {
+                    Stepper(value: $settings.sleepNeedHours, in: 6...10, step: 0.25) {
+                        LabeledContent("Sleep need", value: Duration.seconds(settings.sleepNeedHours * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
+                    }
+                    Toggle("Rest mode (sick or resting)", isOn: Binding(
+                        get: { settings.isRestMode },
+                        set: { settings.setRestMode($0) }
+                    ))
+                } header: {
+                    Text("Sleep & rest")
+                } footer: {
+                    Text("Sleep need sets your sleep score and sleep debt; adults need 7 hours or more. Rest mode pauses strain targets and workout nudges for 3 days, then turns itself off.")
+                }
+
                 Section("Appearance") {
                     Picker("Theme", selection: $settings.appearance) {
                         ForEach(AppAppearance.allCases) { appearance in

@@ -257,7 +257,14 @@ extension CoachView {
         if let trend = metrics.recovery?.hrvTrend {
             lines.append("7-day HRV \(whole(trend.average)) ms, normal range \(whole(trend.normalRange.lowerBound))-\(whole(trend.normalRange.upperBound)) ms (\(trend.status.rawValue)).\(metrics.trainEasyToday ? " HRV-guided: today should be easy." : "")")
         }
-        if let consistency = metrics.sleepConsistency { lines.append("Sleep consistency \(consistency)/100.") }
+        if let consistency = metrics.sleepConsistency { lines.append("Sleep Regularity Index \(consistency)/100 (last week).") }
+        if let debt = metrics.sleepDebt {
+            lines.append("Sleep debt \(debt.hours.formatted(.number.precision(.fractionLength(1)))) h over 14 nights (need \(settings.sleepNeedHours.formatted()) h)" + (debt.plan.map { "; plan: " + $0 } ?? "") + ".")
+        }
+        if settings.isRestMode {
+            lines.append("REST MODE is on (the user is sick or resting): no strain target; suggest rest, sleep, fluids and at most easy walking, not workouts.")
+        }
+        if let metric = metrics.hrvMetric { lines.append("HRV metric: \(metric).") }
         if let water = metrics.nutritionToday?.waterLiters { lines.append("Water today \(water.formatted(.number.precision(.fractionLength(1)))) L.") }
         let lowNutrients = metrics.micronutrients.filter { $0.kind != .ok }
         if !lowNutrients.isEmpty {
@@ -265,7 +272,7 @@ extension CoachView {
         }
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
         if let alert = vitals.illnessAlert(metrics: metrics, drinksLastNight: checkIns.evening(on: yesterday)?.drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false) {
-            lines.append("Illness watch (\(alert.level == .likely ? "likely" : "watch")): " + alert.signals.joined(separator: ", ") + ".")
+            lines.append("Illness watch (\(alert.level.label)): " + alert.signals.joined(separator: ", ") + ".")
         }
         if let deload = muscles.deload { lines.append("Deload suggested: stalled " + deload.stalledLifts.joined(separator: ", ") + ".") }
         let tired = muscles.states.values.filter { $0.status == .fatigued }.map(\.muscle.name)

@@ -29,6 +29,7 @@ struct TodayView: View {
                     }
                     IllnessAlertCard()
                     ScoresCard()
+                    SleepDebtCard()
                     GoalsPromptCard()
                     CheckInCard()
                     ConditionsCard()
@@ -206,6 +207,8 @@ private struct HealthAccessCard: View {
 
 private struct ScoresCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
+    @State private var showingRecovery = false
+    @State private var showingSleep = false
 
     var body: some View {
         let coaching = TrainerSuggestions.coachingLine(metrics: metrics)
@@ -235,6 +238,10 @@ private struct ScoresCard: View {
                     size: 100
                 )
                 .frame(maxWidth: .infinity)
+                .contentShape(.rect)
+                .onTapGesture { showingRecovery = true }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Shows what moved your recovery")
                 ScoreRing(
                     title: "Sleep",
                     value: metrics.sleep.map { "\($0.score)" } ?? "--",
@@ -245,6 +252,10 @@ private struct ScoresCard: View {
                     size: 100
                 )
                 .frame(maxWidth: .infinity)
+                .contentShape(.rect)
+                .onTapGesture { showingSleep = true }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Shows last night's sleep")
             }
             Divider().overlay(Theme.separator)
             VStack(alignment: .leading, spacing: 6) {
@@ -266,6 +277,14 @@ private struct ScoresCard: View {
             }
         }
         .card()
+        .sheet(isPresented: $showingRecovery) {
+            RecoveryContributorsSheet()
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showingSleep) {
+            LastNightSleepSheet()
+                .presentationDetents([.medium, .large])
+        }
     }
 }
 
@@ -286,7 +305,9 @@ private struct StrainGoalCard: View {
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 CardLabel(text: "Strain goal")
-                Text("No target yet. Wear your watch to sleep so the app can set today's strain target from your recovery.")
+                Text(metrics.restMode
+                     ? "Rest mode is on: no strain target until you feel better. Turn it off from the illness card or Settings."
+                     : "No target yet. Wear your watch to sleep so the app can set today's strain target from your recovery.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -403,48 +424,6 @@ private struct SuggestionRow: View {
         .background(Theme.cardRaised, in: .rect(cornerRadius: 16))
         .accessibilityElement(children: .combine)
         .accessibilityHint(isStrength ? "Opens the workout builder" : "")
-    }
-}
-
-// MARK: - Illness watch
-
-private struct IllnessAlertCard: View {
-    @Environment(VitalsModel.self) private var vitals
-    @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(CheckInStore.self) private var checkIns
-
-    var body: some View {
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
-        if let alert = vitals.illnessAlert(
-            metrics: metrics,
-            drinksLastNight: checkIns.evening(on: yesterday)?.drinks,
-            reportedSymptoms: checkIns.morning()?.isSick ?? false
-        ) {
-            let color = alert.level == .likely ? Theme.recoveryLow : Theme.recoveryModerate
-            let immune = Micronutrients.notes(metrics.micronutrients, area: .immune)
-            VStack(alignment: .leading, spacing: 10) {
-                Label(alert.level == .likely ? "Your body may be fighting something" : "Vitals above your normal",
-                      systemImage: "cross.case.fill")
-                    .font(.headline)
-                    .foregroundStyle(Theme.textColor(for: color))
-                Text(alert.message)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.primaryText)
-                // Wraps onto more lines instead of squeezing long signals.
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 6, alignment: .leading)], alignment: .leading, spacing: 6) {
-                    ForEach(alert.signals, id: \.self) { Chip(text: $0, color: color) }
-                }
-                if !immune.isEmpty {
-                    Text("From your food log: " + immune.joined(separator: " "))
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                Text("Not a diagnosis. See a doctor if you feel unwell or it lasts.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            .card(tint: color)
-        }
     }
 }
 

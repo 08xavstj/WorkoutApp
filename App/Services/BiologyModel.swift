@@ -35,7 +35,10 @@ final class BiologyModel {
         async let vo2Task = health.dailySeries(.vo2Max, unit: HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute())), days: 180, cumulative: false)
         async let proteinTask = health.dailySeries(.dietaryProtein, unit: .gram(), days: 14, cumulative: true)
 
-        let vitals = DailyVitals.merging((try? await vitalsTask) ?? [], manualHRV: manualHRV, manualOnlyHRV: true).sorted { $0.date < $1.date }
+        // RMSSD first (typed, camera, Apple Watch beat-to-beat), never mixed with SDNN.
+        let nights = (try? await health.sleepHistory(nights: 90)) ?? []
+        let rmssd = await health.nightlyRMSSD(nights: nights).merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+        let vitals = DailyVitals.merging((try? await vitalsTask) ?? [], manualHRV: rmssd, manualOnlyHRV: true).sorted { $0.date < $1.date }
         hrvSeries = vitals.compactMap { v in v.hrvMilliseconds.map { DatedValue(date: v.date, value: $0) } }
         let rhrSeries = vitals.compactMap { v in v.restingHeartRate.map { DatedValue(date: v.date, value: $0) } }
 
