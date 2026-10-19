@@ -1,10 +1,12 @@
 import SwiftUI
+import SwiftData
 import AppCore
 
 /// Read-only view of a finished session.
 struct WorkoutDetailView: View {
     let session: WorkoutSession
     @Environment(UserSettings.self) private var settings
+    @State private var reloadToken = 0
 
     var body: some View {
         let unit = settings.weightUnit
@@ -15,19 +17,20 @@ struct WorkoutDetailView: View {
                     .foregroundStyle(Theme.secondaryText)
                 HStack {
                     StatView(label: "Duration", value: Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
-                    StatView(label: "Volume", value: "\(unit.format(session.totalVolumeKg)) \(unit.rawValue)")
-                    StatView(label: "RPE", value: session.sessionRPE.map { "\($0)/10" } ?? "--", color: Theme.lifting)
+                    StatView(label: "Total lifted", value: "\(unit.format(session.totalVolumeKg)) \(unit.rawValue)")
+                    StatView(label: "Effort", value: session.sessionRPE.map { "\($0)/10" } ?? "--", color: Theme.liftingText)
                 }
             }
             .listRowBackground(Theme.card)
 
-            HeartRateSourcesSection(start: session.startedAt, end: session.endedAt ?? session.startedAt)
+            HeartRateSourcesSection(start: session.startedAt, end: session.endedAt ?? session.startedAt, reload: reloadToken)
 
             ForEach(session.orderedExercises) { exercise in
                 Section(exercise.name) {
+                    let working = exercise.orderedSets.filter { !$0.isWarmup }
                     ForEach(exercise.orderedSets) { set in
                         HStack {
-                            Text(set.isWarmup ? "W" : "\(set.order + 1)")
+                            Text(set.isWarmup ? "W" : "\((working.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1)")
                                 .foregroundStyle(set.isWarmup ? Theme.recoveryModerate : Theme.secondaryText)
                                 .frame(width: 28, alignment: .leading)
                             Text("\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)")
@@ -47,6 +50,8 @@ struct WorkoutDetailView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle(session.name)
+        // On the List itself: a Section's .refreshable is never used.
+        .refreshable { reloadToken += 1 }
     }
 }
 
@@ -55,6 +60,7 @@ struct WorkoutDetailView: View {
 private struct HeartRateSourcesSection: View {
     let start: Date
     let end: Date
+    var reload = 0
 
     @Environment(\.healthClient) private var health
     @State private var sources: [HeartRateSource] = []
@@ -88,10 +94,9 @@ private struct HeartRateSourcesSection: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(verdict(result))
                             .font(.headline)
-                            .foregroundStyle(result.meanAbsoluteDifference < 5 ? Theme.recoveryHigh : Theme.recoveryModerate)
+                            .foregroundStyle(result.meanAbsoluteDifference < 5 ? Theme.recoveryHighText : Theme.recoveryModerateText)
                         HStack {
                             StatView(label: "Avg difference", value: "\(whole(result.meanAbsoluteDifference)) bpm")
-                            StatView(label: "Agreement", value: result.correlation.map { "\(whole($0 * 100))%" } ?? "–")
                             StatView(label: "Minutes compared", value: "\(result.overlappingMinutes)")
                         }
                         Text(biasText(result))
@@ -107,8 +112,7 @@ private struct HeartRateSourcesSection: View {
             Text("Some watches (like Garmin) send heart rate to Apple Health only when their app syncs, sometimes only as a summary for strength workouts. Open your watch's app, then come back here.")
         }
         .listRowBackground(Theme.card)
-        .task { await load() }
-        .refreshable { await load() }
+        .task(id: reload) { await load() }
     }
 
     private func load() async {
