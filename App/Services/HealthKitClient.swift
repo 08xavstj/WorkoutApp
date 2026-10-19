@@ -301,9 +301,19 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// samples from different sources are merged, not double counted).
     @concurrent
     func averageSleepHours(nights: Int = 7) async throws -> Double? {
+        let totals = try await sleepHistory(nights: nights).map(\.hoursAsleep)
+        guard !totals.isEmpty else { return nil }
+        return totals.reduce(0, +) / Double(totals.count)
+    }
+
+    /// One entry per night (dated by the morning it ended): hours asleep, with
+    /// overlapping samples from different sources merged, plus when sleep
+    /// started and ended. Nights under 2 hours are left out (naps, stray data).
+    @concurrent
+    func sleepHistory(nights: Int) async throws -> [SleepNight] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
-        guard let start = calendar.date(byAdding: .day, value: -nights, to: today)?.addingTimeInterval(-6 * 3600) else { return nil }
+        guard let start = calendar.date(byAdding: .day, value: -nights, to: today)?.addingTimeInterval(-6 * 3600) else { return [] }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
@@ -318,19 +328,19 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             let night = calendar.startOfDay(for: sample.startDate.addingTimeInterval(6 * 3600))
             byNight[night, default: []].append(DateInterval(start: sample.startDate, end: max(sample.startDate, sample.endDate)))
         }
-        let totals = byNight.values.map { intervals -> Double in
+        return byNight.keys.sorted().compactMap { night in
             var merged: [DateInterval] = []
-            for interval in intervals.sorted(by: { $0.start < $1.start }) {
+            for interval in (byNight[night] ?? []).sorted(by: { $0.start < $1.start }) {
                 if let last = merged.last, interval.start <= last.end {
                     merged[merged.count - 1] = DateInterval(start: last.start, end: max(last.end, interval.end))
                 } else {
                     merged.append(interval)
                 }
             }
-            return merged.map(\.duration).reduce(0, +) / 3600
-        }.filter { $0 >= 2 }
-        guard !totals.isEmpty else { return nil }
-        return totals.reduce(0, +) / Double(totals.count)
+            let hours = merged.map(\.duration).reduce(0, +) / 3600
+            guard hours >= 2, let first = merged.first, let last = merged.last else { return nil }
+            return SleepNight(date: night, hoursAsleep: hours, bedtime: first.start, wake: last.end)
+        }
     }
 
     // MARK: - Nutrition (Cronometer and other food loggers write these to Health)
@@ -582,6 +592,15 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         try await builder.endCollection(at: end)
         _ = try await builder.finishWorkout()
     }
+}
+
+/// One night's sleep, dated by the morning it ended.
+nonisolated struct SleepNight: Sendable, Identifiable, Equatable {
+    var date: Date
+    var hoursAsleep: Double
+    var bedtime: Date
+    var wake: Date
+    var id: Date { date }
 }
 
 nonisolated struct DatedValue: Sendable, Identifiable, Equatable {

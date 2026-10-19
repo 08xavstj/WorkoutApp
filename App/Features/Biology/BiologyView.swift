@@ -46,11 +46,11 @@ struct BiologyView: View {
                                 .buttonStyle(.plain)
                             }
                             if category == .body, let protein = biology.markers.first(where: { $0.id == "protein" }) {
-                                VitalTile(stat: VitalsModel.Stat(
-                                    id: "protein", category: .body, title: "Protein · 7 days", icon: "fork.knife",
-                                    value: protein.value, unit: protein.unit, status: protein.status,
-                                    tone: protein.tone == .caution ? .caution : .good, series: protein.series
-                                ), colors: VitalTile.colors(for: .body))
+                                let stat = proteinStat(protein)
+                                Button { selected = stat } label: {
+                                    VitalTile(stat: stat, colors: VitalTile.colors(for: .body))
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -83,6 +83,18 @@ struct BiologyView: View {
             .task { await load() }
             .refreshable { await load() }
         }
+    }
+
+    private func proteinStat(_ protein: BiologyModel.Marker) -> VitalsModel.Stat {
+        var stat = VitalsModel.Stat(
+            id: "protein", category: .body, title: "Protein · 7 days", icon: "fork.knife",
+            value: protein.value, unit: protein.unit, status: protein.status,
+            tone: protein.tone == .caution ? .caution : .good, series: protein.series
+        )
+        stat.chart = .bars
+        stat.goal = metrics.proteinTarget
+        stat.about = "Protein logged in Cronometer each day. Your target comes from your goal and weight: about 1.6 g per kg helps build muscle with lifting, and more while losing weight (Morton et al., Br J Sports Med 2018)."
+        return stat
     }
 
     private func load() async {
@@ -266,68 +278,6 @@ struct VitalTile: View {
         }
         .shadow(color: Color.black.opacity(0.06), radius: 12, y: 5)
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// A stat's history over the last weeks, with an explanation.
-struct VitalDetailView: View {
-    let stat: VitalsModel.Stat
-    let colors: [Color]
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        let main = colors.last ?? Theme.strain
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(stat.value ?? "No data")
-                            .font(.system(size: 52, weight: .bold, design: .rounded))
-                            .foregroundStyle(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
-                        Text(stat.unit)
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    if let status = stat.status {
-                        Chip(text: status, color: VitalTile.color(for: stat.tone))
-                    }
-                    if stat.series.count > 1 {
-                        Chart(stat.series) { point in
-                            AreaMark(x: .value("Date", point.date), y: .value(stat.title, point.value))
-                                .foregroundStyle(LinearGradient(colors: [main.opacity(0.3), main.opacity(0)], startPoint: .top, endPoint: .bottom))
-                                .interpolationMethod(.catmullRom)
-                            LineMark(x: .value("Date", point.date), y: .value(stat.title, point.value))
-                                .foregroundStyle(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
-                                .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                                .interpolationMethod(.catmullRom)
-                        }
-                        .chartYScale(domain: .automatic(includesZero: false))
-                        .frame(height: 200)
-                        .card()
-                    }
-                    if let footnote = stat.footnote {
-                        Text(footnote)
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    if stat.value == nil {
-                        Text("Nothing in Apple Health yet. If your Garmin records this, check that Garmin Connect's Apple Health sharing is on and that WorkoutApp can read it (Health app → profile → Apps → WorkoutApp).")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
-                .padding()
-                .lockedToScreenWidth()
-            }
-            .background(Theme.background)
-            .navigationTitle(stat.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
     }
 }
 

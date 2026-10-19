@@ -31,6 +31,28 @@ final class VitalsModel {
         var gauge: Double?
         var series: [DatedValue] = []
         var footnote: String?
+
+        // For the history view.
+        enum ChartStyle: Equatable { case line, bars, sleepWindows }
+        var chart: ChartStyle = .line
+        var digits = 0
+        /// Values are hours, shown as "7h 12m".
+        var isHours = false
+        /// A second line (e.g. diastolic) or raw readings behind a trend.
+        var secondary: [DatedValue] = []
+        var secondaryLabel: String?
+        var secondaryAsPoints = false
+        /// Sleep start/end per night, for the consistency chart.
+        var nights: [SleepNight] = []
+        /// Typical healthy range, shaded on the chart.
+        var normalRange: ClosedRange<Double>?
+        var goal: Double?
+        /// What this stat is and why it matters, in plain words.
+        var about: String?
+        /// Days shown when the history opens.
+        var defaultDays = 30
+        /// Unit for one day's value when it differs from the headline (e.g. "min" vs "this week").
+        var historyUnit: String?
     }
 
     private(set) var stats: [Stat] = []
@@ -73,18 +95,18 @@ final class VitalsModel {
         let bpm = HKUnit.count().unitDivided(by: .minute())
         let vo2Unit = HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute()))
 
-        async let rhr = health.dailySeries(.restingHeartRate, unit: bpm, days: 30, cumulative: false)
-        async let walkingHR = health.dailySeries(.walkingHeartRateAverage, unit: bpm, days: 30, cumulative: false)
+        async let rhr = health.dailySeries(.restingHeartRate, unit: bpm, days: 90, cumulative: false)
+        async let walkingHR = health.dailySeries(.walkingHeartRateAverage, unit: bpm, days: 90, cumulative: false)
         async let appleHRR = health.dailySeries(.heartRateRecoveryOneMinute, unit: bpm, days: 60, cumulative: false)
-        async let spo2 = health.dailySeries(.oxygenSaturation, unit: .percent(), days: 30, cumulative: false)
-        async let respiration = health.dailySeries(.respiratoryRate, unit: bpm, days: 30, cumulative: false)
-        async let wristTemp = health.dailySeries(.appleSleepingWristTemperature, unit: .degreeCelsius(), days: 30, cumulative: false)
-        async let bodyTemp = health.dailySeries(.bodyTemperature, unit: .degreeCelsius(), days: 30, cumulative: false)
-        async let steps = health.dailySeries(.stepCount, unit: .count(), days: 30, cumulative: true)
-        async let distance = health.dailySeries(.distanceWalkingRunning, unit: .meterUnit(with: .kilo), days: 30, cumulative: true)
-        async let floors = health.dailySeries(.flightsClimbed, unit: .count(), days: 30, cumulative: true)
-        async let active = health.dailySeries(.activeEnergyBurned, unit: .kilocalorie(), days: 30, cumulative: true)
-        async let resting = health.dailySeries(.basalEnergyBurned, unit: .kilocalorie(), days: 30, cumulative: true)
+        async let spo2 = health.dailySeries(.oxygenSaturation, unit: .percent(), days: 90, cumulative: false)
+        async let respiration = health.dailySeries(.respiratoryRate, unit: bpm, days: 90, cumulative: false)
+        async let wristTemp = health.dailySeries(.appleSleepingWristTemperature, unit: .degreeCelsius(), days: 90, cumulative: false)
+        async let bodyTemp = health.dailySeries(.bodyTemperature, unit: .degreeCelsius(), days: 90, cumulative: false)
+        async let steps = health.dailySeries(.stepCount, unit: .count(), days: 90, cumulative: true)
+        async let distance = health.dailySeries(.distanceWalkingRunning, unit: .meterUnit(with: .kilo), days: 90, cumulative: true)
+        async let floors = health.dailySeries(.flightsClimbed, unit: .count(), days: 90, cumulative: true)
+        async let active = health.dailySeries(.activeEnergyBurned, unit: .kilocalorie(), days: 90, cumulative: true)
+        async let resting = health.dailySeries(.basalEnergyBurned, unit: .kilocalorie(), days: 90, cumulative: true)
         async let vo2 = health.dailySeries(.vo2Max, unit: vo2Unit, days: 180, cumulative: false)
         async let weight = health.dailySeries(.bodyMass, unit: .gramUnit(with: .kilo), days: 90, cumulative: false)
         async let fat = health.dailySeries(.bodyFatPercentage, unit: .percent(), days: 90, cumulative: false)
@@ -92,12 +114,12 @@ final class VitalsModel {
         async let lean = health.dailySeries(.leanBodyMass, unit: .gramUnit(with: .kilo), days: 90, cumulative: false)
         async let systolic = health.dailySeries(.bloodPressureSystolic, unit: .millimeterOfMercury(), days: 90, cumulative: false)
         async let diastolic = health.dailySeries(.bloodPressureDiastolic, unit: .millimeterOfMercury(), days: 90, cumulative: false)
-        async let water = health.dailySeries(.dietaryWater, unit: .liter(), days: 30, cumulative: true)
-        async let mindful = health.mindfulMinutes(days: 30)
+        async let water = health.dailySeries(.dietaryWater, unit: .liter(), days: 90, cumulative: true)
+        async let mindful = health.mindfulMinutes(days: 90)
         async let workouts = health.workoutIntervals(from: twoWeeksAgo, to: now)
         async let perMinute = health.heartRatePerMinute(from: twoWeeksAgo, to: now)
         async let lastNight = health.sleepSamples(forNightEnding: today)
-        async let sleepAverage = health.averageSleepHours(nights: 7)
+        async let sleepHistory = health.sleepHistory(nights: 90)
 
         func get(_ value: [DatedValue]?) -> [DatedValue] { value ?? [] }
         let rhrSeries = get(try? await rhr)
@@ -106,10 +128,12 @@ final class VitalsModel {
         // Heart-rate derived stats are computed off the main thread.
         let workoutWindows = ((try? await workouts) ?? [])
             + sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+        let nights = (try? await sleepHistory) ?? []
         let derived = await Self.derive(
             heartRate: (try? await perMinute) ?? [],
             workouts: workoutWindows,
             sleep: (try? await lastNight) ?? [],
+            nights: nights,
             profile: resolvedProfile,
             today: today,
             weekStart: weekAgo
@@ -134,10 +158,12 @@ final class VitalsModel {
                 id: "sleepingHR", category: .heart, title: "Sleeping heart rate", icon: "bed.double.fill",
                 value: fmt(sleeping.average), unit: "bpm",
                 status: "Lowest \(fmt(sleeping.lowest))", tone: .neutral,
+                series: derived.sleepingHeartRateByNight,
                 footnote: "Average while asleep last night"
             ))
         } else {
-            result.append(Stat(id: "sleepingHR", category: .heart, title: "Sleeping heart rate", icon: "bed.double.fill", unit: "bpm"))
+            result.append(Stat(id: "sleepingHR", category: .heart, title: "Sleeping heart rate", icon: "bed.double.fill", unit: "bpm",
+                               series: derived.sleepingHeartRateByNight))
         }
         result.append(makeStat("walkingHR", .heart, "Walking heart rate", "figure.walk", series: get(try? await walkingHR), unit: "bpm", digits: 0))
 
@@ -201,7 +227,7 @@ final class VitalsModel {
             gaugeRange: 85...100
         ))
         let respirationSeries = get(try? await respiration)
-        respirationHistory = respirationSeries
+        respirationHistory = Array(respirationSeries.suffix(31))
         result.append(makeStat(
             "respiration", .breathing, "Respiration", "wind", series: respirationSeries, unit: "brpm", digits: 1,
             status: { (12...20).contains($0) ? "Normal" : "Unusual" },
@@ -238,7 +264,8 @@ final class VitalsModel {
         let stepSeries = get(try? await steps)
         var stepStat = makeStat("steps", .activity, "Steps", "shoeprints.fill", series: stepSeries, unit: "", digits: 0)
         // The goal grows (or eases) with your usual day; see StepGoal.
-        let stepGoal = StepGoal.personal(dailySteps: stepSeries.filter { !calendar.isDateInToday($0.date) }.map(\.value))
+        let stepGoal = StepGoal.personal(dailySteps: stepSeries.filter { !calendar.isDateInToday($0.date) }.suffix(28).map(\.value))
+        stepStat.goal = stepGoal
         if let today = latestToday(stepSeries) {
             stepStat.gauge = min(1, today.value / stepGoal)
             stepStat.status = today.value >= stepGoal ? "Goal reached" : "\(fmt(stepGoal - today.value)) to your \(fmt(stepGoal)) goal"
@@ -256,6 +283,7 @@ final class VitalsModel {
             status: intensity.total >= IntensityMinutes.weeklyGoal ? "Goal reached" : "\(IntensityMinutes.weeklyGoal - intensity.total) to go",
             tone: intensity.total >= IntensityMinutes.weeklyGoal ? .good : .neutral,
             gauge: min(1, Double(intensity.total) / Double(IntensityMinutes.weeklyGoal)),
+            series: derived.intensityByDay,
             footnote: "\(intensity.moderate) moderate + \(intensity.vigorous) vigorous ×2, from heart rate. Goal 150 a week."
         ))
         result.append(todayStat("active", "Active energy", "flame.fill", series: get(try? await active), unit: "kcal", digits: 0, today: latestToday))
@@ -277,6 +305,9 @@ final class VitalsModel {
         if let lastReading = weightSeries.last {
             weightStat.footnote = "Smoothed trend. Last scale reading: \(lastReading.value.formatted(.number.precision(.fractionLength(1)))) \(unit.rawValue). Daily weight swings 1-2 kg with water and food, so the trend is the number to watch."
         }
+        weightStat.secondary = weightSeries
+        weightStat.secondaryLabel = "Scale reading"
+        weightStat.secondaryAsPoints = true
         result.append(weightStat)
         let fatSeries = get(try? await fat).map { DatedValue(date: $0.date, value: $0.value * 100) }
         result.append(makeStat(
@@ -292,35 +323,52 @@ final class VitalsModel {
         let sys = get(try? await systolic)
         let dia = get(try? await diastolic)
         if let s = sys.last, let d = dia.last {
-            let elevated = s.value >= 130 || d.value >= 80
-            result.append(Stat(
+            // ACC/AHA 2017 categories.
+            let status = s.value >= 130 || d.value >= 80 ? "High" : (s.value >= 120 ? "Elevated" : "Normal")
+            var bp = Stat(
                 id: "bp", category: .body, title: "Blood pressure", icon: "waveform.path.ecg.rectangle",
                 value: "\(fmt(s.value))/\(fmt(d.value))", unit: "mmHg",
-                status: elevated ? "Elevated" : "Normal", tone: elevated ? .caution : .good, series: sys
-            ))
+                status: status, tone: status == "Normal" ? .good : .caution, series: sys
+            )
+            bp.secondary = dia
+            bp.secondaryLabel = "Diastolic"
+            result.append(bp)
         } else {
             result.append(Stat(id: "bp", category: .body, title: "Blood pressure", icon: "waveform.path.ecg.rectangle", unit: "mmHg"))
         }
         result.append(todayStat("water", "Water", "waterbottle.fill", series: get(try? await water), unit: "L", digits: 1, today: latestToday, category: .body))
 
         // MARK: Sleep
-        let averageSleep = try? await sleepAverage
-        result.append(Stat(
+        let weekStartNight = calendar.date(byAdding: .day, value: -7, to: today) ?? today
+        let lastWeek = nights.filter { $0.date > weekStartNight }.map(\.hoursAsleep)
+        let averageSleep: Double? = lastWeek.isEmpty ? nil : lastWeek.reduce(0, +) / Double(lastWeek.count)
+        var sleepStat = Stat(
             id: "sleepAverage", category: .sleep, title: "Sleep, 7-night average", icon: "bed.double.fill",
             value: averageSleep.map { Duration.seconds($0 * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
             unit: "", status: averageSleep.map { $0 >= 7 ? "Enough" : "Short" }, tone: (averageSleep ?? 8) >= 7 ? .good : .caution,
-            gauge: averageSleep.map { min(1, $0 / 9) }
-        ))
-        result.append(Stat(
+            gauge: averageSleep.map { min(1, $0 / 9) },
+            series: nights.map { DatedValue(date: $0.date, value: $0.hoursAsleep) }
+        )
+        sleepStat.chart = .bars
+        sleepStat.isHours = true
+        sleepStat.goal = 7
+        sleepStat.defaultDays = 7
+        sleepStat.nights = nights
+        result.append(sleepStat)
+        var consistencyStat = Stat(
             id: "consistency", category: .sleep, title: "Sleep consistency", icon: "clock.arrow.circlepath",
             value: sleepConsistency.map { "\($0)" }, unit: "/ 100",
             status: sleepSpreadMinutes.map { "Bed & wake vary ~\(Int($0.rounded())) min" },
             tone: (sleepConsistency ?? 100) >= 70 ? .good : .caution,
             gauge: sleepConsistency.map { Double($0) / 100 },
-            footnote: "Going to bed and waking at regular times predicted lower mortality more strongly than sleep length in 61,000 UK Biobank adults (Windred et al., Sleep 2024). It's 15% of your sleep score."
-        ))
+            footnote: "It's 15% of your sleep score."
+        )
+        consistencyStat.chart = .sleepWindows
+        consistencyStat.nights = nights
+        consistencyStat.defaultDays = 7
+        result.append(consistencyStat)
 
-        stats = result
+        stats = result.map(Self.describe)
 
         // Body age from the same data (30-day averages where it helps).
         func average(_ series: [DatedValue], last days: Int) -> Double? {
@@ -382,6 +430,82 @@ final class VitalsModel {
         return (mean, sqrt(variance))
     }
 
+    // MARK: - Explanations
+
+    /// What each stat means, its typical range, and how it's charted.
+    private static func describe(_ stat: Stat) -> Stat {
+        var stat = stat
+        switch stat.id {
+        case "rhr":
+            stat.about = "Your heart rate at full rest, measured overnight. It drops as aerobic fitness improves. A rise of 5 or more bpm above your normal can mean illness, stress, alcohol or not enough recovery."
+        case "sleepingHR":
+            stat.about = "Average heart rate between falling asleep and waking. It's lower when you're fit and well recovered, and rises after alcohol, late meals, illness or hard training."
+        case "walkingHR":
+            stat.about = "Average heart rate while walking. It falls as your aerobic fitness improves."
+        case "hrr":
+            stat.chart = .bars
+            stat.about = "How many beats your heart rate drops in the first minute after exercise. Bigger drops mean better fitness; a drop of 12 bpm or less was linked with higher mortality (Cole et al., N Engl J Med 1999)."
+        case "stress":
+            stat.chart = .bars
+            stat.normalRange = 0...25
+            stat.about = "Estimated from how far your heart rate sits above resting when you're not exercising. 0-25 is calm. It's a rough guide, not a medical measure."
+        case "vo2":
+            stat.about = "How much oxygen your body can use at full effort: the best single measure of aerobic fitness. Higher fitness is strongly linked with longer life (Mandsager et al., JAMA Netw Open 2018). Watches estimate it from runs and walks with heart rate."
+            stat.defaultDays = 90
+        case "spo2":
+            stat.normalRange = 95...100
+            stat.about = "Oxygen in your blood. 95-100% is normal near sea level. Wrist readings are least reliable while moving or with cold hands."
+        case "respiration":
+            stat.normalRange = 12...20
+            stat.about = "Breaths per minute while asleep. 12-20 is typical for adults. What matters most is change: a rise of 1-2 above your normal can be an early sign of illness."
+        case "temperature":
+            stat.about = "Your temperature while asleep. Compare it with your own normal: a rise of about 0.5 °C over a night or two can come before illness, and it also shifts across a menstrual cycle."
+        case "mindful":
+            stat.chart = .bars
+            stat.about = "Minutes logged in mindfulness or breathing apps."
+        case "steps":
+            stat.about = "Steps each day. In a meta-analysis of 15 studies, risk of death kept falling up to about 8,000-10,000 steps a day for adults under 60 (Paluch et al., Lancet Public Health 2022). Your goal follows your usual day."
+        case "distance":
+            stat.about = "Walking and running distance each day."
+        case "floors":
+            stat.about = "Flights of stairs climbed each day (about 3 m of height each)."
+        case "intensity":
+            stat.chart = .bars
+            stat.historyUnit = "min"
+            stat.about = "Minutes at moderate (40-59% of heart-rate reserve) or vigorous intensity (60%+, counted double). Guidelines recommend 150 a week (WHO 2020). Bars show each day; the number is the last 7 days."
+        case "active":
+            stat.about = "Calories burned by movement and exercise each day, as reported by your watch."
+        case "resting":
+            stat.about = "Calories your body burns at rest each day, as estimated by your watch."
+        case "weight":
+            stat.about = "The line is your smoothed weight trend; dots are actual scale readings. Daily weight swings 1-2 kg with water, salt and food, so the trend is what to watch."
+            stat.defaultDays = 90
+        case "fat":
+            stat.about = "Body fat percentage from your scale or other app. Smart-scale readings vary with hydration, so watch the trend over weeks."
+            stat.defaultDays = 90
+        case "bmi":
+            stat.normalRange = 18.5...24.9
+            stat.about = "Weight relative to height. 18.5-24.9 is the standard healthy range, but BMI can't tell muscle from fat, so muscular people often read 'over'."
+            stat.defaultDays = 90
+        case "lean":
+            stat.about = "Everything that isn't fat: muscle, bone, organs and water."
+            stat.defaultDays = 90
+        case "bp":
+            stat.about = "Top line systolic, bottom line diastolic. Under 120/80 is normal, 120-129 over less than 80 is elevated, and 130/80 or higher is high (ACC/AHA 2017 guideline)."
+            stat.defaultDays = 90
+        case "water":
+            stat.chart = .bars
+            stat.about = "Water you log in Cronometer each day."
+        case "sleepAverage":
+            stat.about = "Hours actually asleep each night (not time in bed). Adults need 7 or more hours a night (Watson et al., Sleep 2015, AASM/SRS consensus). The dashed line is the average for the range you pick."
+        case "consistency":
+            stat.about = "Each bar is one night, from falling asleep to waking. The more the bars line up, the higher your score. Regular sleep timing predicted lower mortality more strongly than sleep length in 61,000 UK Biobank adults (Windred et al., Sleep 2024)."
+        default:
+            break
+        }
+        return stat
+    }
+
     // MARK: - Building stats
 
     private func makeStat(
@@ -392,12 +516,14 @@ final class VitalsModel {
         gaugeRange: ClosedRange<Double>? = nil
     ) -> Stat {
         guard let last = series.last else {
-            return Stat(id: id, category: category, title: title, icon: icon, unit: unit)
+            var empty = Stat(id: id, category: category, title: title, icon: icon, unit: unit)
+            empty.digits = digits
+            return empty
         }
         let values = series.map(\.value)
         let range = gaugeRange ?? ((values.min() ?? last.value)...(values.max() ?? last.value))
         let span = range.upperBound - range.lowerBound
-        return Stat(
+        var stat = Stat(
             id: id, category: category, title: title, icon: icon,
             value: last.value.formatted(.number.precision(.fractionLength(digits))),
             unit: unit,
@@ -407,6 +533,8 @@ final class VitalsModel {
             series: series,
             footnote: Calendar.current.isDateInToday(last.date) ? nil : "Last reading \(last.date.formatted(.relative(presentation: .named)))"
         )
+        stat.digits = digits
+        return stat
     }
 
     /// A daily total that is "0" today until something is recorded.
@@ -416,6 +544,7 @@ final class VitalsModel {
     ) -> Stat {
         var result = makeStat(id, category, title, icon, series: series, unit: unit, digits: digits)
         result.footnote = nil
+        result.chart = .bars
         if today(series) == nil {
             result.value = series.isEmpty ? nil : "0"
         }
@@ -441,6 +570,8 @@ final class VitalsModel {
         var stressByDay: [DatedValue] = []
         var intensityWeek = IntensityMinutes.Result(moderate: 0, vigorous: 0)
         var sleepingHeartRate: SleepingHeartRate.Result?
+        var sleepingHeartRateByNight: [DatedValue] = []
+        var intensityByDay: [DatedValue] = []
     }
 
     @concurrent
@@ -448,6 +579,7 @@ final class VitalsModel {
         heartRate: [HeartRateSample],
         workouts: [DateInterval],
         sleep: [SleepSample],
+        nights: [SleepNight],
         profile: HeartRateProfile,
         today: Date,
         weekStart: Date
@@ -477,6 +609,25 @@ final class VitalsModel {
         }
 
         derived.intensityWeek = IntensityMinutes.count(sorted.filter { $0.date >= weekStart }, profile: profile)
+
+        // Daily intensity minutes and average heart rate asleep each night, for history charts.
+        if let first = sorted.first {
+            var day = calendar.startOfDay(for: first.date)
+            while day <= today {
+                let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
+                let samples = sorted.filter { $0.date >= day && $0.date < next }
+                if !samples.isEmpty {
+                    derived.intensityByDay.append(DatedValue(date: day, value: Double(IntensityMinutes.count(samples, profile: profile).total)))
+                }
+                day = next
+            }
+        }
+        for night in nights {
+            let asleep = sorted.filter { $0.date >= night.bedtime && $0.date <= night.wake }.map(\.bpm)
+            if asleep.count >= 60 {
+                derived.sleepingHeartRateByNight.append(DatedValue(date: night.date, value: asleep.reduce(0, +) / Double(asleep.count)))
+            }
+        }
         derived.sleepingHeartRate = SleepingHeartRate.measure(sorted.filter { $0.date >= today.addingTimeInterval(-8 * 3600) }, during: sleep)
         return derived
     }
