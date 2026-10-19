@@ -190,6 +190,10 @@ struct ActiveWorkoutView: View {
         session.orderedExercises.first { exercise in exercise.sets.contains { !$0.isCompleted } }?.persistentModelID
     }
 
+    /// Weights in a workout show in the gym's unit, so the numbers, the +/-
+    /// steps and the plates to load all match what's on the bar.
+    private var workoutUnit: WeightUnit { gym.profile.unit == .kg ? .kilograms : .pounds }
+
     @ViewBuilder
     private func exerciseCard(_ exercise: ExerciseLog) -> some View {
         let isCurrent = exercise.persistentModelID == currentExerciseID
@@ -200,7 +204,7 @@ struct ActiveWorkoutView: View {
                 isCurrent: isCurrent,
                 previous: LiftHistory.previousSets(for: exercise.exerciseID, before: session.startedAt, in: sessions),
                 bestBefore: LiftHistory.bestOneRepMax(for: exercise.exerciseID, before: session.startedAt, in: sessions),
-                unit: settings.weightUnit,
+                unit: workoutUnit,
                 gym: gym.profile,
                 onSetCompleted: { startRest(for: exercise) },
                 onCollapse: { expanded.remove(exercise.persistentModelID) }
@@ -213,7 +217,7 @@ struct ActiveWorkoutView: View {
                     exercise: exercise,
                     isDone: isDone,
                     isNext: isNext(exercise),
-                    unit: settings.weightUnit
+                    unit: workoutUnit
                 )
             }
             .buttonStyle(.plain)
@@ -242,7 +246,7 @@ struct ActiveWorkoutView: View {
             let set = sets[index]
             var detail = "Set \(index + 1) of \(sets.count)"
             if set.weightKg > 0 || set.reps > 0 {
-                detail += " · \(settings.weightUnit.format(set.weightKg)) \(settings.weightUnit.rawValue) × \(set.reps)"
+                detail += " · \(workoutUnit.format(set.weightKg)) \(workoutUnit.rawValue) × \(set.reps)"
             }
             return (exercise.name, detail)
         }

@@ -16,6 +16,7 @@ struct FinishWorkoutSheet: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showingRPEGuide = false
+    @State private var confirmingUnticked = false
 
     var body: some View {
         NavigationStack {
@@ -57,11 +58,36 @@ struct FinishWorkoutSheet: View {
                     Button("Back") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await finish() } }
-                        .disabled(isSaving)
+                    Button("Save") {
+                        if untickedWithData.isEmpty {
+                            Task { await finish() }
+                        } else {
+                            confirmingUnticked = true
+                        }
+                    }
+                    .disabled(isSaving)
                 }
             }
+            .confirmationDialog(
+                "\(untickedWithData.count) set\(untickedWithData.count == 1 ? "" : "s") with weights or reps weren't ticked off",
+                isPresented: $confirmingUnticked,
+                titleVisibility: .visible
+            ) {
+                Button("Mark \(untickedWithData.count == 1 ? "it" : "them") as done") {
+                    for set in untickedWithData { set.completedAt = .now }
+                    Task { await finish() }
+                }
+                Button("Discard \(untickedWithData.count == 1 ? "it" : "them")", role: .destructive) {
+                    Task { await finish() }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
         }
+    }
+
+    /// Sets the user filled in but didn't tick.
+    private var untickedWithData: [SetLog] {
+        session.exercises.flatMap(\.sets).filter { !$0.isCompleted && ($0.weightKg > 0 || $0.reps > 0) }
     }
 
     private func finish() async {
