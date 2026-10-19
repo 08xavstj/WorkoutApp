@@ -48,7 +48,24 @@ public struct SleepCalculator: Sendable {
         // staged data exists, ignore the vaguer "unspecified" samples.
         let stagedTypes: Set<SleepStage> = [.core, .deep, .rem]
         let hasStages = samples.contains { stagedTypes.contains($0.stage) }
-        let usable = samples.filter { !(hasStages && $0.stage == .unspecified) }
+        let staged = samples.filter { !(hasStages && $0.stage == .unspecified) }
+
+        // Score only the main sleep: naps and evening dozes are separate
+        // sessions and would otherwise stretch the night and wreck efficiency.
+        // In-bed and awake samples count when they fall around the main sleep.
+        let asleepAll = staged.filter { $0.stage.isAsleep }.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+        guard let main = SleepSessions.main(asleepAll) else { return nil }
+        let windowStart = main.start.addingTimeInterval(-3600)
+        let windowEnd = main.end.addingTimeInterval(30 * 60)
+        let usable = staged.filter { sample in
+            sample.stage.isAsleep
+                ? sample.start >= main.start && sample.end <= main.end
+                : sample.end > windowStart && sample.start < windowEnd
+        }.map { sample -> SleepSample in
+            // Clip in-bed/awake samples to the window around the main sleep.
+            guard !sample.stage.isAsleep else { return sample }
+            return SleepSample(stage: sample.stage, start: max(sample.start, windowStart), end: min(sample.end, windowEnd))
+        }
 
         let asleepIntervals = usable.filter { $0.stage.isAsleep }.map { ($0.start, $0.end) }
         let asleep = Self.unionDuration(asleepIntervals)
@@ -136,29 +153,32 @@ public enum SleepConsistency {
 
     /// Needs at least 4 nights.
     public static func score(_ nights: [Night], calendar: Calendar = .current) -> Int? {
-        guard nights.count >= 4 else { return nil }
-        // Minutes from noon, so 11 pm and 1 am are close together.
-        func minutesFromNoon(_ date: Date) -> Double {
-            let parts = calendar.dateComponents([.hour, .minute], from: date)
-            let minutes = Double((parts.hour ?? 0) * 60 + (parts.minute ?? 0))
-            return (minutes - 720 + 1440).truncatingRemainder(dividingBy: 1440)
-        }
-        let bed = spread(nights.map { minutesFromNoon($0.bedtime) })
-        let wake = spread(nights.map { minutesFromNoon($0.wake) })
-        let average = (bed + wake) / 2
+        guard let average = spreadMinutes(nights, calendar: calendar) else { return nil }
         let score = 100 * (1 - (average - 20) / 100)
         return Int(min(100, max(0, score)).rounded())
     }
 
-    /// Typical bed/wake spread in minutes, for display.
+    /// Typical spread of bed and wake times in minutes (the average of the two).
+    /// Times of day are on a 24-hour circle, so 11:50 and 12:10, or 11 pm and
+    /// 1 am, count as 20 minutes and 2 hours apart, wherever they fall.
     public static func spreadMinutes(_ nights: [Night], calendar: Calendar = .current) -> Double? {
-        guard nights.count >= 4, let score = score(nights, calendar: calendar) else { return nil }
-        return 20 + (100 - Double(score))
+        guard nights.count >= 4 else { return nil }
+        func minuteOfDay(_ date: Date) -> Double {
+            let parts = calendar.dateComponents([.hour, .minute], from: date)
+            return Double((parts.hour ?? 0) * 60 + (parts.minute ?? 0))
+        }
+        let bed = circularSpread(nights.map { minuteOfDay($0.bedtime) })
+        let wake = circularSpread(nights.map { minuteOfDay($0.wake) })
+        return (bed + wake) / 2
     }
 
-    static func spread(_ values: [Double]) -> Double {
-        let mean = values.reduce(0, +) / Double(values.count)
-        let variance = values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count)
-        return sqrt(variance)
+    /// Circular standard deviation, in minutes, of times of day (minutes after midnight).
+    static func circularSpread(_ minutes: [Double]) -> Double {
+        guard !minutes.isEmpty else { return 0 }
+        let angles = minutes.map { $0 / 1440 * 2 * Double.pi }
+        let x = angles.map(cos).reduce(0, +) / Double(angles.count)
+        let y = angles.map(sin).reduce(0, +) / Double(angles.count)
+        let length = min(1, max(1e-12, (x * x + y * y).squareRoot()))
+        return (-2 * log(length)).squareRoot() * 1440 / (2 * Double.pi)
     }
 }

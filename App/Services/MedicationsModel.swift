@@ -94,9 +94,10 @@ final class MedicationsModel {
         matches.contains { $0.drug.adjustments.contains(adjustment) }
     }
 
-    /// Protein per kg the app should aim for (1.6 unless a medication raises it).
-    var proteinGramsPerKg: Double {
-        matches.compactMap(\.drug.proteinGramsPerKg).max() ?? 1.6
+    /// The protein floor (g/kg) a medication sets, if any. The goal sets the
+    /// target (GoalPlanner); this only raises it.
+    var proteinGramsPerKg: Double? {
+        matches.compactMap(\.drug.proteinGramsPerKg).max()
     }
 
     /// Short notes for Home: what to keep in mind today.
@@ -118,7 +119,7 @@ final class MedicationsModel {
                 result.append("Started creatine recently: expect 0.5-2 kg of water weight in the first weeks. It's not fat, so judge progress by your waist and photos for now.")
             }
             if adjustments.contains(.raiseProtein) {
-                result.append("\(match.medication.name): protein target raised to 2.0 g/kg to protect muscle.")
+                result.append("\(match.medication.name): protein target at least 2.0 g/kg to protect muscle.")
             }
         }
         var seen = Set<String>()

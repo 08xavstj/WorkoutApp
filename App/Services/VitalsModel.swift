@@ -79,13 +79,43 @@ final class VitalsModel {
     ///   - sessions: gym sessions logged in this app.
     func refresh(health: HealthKitClient, settings: UserSettings, profile: HeartRateProfile?, sessions: [StrengthSessionSummary],
                  sleepConsistency: Int? = nil, sleepSpreadMinutes: Double? = nil) async {
-        guard health.isAvailable, !isRefreshing else { return }
+        guard health.isAvailable else { return }
+        // Don't stack refreshes, but don't drop one either: if a refresh is
+        // running (e.g. right after a Garmin sync), run once more with the
+        // newest arguments when it finishes.
+        let request = RefreshRequest(profile: profile, sessions: sessions,
+                                     sleepConsistency: sleepConsistency, sleepSpreadMinutes: sleepSpreadMinutes)
+        if isRefreshing {
+            queuedRefresh = request
+            return
+        }
         isRefreshing = true
         isLoading = true
         defer {
             isRefreshing = false
             isLoading = false
         }
+        await performRefresh(health: health, settings: settings, request)
+        while let next = queuedRefresh {
+            queuedRefresh = nil
+            await performRefresh(health: health, settings: settings, next)
+        }
+    }
+
+    private struct RefreshRequest {
+        var profile: HeartRateProfile?
+        var sessions: [StrengthSessionSummary]
+        var sleepConsistency: Int?
+        var sleepSpreadMinutes: Double?
+    }
+
+    @ObservationIgnored private var queuedRefresh: RefreshRequest?
+
+    private func performRefresh(health: HealthKitClient, settings: UserSettings, _ request: RefreshRequest) async {
+        let profile = request.profile
+        let sessions = request.sessions
+        let sleepConsistency = request.sleepConsistency
+        let sleepSpreadMinutes = request.sleepSpreadMinutes
 
         let calendar = Calendar.current
         let now = Date.now
@@ -590,6 +620,8 @@ final class VitalsModel {
 
         // Recovery after each workout (needs heart rate in the minutes after it ends).
         for workout in workouts.sorted(by: { $0.end < $1.end }) where workout.duration >= 10 * 60 {
+            // A logged session and the watch's own workout often end together: measure once.
+            if let last = derived.recoveries.last, abs(last.date.timeIntervalSince(workout.end)) < 5 * 60 { continue }
             let nearby = sorted.filter { $0.date >= workout.end.addingTimeInterval(-180) && $0.date <= workout.end.addingTimeInterval(150) }
             if let result = HeartRateRecovery.measure(nearby, workoutEnd: workout.end) {
                 derived.recoveries.append(.init(date: workout.end, result: result))

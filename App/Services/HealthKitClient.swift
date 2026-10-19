@@ -239,32 +239,11 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// Bedtime and wake time for each of the last `nights` nights (first and
-    /// last asleep sample), for sleep consistency.
+    /// Bedtime and wake time of the main sleep for each of the last `nights`
+    /// nights, for sleep consistency (naps are left out; see `sleepHistory`).
     @concurrent
     func sleepNights(nights: Int = 7) async throws -> [SleepConsistency.Night] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        guard let start = calendar.date(byAdding: .day, value: -nights, to: today)?.addingTimeInterval(-6 * 3600) else { return [] }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
-        let descriptor = HKSampleQueryDescriptor(
-            predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
-        )
-        let asleepValues: Set<Int> = [
-            HKCategoryValueSleepAnalysis.asleepCore.rawValue, HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
-            HKCategoryValueSleepAnalysis.asleepREM.rawValue, HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue
-        ]
-        var byNight: [Date: (Date, Date)] = [:]
-        for sample in try await descriptor.result(for: store) where asleepValues.contains(sample.value) {
-            let night = calendar.startOfDay(for: sample.startDate.addingTimeInterval(6 * 3600))
-            let current = byNight[night]
-            byNight[night] = (min(current?.0 ?? sample.startDate, sample.startDate), max(current?.1 ?? sample.endDate, sample.endDate))
-        }
-        return byNight.keys.sorted().compactMap { night in
-            guard let (bed, wake) = byNight[night], wake.timeIntervalSince(bed) >= 2 * 3600 else { return nil }
-            return SleepConsistency.Night(bedtime: bed, wake: wake)
-        }
+        try await sleepHistory(nights: nights).map { SleepConsistency.Night(bedtime: $0.bedtime, wake: $0.wake) }
     }
 
     /// Average daily vitamins and minerals over the last `days` days, counting
@@ -306,9 +285,9 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return totals.reduce(0, +) / Double(totals.count)
     }
 
-    /// One entry per night (dated by the morning it ended): hours asleep, with
-    /// overlapping samples from different sources merged, plus when sleep
-    /// started and ended. Nights under 2 hours are left out (naps, stray data).
+    /// One entry per night (dated by the morning it ended): hours asleep in the
+    /// main sleep, with overlapping samples from different sources merged, plus
+    /// when it started and ended. Nights under 2 hours are left out.
     @concurrent
     func sleepHistory(nights: Int) async throws -> [SleepNight] {
         let calendar = Calendar.current
@@ -329,17 +308,12 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             byNight[night, default: []].append(DateInterval(start: sample.startDate, end: max(sample.startDate, sample.endDate)))
         }
         return byNight.keys.sorted().compactMap { night in
-            var merged: [DateInterval] = []
-            for interval in (byNight[night] ?? []).sorted(by: { $0.start < $1.start }) {
-                if let last = merged.last, interval.start <= last.end {
-                    merged[merged.count - 1] = DateInterval(start: last.start, end: max(last.end, interval.end))
-                } else {
-                    merged.append(interval)
-                }
-            }
-            let hours = merged.map(\.duration).reduce(0, +) / 3600
-            guard hours >= 2, let first = merged.first, let last = merged.last else { return nil }
-            return SleepNight(date: night, hoursAsleep: hours, bedtime: first.start, wake: last.end)
+            // Only the main sleep counts: an afternoon nap or an evening doze
+            // more than 90 minutes from it is a separate session.
+            guard let main = SleepSessions.main(byNight[night] ?? []) else { return nil }
+            let hours = main.asleep / 3600
+            guard hours >= 2 else { return nil }
+            return SleepNight(date: night, hoursAsleep: hours, bedtime: main.start, wake: main.end)
         }
     }
 
@@ -468,7 +442,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
                 isStrength: strengthTypes.contains(workout.workoutActivityType),
                 start: workout.startDate,
                 end: workout.endDate,
-                distanceKm: distance
+                distanceKm: distance,
+                uuid: workout.uuid
             )
         }
     }
@@ -511,8 +486,18 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     @concurrent
     func steps(from start: Date, to end: Date, excluding windows: [DateInterval]) async throws -> (total: Double, outside: Double) {
         let total = try await dailySum(.stepCount, unit: .count(), start: start, end: end) ?? 0
+        // Merge overlapping windows (a logged session and the watch's own
+        // workout often cover the same time) so their steps aren't subtracted twice.
+        var merged: [DateInterval] = []
+        for window in windows.sorted(by: { $0.start < $1.start }) {
+            if let last = merged.last, window.start <= last.end {
+                merged[merged.count - 1] = DateInterval(start: last.start, end: max(last.end, window.end))
+            } else {
+                merged.append(window)
+            }
+        }
         var inside = 0.0
-        for window in windows {
+        for window in merged {
             let from = max(window.start, start)
             let to = min(window.end, end)
             guard to > from else { continue }
@@ -615,7 +600,9 @@ nonisolated struct ExternalWorkout: Sendable, Identifiable, Equatable {
     var start: Date
     var end: Date
     var distanceKm: Double?
-    var id: Date { start }
+    /// HealthKit's ID, so two sources recording the same time stay distinct.
+    var uuid = UUID()
+    var id: UUID { uuid }
     var minutes: Int { Int(end.timeIntervalSince(start) / 60) }
 }
 

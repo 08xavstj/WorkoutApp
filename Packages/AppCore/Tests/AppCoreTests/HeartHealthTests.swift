@@ -57,6 +57,18 @@ struct HeartHealthTests {
         #expect(result.total == 6)
     }
 
+    @Test func sparseReadingsStillCountTheTimeBetweenThem() {
+        // A watch sampling every 2 minutes for 30 minutes of brisk exercise.
+        let samples = (0..<15).map { HeartRateSample(date: start.addingTimeInterval(Double($0) * 120), bpm: 125) }
+        let result = IntensityMinutes.count(samples, profile: profile)
+        #expect(result.moderate == 29)
+    }
+
+    @Test func longGapsDontCountAsExercise() {
+        let samples = [HeartRateSample(date: start, bpm: 125), HeartRateSample(date: start.addingTimeInterval(3600), bpm: 125)]
+        #expect(IntensityMinutes.count(samples, profile: profile).moderate == 2)
+    }
+
     @Test func sleepingHeartRateUsesOnlyAsleepTime() throws {
         let values: [Double] = [70, 70] + Array(repeating: 52, count: 10) + [48, 48, 48, 48, 48] + [80, 80]
         let samples = perMinute(values, from: start)

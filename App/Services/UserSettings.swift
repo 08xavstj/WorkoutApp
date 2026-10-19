@@ -193,7 +193,13 @@ final class UserSettings {
 
     /// Records the highest believable heart rate from new data.
     func noteHeartRatePeak(_ peak: Double?) {
-        let updated = ObservedMaxHeartRate.update(learnedMaxHeartRate, peak: peak, at: .now)
+        let plausible = peak.flatMap { ObservedMaxHeartRate.plausible($0, estimate: estimatedMaxHeartRate) }
+        let updated = ObservedMaxHeartRate.update(learnedMaxHeartRate, peak: plausible, at: .now)
         if updated != learnedMaxHeartRate { learnedMaxHeartRate = updated }
+    }
+
+    /// Forgets the learned max heart rate (back to the age estimate until a new peak).
+    func resetLearnedMaxHeartRate() {
+        learnedMaxHeartRate = nil
     }
 }

@@ -67,7 +67,12 @@ nonisolated struct Dose: Codable, Sendable, Hashable, Identifiable {
         "\(medicationID.uuidString)|\(Self.dayKey(day))|\(minutes)"
     }
 
-    var time: Date { day.addingTimeInterval(TimeInterval(minutes * 60)) }
+    /// The clock time on that day. Set by hour and minute (not seconds after
+    /// midnight) so it's right on the days clocks change.
+    var time: Date {
+        Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day)
+            ?? day.addingTimeInterval(TimeInterval(minutes * 60))
+    }
 
     static func dayKey(_ day: Date) -> String {
         let parts = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: day)

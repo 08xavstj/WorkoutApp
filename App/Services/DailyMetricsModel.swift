@@ -103,6 +103,10 @@ final class DailyMetricsModel {
     @ObservationIgnored private var dayCache: [Date: (key: String, result: StrainCalculator.Result)] = [:]
     @ObservationIgnored private var isRefreshing = false
     @ObservationIgnored private var refreshQueued = false
+    /// The newest arguments passed while a refresh was running, so the queued
+    /// pass includes a just-finished workout or a newly typed HRV.
+    @ObservationIgnored private var queuedSessions: [StrengthSessionSummary] = []
+    @ObservationIgnored private var queuedManualHRV: [Date: Double] = [:]
     @ObservationIgnored private let recoveryCalculator = RecoveryCalculator()
     @ObservationIgnored private let sleepCalculator = SleepCalculator()
 
@@ -111,6 +115,14 @@ final class DailyMetricsModel {
     /// 1.6 g/kg, raised by some medications (see MedicationsModel).
     var proteinGramsPerKg = 1.6
     var proteinTarget: Double? { NutritionTargets.proteinGrams(bodyMassKg: bodyMassKg, gramsPerKg: proteinGramsPerKg) }
+
+    /// Highest sustained heart rate inside workouts, computed off the main thread.
+    @concurrent
+    nonisolated private static func workoutPeak(_ heartRate: [HeartRateSample], windows: [DateInterval]) async -> Double? {
+        guard !windows.isEmpty else { return nil }
+        let inside = heartRate.filter { sample in windows.contains { $0.contains(sample.date) } }
+        return ObservedMaxHeartRate.peak(inside)
+    }
 
     /// Strain per day, computed off the main thread.
     @concurrent
@@ -178,6 +190,8 @@ final class DailyMetricsModel {
         // Don't stack refreshes: if one is running, run once more when it finishes.
         if isRefreshing {
             refreshQueued = true
+            queuedSessions = sessions
+            queuedManualHRV = manualHRV
             return
         }
         isRefreshing = true
@@ -187,9 +201,9 @@ final class DailyMetricsModel {
             isLoading = false
         }
         await performRefresh(health: health, settings: settings, sessions: sessions, manualHRV: manualHRV, now: now)
-        if refreshQueued {
+        while refreshQueued {
             refreshQueued = false
-            await performRefresh(health: health, settings: settings, sessions: sessions, manualHRV: manualHRV, now: .now)
+            await performRefresh(health: health, settings: settings, sessions: queuedSessions, manualHRV: queuedManualHRV, now: .now)
         }
     }
 
@@ -219,9 +233,9 @@ final class DailyMetricsModel {
             // Typed-in Garmin HRV (RMSSD) and Apple Health HRV (SDNN) aren't
             // comparable, so once you enter HRV, only entered values are used.
             let vitals = DailyVitals.merging(healthVitals, manualHRV: manualHRV, manualOnlyHRV: true, calendar: calendar)
-            let healthHadHRVToday = healthVitals.contains {
-                calendar.isDate($0.date, inSameDayAs: today) && $0.hrvMilliseconds != nil
-            }
+            // Today's HRV is the typed one when you entered a value for today
+            // (typed values replace Health's, see `merging`).
+            let typedToday = manualHRV.contains { calendar.isDate($0.key, inSameDayAs: today) && $0.value > 0 }
             let todayVitals = vitals.first { calendar.isDate($0.date, inSameDayAs: today) }
                 ?? DailyVitals(date: today, hrvMilliseconds: nil, restingHeartRate: nil)
             let history = vitals.filter { !calendar.isDate($0.date, inSameDayAs: today) }
@@ -230,7 +244,7 @@ final class DailyMetricsModel {
 
             restingHeartRate = todayVitals.restingHeartRate
             hrv = todayVitals.hrvMilliseconds
-            hrvIsManual = hrv != nil && !healthHadHRVToday
+            hrvIsManual = hrv != nil && typedToday
             let profile = settings.heartRateProfile(restingHeartRate: todayVitals.restingHeartRate ?? base.meanRHR)
             heartRateProfile = profile
 
@@ -249,13 +263,20 @@ final class DailyMetricsModel {
                 let daySessions = sessions.filter { $0.start >= day && $0.start < next }
                 return profileKey + daySessions.map { "|\($0.start.timeIntervalSince1970)-\($0.end.timeIntervalSince1970)-\($0.sessionRPE ?? 0)" }.joined()
             }
+            // The last 7 days are always recomputed: Garmin Connect can sync
+            // several days late, and cached days wouldn't see the new heart rate.
+            let recentStart = calendar.date(byAdding: .day, value: -6, to: today) ?? yesterday
             let needed = allDays.filter { day in
-                day >= yesterday || dayCache[day]?.key != key(for: day)
+                day >= recentStart || dayCache[day]?.key != key(for: day)
             }
             if let firstNeeded = needed.first {
                 let heartRate = try await health.heartRatePerMinute(from: firstNeeded, to: now)
-                // Learn max heart rate from real efforts (used from the next refresh).
-                settings.noteHeartRatePeak(ObservedMaxHeartRate.peak(heartRate))
+                // Learn max heart rate from workouts only (used from the next refresh).
+                let fetchedWorkouts = (try? await health.externalWorkouts(from: firstNeeded, to: now)) ?? []
+                let workoutWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+                    + fetchedWorkouts.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+                let peak = await Self.workoutPeak(heartRate, windows: workoutWindows)
+                settings.noteHeartRatePeak(peak)
                 let computed = await Self.computeDays(needed, heartRate: heartRate, sessions: sessions, profile: profile)
                 for (date, result) in computed {
                     dayCache[date] = (key(for: date), result)
@@ -395,7 +416,7 @@ final class DailyMetricsModel {
                 detail += " · \(km.formatted(.number.precision(.fractionLength(1)))) km"
             }
             items.append(ActivityItem(
-                id: "w\(workout.start.timeIntervalSince1970)",
+                id: "w\(workout.uuid.uuidString)",
                 name: workout.name, detail: detail, start: workout.start,
                 strainAdded: contribution(load), isStrength: workout.isStrength,
                 minutes: workout.minutes
