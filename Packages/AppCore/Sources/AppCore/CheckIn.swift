@@ -234,7 +234,8 @@ public enum CheckInInsights {
                 let (meanWith, varWith) = meanVariance(with)
                 let (meanWithout, varWithout) = meanVariance(without)
                 guard meanWithout > 0 else { continue }
-                let pooledSD = sqrt((varWith + varWithout) / 2)
+                let pooledVariance: Double = (varWith + varWithout) / 2
+                let pooledSD = sqrt(pooledVariance)
                 let difference = meanWith - meanWithout
                 // Bigger than a normal day-to-day swing.
                 guard abs(difference) >= 0.5 * pooledSD, abs(difference) > 0 else { continue }
@@ -272,8 +273,11 @@ public enum CheckInInsights {
         let se = sqrt(a + b)
         guard se > 0 else { return meanA == meanB ? 1 : 0 }
         let t = abs(meanA - meanB) / se
-        let dfDenominator = (a * a) / Double(nA - 1) + (b * b) / Double(nB - 1)
-        let df = dfDenominator > 0 ? (a + b) * (a + b) / dfDenominator : Double(nA + nB - 2)
+        let partA: Double = (a * a) / Double(nA - 1)
+        let partB: Double = (b * b) / Double(nB - 1)
+        let dfDenominator: Double = partA + partB
+        let sum: Double = a + b
+        let df: Double = dfDenominator > 0 ? sum * sum / dfDenominator : Double(nA + nB - 2)
         // P(|T| > t) = I_x(df/2, 1/2) with x = df / (df + t²).
         return regularizedIncompleteBeta(x: df / (df + t * t), a: df / 2, b: 0.5)
     }
