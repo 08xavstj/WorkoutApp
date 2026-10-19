@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
   try {
     const response = await client.beta.messages.create({
       model: MODEL,
-      max_tokens: 3000,
+      max_tokens: 4000,
       output_config: { effort: "medium" },
       // If a safety classifier declines, retry on Anthropic's recommended fallback model.
       betas: ["server-side-fallback-2026-07-01"],
