@@ -279,10 +279,70 @@ extension CoachView {
         if let deload = muscles.deload { lines.append("Deload suggested: stalled " + deload.stalledLifts.joined(separator: ", ") + ".") }
         let tired = muscles.states.values.filter { $0.status == .fatigued }.map(\.muscle.name)
         if !tired.isEmpty { lines.append("Fatigued muscles: " + tired.sorted().joined(separator: ", ") + ".") }
+        lines.append(contentsOf: habitLines)
         if let analysis = progressPhotos.latestAnalysis {
             lines.append("Latest progress-photo analysis (\(analysis.date.formatted(date: .abbreviated, time: .omitted))): " + String(analysis.text.prefix(700)))
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+extension CoachView {
+    /// Caffeine, alcohol, heat, weight pace, body age, what moved recovery,
+    /// and every Biology stat, for the coach.
+    var habitLines: [String] {
+        var lines: [String] = []
+        let calendar = Calendar.current
+
+        // Caffeine cut-off from the usual bedtime (Gardiner et al. 2023).
+        let bedtime = CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes)
+        var caffeine = "Usual bedtime \(CaffeineTiming.clockText(bedtime)); caffeine cut-off \(CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: 100))) for coffee, \(CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: 200))) for pre-workout"
+        if let evening = checkIns.evening(), let mg = evening.caffeineMg, mg > 0, let minutes = evening.lastCaffeineMinutes {
+            let late = CaffeineTiming.isTooLate(minutes: minutes, mg: mg, bedtimeMinutes: bedtime)
+            caffeine += "; today \(Int(mg)) mg, last at \(CaffeineTiming.clockText(minutes))\(late ? " (too late for good sleep)" : "")"
+        }
+        lines.append(caffeine + ".")
+
+        // The user's own alcohol effect, from their nights.
+        let alcohol = checkIns.alcoholFindings.map { finding in
+            let digits = finding.measure == .sleepScore ? 0 : 1
+            let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(digits))
+            return "\(finding.measure.rawValue) \(finding.withDrinks.formatted(format)) after drinking vs \(finding.without.formatted(format)) without (\(finding.nightsWith)/\(finding.nightsWithout) nights\(finding.isClear ? ", clear difference" : ", not clear yet"))"
+        }
+        if !alcohol.isEmpty { lines.append("Their alcohol effect: " + alcohol.joined(separator: "; ") + ".") }
+
+        // Heat.
+        if metrics.heatAdjustment > 0 {
+            lines.append("Hot day: strain target lowered by \(Int(metrics.heatAdjustment.rounded())) points; trained in the heat on \(conditions.heatTrainingDays) of the last 14 days (acclimation takes about 10-14).")
+        }
+
+        // Weight change speed (Helms et al. 2014).
+        if let weekly = metrics.weightTrendWeekly, let mass = metrics.bodyMassKg,
+           let message = WeightPace.message(WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: mass, goals: settings.goalsSet ? settings.goals : nil)) {
+            lines.append("Weight pace: " + message)
+        }
+
+        // Body age with its confidence and biggest factors.
+        if let age = vitals.bodyAge {
+            let factors = age.factors.prefix(3).map { "\($0.name) \($0.years >= 0 ? "+" : "")\($0.years.formatted(.number.precision(.fractionLength(1)))) y" }
+            lines.append("Body age \(age.bodyAge.formatted(.number.precision(.fractionLength(1)))) vs real age \(age.age) (\(age.confidence.label.lowercased())): " + factors.joined(separator: ", ") + ".")
+        }
+
+        // What moved today's recovery.
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: .now) ?? .now
+        let contributors = metrics.recoveryContributors(drinksLastNight: checkIns.evening(on: yesterday)?.drinks, illness: nil)
+        if !contributors.isEmpty {
+            lines.append("What moved recovery: " + contributors.prefix(5).map { "\($0.name) \($0.effect.rawValue) it (\($0.detail))" }.joined(separator: "; ") + ".")
+        }
+
+        // Every Biology stat with a value (steps vs goal, strength days, blood pressure, sleep, etc.).
+        let stats = vitals.stats.compactMap { stat -> String? in
+            guard let value = stat.value else { return nil }
+            let unit = stat.unit.isEmpty ? "" : " \(stat.unit)"
+            return "\(stat.title) \(value)\(unit)" + (stat.status.map { " (\($0))" } ?? "")
+        }
+        if !stats.isEmpty { lines.append("Biology stats: " + stats.joined(separator: "; ") + ".") }
+        return lines
     }
 }
 

@@ -322,7 +322,7 @@ struct ScalePicker: View {
                 .font(.caption2)
                 .foregroundStyle(Theme.secondaryText)
             }
-            if let value, labels.count == range.count {
+            if let value, labels.count == range.count, range.contains(value) {
                 Text(labels[value - range.lowerBound])
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textColor(for: color))

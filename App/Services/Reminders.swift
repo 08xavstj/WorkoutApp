@@ -28,10 +28,16 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    // These are called by iOS from a background queue. With approachable
+    // concurrency a plain `nonisolated async` method would try to run on the
+    // caller's executor, which crashes when a notification is tapped, so they
+    // are explicitly @concurrent and hop to the main actor for UI state.
+    @concurrent
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .list, .sound]
     }
 
+    @concurrent
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let identifier = response.notification.request.identifier
         let action = response.actionIdentifier
