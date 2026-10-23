@@ -44,6 +44,10 @@ jobs:
       - name: Tap the check-in notifications in a UI test
         run: |
           mkdir -p logs
+          xcrun simctl spawn "$UDID" log stream --level debug --style compact \
+            --predicate 'category == "diagnostics" OR (process == "WorkoutApp" AND (messageType == fault OR messageType == error))' \
+            > logs/diag.log 2>&1 &
+          LOGPID=$!
           set +e
           xcodebuild test \
             -project WorkoutApp.xcodeproj \
@@ -56,6 +60,10 @@ jobs:
             > logs/uitest.log 2>&1
           STATUS=$?
           set -e
+          kill $LOGPID || true
+          echo "=== app diagnostics log ==="
+          grep -E "didReceive|router.open|Fatal|fatal|crash|assert" logs/diag.log | tail -60
+          echo "=== test results ==="
           grep -E "error:|Test Case|crash|Crash|failed|passed|XCTAssert|isn't running|no longer running|didn't" logs/uitest.log | tail -80
           echo "=== crash reports ==="
           for f in $(find ~/Library/Logs/DiagnosticReports -mmin -60 -name "*WorkoutApp*" 2>/dev/null | head -3); do

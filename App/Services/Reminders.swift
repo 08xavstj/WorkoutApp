@@ -1,4 +1,5 @@
 import ActivityKit
+import os
 import Foundation
 import UserNotifications
 import WidgetKit
@@ -17,6 +18,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var dosesVersion = 0
 
     func open(_ url: URL) {
+        Logger.diagnostics.notice("router.open \(url.absoluteString, privacy: .public)")
         guard url.scheme == "workoutapp" else { return }
         switch url.host() {
         case "hrv": showHRVEntry = true
@@ -41,6 +43,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let identifier = response.notification.request.identifier
         let action = response.actionIdentifier
+        Logger.diagnostics.notice("didReceive \(identifier, privacy: .public) action \(action, privacy: .public)")
         let link = response.notification.request.content.userInfo["link"] as? String
         if let doseID = Reminders.doseID(fromIdentifier: identifier) {
             switch action {
@@ -63,6 +66,11 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
             await MainActor.run { self.open(url) }
         }
     }
+}
+
+extension Logger {
+    /// Notification and link handling, for diagnosing launch and tap problems.
+    nonisolated static let diagnostics = Logger(subsystem: "com.lontraindustries.workoutapp", category: "diagnostics")
 }
 
 /// Local notifications for the morning HRV reminder and medication doses.
