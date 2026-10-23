@@ -1,0 +1,102 @@
+name: Diagnose check-in crash
+
+# Temporary: runs the app in a simulator, opens the morning and evening
+# check-ins the way a notification tap does, and prints any crash report and
+# the app's log. Delete once the crash is fixed.
+
+on:
+  push:
+    branches: ["claude/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: diagnose-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Pick and boot a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          for runtime, devices in sorted(data.items(), reverse=True):
+              if "iOS" not in runtime:
+                  continue
+              for d in devices:
+                  if d["name"].startswith("iPhone"):
+                      print(d["udid"]); sys.exit()
+          ')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Build for that simulator
+        run: |
+          xcodebuild build \
+            -project WorkoutApp.xcodeproj \
+            -scheme WorkoutApp \
+            -destination "id=$UDID" \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: Open the check-ins and look for crashes
+        run: |
+          APP=build/Build/Products/Debug-iphonesimulator/WorkoutApp.app
+          BUNDLE=com.lontraindustries.workoutapp
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl privacy "$UDID" grant all "$BUNDLE" || true
+          mkdir -p logs
+          xcrun simctl spawn "$UDID" log stream --level debug --style compact \
+            --predicate 'process == "WorkoutApp"' > logs/app.log 2>&1 &
+          LOGPID=$!
+          for kind in morning evening; do
+            echo "=== $kind ==="
+            xcrun simctl terminate "$UDID" "$BUNDLE" || true
+            # -hasOnboarded YES skips onboarding through UserDefaults' argument domain.
+            xcrun simctl launch "$UDID" "$BUNDLE" -hasOnboarded YES
+            sleep 12
+            xcrun simctl openurl "$UDID" "workoutapp://checkin/$kind"
+            sleep 12
+            if xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE"; then
+              echo "App still running after opening the $kind check-in."
+            else
+              echo "APP IS NOT RUNNING after opening the $kind check-in (crashed?)."
+            fi
+            xcrun simctl io "$UDID" screenshot "logs/$kind.png" || true
+          done
+          # Cold launch straight into a check-in, like tapping a notification while the app is closed.
+          echo "=== cold launch ==="
+          xcrun simctl terminate "$UDID" "$BUNDLE" || true
+          xcrun simctl openurl "$UDID" "workoutapp://checkin/morning"
+          sleep 15
+          if xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE"; then
+            echo "App still running after cold launch into the check-in."
+          else
+            echo "APP IS NOT RUNNING after cold launch into the check-in (crashed?)."
+          fi
+          kill $LOGPID || true
+          echo "=== crash reports ==="
+          find ~/Library/Logs/DiagnosticReports -name "WorkoutApp*" -newer build.log -print -exec head -c 20000 {} \; || true
+          echo "=== app log (errors and faults) ==="
+          grep -iE "fatal|error|fault|crash|assert|executor|isolation|exception|terminat" logs/app.log | tail -200 || true
+
+      - name: Keep screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnose
+          path: logs
