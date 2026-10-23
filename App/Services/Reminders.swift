@@ -40,8 +40,26 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         case "meds": showMedications = true
         case "photos": showProgressPhotos = true
         case "workout": openWorkout += 1
-        case "checkin": checkIn = url.lastPathComponent == "evening" ? .evening : .morning
+        case "checkin": openCheckIn(url.lastPathComponent == "evening" ? .evening : .morning)
         default: break
+        }
+    }
+
+    /// A sheet can't open while another one is showing, so close any other
+    /// screen first and open the check-in once it has gone.
+    private func openCheckIn(_ kind: CheckInKind) {
+        let otherOpen = showHRVEntry || showMedications || showProgressPhotos || (checkIn != nil && checkIn != kind)
+        guard otherOpen else {
+            checkIn = kind
+            return
+        }
+        showHRVEntry = false
+        showMedications = false
+        showProgressPhotos = false
+        checkIn = nil
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            self.checkIn = kind
         }
     }
 

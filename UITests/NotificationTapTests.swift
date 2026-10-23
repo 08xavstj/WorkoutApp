@@ -28,7 +28,7 @@ final class NotificationTapTests: XCTestCase {
     private func tapCheckInNotification(kind: String, title: String, closeAppFirst: Bool) throws {
         let app = XCUIApplication()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        app.launchArguments = ["-hasOnboarded", "YES", "-scheduleTestCheckIn", kind]
+        app.launchArguments = ["-hasOnboarded", "YES", "-skipHealthPrompt", "YES", "-scheduleTestCheckIn", kind]
         app.launch()
 
         // Allow notifications if iOS asks.

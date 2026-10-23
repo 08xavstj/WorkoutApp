@@ -206,7 +206,7 @@ struct RootView: View {
         .task {
             refresher.perform = { await refreshMetrics() }
             // After an update adds new health stats, ask for just those.
-            if settings.hasOnboarded {
+            if settings.hasOnboarded && !Self.skipHealthPrompt {
                 await health?.requestAuthorizationIfNeeded()
                 // Takes effect only once Health access is granted (safe to repeat).
                 health?.enableBackgroundDelivery()
@@ -252,6 +252,16 @@ struct RootView: View {
             scheduleHRVReminder()
             Task { await refreshMetrics() }
         }
+    }
+
+    /// UI tests pass `-skipHealthPrompt YES` to act like a phone that has
+    /// already answered the Apple Health permission screen.
+    private static var skipHealthPrompt: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "skipHealthPrompt")
+        #else
+        false
+        #endif
     }
 
     private var finishedSessionCount: Int {
