@@ -204,7 +204,6 @@ struct RootView: View {
                 .interactiveDismissDisabled()
         }
         .task {
-            if scenePhase == .active { router.openPendingLink() }
             refresher.perform = { await refreshMetrics() }
             // After an update adds new health stats, ask for just those.
             if settings.hasOnboarded {
@@ -223,14 +222,8 @@ struct RootView: View {
                 if scenePhase == .active { await refreshMetrics() }
             }
         }
-        .onChange(of: router.pendingLink) {
-            if scenePhase == .active { router.openPendingLink() }
-        }
-        .onChange(of: router.checkIn) { _, kind in
-            Logger.diagnostics.notice("checkIn changed to \(kind?.rawValue ?? "nil", privacy: .public)")
-        }
+        .modifier(PendingLinkOpener(router: router))
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { router.openPendingLink() }
             if phase == .active {
                 medications.reload()
                 Task {
@@ -351,5 +344,27 @@ struct RootView: View {
         let enabled = settings.hrvReminderOn
         let minutes = settings.hrvReminderMinutes
         Task { await Reminders.scheduleHRV(enabled: enabled, minutes: minutes, loggedToday: loggedToday) }
+    }
+}
+
+/// Opens a tapped notification's link once the app is active (see `AppRouter.pendingLink`).
+private struct PendingLinkOpener: ViewModifier {
+    let router: AppRouter
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                if scenePhase == .active { router.openPendingLink() }
+            }
+            .onChange(of: router.pendingLink) {
+                if scenePhase == .active { router.openPendingLink() }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { router.openPendingLink() }
+            }
+            .onChange(of: router.checkIn) { _, kind in
+                Logger.diagnostics.notice("checkIn changed to \(kind?.rawValue ?? "nil", privacy: .public)")
+            }
     }
 }
