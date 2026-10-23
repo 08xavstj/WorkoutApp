@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import SwiftData
 import AppCore
 
@@ -58,7 +59,10 @@ struct CheckInView: View {
                     Button("Save") { save() }
                 }
             }
-            .onAppear(perform: load)
+            .onAppear {
+                Logger.diagnostics.notice("check-in screen appeared: \(kind.rawValue, privacy: .public)")
+                load()
+            }
             .onDisappear {
                 if openPhotosAfter { router.showProgressPhotos = true }
             }

@@ -16,6 +16,21 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var openWorkout = 0
     /// Bumped when doses change outside the app (Live Activity, notification).
     var dosesVersion = 0
+    /// A link from a tapped notification, opened once the app is fully on
+    /// screen. Presenting a sheet while iOS is still bringing the app to the
+    /// front (or launching it) fails or crashes, so it waits for `.active`.
+    var pendingLink: URL?
+
+    /// Opens a waiting notification link, a moment after the app becomes active.
+    func openPendingLink() {
+        guard let url = pendingLink else { return }
+        pendingLink = nil
+        Logger.diagnostics.notice("opening pending link \(url.absoluteString, privacy: .public)")
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            self.open(url)
+        }
+    }
 
     func open(_ url: URL) {
         Logger.diagnostics.notice("router.open \(url.absoluteString, privacy: .public)")
@@ -63,7 +78,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
             }
         }
         if let link, let url = URL(string: link) {
-            await MainActor.run { self.open(url) }
+            await MainActor.run { self.pendingLink = url }
         }
     }
 }

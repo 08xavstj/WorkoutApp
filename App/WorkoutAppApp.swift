@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import AppCore
 import UserNotifications
+import os
 
 @main
 struct WorkoutAppApp: App {
@@ -203,6 +204,7 @@ struct RootView: View {
                 .interactiveDismissDisabled()
         }
         .task {
+            if scenePhase == .active { router.openPendingLink() }
             refresher.perform = { await refreshMetrics() }
             // After an update adds new health stats, ask for just those.
             if settings.hasOnboarded {
@@ -221,7 +223,14 @@ struct RootView: View {
                 if scenePhase == .active { await refreshMetrics() }
             }
         }
+        .onChange(of: router.pendingLink) {
+            if scenePhase == .active { router.openPendingLink() }
+        }
+        .onChange(of: router.checkIn) { _, kind in
+            Logger.diagnostics.notice("checkIn changed to \(kind?.rawValue ?? "nil", privacy: .public)")
+        }
         .onChange(of: scenePhase) { _, phase in
+            if phase == .active { router.openPendingLink() }
             if phase == .active {
                 medications.reload()
                 Task {

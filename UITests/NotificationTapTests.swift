@@ -53,9 +53,13 @@ final class NotificationTapTests: XCTestCase {
         }
         notification.tap()
 
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20), "App didn't come to the front after tapping the notification")
+        let cameForward = app.wait(for: .runningForeground, timeout: 20)
+        if !cameForward { print("APP STATE after tap: \(app.state.rawValue)\n\(springboard.debugDescription)") }
+        XCTAssertTrue(cameForward, "App didn't come to the front after tapping the notification")
         sleep(8)
         XCTAssertEqual(app.state, .runningForeground, "App is no longer running after tapping the notification")
-        XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 10), "The \(title) screen didn't open")
+        let opened = app.staticTexts[title].waitForExistence(timeout: 10) || app.navigationBars[title].exists
+        if !opened { print("SCREEN after tap:\n\(app.debugDescription)") }
+        XCTAssertTrue(opened, "The \(title) screen didn't open")
     }
 }

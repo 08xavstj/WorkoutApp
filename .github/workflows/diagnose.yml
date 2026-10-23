@@ -62,9 +62,11 @@ jobs:
           set -e
           kill $LOGPID || true
           echo "=== app diagnostics log ==="
-          grep -E "didReceive|router.open|Fatal|fatal|crash|assert" logs/diag.log | tail -60
+          grep -E "didReceive|router.open|pending|checkIn changed|screen appeared|Fatal|fatal|crash|assert" logs/diag.log | tail -80
           echo "=== test results ==="
           grep -E "error:|Test Case|crash|Crash|failed|passed|XCTAssert|isn't running|no longer running|didn't" logs/uitest.log | tail -80
+          echo "=== screen dumps on failure ==="
+          grep -A60 -E "APP STATE after tap|SCREEN after tap" logs/uitest.log | head -150
           echo "=== crash reports ==="
           for f in $(find ~/Library/Logs/DiagnosticReports -mmin -60 -name "*WorkoutApp*" 2>/dev/null | head -3); do
             echo "--- $f"; head -c 40000 "$f"; echo
