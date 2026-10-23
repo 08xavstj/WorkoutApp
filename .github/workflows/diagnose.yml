@@ -79,20 +79,40 @@ jobs:
             xcrun simctl io "$UDID" screenshot "logs/$kind.png" || true
           done
           # Cold launch straight into a check-in, like tapping a notification while the app is closed.
-          echo "=== cold launch ==="
+          for kind in morning evening; do
+            echo "=== cold launch: $kind (console) ==="
+            xcrun simctl terminate "$UDID" "$BUNDLE" || true
+            sleep 2
+            # --console streams the app's stdout/stderr (Swift fatal errors) until it exits.
+            ( xcrun simctl launch --console-pty "$UDID" "$BUNDLE" -hasOnboarded YES -openCheckInAtLaunch "$kind" > "logs/console-$kind.txt" 2>&1 & echo $! > logs/console.pid )
+            sleep 25
+            kill "$(cat logs/console.pid)" 2>/dev/null || true
+            tail -c 6000 "logs/console-$kind.txt"
+            if xcrun simctl spawn "$UDID" launchctl list > logs/launchctl.txt 2>/dev/null && grep -q "$BUNDLE" logs/launchctl.txt; then
+              echo "App still running after cold launch into the $kind check-in."
+            else
+              echo "APP IS NOT RUNNING after cold launch into the $kind check-in."
+            fi
+            xcrun simctl io "$UDID" screenshot "logs/cold-$kind.png" || true
+          done
+          echo "=== cold launch through openurl ==="
           xcrun simctl terminate "$UDID" "$BUNDLE" || true
+          sleep 2
           xcrun simctl openurl "$UDID" "workoutapp://checkin/morning"
-          sleep 15
-          if xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE"; then
-            echo "App still running after cold launch into the check-in."
-          else
-            echo "APP IS NOT RUNNING after cold launch into the check-in (crashed?)."
-          fi
+          sleep 20
+          xcrun simctl spawn "$UDID" launchctl list > logs/launchctl.txt 2>/dev/null || true
+          grep "$BUNDLE" logs/launchctl.txt || echo "Not running after openurl cold launch."
           kill $LOGPID || true
+          sleep 20
           echo "=== crash reports ==="
-          find ~/Library/Logs/DiagnosticReports -name "WorkoutApp*" -newer build.log -print -exec head -c 20000 {} \; || true
-          echo "=== app log (errors and faults) ==="
-          grep -iE "fatal|error|fault|crash|assert|executor|isolation|exception|terminat" logs/app.log | tail -200 || true
+          find ~/Library/Logs/DiagnosticReports ~/Library/Logs/CrashReporter -mmin -40 \( -name "*WorkoutApp*" -o -name "*.ips" \) -print 2>/dev/null | head -20
+          for f in $(find ~/Library/Logs/DiagnosticReports -mmin -40 -name "*WorkoutApp*" 2>/dev/null | head -3); do
+            echo "--- $f"; head -c 30000 "$f"; echo
+          done
+          echo "=== system log mentioning WorkoutApp (last 3 min) ==="
+          xcrun simctl spawn "$UDID" log show --last 3m --style compact \
+            --predicate 'process == "WorkoutApp" OR eventMessage CONTAINS[c] "workoutapp"' 2>/dev/null \
+            | grep -iE "fatal|crash|terminat|exit|assert|executor|isolat|exception|signal|abort|jetsam|killed|watchdog" | tail -80 || true
 
       - name: Keep screenshots and logs
         if: always()

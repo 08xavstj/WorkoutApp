@@ -48,6 +48,14 @@ struct WorkoutAppApp: App {
         let router = AppRouter()
         _router = State(initialValue: router)
         UNUserNotificationCenter.current().delegate = router
+        #if DEBUG
+        // Diagnostics: `-openCheckInAtLaunch morning` opens the check-in during
+        // launch, the way tapping a notification while the app is closed does.
+        if let kind = UserDefaults.standard.string(forKey: "openCheckInAtLaunch"),
+           let url = URL(string: "workoutapp://checkin/\(kind)") {
+            router.open(url)
+        }
+        #endif
         Reminders.registerCategories()
         do {
             container = try ModelContainer(
