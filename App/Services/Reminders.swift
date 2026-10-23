@@ -63,32 +63,42 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    // These are called by iOS from a background queue. With approachable
-    // concurrency a plain `nonisolated async` method would try to run on the
-    // caller's executor, which crashes when a notification is tapped, so they
-    // are explicitly @concurrent and hop to the main actor for UI state.
-    @concurrent
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+    // iOS calls these on the main thread and expects the completion handler
+    // back on the main thread. The `async` versions of these methods finish
+    // on a background thread, and UIKit then aborts the app ("must be called
+    // on the main thread"), which is what crashed taps on check-in
+    // notifications. So these use completion handlers and call them from the
+    // main actor.
+    @objc(userNotificationCenter:willPresentNotification:withCompletionHandler:)
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
     }
 
-    @concurrent
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    @objc(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:)
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let identifier = response.notification.request.identifier
         let action = response.actionIdentifier
-        Logger.diagnostics.notice("didReceive \(identifier, privacy: .public) action \(action, privacy: .public)")
+        let title = response.notification.request.content.title
+        let body = response.notification.request.content.body
         let link = response.notification.request.content.userInfo["link"] as? String
+        Logger.diagnostics.notice("didReceive \(identifier, privacy: .public) action \(action, privacy: .public)")
+        nonisolated(unsafe) let done = completionHandler
+        Task { @MainActor in
+            await self.handleResponse(identifier: identifier, action: action, title: title, body: body, link: link)
+            done()
+        }
+    }
+
+    private func handleResponse(identifier: String, action: String, title: String, body: String, link: String?) async {
         if let doseID = Reminders.doseID(fromIdentifier: identifier) {
             switch action {
             case DoseNotifications.takenAction:
                 MedicationStore.markTaken(doseID)
                 UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Reminders.snoozeIdentifier(for: doseID)])
                 await MedsLiveActivity.refresh()
-                await MainActor.run { self.dosesVersion += 1 }
+                dosesVersion += 1
                 return
             case DoseNotifications.snoozeAction:
-                let title = response.notification.request.content.title
-                let body = response.notification.request.content.body
                 await Reminders.snooze(doseID: doseID, title: title, body: body)
                 return
             default:
@@ -96,7 +106,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
             }
         }
         if let link, let url = URL(string: link) {
-            await MainActor.run { self.pendingLink = url }
+            pendingLink = url
         }
     }
 }
