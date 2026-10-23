@@ -135,6 +135,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lontraindustries.workoutapp.uitests
         TEST_TARGET_NAME: WorkoutApp
+        GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
 
