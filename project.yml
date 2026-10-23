@@ -58,7 +58,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: WorkoutApp
+        CFBundleDisplayName: Tensile
         UILaunchScreen: {}
         UIBackgroundModes:
           - workout-processing
@@ -112,7 +112,7 @@ targets:
     info:
       path: Widget/Info.plist
       properties:
-        CFBundleDisplayName: WorkoutApp
+        CFBundleDisplayName: Tensile
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

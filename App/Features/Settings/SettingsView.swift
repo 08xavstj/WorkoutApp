@@ -187,7 +187,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Reminders")
                 } footer: {
-                    Text("The morning check-in includes last night's HRV, so most people only need check-in reminders. Reminders are skipped once done. Medication and creatine reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → WorkoutApp.")
+                    Text("The morning check-in includes last night's HRV, so most people only need check-in reminders. Reminders are skipped once done. Medication and creatine reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → Tensile.")
                 }
 
                 Section {
@@ -258,7 +258,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Apple Health")
                 } footer: {
-                    Text("iOS only shows the permission screen once. To change access later, open the Health app → your profile picture → Apps → WorkoutApp, and tap Turn On All.")
+                    Text("iOS only shows the permission screen once. To change access later, open the Health app → your profile picture → Apps → Tensile, and tap Turn On All.")
                 }
 
                 Section("About") {

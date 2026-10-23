@@ -22,7 +22,7 @@ struct ProgressPhotosView: View {
                     if photos.days.count >= 2 { compareCard }
                     analysisCard(weekly: $settings.weeklyPhotoAnalysis)
                     if !photos.days.isEmpty { timeline }
-                    Text("Photos are saved only inside WorkoutApp, encrypted on your iPhone, and never added to your Photos library. For the weekly analysis, the photos being compared are sent to Claude through the app's secure server for that one request and aren't stored there.")
+                    Text("Photos are saved only inside Tensile, encrypted on your iPhone, and never added to your Photos library. For the weekly analysis, the photos being compared are sent to Claude through the app's secure server for that one request and aren't stored there.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }

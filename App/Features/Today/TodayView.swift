@@ -185,7 +185,7 @@ private struct HealthAccessCard: View {
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
-            Text("If you already answered, open the Health app → your profile picture → Apps → WorkoutApp, and tap Turn On All.")
+            Text("If you already answered, open the Health app → your profile picture → Apps → Tensile, and tap Turn On All.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
             HStack {

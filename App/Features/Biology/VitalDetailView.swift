@@ -72,7 +72,7 @@ struct VitalDetailView: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                     if stat.value == nil && !hasHistory {
-                        Text("Nothing in Apple Health yet. If your watch records this, check that its app shares with Apple Health and that WorkoutApp can read it (Health app → profile → Apps → WorkoutApp).")
+                        Text("Nothing in Apple Health yet. If your watch records this, check that its app shares with Apple Health and that Tensile can read it (Health app → profile → Apps → Tensile).")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                     }

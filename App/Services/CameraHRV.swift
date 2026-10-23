@@ -191,7 +191,7 @@ final class CameraHRVModel {
         do {
             try await capture.start()
         } catch PPGCapture.CaptureError.notAllowed {
-            phase = .failed("Camera access is off. Turn it on in Settings → WorkoutApp → Camera.")
+            phase = .failed("Camera access is off. Turn it on in Settings → Tensile → Camera.")
             return
         } catch {
             phase = .failed("The camera couldn't start. Try again.")

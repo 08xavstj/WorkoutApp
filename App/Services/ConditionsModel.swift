@@ -255,7 +255,7 @@ final class LocationFinder {
         do {
             for try await update in CLLocationUpdate.liveUpdates() {
                 if update.authorizationDenied || update.authorizationDeniedGlobally {
-                    problem = "Location is off for WorkoutApp. Turn it on in Settings → Privacy → Location Services, or search for your city."
+                    problem = "Location is off for Tensile. Turn it on in Settings → Privacy → Location Services, or search for your city."
                     return nil
                 }
                 if let location = update.location {

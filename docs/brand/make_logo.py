@@ -1,19 +1,43 @@
-"""Draws the app icon (1024 px) and a preview of the logo mark.
+"""Draws the Tensile app icon (light, dark and tinted, 1024 px) and logo previews.
 
-The mark: a ring split into three gradient arcs, one per score (strain
-orange, recovery green, sleep blue), around a white disk with a heartbeat
-line. The same mark is drawn in SwiftUI by `AppLogoMark` (App/Design/AppLogo.swift).
+The mark is a "T" made from a loaded barbell: the bar flexes under load (the
+"whip" of a heavy lift, i.e. tensile strength), with a plate at each end and
+the stem of the T rising from the middle of the bar. On the light icon it is
+white on the app's strain-to-sleep gradient (butter, orange, pink, violet).
+
+The same geometry is drawn in SwiftUI by `TensileMark` (App/Design/AppLogo.swift).
+Keep the numbers in `GEOMETRY` in sync with it.
 
 Run: python3 docs/brand/make_logo.py
 """
 import math
 import os
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SIZE = 1024
 SS = 4  # supersampling
 W = SIZE * SS
+
+# Unit-square geometry, shared with TensileMark in Swift.
+GEOMETRY = {
+    "bar_start": (0.14, 0.40),
+    "bar_control": (0.50, 0.25),
+    "bar_end": (0.86, 0.40),
+    "bar_width": 0.07,
+    # Plates along the bar: (t on the curve, width, height). Mirrored on the right.
+    "plates": [(0.075, 0.085, 0.30), (0.145, 0.06, 0.21)],
+    "plate_corner": 0.035,
+    "stem_top": 0.30,
+    "stem_bottom": 0.82,
+    "stem_width": 0.13,
+}
+
+# The mark sits inside the icon's safe area (iOS rounds the corners).
+ICON_SCALE = 0.80
+ICON_OFFSET = (0.5 - 0.5 * ICON_SCALE, 0.5 - 0.52 * ICON_SCALE)
+
+GRADIENT = ["#FFC94A", "#FF7A1A", "#F0447A", "#5B5BF0"]  # strainLight, strain, lifting, sleep
 
 
 def hex_rgb(value):
@@ -26,115 +50,142 @@ def lerp(a, b, t):
 
 
 def ramp(stops, t):
-    """Color at t (0...1) along evenly spaced color stops."""
-    if t <= 0:
-        return stops[0]
-    if t >= 1:
-        return stops[-1]
+    t = min(max(t, 0), 1)
     scaled = t * (len(stops) - 1)
-    i = int(scaled)
+    i = min(int(scaled), len(stops) - 2)
     return lerp(stops[i], stops[i + 1], scaled - i)
 
 
-def background():
-    img = Image.new("RGB", (W, W), hex_rgb("#FFFFFF"))
-    px = ImageDraw.Draw(img)
-    top, bottom = hex_rgb("#FFFBF5"), hex_rgb("#F3F1FF")
-    for y in range(0, W, SS):
-        px.rectangle([0, y, W, y + SS], fill=lerp(top, bottom, y / W))
-    # Soft pastel blobs, like the tab headers.
-    blobs = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    bd = ImageDraw.Draw(blobs)
-    for (cx, cy, r, color, alpha) in [
-        (0.12, 0.10, 0.55, "#FFD3B0", 200),
-        (0.95, 0.20, 0.45, "#FFF0A6", 170),
-        (0.10, 0.95, 0.50, "#D9F5A6", 150),
-        (0.92, 0.92, 0.55, "#B9DEFF", 200),
-    ]:
-        x, y, rr = cx * W, cy * W, r * W
-        bd.ellipse([x - rr, y - rr, x + rr, y + rr], fill=hex_rgb(color) + (alpha,))
-    blobs = blobs.filter(ImageFilter.GaussianBlur(W * 0.12))
-    img = img.convert("RGBA")
-    img.alpha_composite(blobs)
-    return img
+def diagonal_gradient(stops):
+    """Top-left to bottom-right gradient."""
+    small = 256
+    img = Image.new("RGB", (small, small))
+    px = img.load()
+    rgb = [hex_rgb(s) for s in stops]
+    for y in range(small):
+        for x in range(small):
+            px[x, y] = ramp(rgb, (x + y) / (2 * (small - 1)))
+    return img.resize((W, W), Image.BICUBIC).convert("RGBA")
 
 
-def arc_layer(center, radius, width, arcs):
-    layer = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    r = width / 2
-    for start, end, stops in arcs:
-        steps = int(abs(end - start) * 8)
-        for k in range(steps + 1):
-            t = k / steps
-            angle = math.radians(start + (end - start) * t)
-            x = center[0] + radius * math.cos(angle)
-            y = center[1] + radius * math.sin(angle)
-            color = ramp(stops, t)
-            d.ellipse([x - r, y - r, x + r, y + r], fill=color + (255,))
-    return layer
+def quad(p0, p1, p2, t):
+    return tuple((1 - t) ** 2 * p0[i] + 2 * (1 - t) * t * p1[i] + t ** 2 * p2[i] for i in range(2))
 
 
-def pulse_mask(center, scale, width):
+def mark_mask(scale=ICON_SCALE, offset=ICON_OFFSET):
+    """White-on-black mask of the mark, in a W x W canvas."""
+    g = GEOMETRY
     mask = Image.new("L", (W, W), 0)
     d = ImageDraw.Draw(mask)
-    # A heartbeat: flat, small bump, tall spike, dip, flat.
-    shape = [(-1.0, 0.0), (-0.48, 0.0), (-0.34, -0.22), (-0.2, 0.0), (-0.08, 0.0),
-             (0.06, -0.78), (0.22, 0.62), (0.36, 0.0), (1.0, 0.0)]
-    points = [(center[0] + x * scale, center[1] + y * scale) for x, y in shape]
-    d.line(points, fill=255, width=int(width), joint="curve")
-    for p in (points[0], points[-1]):
-        d.ellipse([p[0] - width / 2, p[1] - width / 2, p[0] + width / 2, p[1] + width / 2], fill=255)
+
+    def P(pt):
+        return ((offset[0] + pt[0] * scale) * W, (offset[1] + pt[1] * scale) * W)
+
+    # Stem.
+    sw = g["stem_width"] * scale * W
+    x = P((0.5, 0))[0]
+    top, bottom = P((0, g["stem_top"]))[1], P((0, g["stem_bottom"]))[1]
+    d.rounded_rectangle([x - sw / 2, top, x + sw / 2, bottom], radius=sw / 2, fill=255)
+
+    # Flexed bar: discs along a quadratic curve.
+    r = g["bar_width"] * scale * W / 2
+    p0, p1, p2 = g["bar_start"], g["bar_control"], g["bar_end"]
+    for k in range(801):
+        cx, cy = P(quad(p0, p1, p2, k / 800))
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+
+    # Plates, square to the bar.
+    corner = g["plate_corner"] * scale * W
+    for t0, pw_u, ph_u in g["plates"]:
+        for t in (t0, 1 - t0):
+            pw, ph = pw_u * scale * W, ph_u * scale * W
+            a_pt, b_pt = quad(p0, p1, p2, t - 0.01), quad(p0, p1, p2, t + 0.01)
+            angle = math.degrees(math.atan2(b_pt[1] - a_pt[1], b_pt[0] - a_pt[0]))
+            size = int(max(pw, ph) * 1.6)
+            plate = Image.new("L", (size, size), 0)
+            pd = ImageDraw.Draw(plate)
+            c = size / 2
+            pd.rounded_rectangle([c - pw / 2, c - ph / 2, c + pw / 2, c + ph / 2], radius=corner, fill=255)
+            plate = plate.rotate(-angle, resample=Image.BICUBIC)
+            ex, ey = P(quad(p0, p1, p2, t))
+            mask.paste(255, (int(ex - size / 2), int(ey - size / 2)), plate)
     return mask
 
 
-def gradient_fill(stops, x0, x1):
-    """Horizontal gradient from x0 to x1 (flat colour outside)."""
-    img = Image.new("RGBA", (W, W))
-    d = ImageDraw.Draw(img)
-    for i in range(0, W, SS):
-        d.rectangle([i, 0, i + SS, W], fill=ramp(stops, (i - x0) / max(1, x1 - x0)) + (255,))
-    return img
+def finish(img, path):
+    img = img.resize((SIZE, SIZE), Image.LANCZOS)
+    img.convert("RGB").save(path)
+    print("wrote", os.path.relpath(path, ROOT))
 
 
-def mark(img, center, radius, width, disk=True):
-    gap = 15
-    arcs = [
-        (-90 + gap, 30 - gap, [hex_rgb("#FFC94A"), hex_rgb("#FF7A1A"), hex_rgb("#F0447A")]),
-        (30 + gap, 150 - gap, [hex_rgb("#C9EC4C"), hex_rgb("#22C36A")]),
-        (150 + gap, 270 - gap, [hex_rgb("#5CC8FF"), hex_rgb("#5B5BF0")]),
-    ]
-    ring = arc_layer(center, radius, width, arcs)
-    # Coloured glow under the ring.
-    glow = ring.copy().filter(ImageFilter.GaussianBlur(width * 0.45))
-    glow.putalpha(glow.getchannel("A").point(lambda a: int(a * 0.35)))
-    img.alpha_composite(glow)
-    img.alpha_composite(ring)
-    if disk:
-        inner = radius - width * 0.64
-        shadow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-        ImageDraw.Draw(shadow).ellipse(
-            [center[0] - inner, center[1] - inner + width * 0.18, center[0] + inner, center[1] + inner + width * 0.18],
-            fill=(30, 30, 60, 60))
-        shadow = shadow.filter(ImageFilter.GaussianBlur(width * 0.35))
-        img.alpha_composite(shadow)
-        ImageDraw.Draw(img).ellipse(
-            [center[0] - inner, center[1] - inner, center[0] + inner, center[1] + inner], fill=(255, 255, 255, 255))
-        scale = inner * 0.66
-        line = gradient_fill([hex_rgb("#FF9A1A"), hex_rgb("#F0447A"), hex_rgb("#5B5BF0")], center[0] - scale, center[0] + scale)
-        mask = pulse_mask(center, scale, width * 0.38)
-        img.paste(line, (0, 0), mask)
+def light_icon():
+    bg = diagonal_gradient(GRADIENT)
+    # A soft highlight top-left, like the pastel washes in the app.
+    glow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse([-0.25 * W, -0.35 * W, 0.65 * W, 0.45 * W], fill=(255, 255, 255, 90))
+    bg.alpha_composite(glow.filter(ImageFilter.GaussianBlur(W * 0.08)))
+    mask = mark_mask()
+    shadow = Image.new("RGBA", (W, W), (60, 20, 80, 0))
+    shadow.putalpha(mask.filter(ImageFilter.GaussianBlur(W * 0.018)).point(lambda v: v * 0.35))
+    bg.alpha_composite(shadow, (0, int(W * 0.012)))
+    white = Image.new("RGBA", (W, W), (255, 255, 255, 255))
+    bg.paste(white, (0, 0), mask)
+    return bg
 
 
-def main():
-    img = background()
-    mark(img, (W / 2, W / 2), W * 0.30, W * 0.115)
-    icon = img.convert("RGB").resize((SIZE, SIZE), Image.LANCZOS)
-    out = os.path.join(ROOT, "App/Assets.xcassets/AppIcon.appiconset/AppIcon.png")
-    icon.save(out)
-    icon.resize((512, 512), Image.LANCZOS).save(os.path.join(ROOT, "docs/brand/app-icon.png"))
-    print("wrote", out)
+def dark_icon():
+    bg = Image.new("RGBA", (W, W), hex_rgb("#0B0B0F") + (255,))
+    glow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse([0.15 * W, 0.15 * W, 0.85 * W, 0.85 * W], fill=hex_rgb("#F0447A") + (60,))
+    bg.alpha_composite(glow.filter(ImageFilter.GaussianBlur(W * 0.12)))
+    bg.paste(diagonal_gradient(GRADIENT), (0, 0), mark_mask())
+    return bg
+
+
+def tinted_icon():
+    # iOS tints a grayscale image; keep the mark bright on black.
+    bg = Image.new("RGBA", (W, W), (0, 0, 0, 255))
+    shade = diagonal_gradient(["#FFFFFF", "#BDBDBD"])
+    bg.paste(shade, (0, 0), mark_mask())
+    return bg
+
+
+def wordmark_preview():
+    """Mark plus "Tensile" on white, for docs."""
+    width, height = 1800 * 2, 600 * 2
+    img = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+    icon = light_icon().resize((height - 200, height - 200), Image.LANCZOS)
+    rounded = Image.new("L", icon.size, 0)
+    ImageDraw.Draw(rounded).rounded_rectangle([0, 0, icon.width, icon.height], radius=int(icon.width * 0.225), fill=255)
+    img.paste(icon, (100, 100), rounded)
+    font = None
+    for name in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/System/Library/Fonts/SFNSRounded.ttf"]:
+        if os.path.exists(name):
+            font = ImageFont.truetype(name, 420)
+            break
+    font = font or ImageFont.load_default()
+    text = Image.new("L", (width, height), 0)
+    ImageDraw.Draw(text).text((height + 40, height / 2), "Tensile", font=font, fill=255, anchor="lm")
+    grad = Image.new("RGBA", (width, height))
+    gp = grad.load()
+    rgb = [hex_rgb(s) for s in GRADIENT[1:]]
+    for x in range(width):
+        c = ramp(rgb, (x - height) / (width - height)) + (255,)
+        for y in range(0, height):
+            gp[x, y] = c
+    img.paste(grad, (0, 0), text)
+    img = img.resize((width // 2, height // 2), Image.LANCZOS)
+    path = os.path.join(ROOT, "docs/brand/logo.png")
+    img.convert("RGB").save(path)
+    print("wrote", os.path.relpath(path, ROOT))
 
 
 if __name__ == "__main__":
-    main()
+    out = os.path.join(ROOT, "App/Assets.xcassets/AppIcon.appiconset")
+    finish(light_icon(), os.path.join(out, "AppIcon.png"))
+    finish(dark_icon(), os.path.join(out, "AppIcon-Dark.png"))
+    finish(tinted_icon(), os.path.join(out, "AppIcon-Tinted.png"))
+    finish(light_icon(), os.path.join(ROOT, "docs/brand/app-icon.png"))
+    wordmark_preview()

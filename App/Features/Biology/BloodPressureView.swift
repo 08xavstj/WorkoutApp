@@ -271,7 +271,7 @@ struct BloodPressureEntrySheet: View {
             try await health.saveBloodPressure(systolic: Double(systolic), diastolic: Double(diastolic),
                                                pulse: pulse.map(Double.init), date: date, arm: arm)
         } catch {
-            errorMessage = "Couldn't save to Apple Health. Allow WorkoutApp to write blood pressure in the Health app (profile → Apps → WorkoutApp)."
+            errorMessage = "Couldn't save to Apple Health. Allow Tensile to write blood pressure in the Health app (profile → Apps → Tensile)."
             return
         }
         let category = HomeBloodPressure.category(systolic: Double(systolic), diastolic: Double(diastolic))

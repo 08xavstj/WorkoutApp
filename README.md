@@ -1,8 +1,10 @@
-# WorkoutApp
+# Tensile
+
+![Tensile](docs/brand/logo.png)
 
 An iPhone app in the style of Bevel: **Strain, Recovery and Sleep** scores from Apple Health, an **AI coach** you can chat with, plus a full **gym workout tracker** whose sessions count toward strain.
 
-> Working name. Pick your own name and icon before shipping. Don't use Bevel's or Whoop's name, logo or artwork.
+> The app is called **Tensile** (the repo and Xcode project keep the name WorkoutApp). The logo is a "T" made from a loaded barbell whose bar flexes under the weight; regenerate the icons with `python3 docs/brand/make_logo.py`. Before shipping, run a proper trademark search on the name. Don't use Bevel's or Whoop's name, logo or artwork.
 
 ## What's in v0.1
 

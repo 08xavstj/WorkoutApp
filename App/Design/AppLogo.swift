@@ -1,58 +1,77 @@
 import SwiftUI
 
-/// The app's logo mark: a ring of three gradient arcs (strain, recovery,
-/// sleep) around a white disk with a heartbeat line. Matches the app icon
-/// drawn by docs/brand/make_logo.py.
+/// Tensile's logo mark: a "T" made from a loaded barbell whose bar flexes
+/// under the weight, white on the app's orange-pink-violet gradient. Matches
+/// the app icon drawn by docs/brand/make_logo.py (same geometry).
 struct AppLogoMark: View {
     var size: CGFloat = 44
 
     var body: some View {
-        let width = size * 0.16
-        let gap = 15.0 / 360
-        ZStack {
-            arc(from: 0 + gap, to: 1.0 / 3 - gap, colors: [Theme.strainLight, Theme.strain, Theme.lifting], width: width)
-            arc(from: 1.0 / 3 + gap, to: 2.0 / 3 - gap, colors: [Theme.recoveryHighLight, Theme.recoveryHigh], width: width)
-            arc(from: 2.0 / 3 + gap, to: 1 - gap, colors: [Theme.sleepLight, Theme.sleep], width: width)
-            Circle()
-                .fill(Color.white)
-                .padding(width * 1.25)
-                .shadow(color: Color.black.opacity(0.12), radius: size * 0.04, y: size * 0.02)
-            HeartbeatLine()
-                .stroke(
-                    LinearGradient(colors: [Theme.strain, Theme.lifting, Theme.sleep], startPoint: .leading, endPoint: .trailing),
-                    style: StrokeStyle(lineWidth: max(1.5, size * 0.055), lineCap: .round, lineJoin: .round)
-                )
-                .padding(size * 0.3)
-        }
-        .padding(width / 2)
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+            .fill(LinearGradient(colors: Self.gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+            .overlay {
+                TensileMark()
+                    .fill(Color.white)
+                    .shadow(color: Color.black.opacity(0.18), radius: size * 0.02, y: size * 0.012)
+                    .padding(size * 0.1)
+                    .offset(y: -size * 0.016)
+            }
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 
-    /// One arc, as a fraction of the circle starting at 12 o'clock.
-    private func arc(from: Double, to: Double, colors: [Color], width: CGFloat) -> some View {
-        Circle()
-            .trim(from: from, to: to)
-            .stroke(
-                AngularGradient(colors: colors, center: .center, startAngle: .degrees(360 * from), endAngle: .degrees(360 * to)),
-                style: StrokeStyle(lineWidth: width, lineCap: .round)
-            )
-            .rotationEffect(.degrees(-90))
-            .shadow(color: (colors.last ?? .clear).opacity(0.35), radius: width * 0.4)
-    }
+    /// Strain yellow and orange, lifting pink, sleep violet (fixed, so the
+    /// mark looks the same in light and dark mode, like the icon).
+    static let gradient: [Color] = [
+        Color(red: 1.0, green: 0.788, blue: 0.290),
+        Color(red: 1.0, green: 0.478, blue: 0.102),
+        Color(red: 0.941, green: 0.267, blue: 0.478),
+        Color(red: 0.357, green: 0.357, blue: 0.941),
+    ]
 }
 
-/// Flat line, small bump, tall spike, dip, flat.
-nonisolated struct HeartbeatLine: Shape {
+/// The barbell "T", in a unit square. Keep the numbers in sync with
+/// `GEOMETRY` in docs/brand/make_logo.py.
+nonisolated struct TensileMark: Shape {
     func path(in rect: CGRect) -> Path {
-        let points: [(Double, Double)] = [
-            (-1.0, 0.0), (-0.48, 0.0), (-0.34, -0.22), (-0.2, 0.0), (-0.08, 0.0),
-            (0.06, -0.78), (0.22, 0.62), (0.36, 0.0), (1.0, 0.0)
-        ]
+        let side = min(rect.width, rect.height)
+        let origin = CGPoint(x: rect.midX - side / 2, y: rect.midY - side / 2)
+        func point(_ x: Double, _ y: Double) -> CGPoint {
+            CGPoint(x: origin.x + x * side, y: origin.y + y * side)
+        }
+        let start = (x: 0.14, y: 0.40), control = (x: 0.50, y: 0.25), end = (x: 0.86, y: 0.40)
+        func onBar(_ t: Double) -> (x: Double, y: Double) {
+            let a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t
+            return (a * start.x + b * control.x + c * end.x, a * start.y + b * control.y + c * end.y)
+        }
+
         var path = Path()
-        for (index, point) in points.enumerated() {
-            let p = CGPoint(x: rect.midX + point.0 * rect.width / 2, y: rect.midY + point.1 * rect.height / 2)
-            if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        // Stem.
+        let stemWidth = 0.13
+        path.addRoundedRect(
+            in: CGRect(x: origin.x + (0.5 - stemWidth / 2) * side, y: origin.y + 0.30 * side,
+                       width: stemWidth * side, height: 0.52 * side),
+            cornerSize: CGSize(width: stemWidth * side / 2, height: stemWidth * side / 2)
+        )
+        // Flexed bar.
+        var bar = Path()
+        bar.move(to: point(start.x, start.y))
+        bar.addQuadCurve(to: point(end.x, end.y), control: point(control.x, control.y))
+        // Union rather than addPath, so overlapping pieces can't cancel out when filled.
+        path = path.union(bar.strokedPath(StrokeStyle(lineWidth: 0.07 * side, lineCap: .round)))
+        // Plates, square to the bar: (t, width, height), mirrored on the right.
+        for (t0, width, height) in [(0.075, 0.085, 0.30), (0.145, 0.06, 0.21)] {
+            for t in [t0, 1 - t0] {
+                let a = onBar(t - 0.01), b = onBar(t + 0.01), centre = onBar(t)
+                let angle = atan2(b.y - a.y, b.x - a.x)
+                let plate = Path(
+                    roundedRect: CGRect(x: -width * side / 2, y: -height * side / 2, width: width * side, height: height * side),
+                    cornerRadius: 0.035 * side
+                )
+                let transform = CGAffineTransform(rotationAngle: angle)
+                    .concatenating(CGAffineTransform(translationX: origin.x + centre.x * side, y: origin.y + centre.y * side))
+                path = path.union(plate.applying(transform))
+            }
         }
         return path
     }
@@ -62,12 +81,12 @@ nonisolated struct HeartbeatLine: Shape {
 struct AppLogoHeader: View {
     var body: some View {
         HStack(spacing: 8) {
-            AppLogoMark(size: 34)
-            Text("WorkoutApp")
-                .font(.system(.headline, design: .rounded).weight(.heavy))
-                .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting, Theme.sleep], startPoint: .leading, endPoint: .trailing))
+            AppLogoMark(size: 30)
+            Text("Tensile")
+                .font(.system(.title3, design: .rounded).weight(.heavy))
+                .foregroundStyle(LinearGradient(colors: Array(AppLogoMark.gradient.dropFirst()), startPoint: .leading, endPoint: .trailing))
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("WorkoutApp")
+        .accessibilityLabel("Tensile")
     }
 }
