@@ -41,78 +41,33 @@ jobs:
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
 
-      - name: Build for that simulator
+      - name: Tap the check-in notifications in a UI test
         run: |
-          xcodebuild build \
+          mkdir -p logs
+          set +e
+          xcodebuild test \
             -project WorkoutApp.xcodeproj \
             -scheme WorkoutApp \
             -destination "id=$UDID" \
             -configuration Debug \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
-          grep -q "BUILD SUCCEEDED" build.log
-
-      - name: Open the check-ins and look for crashes
-        run: |
-          APP=build/Build/Products/Debug-iphonesimulator/WorkoutApp.app
-          BUNDLE=com.lontraindustries.workoutapp
-          xcrun simctl install "$UDID" "$APP"
-          xcrun simctl privacy "$UDID" grant all "$BUNDLE" || true
-          mkdir -p logs
-          xcrun simctl spawn "$UDID" log stream --level debug --style compact \
-            --predicate 'process == "WorkoutApp"' > logs/app.log 2>&1 &
-          LOGPID=$!
-          for kind in morning evening; do
-            echo "=== $kind ==="
-            xcrun simctl terminate "$UDID" "$BUNDLE" || true
-            # -hasOnboarded YES skips onboarding through UserDefaults' argument domain.
-            xcrun simctl launch "$UDID" "$BUNDLE" -hasOnboarded YES
-            sleep 12
-            xcrun simctl openurl "$UDID" "workoutapp://checkin/$kind"
-            sleep 12
-            if xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE"; then
-              echo "App still running after opening the $kind check-in."
-            else
-              echo "APP IS NOT RUNNING after opening the $kind check-in (crashed?)."
-            fi
-            xcrun simctl io "$UDID" screenshot "logs/$kind.png" || true
-          done
-          # Cold launch straight into a check-in, like tapping a notification while the app is closed.
-          for kind in morning evening; do
-            echo "=== cold launch: $kind (console) ==="
-            xcrun simctl terminate "$UDID" "$BUNDLE" || true
-            sleep 2
-            # --console streams the app's stdout/stderr (Swift fatal errors) until it exits.
-            ( xcrun simctl launch --console-pty "$UDID" "$BUNDLE" -hasOnboarded YES -openCheckInAtLaunch "$kind" > "logs/console-$kind.txt" 2>&1 & echo $! > logs/console.pid )
-            sleep 25
-            kill "$(cat logs/console.pid)" 2>/dev/null || true
-            tail -c 6000 "logs/console-$kind.txt"
-            if xcrun simctl spawn "$UDID" launchctl list > logs/launchctl.txt 2>/dev/null && grep -q "$BUNDLE" logs/launchctl.txt; then
-              echo "App still running after cold launch into the $kind check-in."
-            else
-              echo "APP IS NOT RUNNING after cold launch into the $kind check-in."
-            fi
-            xcrun simctl io "$UDID" screenshot "logs/cold-$kind.png" || true
-          done
-          echo "=== cold launch through openurl ==="
-          xcrun simctl terminate "$UDID" "$BUNDLE" || true
-          sleep 2
-          xcrun simctl openurl "$UDID" "workoutapp://checkin/morning"
-          sleep 20
-          xcrun simctl spawn "$UDID" launchctl list > logs/launchctl.txt 2>/dev/null || true
-          grep "$BUNDLE" logs/launchctl.txt || echo "Not running after openurl cold launch."
-          kill $LOGPID || true
-          sleep 20
+            -resultBundlePath logs/ui.xcresult \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            > logs/uitest.log 2>&1
+          STATUS=$?
+          set -e
+          grep -E "error:|Test Case|crash|Crash|failed|passed|XCTAssert|isn't running|no longer running|didn't" logs/uitest.log | tail -80
           echo "=== crash reports ==="
-          find ~/Library/Logs/DiagnosticReports ~/Library/Logs/CrashReporter -mmin -40 \( -name "*WorkoutApp*" -o -name "*.ips" \) -print 2>/dev/null | head -20
-          for f in $(find ~/Library/Logs/DiagnosticReports -mmin -40 -name "*WorkoutApp*" 2>/dev/null | head -3); do
-            echo "--- $f"; head -c 30000 "$f"; echo
+          for f in $(find ~/Library/Logs/DiagnosticReports -mmin -60 -name "*WorkoutApp*" 2>/dev/null | head -3); do
+            echo "--- $f"; head -c 40000 "$f"; echo
           done
-          echo "=== system log mentioning WorkoutApp (last 3 min) ==="
-          xcrun simctl spawn "$UDID" log show --last 3m --style compact \
-            --predicate 'process == "WorkoutApp" OR eventMessage CONTAINS[c] "workoutapp"' 2>/dev/null \
-            | grep -iE "fatal|crash|terminat|exit|assert|executor|isolat|exception|signal|abort|jetsam|killed|watchdog" | tail -80 || true
+          echo "=== crash logs inside the test results ==="
+          xcrun xcresulttool get test-results tests --path logs/ui.xcresult 2>/dev/null | head -c 20000 || true
+          find logs/ui.xcresult -iname "*crash*" -o -iname "*.ips" 2>/dev/null | head
+          for f in $(find logs/ui.xcresult -type f \( -iname "*crash*" -o -iname "*.ips" \) 2>/dev/null | head -3); do
+            echo "--- $f"; head -c 40000 "$f"; echo
+          done
+          echo "xcodebuild test exit status: $STATUS"
 
       - name: Keep screenshots and logs
         if: always()

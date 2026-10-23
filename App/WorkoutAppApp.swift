@@ -55,6 +55,11 @@ struct WorkoutAppApp: App {
            let url = URL(string: "workoutapp://checkin/\(kind)") {
             router.open(url)
         }
+        // UI tests: `-scheduleTestCheckIn morning` schedules a real check-in
+        // notification 10 seconds from now, the same as the daily reminder.
+        if let kind = UserDefaults.standard.string(forKey: "scheduleTestCheckIn") {
+            Task { await Reminders.scheduleTestCheckIn(kind: kind) }
+        }
         #endif
         Reminders.registerCategories()
         do {

@@ -146,6 +146,22 @@ nonisolated enum Reminders {
         }
     }
 
+    #if DEBUG
+    /// For UI tests: the same notification as the daily check-in reminder, in 10 seconds.
+    static func scheduleTestCheckIn(kind: String) async {
+        guard await requestPermission() else { return }
+        let content = UNMutableNotificationContent()
+        let morning = kind == "morning"
+        content.title = morning ? "Morning check-in" : "Evening check-in"
+        content.body = morning ? "Last night's HRV and how you feel. 30 seconds." : "Caffeine, drinks and stress today. 45 seconds."
+        content.userInfo = ["link": "workoutapp://checkin/\(morning ? "morning" : "evening")"]
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: "checkin|\(morning ? "m" : "e")|test", content: content,
+                                            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 10, repeats: false))
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+    #endif
+
     // MARK: Medications
 
     /// Snoozed reminders use their own prefix so rescheduling doesn't remove them.
