@@ -3,8 +3,9 @@ import XCTest
 /// Taps a real check-in notification and checks the app opens the check-in
 /// instead of crashing, both while the app is in the background and after it
 /// has been closed.
+@MainActor
 final class NotificationTapTests: XCTestCase {
-    override func setUp() {
+    override func setUp() async throws {
         continueAfterFailure = false
     }
 
