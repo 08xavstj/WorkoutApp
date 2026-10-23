@@ -303,18 +303,19 @@ struct ScalePicker: View {
             HStack(spacing: 6) {
                 ForEach(Array(range), id: \.self) { number in
                     let selected = value == number
-                    Button {
-                        value = selected ? nil : number
-                    } label: {
-                        Text("\(number)")
-                            .font(.subheadline.weight(.bold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .foregroundStyle(selected ? .white : Theme.primaryText)
-                            .background(selected ? AnyShapeStyle(color) : AnyShapeStyle(Theme.cardRaised), in: .rect(cornerRadius: 9))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(labels.count == range.count ? "\(number), \(labels[number - range.lowerBound])" : "\(number)")
-                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    // A tap gesture, not a Button: a Form row full of buttons
+                    // can pass a tap to the wrong one.
+                    Text("\(number)")
+                        .font(.subheadline.weight(.bold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(selected ? .white : Theme.primaryText)
+                        .background(selected ? AnyShapeStyle(color) : AnyShapeStyle(Theme.cardRaised), in: .rect(cornerRadius: 9))
+                        .contentShape(.rect(cornerRadius: 9))
+                        .onTapGesture { value = selected ? nil : number }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(labels.count == range.count ? "\(number), \(labels[number - range.lowerBound])" : "\(number)")
+                        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityAction { value = selected ? nil : number }
                 }
             }
             if let endLabels {
@@ -353,20 +354,27 @@ struct ChipFlow<Option: Hashable>: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
             ForEach(options, id: \.self) { option in
                 let selected = selection.contains(option)
-                Button {
-                    if selected { selection.removeAll { $0 == option } } else { selection.append(option) }
-                } label: {
-                    Text(label(option))
-                        .font(.caption.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity, minHeight: 32)
-                        .foregroundStyle(selected ? .white : Theme.primaryText)
-                        .background(selected ? color : Theme.cardRaised, in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
+                // A tap gesture, not a Button: in a Form row, a tap on one
+                // button (or on the row around them) can trigger another, which
+                // ticked symptoms nobody chose.
+                Text(label(option))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .foregroundStyle(selected ? .white : Theme.primaryText)
+                    .background(selected ? color : Theme.cardRaised, in: .capsule)
+                    .contentShape(.capsule)
+                    .onTapGesture { toggle(option) }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(label(option))
+                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { toggle(option) }
             }
         }
+    }
+
+    private func toggle(_ option: Option) {
+        if selection.contains(option) { selection.removeAll { $0 == option } } else { selection.append(option) }
     }
 }

@@ -58,6 +58,7 @@ struct IllnessAlertCard: View {
             Text("Rest mode pauses strain targets and workout nudges. Not a diagnosis: see a doctor if you feel unwell or it lasts.")
                 .font(.caption2)
                 .foregroundStyle(Theme.secondaryText)
+            ReportedSymptomsRow()
         }
         .card(tint: color)
     }
@@ -73,12 +74,38 @@ struct IllnessAlertCard: View {
                 Text(alert.message)
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
+                ReportedSymptomsRow()
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
-        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Says which symptoms this morning's check-in has, with a button to clear
+/// them if that's wrong.
+private struct ReportedSymptomsRow: View {
+    @Environment(CheckInStore.self) private var checkIns
+
+    var body: some View {
+        if let morning = checkIns.morning(), morning.isSick {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("This morning's check-in: \(morning.symptoms.map(\.rawValue).joined(separator: ", ").lowercased()).")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                Spacer(minLength: 4)
+                Button("I feel fine") {
+                    var cleared = morning
+                    cleared.symptoms = []
+                    checkIns.save(cleared)
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(.top, 4)
+        }
     }
 }
 
