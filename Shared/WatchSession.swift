@@ -151,6 +151,8 @@ nonisolated enum WatchMessage {
     static let command = "command"
     static let request = "request"
     static let summary = "summary"
+    /// `WatchFaceData` for the complications (phone → Watch).
+    static let faceData = "faceData"
 
     static func encode<T: Encodable>(_ value: T) -> Data? {
         try? JSONEncoder().encode(value)

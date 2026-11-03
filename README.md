@@ -65,6 +65,8 @@ Tensile has a Watch app for lifting days. It shows the session running on your i
 
 The Watch's workout is the single record. Tap **Start on Apple Watch** from the workout's menu on the phone (or start the session from the Watch) and the Watch saves the one `HKWorkout` for that session with its heart rate and calories; the phone then doesn't save a second one. AirPods heart rate still streams into Apple Health as before and is merged with the watch's. If the Watch starts a workout with no session on the phone, the phone creates one ("Watch workout, N min") when the summary arrives, and if the phone is out of reach the Watch keeps recording and queues what you did until it reconnects.
 
+Watch face complications: long-press the watch face → **Edit** → swipe to **Complications** → tap a slot → **Tensile**. "Recovery & strain" fits a round subdial (on Wayfinder, the bottom right): recovery in the middle, coloured by band (blue easy day, amber normal, green recovered), with today's strain filling the orange ring and today's target marked as a thin arc outside it; it also fits a corner or the rectangular slot. "Next session" fits a corner ("Push 6 PM", "Rest day", or the next one, like "Tue Pull", once today's is done), a round slot or the inline line. The iPhone sends the numbers whenever it refreshes your scores (they show "--" until it has today's), and the next session moves on by itself. Signing: the complications are a widget extension (`<your app id>.watchkitapp.widgets`) that shares data with the Watch app through the App Group `group.com.lontraindustries.workoutapp`. Automatic signing adds it; if Xcode shows an App Group error, open Signing & Capabilities for **TensileWatch** and **TensileWatchWidgets**, add App Groups if it's missing, and tick `group.com.lontraindustries.workoutapp`.
+
 Installing: the Watch app ships inside the iPhone app, so it installs with it when "Automatic app install" is on in the Watch app on your iPhone; otherwise open the Watch app → **Available Apps** → Tensile. Signing: it uses the same team and the bundle ID `<your app id>.watchkitapp` (set by `scripts/set-signing.sh`; if you set signing before the Watch app existed, run the script again so `COMPANION_APP_BUNDLE_IDENTIFIER` is written). Xcode's automatic signing creates the Watch provisioning profile the first time you run on a device.
 
 ## Connect a Garmin watch
@@ -119,6 +121,7 @@ App/                        iPhone app (SwiftUI + SwiftData)
   Features/                 Today, Workout, Coach, Settings screens
   Resources/exercises.json  Exercise library (free-exercise-db, public domain)
 Watch/                      Apple Watch app (SwiftUI + HealthKit + WatchConnectivity)
+WatchWidgets/               Apple Watch complications (WidgetKit)
 Shared/                     Code the app, widget and Watch share (WatchSession is the wrist's session model)
 Packages/AppCore/           Strain/recovery/sleep math + tests (no UI, no HealthKit)
 supabase/functions/coach/   Claude proxy (Deno/TypeScript)

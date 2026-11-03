@@ -26,6 +26,8 @@ Widget/Info.plist
 Widget/WorkoutWidget.entitlements
 Watch/Info.plist
 Watch/TensileWatch.entitlements
+WatchWidgets/Info.plist
+WatchWidgets/TensileWatchWidgets.entitlements
 
 # Your Apple team + bundle ID (written by scripts/set-signing.sh)
 Config/Signing.local.xcconfig

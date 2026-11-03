@@ -326,6 +326,11 @@ struct RootView: View {
             recovery: metrics.recovery?.score,
             strain: metrics.strain?.strain
         ))
+        // [Watch complications] Recovery, strain and the next planned session for the watch face (`WatchFaceData`).
+        do {
+            let lastWorkoutEnd = sessions.lazy.compactMap(\.endedAt).max()
+            WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd)
+        }
     }
 
     private func analyzeProgressPhotos() async {

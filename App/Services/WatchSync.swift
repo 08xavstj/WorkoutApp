@@ -31,6 +31,9 @@ final class WatchSync: NSObject {
     @ObservationIgnored private var launcher: WorkoutLauncher?
     @ObservationIgnored private var health: HealthKitClient?
     @ObservationIgnored private var lastSnapshot: WatchSession?
+    /// The complications' data as last sent, and when.
+    @ObservationIgnored private var lastFace: WatchFaceData?
+    @ObservationIgnored private var lastFaceSentAt = Date.distantPast
 
     /// Called once from the root view, so commands can reach the database.
     func configure(context: ModelContext, gym: GymStore, launcher: WorkoutLauncher, health: HealthKitClient?) {
@@ -127,7 +130,16 @@ final class WatchSync: NSObject {
         guard let data = WatchMessage.encode(snapshot) else { return }
         deliver(key: WatchMessage.snapshot, data: data, queued: false)
         // The latest state also waits for the Watch app if it isn't running.
-        try? connection?.updateApplicationContext([WatchMessage.snapshot: data])
+        updateContext(key: WatchMessage.snapshot, data: data)
+    }
+
+    /// The application context is one dictionary: replaces one key and keeps
+    /// the others (the session snapshot and the complications' data).
+    private func updateContext(key: String, data: Data) {
+        guard let connection, connection.activationState == .activated else { return }
+        var context = connection.applicationContext
+        context[key] = data
+        try? connection.updateApplicationContext(context)
     }
 
     private func sendRequest(_ request: WatchRequest) {
@@ -144,6 +156,63 @@ final class WatchSync: NSObject {
             }
         } else if queued {
             connection.transferUserInfo([key: data])
+        }
+    }
+
+    // MARK: Complications
+
+    /// Sends today's recovery, strain and planned sessions to the Watch's
+    /// complications. Called after every metrics refresh; sends only when
+    /// something on the face changed, or every 30 minutes.
+    func updateFace(metrics: DailyMetricsModel, plans: WeeklyPlanStore, lastWorkoutEnd: Date?, now: Date = .now) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let horizon = today.addingTimeInterval(8 * 86_400)
+        // From the start of today, so today's session stays on the face (done or not).
+        let slots = plans.upcomingSlots(now: today)
+            .filter { $0.start < horizon }
+            .map { slot in
+                WatchFaceData.Slot(start: slot.start, title: slot.day.focus.title,
+                                   shortTitle: slot.day.focus.shortTitle, symbol: Self.symbol(for: slot.day.focus))
+            }
+        let target = metrics.targetStrain
+        updateFace(WatchFaceData(
+            recovery: metrics.recovery?.score,
+            band: metrics.recovery?.status.rawValue,
+            calibrating: metrics.recovery.map { !$0.isCalibrated } ?? false,
+            strain: metrics.strain?.strain,
+            targetLower: target?.lowerBound,
+            targetUpper: target?.upperBound,
+            easyDay: metrics.trainEasyToday,
+            slots: slots,
+            lastWorkoutEnd: lastWorkoutEnd,
+            updated: now
+        ))
+    }
+
+    func updateFace(_ data: WatchFaceData) {
+        guard let connection, connection.activationState == .activated,
+              connection.isPaired, connection.isWatchAppInstalled else { return }
+        let changed = lastFace.map { !data.looksSame(as: $0) } ?? true
+        guard changed || data.updated.timeIntervalSince(lastFaceSentAt) >= 30 * 60 else { return }
+        guard let encoded = WatchMessage.encode(data) else { return }
+        lastFace = data
+        lastFaceSentAt = data.updated
+        // A change wakes the Watch app in the background while a Tensile
+        // complication is on the face (about 50 of these a day).
+        if changed, connection.isComplicationEnabled, connection.remainingComplicationUserInfoTransfers > 3 {
+            connection.transferCurrentComplicationUserInfo([WatchMessage.faceData: encoded])
+        }
+        // The latest data also waits in the context for the next time the Watch app runs.
+        updateContext(key: WatchMessage.faceData, data: encoded)
+    }
+
+    /// SF Symbol for a planned session's focus.
+    private static func symbol(for focus: WorkoutFocus) -> String {
+        switch focus {
+        case .legs, .lower: "figure.strengthtraining.functional"
+        case .fullBody: "figure.strengthtraining.traditional"
+        case .push, .pull, .upper: "dumbbell.fill"
         }
     }
 

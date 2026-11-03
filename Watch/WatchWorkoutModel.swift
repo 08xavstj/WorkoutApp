@@ -201,6 +201,11 @@ final class WatchWorkoutModel: NSObject {
         self.summary = summary
         endedAt = end
         phase = .ended
+        // Today's planned session is done: the "next session" complication moves on.
+        // (10 minutes is the app's own cut-off so a quick test recording doesn't count.)
+        if workout != nil, end.timeIntervalSince(startedAt ?? end) >= 10 * 60 {
+            WatchComplications.workoutEnded(at: end)
+        }
         self.workoutSession = nil
         self.builder = nil
         clearRest()
@@ -474,6 +479,10 @@ extension WatchWorkoutModel: WCSessionDelegate {
         let snapshot = WatchMessage.decode(WatchSession.self, from: session.receivedApplicationContext, key: WatchMessage.snapshot)
         let reachable = session.isReachable
         Task { @MainActor in self.activated(snapshot: snapshot, reachable: reachable) }
+        // The complications' latest data waits there too.
+        if let face = WatchMessage.decode(WatchFaceData.self, from: session.receivedApplicationContext, key: WatchMessage.faceData) {
+            Task { @MainActor in WatchComplications.store(face) }
+        }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
@@ -500,6 +509,10 @@ extension WatchWorkoutModel: WCSessionDelegate {
         }
         if let request = WatchMessage.decode(WatchRequest.self, from: payload, key: WatchMessage.request) {
             Task { @MainActor in self.handle(request) }
+        }
+        // Complication data: by message, context, or `transferCurrentComplicationUserInfo` (arrives as user info).
+        if let face = WatchMessage.decode(WatchFaceData.self, from: payload, key: WatchMessage.faceData) {
+            Task { @MainActor in WatchComplications.store(face) }
         }
     }
 }

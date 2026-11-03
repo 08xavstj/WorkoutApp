@@ -143,22 +143,36 @@ targets:
           enabled: 1
     sources:
       - path: Watch
-      # Only the session model is shared: the other Shared files need ActivityKit.
+      # Only the session model and the complications' data are shared: the
+      # other Shared files need ActivityKit.
       - path: Shared/WatchSession.swift
+      - path: Shared/WatchFaceData.swift
     dependencies:
       - sdk: HealthKit.framework
       - sdk: WatchConnectivity.framework
       - sdk: SwiftUI.framework
+      - sdk: WidgetKit.framework
+      # Watch face complications, embedded in the Watch app (PlugIns).
+      - target: TensileWatchWidgets
+        embed: true
     entitlements:
       path: Watch/TensileWatch.entitlements
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
+        # Shares the complications' data with TensileWatchWidgets.
+        com.apple.security.application-groups:
+          - group.com.lontraindustries.workoutapp
     info:
       path: Watch/Info.plist
       properties:
         CFBundleDisplayName: Tensile
         WKApplication: true
+        # Complication taps open tensile://start.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.lontraindustries.workoutapp.watchkitapp
+            CFBundleURLSchemes:
+              - tensile
         # The iPhone app's bundle ID (Config/Base.xcconfig, or Signing.local.xcconfig).
         WKCompanionAppBundleIdentifier: $(COMPANION_APP_BUNDLE_IDENTIFIER)
         WKBackgroundModes:
@@ -177,6 +191,41 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: ""
         TARGETED_DEVICE_FAMILY: "4"
+
+  # Watch face complications (WidgetKit): recovery + strain, and the next
+  # planned session. Reads what the Watch app stores in the App Group.
+  TensileWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    sources:
+      - path: WatchWidgets
+      - path: Shared/WatchFaceData.swift
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    entitlements:
+      path: WatchWidgets/TensileWatchWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.lontraindustries.workoutapp
+    info:
+      path: WatchWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Tensile
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        SDKROOT: watchos
+        # The app's bundle ID (from Config) plus ".watchkitapp.widgets".
+        PRODUCT_BUNDLE_IDENTIFIER: $(inherited).watchkitapp.widgets
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: ""
+        ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME: ""
 
   # UI tests (run in CI on a simulator).
   WorkoutAppUITests:
