@@ -132,7 +132,7 @@ final class BodyMeasurementsStore {
 
     /// Yearly, or sooner when home blood pressure has turned elevated.
     func stopBangDue(bloodPressureElevated: Bool = false) -> Bool {
-        StopBang.isDue(lastAnswered: saved.stopBang?.date, lastAnswers: saved.stopBang?.answers ?? [],
+        StopBang.isDue(lastAnswered: saved.stopBang?.date, lastAnswers: saved.stopBang?.answers ?? [:],
                        bloodPressureElevated: bloodPressureElevated)
     }
 
