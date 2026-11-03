@@ -81,7 +81,7 @@ struct CardioFitnessNormTests {
         #expect(abs(CardioFitness.norm(age: 25, sex: .male) - 54.4) < 0.001)
         #expect(abs(CardioFitness.norm(age: 35, sex: .male) - 50.4) < 0.001)
         #expect(abs(CardioFitness.norm(age: 45, sex: .female) - 37.0) < 0.001)
-        #expect(CardioFitness.norm(age: 120, sex: .male) == 15)
+        #expect(CardioFitness.norm(age: 130, sex: .male) == 15) // the floor
     }
 
     @Test func fitnessAgeIsTheAgeWithYourAverage() {
