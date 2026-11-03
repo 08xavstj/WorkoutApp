@@ -193,13 +193,7 @@ struct RootView: View {
         .sheet(item: $router.checkIn, onDismiss: scheduleCheckInReminders) { kind in
             CheckInView(kind: kind)
         }
-        // The weekly loop: Monday review (workoutapp://review) and this week's plan (workoutapp://plan).
-        .sheet(isPresented: $router.showWeeklyReview) {
-            WeeklyReviewView()
-        }
-        .sheet(isPresented: $router.showWeeklyPlan) {
-            WeeklyPlanView()
-        }
+        .modifier(WeeklySheets(router: router))
         .sheet(item: $launcher.builderRequest) { request in
             WorkoutBuilderView(initialFocus: request.focus, initialMinutes: request.minutes)
         }
@@ -244,31 +238,19 @@ struct RootView: View {
                 }
             }
         }
-        .onChange(of: router.dosesVersion) { medications.reload() }
-        .onChange(of: router.openWorkout) {
-            if let active = sessions.first(where: \.isActive) { launcher.activeSession = active }
-        }
-        .onChange(of: settings.hrvReminderOn) { scheduleHRVReminder() }
-        .onChange(of: settings.hrvReminderMinutes) { scheduleHRVReminder() }
-        .onChange(of: settings.checkInRemindersOn) { scheduleCheckInReminders() }
-        .onChange(of: settings.goals) { Task { await refreshMetrics() } }
-        .onChange(of: settings.restModeUntil) { metrics.restMode = settings.isRestMode }
-        .onChange(of: settings.sleepNeedHours) { Task { await refreshMetrics() } }
-        .onChange(of: settings.morningCheckInMinutes) { scheduleCheckInReminders() }
-        .onChange(of: settings.eveningCheckInMinutes) { scheduleCheckInReminders() }
-        .onChange(of: settings.workoutRemindersOn) { scheduleWorkoutReminders() }
-        .onChange(of: weeklyPlans.plans) {
-            // A saved plan is a fresh commitment: paused workout reminders come back.
-            Reminders.resumeWorkoutReminders()
-            scheduleWorkoutReminders()
-        }
-        .onChange(of: finishedSessionCount) {
-            Task { await refreshMetrics() }
-        }
-        .onChange(of: hrvReadings.map(\.milliseconds)) {
-            scheduleCheckInReminders() // a typed HRV can complete the morning check-in
-            Task { await refreshMetrics() }
-        }
+        // Settings and data changes, in their own modifier so the body stays
+        // small enough for the type checker.
+        .modifier(SettingsReactions(
+            settings: settings, router: router, plans: weeklyPlans.plans,
+            finishedSessionCount: finishedSessionCount, hrvValues: hrvReadings.map(\.milliseconds),
+            reloadMedications: { medications.reload() },
+            openWorkout: { if let active = sessions.first(where: \.isActive) { launcher.activeSession = active } },
+            refresh: { Task { await refreshMetrics() } },
+            scheduleHRV: scheduleHRVReminder,
+            scheduleCheckIns: scheduleCheckInReminders,
+            scheduleWorkouts: scheduleWorkoutReminders,
+            setRestMode: { metrics.restMode = settings.isRestMode }
+        ))
     }
 
     /// UI tests pass `-skipHealthPrompt YES` to act like a phone that has
@@ -446,6 +428,86 @@ private struct PendingLinkOpener: ViewModifier {
             }
             .onChange(of: router.checkIn) { _, kind in
                 Logger.diagnostics.notice("checkIn changed to \(kind?.rawValue ?? "nil", privacy: .public)")
+            }
+    }
+}
+
+/// The weekly loop's sheets: Monday review (workoutapp://review) and this
+/// week's plan (workoutapp://plan).
+private struct WeeklySheets: ViewModifier {
+    let router: AppRouter
+
+    func body(content: Content) -> some View {
+        @Bindable var router = router
+        content
+            .sheet(isPresented: $router.showWeeklyReview) { WeeklyReviewView() }
+            .sheet(isPresented: $router.showWeeklyPlan) { WeeklyPlanView() }
+    }
+}
+
+/// Reacts to settings and data changes (reminders, refreshes), kept out of
+/// `RootView.body` so the compiler can type-check it.
+private struct SettingsReactions: ViewModifier {
+    let settings: UserSettings
+    let router: AppRouter
+    let plans: [WeeklyPlan]
+    let finishedSessionCount: Int
+    let hrvValues: [Double]
+    let reloadMedications: () -> Void
+    let openWorkout: () -> Void
+    let refresh: () -> Void
+    let scheduleHRV: () -> Void
+    let scheduleCheckIns: () -> Void
+    let scheduleWorkouts: () -> Void
+    let setRestMode: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(RouterReactions(router: router, reloadMedications: reloadMedications, openWorkout: openWorkout))
+            .modifier(ReminderReactions(settings: settings, plans: plans, scheduleHRV: scheduleHRV,
+                                        scheduleCheckIns: scheduleCheckIns, scheduleWorkouts: scheduleWorkouts))
+            .onChange(of: settings.goals) { refresh() }
+            .onChange(of: settings.restModeUntil) { setRestMode() }
+            .onChange(of: settings.sleepNeedHours) { refresh() }
+            .onChange(of: finishedSessionCount) { refresh() }
+            .onChange(of: hrvValues) {
+                scheduleCheckIns() // a typed HRV can complete the morning check-in
+                refresh()
+            }
+    }
+}
+
+private struct RouterReactions: ViewModifier {
+    let router: AppRouter
+    let reloadMedications: () -> Void
+    let openWorkout: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: router.dosesVersion) { reloadMedications() }
+            .onChange(of: router.openWorkout) { openWorkout() }
+    }
+}
+
+private struct ReminderReactions: ViewModifier {
+    let settings: UserSettings
+    let plans: [WeeklyPlan]
+    let scheduleHRV: () -> Void
+    let scheduleCheckIns: () -> Void
+    let scheduleWorkouts: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: settings.hrvReminderOn) { scheduleHRV() }
+            .onChange(of: settings.hrvReminderMinutes) { scheduleHRV() }
+            .onChange(of: settings.checkInRemindersOn) { scheduleCheckIns() }
+            .onChange(of: settings.morningCheckInMinutes) { scheduleCheckIns() }
+            .onChange(of: settings.eveningCheckInMinutes) { scheduleCheckIns() }
+            .onChange(of: settings.workoutRemindersOn) { scheduleWorkouts() }
+            .onChange(of: plans) {
+                // A saved plan is a fresh commitment: paused workout reminders come back.
+                Reminders.resumeWorkoutReminders()
+                scheduleWorkouts()
             }
     }
 }
