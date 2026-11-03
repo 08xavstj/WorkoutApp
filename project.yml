@@ -199,7 +199,6 @@ schemes:
     build:
       targets:
         WorkoutApp: all
-        TensileWatch: all
     run:
       config: Debug
     test:
