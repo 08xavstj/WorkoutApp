@@ -125,6 +125,8 @@ final class UserSettings {
     }
     /// Hide calorie numbers on Home and in the coach chips (protein and fibre stay).
     var hideCalories: Bool { didSet { defaults.set(hideCalories, forKey: "hideCalories") } }
+    /// Start the Watch's workout recording whenever a workout starts on the phone.
+    var startWatchWithWorkout: Bool { didSet { defaults.set(startWatchWithWorkout, forKey: "startWatchWithWorkout") } }
     var checkInRemindersOn: Bool { didSet { defaults.set(checkInRemindersOn, forKey: "checkInRemindersOn") } }
     var morningCheckInMinutes: Int { didSet { defaults.set(morningCheckInMinutes, forKey: "morningCheckInMinutes") } }
     var eveningCheckInMinutes: Int { didSet { defaults.set(eveningCheckInMinutes, forKey: "eveningCheckInMinutes") } }
@@ -178,6 +180,7 @@ final class UserSettings {
         sleepNeedHours = need >= 6 && need <= 11 ? need : 8
         restModeUntil = defaults.object(forKey: "restModeUntil") as? Date
         hideCalories = defaults.bool(forKey: "hideCalories")
+        startWatchWithWorkout = defaults.object(forKey: "startWatchWithWorkout") as? Bool ?? true
         checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
         morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30

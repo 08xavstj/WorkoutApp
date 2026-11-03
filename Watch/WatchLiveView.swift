@@ -136,7 +136,7 @@ struct WatchElapsedLine: View {
     @Environment(WatchWorkoutModel.self) private var model
 
     var body: some View {
-        if let start = model.startedAt {
+        if let start = model.clockStart {
             TimelineView(.periodic(from: start, by: 1)) { context in
                 HStack {
                     Text(watchClock(context.date.timeIntervalSince(start)))

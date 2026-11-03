@@ -25,9 +25,9 @@ struct WorkoutBuilderView: View {
     @State private var showingGym = false
     @State private var didSetUp = false
 
-    private let durations = [30, 45, 60, 75]
-    /// "I have N minutes": short sessions are fitted with fewer sets and supersets (`Supersets`).
-    private let quickMinutes = [15, 20, 30, 45, 60]
+    /// Session length. Short sessions are fitted with fewer sets, then paired
+    /// exercises (`Supersets`).
+    private let durations = [15, 20, 30, 45, 60, 75]
 
     var body: some View {
         NavigationStack {
@@ -65,7 +65,6 @@ struct WorkoutBuilderView: View {
                     .buttonStyle(.plain)
                     focusPicker
                     durationPicker
-                    quickPicker
                     if let plan {
                         if plan.exercises.isEmpty {
                             ContentUnavailableView(
@@ -225,34 +224,26 @@ struct WorkoutBuilderView: View {
         }
     }
 
+    /// One time control. Under 30 minutes the plan keeps the same exercises
+    /// with fewer sets, then pairs them (A1/A2): paired sets keep growth and
+    /// most strength while cutting time by about a third (Iversen et al.,
+    /// Sports Med 2021).
     private var durationPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             CardLabel(text: "Time")
-            HStack(spacing: 8) {
-                ForEach(durations, id: \.self) { value in
-                    SelectChip(title: "\(value) min", isSelected: minutes == value) { minutes = value }
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(durations, id: \.self) { value in
+                        SelectChip(title: "\(value) min", isSelected: minutes == value) { minutes = value }
+                    }
                 }
             }
-        }
-    }
-
-    /// "I have 20 minutes": the same plan, fitted with fewer sets and paired
-    /// exercises. Paired sets keep growth and most strength while cutting
-    /// time by about a third (Iversen et al., Sports Med 2021).
-    private var quickPicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            CardLabel(text: "I have…")
-            HStack(spacing: 8) {
-                ForEach(quickMinutes, id: \.self) { value in
-                    SelectChip(title: "\(value)", isSelected: minutes == value) { minutes = value }
-                }
-                Text("min")
-                    .font(.subheadline)
+            .scrollIndicators(.hidden)
+            if minutes < 30 {
+                Text("Short on time: fewer sets, then paired exercises (A1/A2) with one rest after both.")
+                    .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
-            Text("Short on time: fewer sets, then paired exercises (A1/A2) with one rest after both.")
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
         }
     }
 

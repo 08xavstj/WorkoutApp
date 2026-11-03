@@ -161,6 +161,7 @@ struct SettingsView: View {
                         DatePicker("Morning", selection: minutesBinding(\.morningCheckInMinutes), displayedComponents: .hourAndMinute)
                         DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
                     }
+                    Toggle("Start workouts on Apple Watch", isOn: $settings.startWatchWithWorkout)
                     Toggle("Workout reminders", isOn: $settings.workoutRemindersOn)
                     if settings.workoutRemindersOn, Reminders.workoutRemindersPaused {
                         Text("Paused: two in a row went unanswered. They come back when you confirm next week's plan.")

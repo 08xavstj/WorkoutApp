@@ -54,6 +54,11 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         String(Int(startedAt.timeIntervalSince1970))
     }
 
+    /// The phone session's start time, from its id (whole seconds).
+    static func startDate(for id: String) -> Date? {
+        Double(id).map { Date(timeIntervalSince1970: $0) }
+    }
+
     /// Converts kilograms to the gym's unit.
     func display(_ kilograms: Double) -> Double {
         unit == "lb" ? kilograms * 2.20462 : kilograms

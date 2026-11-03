@@ -18,6 +18,8 @@ final class WatchWorkoutModel: NSObject {
 
     private(set) var phase: Phase = .idle
     private(set) var startedAt: Date?
+    /// The phone session's start, when this recording was attached to one after it began.
+    private(set) var displayStart: Date?
     private(set) var endedAt: Date?
     private(set) var heartRate: Double?
     private(set) var averageHeartRate: Double?
@@ -97,7 +99,10 @@ final class WatchWorkoutModel: NSObject {
             builder.delegate = self
             workoutSession = session
             self.builder = builder
-            let start = Date.now
+            // Start from the phone session's start time when it's recent, so the
+            // Watch's clock, heart rate and calories line up with the phone's
+            // workout instead of beginning when the Watch caught up.
+            let start = Self.recordingStart(for: sessionID ?? snapshot.flatMap { $0.isFinished ? nil : $0.id })
             session.startActivity(with: start)
             try await builder.beginCollection(at: start)
             heartRate = nil
@@ -108,9 +113,14 @@ final class WatchWorkoutModel: NSObject {
             endedAt = nil
             setsCompletedHere = 0
             startedAt = start
+            displayStart = nil
             phase = .running
             let active = snapshot.flatMap { $0.isFinished ? nil : $0.id }
             recordingSessionID = sessionID ?? recordingSessionID ?? active
+            // The phone's session arrived only while starting: count the clock from its start.
+            if let id = recordingSessionID, Self.recordingStart(for: id, now: start) < start {
+                displayStart = Self.recordingStart(for: id, now: start)
+            }
             send(.recordingStarted, sessionID: recordingSessionID)
             WKInterfaceDevice.current().play(.start)
         } catch {
@@ -121,11 +131,28 @@ final class WatchWorkoutModel: NSObject {
         }
     }
 
-    /// A recording started empty now belongs to the phone's session.
+    /// A recording started empty now belongs to the phone's session. The
+    /// clock on the wrist switches to the phone's start, so both show the
+    /// same elapsed time (the Health workout keeps its real start).
     private func adopt(_ sessionID: String) {
         recordingSessionID = sessionID
+        if let phoneStart = WatchSession.startDate(for: sessionID), phoneStart <= .now {
+            displayStart = phoneStart
+        }
         send(.recordingStarted, sessionID: sessionID)
     }
+
+    /// When to start recording: the phone session's start if it began within
+    /// the last 15 minutes, otherwise now.
+    static func recordingStart(for sessionID: String?, now: Date = .now) -> Date {
+        guard let sessionID, let phoneStart = WatchSession.startDate(for: sessionID),
+              phoneStart <= now, now.timeIntervalSince(phoneStart) < 15 * 60 else { return now }
+        return phoneStart
+    }
+
+    /// The start the wrist's clock counts from: the phone session's when this
+    /// recording belongs to one, else the recording's own.
+    var clockStart: Date? { displayStart ?? startedAt }
 
     func pause() {
         guard phase == .running else { return }

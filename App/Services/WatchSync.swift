@@ -42,6 +42,9 @@ final class WatchSync: NSObject {
         connection = session
     }
 
+    /// A paired Watch with Tensile installed: starting it can happen without asking.
+    var canStartAutomatically: Bool { isPaired && isWatchAppInstalled }
+
     /// True when the Watch's workout is (or will be) the Health record for this session.
     func watchOwnsWorkout(_ session: WorkoutSession) -> Bool {
         session.watchWorkoutUUID != nil || recordingSessionID == WatchSession.id(for: session.startedAt)

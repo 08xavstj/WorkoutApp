@@ -114,6 +114,13 @@ struct ActiveWorkoutView: View {
                 if recorder.sessionStart != session.startedAt {
                     await recorder.start(at: session.startedAt)
                 }
+                // Apple Watch: a workout just started on the phone starts on the wrist too,
+                // from the same start time, so nothing has to be started twice.
+                if settings.startWatchWithWorkout, WatchSync.shared.canStartAutomatically,
+                   !WatchSync.shared.watchOwnsWorkout(session),
+                   Date.now.timeIntervalSince(session.startedAt) < 5 * 60 {
+                    await WatchSync.shared.startOnWatch(session)
+                }
             }
             .alert("Apple Watch", isPresented: Binding(
                 get: { WatchSync.shared.startProblem != nil },
