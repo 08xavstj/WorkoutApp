@@ -314,7 +314,7 @@ struct BodyAgeCard: View {
                         lineWidth: 12
                     ) {
                         VStack(spacing: 0) {
-                            Text(result.bodyAge.formatted(.number.precision(.fractionLength(1))))
+                            Text("\(result.years)")
                                 .font(.system(size: 30, weight: .bold, design: .rounded))
                                 .foregroundStyle(Theme.primaryText)
                                 .minimumScaleFactor(0.7)
@@ -328,12 +328,16 @@ struct BodyAgeCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 4) {
                             Image(systemName: younger ? "arrow.down" : "arrow.up")
-                            Text("\(abs(result.difference).formatted(.number.precision(.fractionLength(1)))) years \(younger ? "younger" : "older")")
+                            Text("\(abs(result.difference).formatted(.number.precision(.fractionLength(0)))) years \(younger ? "younger" : "older")")
                         }
                         .font(.headline)
                         .foregroundStyle(tone)
                         Text("than your age (\(result.age))")
                             .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryText)
+                        // Whole years with a ±5-year range: no composite "age" is validated finer than that.
+                        Text("Likely \(result.rangeLabel)")
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(Theme.secondaryText)
                         Text(younger ? "Your habits are taking years off. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
                             .font(.caption)
@@ -348,7 +352,7 @@ struct BodyAgeCard: View {
                         FactorRow(factor: factor)
                     }
                 }
-                Text("\(result.confidence.label): \(result.confidenceReason) Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. An estimate, not a medical test.")
+                Text("\(result.confidence.label): \(result.confidenceReason) Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. Shown as whole years with a ±\(BodyAge.uncertaintyYears)-year range because only the parts, not the sum, have been tested in studies. An estimate, not a medical test.")
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
             } else {

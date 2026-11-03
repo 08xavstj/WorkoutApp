@@ -59,7 +59,8 @@ public enum Micronutrients {
             case .folate: return 400
             case .vitaminA: return male ? 900 : 700
             case .selenium: return 55
-            case .fiber: return male ? (age > 50 ? 30 : 38) : (age > 50 ? 21 : 25)
+            // Reynolds et al., Lancet 2019: benefits rise to 25-29 g/day (NutritionTargets.fiberTargetGrams).
+            case .fiber: return NutritionTargets.fiberTargetGrams.upperBound
             }
         }
 

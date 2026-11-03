@@ -5,21 +5,38 @@ import Foundation
 /// When to stop caffeine so it doesn't cost sleep.
 ///
 /// In a meta-analysis of 24 studies, caffeine cut total sleep by about 45
-/// minutes. To avoid losing sleep time, a coffee (~107 mg) should be at least
-/// 8.8 hours before bed and a typical pre-workout (~217 mg) at least 13.2 hours
-/// (Gardiner et al., Sleep Med Rev 2023).
+/// minutes. The model in that paper puts a coffee (~107 mg) at 8.8 hours
+/// before bed and a typical pre-workout (~217 mg) at 13.2 hours (Gardiner et
+/// al., Sleep Med Rev 2023; the 8.8/13.2 h figures are the paper's model
+/// averages, from memory in the audit). The cut-off here is interpolated by
+/// dose along that line rather than stepped, and it is a conservative
+/// average: a 2025 crossover trial by the same group found 100 mg four hours
+/// before bed had no measurable effect on sleep, while 400 mg at 12 hours did
+/// (Gardiner et al., Sleep 2025; secondary source). Sensitivity varies a lot
+/// between people.
 public enum CaffeineTiming {
-    public static let coffeeHours = 8.8
-    public static let preWorkoutHours = 13.2
-    /// Doses from about this size count as pre-workout strength.
-    public static let largeDoseMg = 180.0
+    /// Hours before bed at the reference dose (Gardiner et al., Sleep Med Rev 2023).
+    public static let baseHours = 8.8
+    /// The dose the base figure applies to: one coffee, ~107 mg (Gardiner 2023).
+    public static let referenceDoseMg = 107.0
+    /// Extra hours per mg above the reference dose: (13.2 − 8.8) / (217 − 107)
+    /// = 0.04 h/mg, the slope between the paper's two model estimates.
+    public static let hoursPerMg = 0.04
+    /// Clamp so tiny doses still get a sensible gap and huge doses don't run
+    /// past the morning (app choice; the paper's data cover ~100-400 mg).
+    public static let minimumHours = 6.0
+    public static let maximumHours = 14.0
     /// Used when there's no sleep data yet.
     public static let defaultBedtimeMinutes = 23 * 60
 
-    /// Hours before bed for a dose.
+    /// Hours before bed for a dose: 8.8 + 0.04 × (mg − 107), clamped to 6-14 h.
     public static func hoursBeforeBed(mg: Double) -> Double {
-        mg >= largeDoseMg ? preWorkoutHours : coffeeHours
+        let hours = baseHours + hoursPerMg * (mg - referenceDoseMg)
+        return min(maximumHours, max(minimumHours, hours))
     }
+
+    /// One line for the UI: why the cut-off is an average, not a rule.
+    public static let cautionNote = "That's a conservative average; a 2025 trial found 100 mg four hours before bed had no measurable effect, and sensitivity varies a lot between people."
 
     /// Usual time of falling asleep, in minutes after midnight (may exceed
     /// 1440 for after-midnight bedtimes, e.g. 1500 = 1:00 am). Median of recent
@@ -234,20 +251,131 @@ public enum WeightPace {
 
 /// Hot days: a lower strain target and heat acclimation.
 ///
-/// Heat raises heart rate and core temperature at the same pace, and repeated
-/// training in the heat over about 10-14 days brings most of the adaptation
-/// (Périard et al., Physiol Rev 2021). "Feels like" stands in for wet-bulb
-/// globe temperature, so the thresholds are approximate.
+/// Heat risk is judged on wet-bulb globe temperature (WBGT), which combines
+/// air temperature, humidity and, in the full measurement, sun and wind. With
+/// no sensor it is estimated from air temperature and relative humidity using
+/// the Australian Bureau of Meteorology approximation, which assumes moderate
+/// sun and light wind, so it reads high for shaded or indoor training (BoM
+/// "approximation to the WBGT"; named in the audit from memory). The bands
+/// follow the ACSM consensus on exertional heat illness (Roberts et al., Curr
+/// Sports Med Rep 2021; bands from memory in the audit): under 18 °C low,
+/// 18-23 moderate, 23-28 high, 28-30 very high, over 30 extreme, where
+/// unacclimatised people should not train hard outdoors.
+///
+/// Repeated training in the heat over about 7-14 days brings most of the
+/// adaptation (Périard et al., Scand J Med Sci Sports 2015), and it fades over
+/// about 2-3 weeks away from the heat (Daanen et al., Sports Med 2018; from
+/// memory in the audit). The size of the strain-target cut is the app's choice.
 public enum HeatAdvice {
-    public static let hotFeelsLikeC = 28.0
-    public static let veryHotFeelsLikeC = 35.0
+    /// ACSM WBGT bands (Roberts et al. 2021), lower bound of each.
+    public static let moderateWBGT = 18.0
+    public static let highWBGT = 23.0
+    public static let veryHighWBGT = 28.0
+    public static let extremeWBGT = 30.0
+    /// Hot training days (of 14) that count as acclimatised (Périard 2015: most adaptation in 7-14 days).
     public static let acclimatizedDays = 10
+    /// Days away from the heat over which acclimation is kept in full, then partly, then lost (Daanen 2018: ~2-3 weeks).
+    public static let acclimationKeptDays = 14
+    public static let acclimationLostDays = 21
+    /// Relative humidity assumed when the weather source has none (app choice).
+    public static let defaultHumidityPercent = 50.0
 
-    /// Change to the strain target's upper end (0 or negative).
-    public static func targetAdjustment(feelsLikeC: Double?, heatTrainingDays: Int) -> Double {
-        guard let feels = feelsLikeC, feels >= hotFeelsLikeC else { return 0 }
-        let base: Double = feels >= veryHotFeelsLikeC ? -15 : -10
-        return heatTrainingDays >= acclimatizedDays ? base / 2 : base
+    public enum Risk: Int, Sendable, Comparable {
+        case low, moderate, high, veryHigh, extreme
+        public static func < (a: Risk, b: Risk) -> Bool { a.rawValue < b.rawValue }
+
+        public var label: String {
+            switch self {
+            case .low: "Low"
+            case .moderate: "Moderate"
+            case .high: "High"
+            case .veryHigh: "Very high"
+            case .extreme: "Extreme"
+            }
+        }
+    }
+
+    /// WBGT estimate, °C, from air temperature and relative humidity
+    /// (Australian BoM approximation): WBGT = 0.567 T + 0.393 e + 3.94, where
+    /// e is the water-vapour pressure in hPa from T and humidity.
+    public static func estimatedWBGT(temperatureC: Double, humidityPercent: Double?) -> Double {
+        let humidity = min(100, max(0, humidityPercent ?? defaultHumidityPercent))
+        let vapourPressure = humidity / 100 * 6.105 * exp(17.27 * temperatureC / (237.7 + temperatureC))
+        return 0.567 * temperatureC + 0.393 * vapourPressure + 3.94
+    }
+
+    /// ACSM band for an estimated WBGT.
+    public static func risk(wbgtC: Double) -> Risk {
+        switch wbgtC {
+        case ..<moderateWBGT: .low
+        case ..<highWBGT: .moderate
+        case ..<veryHighWBGT: .high
+        case ...extremeWBGT: .veryHigh
+        default: .extreme
+        }
+    }
+
+    /// How acclimatised the user is, from hot days that had training.
+    public struct Acclimation: Sendable, Equatable {
+        /// Hot training days in the last 14.
+        public var heatTrainingDays: Int
+        /// Hot training days in the 14 days ending on the most recent one.
+        public var peakHeatTrainingDays: Int
+        /// Days since the last hot training day (0 = today); nil if none.
+        public var daysSinceHeatTraining: Int?
+
+        public init(heatTrainingDays: Int, peakHeatTrainingDays: Int, daysSinceHeatTraining: Int?) {
+            self.heatTrainingDays = heatTrainingDays
+            self.peakHeatTrainingDays = peakHeatTrainingDays
+            self.daysSinceHeatTraining = daysSinceHeatTraining
+        }
+
+        public static let notAcclimatized = Acclimation(heatTrainingDays: 0, peakHeatTrainingDays: 0, daysSinceHeatTraining: nil)
+
+        /// 1 = fully acclimatised, 0.5 = fading (15-21 days away from the heat), 0 = not.
+        public var level: Double {
+            guard peakHeatTrainingDays >= HeatAdvice.acclimatizedDays, let days = daysSinceHeatTraining else { return 0 }
+            if days <= HeatAdvice.acclimationKeptDays { return 1 }
+            if days <= HeatAdvice.acclimationLostDays { return 0.5 }
+            return 0
+        }
+
+        public var isAcclimatized: Bool { level >= 1 }
+    }
+
+    /// Days in the last 14 that were hot and had training.
+    public static func heatTrainingDays(hotDays: Set<Date>, trainingDays: Set<Date>, now: Date = .now, calendar: Calendar = .current) -> Int {
+        let start = calendar.date(byAdding: .day, value: -13, to: calendar.startOfDay(for: now)) ?? now
+        return hotDays.intersection(trainingDays).filter { $0 >= start }.count
+    }
+
+    /// Acclimation from hot days and training days (both as start-of-day dates).
+    public static func acclimation(hotDays: Set<Date>, trainingDays: Set<Date>, now: Date = .now, calendar: Calendar = .current) -> Acclimation {
+        let today = calendar.startOfDay(for: now)
+        let hotTraining = hotDays.intersection(trainingDays).filter { $0 <= today }
+        let recent = heatTrainingDays(hotDays: hotDays, trainingDays: trainingDays, now: now, calendar: calendar)
+        guard let last = hotTraining.max() else {
+            return Acclimation(heatTrainingDays: recent, peakHeatTrainingDays: 0, daysSinceHeatTraining: nil)
+        }
+        let windowStart = calendar.date(byAdding: .day, value: -13, to: last) ?? last
+        let peak = hotTraining.filter { $0 >= windowStart }.count
+        let since = calendar.dateComponents([.day], from: last, to: today).day ?? 0
+        return Acclimation(heatTrainingDays: recent, peakHeatTrainingDays: peak, daysSinceHeatTraining: max(0, since))
+    }
+
+    /// Change to the strain target's upper end (0 or negative): −10 from the
+    /// "high" band, −15 "very high", −20 "extreme", halved when acclimatised
+    /// (app choice, as before the WBGT change).
+    public static func targetAdjustment(wbgtC: Double?, acclimation: Acclimation) -> Double {
+        guard let wbgt = wbgtC else { return 0 }
+        let base: Double
+        switch risk(wbgtC: wbgt) {
+        case .low, .moderate: return 0
+        case .high: base = -10
+        case .veryHigh: base = -15
+        case .extreme: base = -20
+        }
+        return base * (1 - 0.5 * acclimation.level)
     }
 
     /// Lowers the top of a target range; the range stays valid and at least 5 wide.
@@ -258,17 +386,38 @@ public enum HeatAdvice {
         return lower...upper
     }
 
-    /// Days in the last 14 that were hot and had training.
-    public static func heatTrainingDays(hotDays: Set<Date>, trainingDays: Set<Date>, now: Date = .now, calendar: Calendar = .current) -> Int {
-        let start = calendar.date(byAdding: .day, value: -13, to: calendar.startOfDay(for: now)) ?? now
-        return hotDays.intersection(trainingDays).filter { $0 >= start }.count
+    /// One sentence on where acclimation stands.
+    public static func acclimationText(_ acclimation: Acclimation) -> String {
+        let since = acclimation.daysSinceHeatTraining ?? 0
+        if acclimation.isAcclimatized {
+            if since > 2 {
+                return "You were training in the heat until \(since) days ago, so most of your heat adaptation is still there."
+            }
+            return "You've trained in the heat on \(acclimation.heatTrainingDays) of the last 14 days, so you're largely acclimatised."
+        }
+        if acclimation.level > 0 {
+            return "Your last hot session was \(since) days ago; heat adaptation fades over 2-3 weeks, so some of it has gone."
+        }
+        return "Heat adaptation builds over about 7-14 days of training in it (\(acclimation.heatTrainingDays) of the last 14 so far)."
     }
 
-    public static func advice(feelsLikeC: Double?, heatTrainingDays: Int) -> String? {
-        guard let feels = feelsLikeC, feels >= hotFeelsLikeC else { return nil }
-        let acclimation = heatTrainingDays >= acclimatizedDays
-            ? "You've trained in the heat on \(heatTrainingDays) of the last 14 days, so you're largely acclimatised."
-            : "Heat adaptation builds over about 10-14 days of training in it (\(heatTrainingDays) so far)."
-        return "Hot today (feels \(Int(feels.rounded()))°C): your strain target is lower. Slow your pace to keep the same effort, drink regularly, and train early or indoors. \(acclimation)"
+    /// Advice for the high band and up; nil below it (the weather tips cover milder days).
+    public static func advice(wbgtC: Double?, acclimation: Acclimation) -> String? {
+        guard let wbgt = wbgtC else { return nil }
+        let index = "heat stress about \(Int(wbgt.rounded())) °C WBGT, estimated from temperature and humidity"
+        let acclimationNote = acclimationText(acclimation)
+        switch risk(wbgtC: wbgt) {
+        case .low, .moderate:
+            return nil
+        case .high:
+            return "Hot for training (\(index)): your strain target is lower. Slow your pace to keep the same effort, drink regularly, and train early or indoors. \(acclimationNote)"
+        case .veryHigh:
+            return "Very hot (\(index)): your strain target is lower. Keep hard efforts short, or move them indoors; drink before you're thirsty. \(acclimationNote)"
+        case .extreme:
+            let stop = acclimation.isAcclimatized
+                ? "Even acclimatised, keep outdoor efforts short and easy."
+                : "ACSM advises against hard outdoor training at this level unless you're heat-acclimatised: train indoors or at dawn."
+            return "Extreme heat (\(index)): your strain target is lower. \(stop) \(acclimationNote)"
+        }
     }
 }

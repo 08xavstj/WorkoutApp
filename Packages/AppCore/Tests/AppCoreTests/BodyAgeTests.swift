@@ -45,6 +45,21 @@ struct BodyAgeTests {
     @Test func gompertzDoublingIsEightYears() {
         #expect(abs(BodyAge.gompertzYears(hazard: 2) - 8) < 0.0001)
     }
+
+    @Test func wholeYearsWithAFiveYearRange() throws {
+        // Fit 30-year-old: −3.9 (VO₂ max) − 1.0 (RHR) − 1.8 (steps) ≈ 23.3 → 23, shown as "about 23 (18–28)".
+        let inputs = BodyAge.Inputs(age: 30, sex: .male, vo2Max: 55, restingHeartRate: 50, sleepHours: 7.5, dailySteps: 11_000)
+        let result = try #require(BodyAge.estimate(inputs))
+        #expect(result.bodyAge == 23)
+        #expect(result.bodyAge == result.bodyAge.rounded())
+        #expect(result.years == 23)
+        #expect(result.range == 18...28)
+        #expect(result.rangeLabel == "about 23 (18–28)")
+        #expect(BodyAge.uncertaintyYears == 5)
+        // The range never dips below 18.
+        let young = try #require(BodyAge.estimate(BodyAge.Inputs(age: 20, sex: .male, vo2Max: 60, restingHeartRate: 45, dailySteps: 12_000)))
+        #expect(young.range.lowerBound == 18)
+    }
 }
 
 struct OneRepMaxTests {

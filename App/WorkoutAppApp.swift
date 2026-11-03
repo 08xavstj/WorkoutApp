@@ -292,9 +292,10 @@ struct RootView: View {
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         checkIns.recordSleepScore(metrics.sleep?.score)
         await conditions.refresh(settings: settings)
-        // Hot days lower the strain target (less once you're heat-acclimatised).
-        conditions.heatTrainingDays = HeatAdvice.heatTrainingDays(hotDays: conditions.hotDays, trainingDays: metrics.recentTrainingDays)
-        metrics.heatAdjustment = HeatAdvice.targetAdjustment(feelsLikeC: conditions.forecastFeelsLikeC, heatTrainingDays: conditions.heatTrainingDays)
+        // Hot days (by estimated WBGT) lower the strain target (less once you're heat-acclimatised).
+        conditions.heatAcclimation = HeatAdvice.acclimation(hotDays: conditions.hotDays, trainingDays: metrics.recentTrainingDays)
+        conditions.heatTrainingDays = conditions.heatAcclimation.heatTrainingDays
+        metrics.heatAdjustment = HeatAdvice.targetAdjustment(wbgtC: conditions.forecastWBGT, acclimation: conditions.heatAcclimation)
         // Weekly photo analysis, only if turned on, Claude is set up and it's due.
         // Runs on its own so a slow upload doesn't hold up the rest of the refresh.
         if settings.weeklyPhotoAnalysis, !settings.supabaseURL.isEmpty, !settings.supabaseAnonKey.isEmpty,

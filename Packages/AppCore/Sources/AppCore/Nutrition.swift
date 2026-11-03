@@ -44,4 +44,48 @@ public enum NutritionTargets {
         guard let bodyMassKg, bodyMassKg > 0 else { return nil }
         return (bodyMassKg * gramsPerKg).rounded()
     }
+
+    // MARK: Fibre
+
+    /// Daily fibre target: 25-29 g a day gave the largest fall in all-cause
+    /// and heart mortality in 185 prospective studies and 58 trials (Reynolds
+    /// et al., Lancet 2019), with some extra benefit above that. The dietary
+    /// "adequate intake" (38 g for men under 50) is a population value, not an
+    /// outcome target, so the target here is the trial range. Most people eat
+    /// about half of it.
+    public static let fiberTargetGrams: ClosedRange<Double> = 25...29
+    /// Under this is clearly low: about the bottom of the intake bands with
+    /// the worst outcomes in Reynolds 2019 (app choice from the research round).
+    public static let fiberLowGrams = 20.0
+    /// When gaining weight, a lot more than the target blunts appetite; the
+    /// health-metrics report puts the useful range at 25-35 g.
+    public static let fiberGainCapGrams = 35.0
+
+    public enum FiberStatus: String, Sendable, Equatable {
+        case low, nearTarget, onTarget
+    }
+
+    /// Where a day's (or a 7-day average) fibre intake sits against the target.
+    public static func fiberStatus(grams: Double?) -> FiberStatus? {
+        guard let grams, grams >= 0 else { return nil }
+        if grams < fiberLowGrams { return .low }
+        if grams < fiberTargetGrams.lowerBound { return .nearTarget }
+        return .onTarget
+    }
+
+    /// Target text by goal. Losing: fibre is the satiety lever, so aim for the
+    /// top of the range or more. Gaining: enough is enough. Everyone else: the
+    /// trial range, and more is fine.
+    public static func fiberTargetText(goals: Goals?) -> String {
+        let low = Int(fiberTargetGrams.lowerBound)
+        let high = Int(fiberTargetGrams.upperBound)
+        switch goals?.weight {
+        case .lose:
+            return "\(low)-\(high) g a day or more; fibre is the cheapest way to feel full on fewer calories."
+        case .gain:
+            return "\(low)-\(Int(fiberGainCapGrams)) g a day; much more blunts appetite when you're trying to eat enough."
+        default:
+            return "\(low)-\(high) g a day or more."
+        }
+    }
 }

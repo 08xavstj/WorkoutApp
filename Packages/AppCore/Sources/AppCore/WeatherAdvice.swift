@@ -5,8 +5,10 @@ import Foundation
 /// - Heat: heart rate runs higher and performance drops as it gets hot and
 ///   humid; ACSM advises extra fluids and easing off in the heat (Roberts et
 ///   al., ACSM expert consensus on exertional heat illness, Curr Sports Med Rep
-///   2021). ACSM uses wet-bulb globe temperature; "feels like" (apparent
-///   temperature) stands in for it here, so the thresholds are approximate.
+///   2021). ACSM grades risk by wet-bulb globe temperature (WBGT), estimated
+///   here from air temperature and humidity (see `HeatAdvice`), so the bands
+///   are approximate: moderate from 18 °C WBGT, high 23, very high 28, extreme
+///   over 30. Cold still uses "feels like" (wind chill).
 /// - Air quality: US EPA AQI guidance: over 100, sensitive people should cut
 ///   long or hard outdoor exertion; over 150, everyone should.
 /// - UV: WHO UV index guidance: protection from 3, avoid midday sun from 8.
@@ -18,6 +20,9 @@ import Foundation
 public enum WeatherAdvice {
     public struct Conditions: Sendable, Equatable {
         public var feelsLikeC: Double?
+        /// Air temperature, °C; with `humidity` it gives the WBGT estimate.
+        public var temperatureC: Double?
+        /// Relative humidity, %.
         public var humidity: Double?
         public var uvIndexMax: Double?
         public var usAQI: Double?
@@ -27,10 +32,11 @@ public enum WeatherAdvice {
         public var sunset: Date?
         public var now: Date
 
-        public init(feelsLikeC: Double? = nil, humidity: Double? = nil, uvIndexMax: Double? = nil,
+        public init(feelsLikeC: Double? = nil, temperatureC: Double? = nil, humidity: Double? = nil, uvIndexMax: Double? = nil,
                     usAQI: Double? = nil, daylightHours: Double? = nil, precipitationChance: Double? = nil,
                     sunrise: Date? = nil, sunset: Date? = nil, now: Date = .now) {
             self.feelsLikeC = feelsLikeC
+            self.temperatureC = temperatureC
             self.humidity = humidity
             self.uvIndexMax = uvIndexMax
             self.usAQI = usAQI
@@ -59,15 +65,21 @@ public enum WeatherAdvice {
         }
     }
 
+    /// Estimated WBGT for the conditions, when there's a temperature to work from.
+    /// Falls back to "feels like" as the air temperature (and the default
+    /// humidity) when the source gives nothing better.
+    public static func estimatedWBGT(for c: Conditions) -> Double? {
+        guard let temperature = c.temperatureC ?? c.feelsLikeC else { return nil }
+        return HeatAdvice.estimatedWBGT(temperatureC: temperature, humidityPercent: c.humidity)
+    }
+
     /// Most important first.
     public static func tips(for c: Conditions) -> [Tip] {
         var tips: [Tip] = []
-        if let feels = c.feelsLikeC {
-            if feels >= 35 {
-                tips.append(Tip(id: "heat", level: .warning, text: "Very hot (feels \(Int(feels.rounded()))°C): train indoors or early, drink before you're thirsty, and expect a higher heart rate at your usual pace."))
-            } else if feels >= 28 {
-                tips.append(Tip(id: "heat", level: .caution, text: "Warm (feels \(Int(feels.rounded()))°C): bring extra water and expect a higher heart rate outdoors."))
-            } else if feels <= -10 {
+        if let tip = heatTip(for: c) {
+            tips.append(tip)
+        } else if let feels = c.feelsLikeC {
+            if feels <= -10 {
                 tips.append(Tip(id: "cold", level: .caution, text: "Very cold (feels \(Int(feels.rounded()))°C): warm up longer indoors and cover your hands, ears and face."))
             } else if feels <= 0 {
                 tips.append(Tip(id: "cold", level: .info, text: "Below freezing: take a longer warm-up before hard efforts."))
@@ -99,5 +111,23 @@ public enum WeatherAdvice {
             tips.append(Tip(id: "daylight", level: .info, text: "Only \(String(format: "%.1f", daylight)) h of daylight: get 10-20 minutes outside in the morning to help your sleep."))
         }
         return tips.sorted { $0.level > $1.level }
+    }
+
+    /// Heat tip by ACSM WBGT band (Roberts et al. 2021); nil when the risk is low.
+    static func heatTip(for c: Conditions) -> Tip? {
+        guard let wbgt = estimatedWBGT(for: c) else { return nil }
+        let index = "heat stress about \(Int(wbgt.rounded())) °C WBGT"
+        switch HeatAdvice.risk(wbgtC: wbgt) {
+        case .low:
+            return nil
+        case .moderate:
+            return Tip(id: "heat", level: .info, text: "Warm for training (\(index)): drink regularly and expect a slightly higher heart rate at your usual pace.")
+        case .high:
+            return Tip(id: "heat", level: .caution, text: "Hot for training (\(index)): bring extra water, slow your pace to keep the same effort, and expect a higher heart rate outdoors.")
+        case .veryHigh:
+            return Tip(id: "heat", level: .warning, text: "Very hot (\(index)): train indoors or early, keep hard efforts short, and drink before you're thirsty.")
+        case .extreme:
+            return Tip(id: "heat", level: .warning, text: "Extreme heat (\(index)): skip hard outdoor training unless you're heat-acclimatised; train indoors or at dawn.")
+        }
     }
 }

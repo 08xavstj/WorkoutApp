@@ -10,11 +10,24 @@ struct CaffeineTimingTests {
     }
 
     @Test func cutoffsBeforeBed() {
-        // 11 pm bedtime: coffee by 2:12 pm, pre-workout by 9:48 am.
-        #expect(CaffeineTiming.cutoffMinutes(bedtimeMinutes: 23 * 60, mg: 100) == 23 * 60 - 528)
-        #expect(CaffeineTiming.cutoffMinutes(bedtimeMinutes: 23 * 60, mg: 220) == 23 * 60 - 792)
+        // Linear by dose (Gardiner 2023): 100 mg → 8.52 h (511 min), 220 mg → 13.32 h (799 min).
+        // 11 pm bedtime: coffee by 2:29 pm, pre-workout by 9:41 am.
+        #expect(CaffeineTiming.cutoffMinutes(bedtimeMinutes: 23 * 60, mg: 100) == 23 * 60 - 511)
+        #expect(CaffeineTiming.cutoffMinutes(bedtimeMinutes: 23 * 60, mg: 220) == 23 * 60 - 799)
         #expect(CaffeineTiming.isTooLate(minutes: 15 * 60, mg: 95, bedtimeMinutes: 23 * 60))
         #expect(!CaffeineTiming.isTooLate(minutes: 13 * 60, mg: 95, bedtimeMinutes: 23 * 60))
+    }
+
+    @Test func hoursFollowTheDoseLineAndClamp() {
+        // The paper's two model points sit on the line: 107 mg → 8.8 h, 217 mg → 13.2 h.
+        #expect(abs(CaffeineTiming.hoursBeforeBed(mg: 107) - 8.8) < 1e-9)
+        #expect(abs(CaffeineTiming.hoursBeforeBed(mg: 217) - 13.2) < 1e-9)
+        // No step at 180 mg any more: 179 and 181 mg differ by 0.08 h, not 4.4.
+        #expect(abs(CaffeineTiming.hoursBeforeBed(mg: 181) - CaffeineTiming.hoursBeforeBed(mg: 179) - 0.08) < 1e-9)
+        // Clamped to 6-14 h.
+        #expect(CaffeineTiming.hoursBeforeBed(mg: 10) == 6)
+        #expect(CaffeineTiming.hoursBeforeBed(mg: 400) == 14)
+        #expect(CaffeineTiming.cautionNote.contains("conservative average"))
     }
 
     @Test func usualBedtimeHandlesMidnight() {
@@ -94,12 +107,56 @@ struct WeightPaceTests {
 }
 
 struct HeatAdviceTests {
+    let fresh = HeatAdvice.Acclimation.notAcclimatized
+    let acclimatised = HeatAdvice.Acclimation(heatTrainingDays: 12, peakHeatTrainingDays: 12, daysSinceHeatTraining: 0)
+
+    @Test func wbgtFromTemperatureAndHumidity() {
+        // Australian BoM approximation: 30 °C at 60% RH ≈ 30.9 °C WBGT; 20 °C at 40% ≈ 19.0.
+        #expect(abs(HeatAdvice.estimatedWBGT(temperatureC: 30, humidityPercent: 60) - 30.92) < 0.05)
+        #expect(abs(HeatAdvice.estimatedWBGT(temperatureC: 20, humidityPercent: 40) - 18.95) < 0.05)
+        // Humidity moves the band: the same 27 °C is "high" when dry and "extreme" when muggy.
+        #expect(HeatAdvice.risk(wbgtC: HeatAdvice.estimatedWBGT(temperatureC: 27, humidityPercent: 30)) == .high)
+        #expect(HeatAdvice.risk(wbgtC: HeatAdvice.estimatedWBGT(temperatureC: 27, humidityPercent: 85)) == .extreme)
+        // Missing humidity falls back to the default instead of failing.
+        #expect(HeatAdvice.estimatedWBGT(temperatureC: 25, humidityPercent: nil) == HeatAdvice.estimatedWBGT(temperatureC: 25, humidityPercent: HeatAdvice.defaultHumidityPercent))
+    }
+
+    @Test func acsmBands() {
+        // Roberts et al. 2021: < 18 low, 18-23 moderate, 23-28 high, 28-30 very high, > 30 extreme.
+        #expect(HeatAdvice.risk(wbgtC: 15) == .low)
+        #expect(HeatAdvice.risk(wbgtC: 18) == .moderate)
+        #expect(HeatAdvice.risk(wbgtC: 22.9) == .moderate)
+        #expect(HeatAdvice.risk(wbgtC: 23) == .high)
+        #expect(HeatAdvice.risk(wbgtC: 28) == .veryHigh)
+        #expect(HeatAdvice.risk(wbgtC: 30) == .veryHigh)
+        #expect(HeatAdvice.risk(wbgtC: 30.1) == .extreme)
+        #expect(HeatAdvice.Risk.low < HeatAdvice.Risk.extreme)
+    }
+
     @Test func hotDaysLowerTheTarget() {
-        #expect(HeatAdvice.targetAdjustment(feelsLikeC: 25, heatTrainingDays: 0) == 0)
-        #expect(HeatAdvice.targetAdjustment(feelsLikeC: 30, heatTrainingDays: 0) == -10)
-        #expect(HeatAdvice.targetAdjustment(feelsLikeC: 36, heatTrainingDays: 0) == -15)
+        #expect(HeatAdvice.targetAdjustment(wbgtC: nil, acclimation: fresh) == 0)
+        #expect(HeatAdvice.targetAdjustment(wbgtC: 20, acclimation: fresh) == 0)
+        #expect(HeatAdvice.targetAdjustment(wbgtC: 25, acclimation: fresh) == -10)
+        #expect(HeatAdvice.targetAdjustment(wbgtC: 29, acclimation: fresh) == -15)
+        #expect(HeatAdvice.targetAdjustment(wbgtC: 32, acclimation: fresh) == -20)
         // Acclimatised: half the change.
-        #expect(HeatAdvice.targetAdjustment(feelsLikeC: 30, heatTrainingDays: 12) == -5)
+        #expect(HeatAdvice.targetAdjustment(wbgtC: 25, acclimation: acclimatised) == -5)
+        // Fading (15-21 days away from the heat): a quarter of it is back.
+        let fading = HeatAdvice.Acclimation(heatTrainingDays: 0, peakHeatTrainingDays: 12, daysSinceHeatTraining: 18)
+        #expect(HeatAdvice.targetAdjustment(wbgtC: 25, acclimation: fading) == -7.5)
+        // Gone after 3 weeks (Daanen 2018).
+        let lost = HeatAdvice.Acclimation(heatTrainingDays: 0, peakHeatTrainingDays: 12, daysSinceHeatTraining: 25)
+        #expect(HeatAdvice.targetAdjustment(wbgtC: 25, acclimation: lost) == -10)
+    }
+
+    @Test func adviceOnlyFromTheHighBand() {
+        #expect(HeatAdvice.advice(wbgtC: 21, acclimation: fresh) == nil)
+        let high = HeatAdvice.advice(wbgtC: 25, acclimation: fresh) ?? ""
+        #expect(high.contains("strain target is lower"))
+        #expect(high.contains("7-14 days"))
+        let extreme = HeatAdvice.advice(wbgtC: 32, acclimation: fresh) ?? ""
+        #expect(extreme.contains("unless you're heat-acclimatised"))
+        #expect((HeatAdvice.advice(wbgtC: 32, acclimation: acclimatised) ?? "").contains("largely acclimatised"))
     }
 
     @Test func adjustedRangeStaysValid() {
@@ -117,6 +174,33 @@ struct HeatAdviceTests {
         let trained = Set(days.enumerated().filter { $0.offset.isMultiple(of: 2) }.map(\.element))
         // Even offsets 0...12 fall inside the last 14 days: 7 days.
         #expect(HeatAdvice.heatTrainingDays(hotDays: hot, trainingDays: trained, now: .now, calendar: calendar) == 7)
+        let state = HeatAdvice.acclimation(hotDays: hot, trainingDays: trained, now: .now, calendar: calendar)
+        #expect(state.heatTrainingDays == 7)
+        #expect(state.daysSinceHeatTraining == 0)
+        #expect(!state.isAcclimatized)
+    }
+
+    @Test func acclimationIsKeptForTwoWeeksThenFades() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        func day(_ offset: Int) -> Date { calendar.date(byAdding: .day, value: -offset, to: today)! }
+        // Two weeks of hot training that ended 7 days ago (Périard 2015: 7-14 days to adapt).
+        let stint = Set((7..<21).map(day))
+        let recent = HeatAdvice.acclimation(hotDays: stint, trainingDays: stint, now: .now, calendar: calendar)
+        #expect(recent.peakHeatTrainingDays == 14)
+        #expect(recent.heatTrainingDays == 7)
+        #expect(recent.daysSinceHeatTraining == 7)
+        #expect(recent.isAcclimatized)
+        // The same stint 17 days ago: fading (Daanen 2018: lost over ~2-3 weeks).
+        let older = Set((17..<31).map(day))
+        let fading = HeatAdvice.acclimation(hotDays: older, trainingDays: older, now: .now, calendar: calendar)
+        #expect(fading.level == 0.5)
+        #expect(!fading.isAcclimatized)
+        // 25 days ago: gone.
+        let oldest = Set((25..<39).map(day))
+        #expect(HeatAdvice.acclimation(hotDays: oldest, trainingDays: oldest, now: .now, calendar: calendar).level == 0)
+        // Hot days without training don't count.
+        #expect(HeatAdvice.acclimation(hotDays: stint, trainingDays: [], now: .now, calendar: calendar) == .notAcclimatized)
     }
 }
 

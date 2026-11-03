@@ -972,7 +972,7 @@ private struct CalorieDetailsSheet: View {
                     } footer: {
                         Text(summary.fromWatch
                              ? "From your watch via Apple Health, so \"burned so far\" matches your watch. \"By midnight\" adds the resting calories your body will burn before the day ends; more activity adds to it."
-                             : "Estimated: resting from \(metrics.energy?.bmrMethod ?? "your profile"), activity from heart rate and steps, plus about 10% of food eaten for digestion.")
+                             : "Estimated: resting from \(metrics.energy?.bmrMethod ?? "your profile"), activity from heart rate and steps, plus the energy digestion costs (about 10% overall; more for protein).")
                     }
                     Section {
                         if let maintenance = metrics.maintenance {

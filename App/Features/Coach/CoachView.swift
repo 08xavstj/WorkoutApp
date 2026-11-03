@@ -314,7 +314,7 @@ extension CoachView {
 
         // Heat.
         if metrics.heatAdjustment > 0 {
-            lines.append("Hot day: strain target lowered by \(Int(metrics.heatAdjustment.rounded())) points; trained in the heat on \(conditions.heatTrainingDays) of the last 14 days (acclimation takes about 10-14).")
+            lines.append("Hot day: strain target lowered by \(Int(metrics.heatAdjustment.rounded())) points; trained in the heat on \(conditions.heatTrainingDays) of the last 14 days (acclimation takes about 10-14 hot training days and fades after 2-3 weeks away from the heat).")
         }
 
         // Weight change speed (Helms et al. 2014).
@@ -326,7 +326,7 @@ extension CoachView {
         // Body age with its confidence and biggest factors.
         if let age = vitals.bodyAge {
             let factors = age.factors.prefix(3).map { "\($0.name) \($0.years >= 0 ? "+" : "")\($0.years.formatted(.number.precision(.fractionLength(1)))) y" }
-            lines.append("Body age \(age.bodyAge.formatted(.number.precision(.fractionLength(1)))) vs real age \(age.age) (\(age.confidence.label.lowercased())): " + factors.joined(separator: ", ") + ".")
+            lines.append("Body age \(age.rangeLabel) vs real age \(age.age) (\(age.confidence.label.lowercased())): " + factors.joined(separator: ", ") + ".")
         }
 
         // What moved today's recovery.

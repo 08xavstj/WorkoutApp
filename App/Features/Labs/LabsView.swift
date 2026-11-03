@@ -238,6 +238,14 @@ struct LabMarkerDetailView: View {
                     if let status = latest.status {
                         Chip(text: status.rawValue + (latest.rangeText.map { " · range \($0)" } ?? ""), color: LabStatusColor.color(status))
                     }
+                    // A second line for people who train (e.g. ferritin under 30 µg/L), inside the lab range or not.
+                    if let note = LabMarkers.trainingNote(markerID: key, value: latest.value, unit: latest.unit) {
+                        Text(note)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .card(tint: Theme.recoveryModerate)
+                    }
                 }
                 if history.count > 1 {
                     chart.frame(height: 200).card()
@@ -246,6 +254,17 @@ struct LabMarkerDetailView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         CardLabel(text: "What it means", color: Theme.sleep)
                         Text(about)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card()
+                }
+                if let retest = marker?.retest {
+                    VStack(alignment: .leading, spacing: 6) {
+                        CardLabel(text: "When to retest", color: Theme.sleep)
+                        Text(retest)
                             .font(.subheadline)
                             .foregroundStyle(Theme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)

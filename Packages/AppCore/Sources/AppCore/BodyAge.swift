@@ -2,14 +2,19 @@ import Foundation
 
 /// A "body age" estimate: your age, moved up or down by measurements that
 /// research links with how long people live. It's a motivating summary, not a
-/// medical test.
+/// medical test. No composite like this has been validated, only its parts,
+/// so it is shown as whole years with a ±5-year range (app choice; the audit
+/// asked for a range rather than a point).
 ///
 /// How each factor turns into years:
-/// - Fitness (VO₂ max) is the biggest. "Fitness age" from the HUNT study
-///   (Nes et al., Med Sci Sports Exerc 2014): the age at which an average healthy person has your
-///   VO₂ max. Average VO₂ max falls about 0.40 ml/kg/min a year for men
-///   (54.4 at 25) and 0.30 for women (43.0 at 25). It counts at 60 % weight
-///   because the other factors overlap with it (the 60% is the app's choice).
+/// - Fitness (VO₂ max) is the biggest. "Fitness age": the age at which an
+///   average healthy person has your VO₂ max, using the HUNT3 reference data
+///   (Loe et al., PLoS One 2013: 3,816 healthy adults; VO₂ max falls about
+///   3.5 mL/kg/min a decade to 50, faster after). Average VO₂ max is taken as
+///   falling about 0.40 ml/kg/min a year for men (54.4 at 25) and 0.30 for
+///   women (43.0 at 25). The non-exercise fitness model is Nes et al., Med Sci
+///   Sports Exerc 2011; Nes 2014 is the mortality follow-up. It counts at 60 %
+///   weight because the other factors overlap with it (the 60% is the app's choice).
 /// - Mortality hazards from the other studies become years with the Gompertz
 ///   rule that the risk of dying doubles about every 8 years:
 ///   years = 8 × log2(hazard ratio) ("effective age", Spiegelhalter, BMC Med
@@ -103,7 +108,13 @@ public enum BodyAge {
         public var id: String { name }
     }
 
+    /// Half-width of the range shown with the estimate, in years. No composite
+    /// "age" is validated to the year; watch VO₂ max alone is off by ~10% in
+    /// fit people (app choice from the audit).
+    public static let uncertaintyYears = 5
+
     public struct Result: Sendable, Equatable {
+        /// Whole years (rounded).
         public var bodyAge: Double
         public var age: Int
         /// Biggest effect first: what's moving your body age.
@@ -112,6 +123,16 @@ public enum BodyAge {
         public var confidenceReason: String = ""
         /// Negative = younger than your age.
         public var difference: Double { bodyAge - Double(age) }
+        /// Body age as a whole number.
+        public var years: Int { Int(bodyAge.rounded()) }
+        /// The ±5-year range around the estimate, never below 18.
+        public var range: ClosedRange<Int> {
+            max(18, years - BodyAge.uncertaintyYears)...(years + BodyAge.uncertaintyYears)
+        }
+        /// e.g. "about 34 (29–39)"
+        public var rangeLabel: String {
+            "about \(years) (\(range.lowerBound)–\(range.upperBound))"
+        }
     }
 
     /// Needs at least two factors; returns nil otherwise.
@@ -165,7 +186,8 @@ public enum BodyAge {
         let total = clamp(factors.map(\.years).reduce(0, +), -20, 20)
         let bodyAge = max(18, age + total)
         let trust = Self.confidence(inputs, factorCount: factors.count)
-        return Result(bodyAge: (bodyAge * 10).rounded() / 10, age: inputs.age, factors: factors.sorted { abs($0.years) > abs($1.years) },
+        // Whole years: the composite isn't validated finer than that (audit, problem 8).
+        return Result(bodyAge: bodyAge.rounded(), age: inputs.age, factors: factors.sorted { abs($0.years) > abs($1.years) },
                       confidence: trust.0, confidenceReason: trust.reason)
     }
 

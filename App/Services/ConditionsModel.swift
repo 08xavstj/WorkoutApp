@@ -30,10 +30,18 @@ final class ConditionsModel {
         current.map { max($0.feelsLike, $0.high ?? $0.feelsLike) }
     }
 
-    /// Days (start of day) that reached `HeatAdvice.hotFeelsLikeC`, for heat acclimation.
+    /// Heat stress (WBGT) for the ACSM bands: estimated from the warmer of the
+    /// air temperature now and the day's high, with the current humidity.
+    var forecastWBGT: Double? {
+        current.map { HeatAdvice.estimatedWBGT(temperatureC: max($0.temperature, $0.high ?? $0.temperature), humidityPercent: $0.humidity) }
+    }
+
+    /// Days (start of day) that reached the ACSM "high" band (`HeatAdvice.highWBGT`), for heat acclimation.
     private(set) var hotDays: Set<Date> = ConditionsModel.loadHotDays()
     /// Hot days in the last 14 that had training; set by the app after a refresh.
     var heatTrainingDays = 0
+    /// Acclimation state (builds over 7-14 hot training days, fades over 2-3 weeks); set by the app after a refresh.
+    var heatAcclimation = HeatAdvice.Acclimation.notAcclimatized
 
     private static let hotDaysKey = "hotDays"
 
@@ -43,7 +51,7 @@ final class ConditionsModel {
     }
 
     private func recordHotDay() {
-        guard let feels = forecastFeelsLikeC, feels >= HeatAdvice.hotFeelsLikeC else { return }
+        guard let wbgt = forecastWBGT, wbgt >= HeatAdvice.highWBGT else { return }
         let today = Calendar.current.startOfDay(for: .now)
         let cutoff = today.addingTimeInterval(-30 * 86_400)
         guard !hotDays.contains(today) else { return }
@@ -56,12 +64,12 @@ final class ConditionsModel {
     var tips: [WeatherAdvice.Tip] {
         guard let current else { return [] }
         var tips = WeatherAdvice.tips(for: .init(
-            feelsLikeC: current.feelsLike, humidity: current.humidity, uvIndexMax: current.uvIndexMax,
+            feelsLikeC: current.feelsLike, temperatureC: current.temperature, humidity: current.humidity, uvIndexMax: current.uvIndexMax,
             usAQI: current.usAQI, daylightHours: current.daylightHours, precipitationChance: current.precipitationChance,
             sunrise: current.sunrise, sunset: current.sunset
         ))
         // On hot days, explain the lower strain target and acclimation instead.
-        if let heat = HeatAdvice.advice(feelsLikeC: forecastFeelsLikeC, heatTrainingDays: heatTrainingDays) {
+        if let heat = HeatAdvice.advice(wbgtC: forecastWBGT, acclimation: heatAcclimation) {
             if let index = tips.firstIndex(where: { $0.id == "heat" }) {
                 tips[index].text = heat
             } else {

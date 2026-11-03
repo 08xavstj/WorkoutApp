@@ -185,12 +185,50 @@ struct EnergyTests {
         #expect(abs(calc.bmr(body).kcal - 1723) < 0.5)
     }
 
-    @Test func katchMcArdleWhenBodyFatKnown() {
-        var lean = body
-        lean.bodyFatPercent = 13.3
-        let result = calc.bmr(lean)
+    @Test func katchMcArdleOnlyWithClinicalBodyFat() {
+        // A smart-scale body-fat reading (±5-8 points) doesn't switch the equation.
+        var scale = body
+        scale.bodyFatPercent = 13.3
+        #expect(calc.bmr(scale).method == "Mifflin-St Jeor")
+        #expect(abs(calc.bmr(scale).kcal - 1723) < 0.5)
+        // DXA or clinic body fat does.
+        var clinic = scale
+        clinic.bodyFatIsClinical = true
+        let result = calc.bmr(clinic)
         #expect(result.method == "Katch-McArdle")
         #expect(abs(result.kcal - (370 + 21.6 * 74.3 * 0.867)) < 0.5)
+    }
+
+    @Test func stepCaloriesFollowTheACSMWalkingEquation() {
+        #expect(calc.kcalPerStepPerKg == 0.00042)
+        // 8,000 everyday steps at 74.3 kg ≈ 250 kcal (was ≈ 339 at the old 0.00057).
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let result = calc.estimate(body: body, profile: HeartRateProfile(age: 30, sex: .male, restingHeartRate: 55),
+                                   heartRate: [], strengthSessions: [], stepsOutsideWorkouts: 8000, intake: nil,
+                                   dayStart: start, now: start.addingTimeInterval(3600))
+        #expect(abs(result.everydayMovement - 8000 * 0.00042 * 74.3) < 0.01)
+    }
+
+    @Test func digestionFromMacrosWhenLogged() {
+        // Westerterp 2004: 25% of protein kcal, 7.5% of carb kcal, 2% of fat kcal.
+        let macros = EnergyCalculator.Macros(proteinGrams: 180, carbsGrams: 240, fatGrams: 80) // 720 + 960 + 720 = 2400 kcal
+        #expect(abs(calc.digestion(intake: 2400, macros: macros) - (180 + 72 + 14.4)) < 0.001)
+        // Calories the macros don't explain (alcohol, say) get the 10% rule.
+        #expect(abs(calc.digestion(intake: 2600, macros: macros) - (266.4 + 20)) < 0.001)
+        // No macros: 10% of intake.
+        #expect(calc.digestion(intake: 2400, macros: nil) == 240)
+        #expect(calc.digestion(intake: nil, macros: nil) == 0)
+        // From a logged day; nil when nothing but calories was logged.
+        let day = NutritionDay(date: Date(timeIntervalSince1970: 1_800_000_000), calories: 2400, proteinGrams: 180, carbsGrams: 240, fatGrams: 80)
+        #expect(EnergyCalculator.Macros(day) == macros)
+        #expect(EnergyCalculator.Macros(NutritionDay(date: day.date, calories: 2400)) == nil)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let result = calc.estimate(body: body, profile: HeartRateProfile(age: 30, sex: .male, restingHeartRate: 55),
+                                   heartRate: [], strengthSessions: [], stepsOutsideWorkouts: 0, intake: 2400, macros: macros,
+                                   dayStart: start, now: start.addingTimeInterval(3600))
+        #expect(result.digestionFromMacros)
+        #expect(abs(result.digestion - 266.4) < 0.001)
+        #expect(EnergyCalculator.accuracyNote.contains("±15-25%"))
     }
 
     @Test func keytelRisesWithHeartRate() {
