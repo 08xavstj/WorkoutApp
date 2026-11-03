@@ -399,7 +399,7 @@ public struct WorkoutPlanner: Sendable {
     /// Cuts sets until the estimated length fits `minutes`: always from the
     /// exercise with the most sets, the later one on a tie, so the main lifts
     /// keep theirs longest. If every exercise is down to two sets, the last
-    /// exercise goes (keeping at least three). With little time, fewer sets of
+    /// exercise goes (keeping at least two). With little time, fewer sets of
     /// the big multi-joint lifts are the efficient choice (Iversen et al.,
     /// Sports Med 2021).
     static func fit(_ exercises: inout [PlannedExercise], minutes: Int) {
@@ -407,7 +407,7 @@ public struct WorkoutPlanner: Sendable {
             let trimmable = exercises.indices.filter { exercises[$0].sets > minimumSetsWhenShort }
             if let index = trimmable.reversed().max(by: { exercises[$0].sets < exercises[$1].sets }) {
                 exercises[index].sets -= 1
-            } else if exercises.count > 3 {
+            } else if exercises.count > 2 {
                 exercises.removeLast()
             } else {
                 return

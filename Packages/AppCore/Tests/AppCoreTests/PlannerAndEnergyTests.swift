@@ -255,7 +255,7 @@ struct PlannerResearchTests {
         for minutes in [20, 30, 45, 60] {
             let plan = planner.plan(focus: .legs, minutes: minutes, recovery: 70, history: [:])
             #expect(WorkoutPlanner.estimatedMinutes(plan.exercises) <= minutes)
-            #expect(plan.exercises.count >= 3)
+            #expect(plan.exercises.count >= (minutes < 30 ? 2 : 3))
             #expect(plan.exercises.allSatisfy { $0.sets >= WorkoutPlanner.minimumSetsWhenShort })
         }
     }
