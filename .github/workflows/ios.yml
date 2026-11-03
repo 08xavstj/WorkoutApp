@@ -28,7 +28,22 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
+      # The Watch app first, on its own, so a watch compile error is reported
+      # by name and a simulator hang can't eat the whole job silently.
+      - name: Build the Watch app for the simulator
+        timeout-minutes: 12
+        run: |
+          xcodebuild build \
+            -project WorkoutApp.xcodeproj \
+            -target TensileWatch \
+            -sdk watchsimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee watch-build.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" watch-build.log
+
       - name: Build app for the simulator
+        timeout-minutes: 12
         run: |
           xcodebuild build \
             -project WorkoutApp.xcodeproj \
