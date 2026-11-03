@@ -159,8 +159,10 @@ targets:
       properties:
         CFBundleDisplayName: Tensile
         WKApplication: true
-        # The iPhone app's bundle ID (Config/Base.xcconfig, or Signing.local.xcconfig).
-        WKCompanionAppBundleIdentifier: $(COMPANION_APP_BUNDLE_IDENTIFIER)
+        # WKCompanionAppBundleIdentifier is supplied by the
+        # INFOPLIST_KEY_WKCompanionAppBundleIdentifier build setting below, which
+        # Xcode merges into the plist with the variable expanded. (A literal
+        # $(VAR) here reached the device unexpanded and the install failed.)
         WKBackgroundModes:
           - workout-processing
         NSHealthShareUsageDescription: >-
@@ -173,7 +175,9 @@ targets:
         SDKROOT: watchos
         # The app's bundle ID (from Config) plus ".watchkitapp".
         PRODUCT_BUNDLE_IDENTIFIER: $(inherited).watchkitapp
+        # The iPhone app's bundle ID (Config/Base.xcconfig, or Signing.local.xcconfig).
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: $(COMPANION_APP_BUNDLE_IDENTIFIER)
+
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: ""
         TARGETED_DEVICE_FAMILY: "4"
