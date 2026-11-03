@@ -130,10 +130,17 @@ final class HRVReading {
     }
 }
 
+// Each schema version must describe the models exactly as they were stored
+// in that version. Versions that point at the same live classes get identical
+// checksums and SwiftData aborts at launch ("Duplicate version checksums
+// detected"). So 1.0.0 and 1.1.0 use frozen copies of the workout models from
+// before 1.2.0 (below); only the current version uses the live classes.
+
 nonisolated enum WorkoutSchema: VersionedSchema {
     static let versionIdentifier = Schema.Version(1, 0, 0)
     static var models: [any PersistentModel.Type] {
-        [WorkoutSession.self, ExerciseLog.self, SetLog.self, HRVReading.self]
+        [WorkoutSchemaV2.WorkoutSession.self, WorkoutSchemaV2.ExerciseLog.self,
+         WorkoutSchemaV2.SetLog.self, WorkoutSchemaV2.HRVReading.self]
     }
 }
 
@@ -144,6 +151,78 @@ nonisolated enum WorkoutSchemaV2: VersionedSchema {
     static var models: [any PersistentModel.Type] {
         WorkoutSchema.models + [WorkoutTemplate.self, TemplateExercise.self]
     }
+
+    // Frozen: the workout models as stored in 1.0.0 and 1.1.0. Don't edit
+    // these; change the live classes and add a new schema version instead.
+
+    @Model
+    final class WorkoutSession {
+        var startedAt: Date
+        var endedAt: Date?
+        var name: String
+        var sessionRPE: Int?
+        var notes: String
+        var savedToHealth: Bool
+
+        @Relationship(deleteRule: .cascade, inverse: \ExerciseLog.session)
+        var exercises: [ExerciseLog] = []
+
+        init(name: String, startedAt: Date) {
+            self.name = name
+            self.startedAt = startedAt
+            self.notes = ""
+            self.savedToHealth = false
+        }
+    }
+
+    @Model
+    final class ExerciseLog {
+        var exerciseID: String
+        var name: String
+        var order: Int
+        var session: WorkoutSession?
+
+        @Relationship(deleteRule: .cascade, inverse: \SetLog.exercise)
+        var sets: [SetLog] = []
+
+        init(exerciseID: String, name: String, order: Int) {
+            self.exerciseID = exerciseID
+            self.name = name
+            self.order = order
+        }
+    }
+
+    @Model
+    final class SetLog {
+        var order: Int
+        var weightKg: Double
+        var reps: Int
+        var rpe: Double?
+        var isWarmup: Bool
+        var completedAt: Date?
+        var exercise: ExerciseLog?
+
+        init(order: Int, weightKg: Double, reps: Int, rpe: Double?, isWarmup: Bool) {
+            self.order = order
+            self.weightKg = weightKg
+            self.reps = reps
+            self.rpe = rpe
+            self.isWarmup = isWarmup
+        }
+    }
+
+    @Model
+    final class HRVReading {
+        var date: Date
+        var milliseconds: Double
+        var source: String
+
+        init(date: Date, milliseconds: Double, source: String) {
+            self.date = date
+            self.milliseconds = milliseconds
+            self.source = source
+        }
+    }
 }
 
 /// Adds the link from a session to the watch workout recorded alongside it
@@ -152,7 +231,10 @@ nonisolated enum WorkoutSchemaV2: VersionedSchema {
 /// default, so another lightweight migration.
 nonisolated enum WorkoutSchemaV3: VersionedSchema {
     static let versionIdentifier = Schema.Version(1, 2, 0)
-    static var models: [any PersistentModel.Type] { WorkoutSchemaV2.models }
+    static var models: [any PersistentModel.Type] {
+        [WorkoutSession.self, ExerciseLog.self, SetLog.self, HRVReading.self,
+         WorkoutTemplate.self, TemplateExercise.self]
+    }
 }
 
 nonisolated enum WorkoutMigrationPlan: SchemaMigrationPlan {
