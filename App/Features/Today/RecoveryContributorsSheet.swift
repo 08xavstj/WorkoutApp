@@ -11,7 +11,8 @@ struct RecoveryContributorsSheet: View {
     var body: some View {
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
         let drinks = checkIns.evening(on: yesterday)?.drinks
-        let illness = vitals.illnessAlert(metrics: metrics, drinksLastNight: drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false)
+        let illness = vitals.illnessAlert(metrics: metrics, drinksLastNight: drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false,
+                                          daysSinceLastPeriod: checkIns.daysSinceLastPeriod())
         let items = metrics.recoveryContributors(drinksLastNight: drinks, illness: illness)
         NavigationStack {
             ScrollView {

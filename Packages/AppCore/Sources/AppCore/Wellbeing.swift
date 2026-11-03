@@ -81,15 +81,56 @@ public enum Hydration {
 /// Flags when resting heart rate, breathing rate or temperature rise above your
 /// own baseline together, a pattern that often comes before feeling sick
 /// (Mishra et al., Nat Biomed Eng 2020: 63% of 32 COVID-19 cases flagged
-/// before symptoms, retrospective; Quer et al., Nat Med 2020, DETECT study:
-/// sensors plus symptoms worked better than resting heart rate alone).
+/// before symptoms, retrospective; Quer et al., Nat Med 2021;27:73-77, DETECT
+/// study: sensors plus symptoms worked better than resting heart rate alone;
+/// Natarajan et al., npj Digit Med 2020: breathing rate and heart rate up, HRV
+/// down, around onset).
 ///
 /// One raised signal is common on a normal day, so it's only a "minor sign"
 /// shown quietly. Two or more signals together (reported symptoms count as one)
 /// are "major signs" and raise an alert, the multi-signal approach that cuts
-/// false alarms. Alcohol and very hard training cause the same changes, so they
-/// lower the level unless you also feel unwell.
+/// false alarms. Without symptoms, a body signal also has to be up for two
+/// days running before it counts toward "major", as the wearable studies
+/// required (Mishra 2020; Quer 2021): one odd night is usually noise. Alcohol
+/// and very hard training cause the same changes, so they lower the level
+/// unless you also feel unwell.
+///
+/// Menstrual cycle: in the luteal phase sleeping temperature runs about
+/// 0.3-0.5 °C higher and resting heart rate 2-4 bpm higher (figures from the
+/// app's evidence audit, Nov 2026, problem 9; the pattern is well known but
+/// was not re-verified against one study), which would trip both signals at
+/// once. The rise starts after ovulation, about two weeks after a period
+/// begins, and lasts until the next period (Baker & Driver, Sleep Med 2007),
+/// so when the morning check-in last logged "On my period" `lutealWindowDays`
+/// ago, the temperature bar rises to +0.8 °C and resting heart rate gets 3
+/// bpm of extra room.
 public enum IllnessWatch {
+    /// Days since the last logged period day during which the cycle
+    /// allowances apply: the luteal phase of a typical 24-35 day cycle. The
+    /// app's choice of window; the phase itself is well documented.
+    public static let lutealWindowDays: ClosedRange<Int> = 10...32
+    /// Temperature rise vs your 14-night mean that counts (Smarr et al., Sci Rep 2020).
+    public static let temperatureThreshold = 0.5
+    /// The same bar in the luteal phase (audit: luteal rise ≈ 0.3-0.5 °C).
+    public static let lutealTemperatureThreshold = 0.8
+    /// Extra resting heart rate allowed in the luteal phase (audit: luteal rise ≈ 2-4 bpm).
+    public static let lutealRestingHeartRateAllowance = 3.0
+
+    /// Yesterday's values, compared with the same baselines, so a signal can
+    /// be checked for two consecutive days.
+    public struct PreviousDay: Sendable, Equatable {
+        public var restingHeartRate: Double?
+        public var respiratoryRate: Double?
+        /// Wrist/body temperature difference from usual that day, °C.
+        public var temperatureDelta: Double?
+
+        public init(restingHeartRate: Double? = nil, respiratoryRate: Double? = nil, temperatureDelta: Double? = nil) {
+            self.restingHeartRate = restingHeartRate
+            self.respiratoryRate = respiratoryRate
+            self.temperatureDelta = temperatureDelta
+        }
+    }
+
     public struct Inputs: Sendable, Equatable {
         public var restingHeartRate: Double?
         public var rhrBaseline: (mean: Double, sd: Double)?
@@ -102,11 +143,17 @@ public enum IllnessWatch {
         public var drinksLastNight: Int?
         public var yesterdayStrain: Double?
         public var reportedSymptoms: Bool
+        /// Yesterday's signals, for the two-day rule. Nil when unknown.
+        public var previousDay: PreviousDay?
+        /// Days since the morning check-in last logged "On my period"; nil when
+        /// not tracked or none logged.
+        public var daysSinceLastPeriod: Int?
 
         public init(restingHeartRate: Double? = nil, rhrBaseline: (mean: Double, sd: Double)? = nil,
                     respiratoryRate: Double? = nil, respiratoryBaseline: (mean: Double, sd: Double)? = nil,
                     temperatureDelta: Double? = nil, hrvChangePercent: Double? = nil,
-                    drinksLastNight: Int? = nil, yesterdayStrain: Double? = nil, reportedSymptoms: Bool = false) {
+                    drinksLastNight: Int? = nil, yesterdayStrain: Double? = nil, reportedSymptoms: Bool = false,
+                    previousDay: PreviousDay? = nil, daysSinceLastPeriod: Int? = nil) {
             self.restingHeartRate = restingHeartRate
             self.rhrBaseline = rhrBaseline
             self.respiratoryRate = respiratoryRate
@@ -116,6 +163,14 @@ public enum IllnessWatch {
             self.drinksLastNight = drinksLastNight
             self.yesterdayStrain = yesterdayStrain
             self.reportedSymptoms = reportedSymptoms
+            self.previousDay = previousDay
+            self.daysSinceLastPeriod = daysSinceLastPeriod
+        }
+
+        /// Whether the cycle allowances apply (see `lutealWindowDays`).
+        public var inCycleWindow: Bool {
+            guard let days = daysSinceLastPeriod else { return false }
+            return IllnessWatch.lutealWindowDays.contains(days)
         }
 
         public static func == (a: Inputs, b: Inputs) -> Bool {
@@ -126,6 +181,7 @@ public enum IllnessWatch {
                 && a.respiratoryBaseline?.sd == b.respiratoryBaseline?.sd
                 && a.drinksLastNight == b.drinksLastNight && a.yesterdayStrain == b.yesterdayStrain
                 && a.reportedSymptoms == b.reportedSymptoms
+                && a.previousDay == b.previousDay && a.daysSinceLastPeriod == b.daysSinceLastPeriod
         }
     }
 
@@ -148,45 +204,96 @@ public enum IllnessWatch {
         public var level: Level
         public var signals: [String]
         public var message: String
+        /// True when two or more signals are up today but none was up yesterday
+        /// and no symptoms were reported: held at "minor" until a second day.
+        public var awaitingSecondDay: Bool = false
+    }
+
+    /// One raised body signal and its wording.
+    struct Signal: Equatable {
+        var id: String
+        var text: String
+    }
+
+    /// Which of resting heart rate, breathing rate and temperature are up.
+    /// Thresholds: RHR ≥ max(2 SD, 4 bpm) above baseline (Mishra et al., Nat
+    /// Biomed Eng 2020 used RHR residuals); breathing ≥ max(2 SD, 1/min)
+    /// (Natarajan et al., npj Digit Med 2020); temperature ≥ +0.5 °C vs the
+    /// 14-night mean (Smarr et al., Sci Rep 2020). The luteal allowances are
+    /// added when `luteal` is true.
+    static func bodySignals(
+        restingHeartRate: Double?, rhrBaseline: (mean: Double, sd: Double)?,
+        respiratoryRate: Double?, respiratoryBaseline: (mean: Double, sd: Double)?,
+        temperatureDelta: Double?, luteal: Bool
+    ) -> [Signal] {
+        var signals: [Signal] = []
+        if let rhr = restingHeartRate, let base = rhrBaseline,
+           rhr - base.mean >= max(2 * base.sd, 4) + (luteal ? lutealRestingHeartRateAllowance : 0) {
+            signals.append(Signal(id: "rhr", text: "Resting heart rate +\(Int((rhr - base.mean).rounded())) bpm"))
+        }
+        if let rate = respiratoryRate, let base = respiratoryBaseline,
+           rate - base.mean >= max(2 * base.sd, 1) {
+            signals.append(Signal(id: "breathing", text: String(format: "Breathing rate +%.1f/min", rate - base.mean)))
+        }
+        if let delta = temperatureDelta, delta >= (luteal ? lutealTemperatureThreshold : temperatureThreshold) {
+            signals.append(Signal(id: "temperature", text: String(format: "Temperature +%.1f °C", delta)))
+        }
+        return signals
     }
 
     public static func evaluate(_ inputs: Inputs) -> Alert? {
-        var signals: [String] = []
-        if let rhr = inputs.restingHeartRate, let base = inputs.rhrBaseline,
-           rhr - base.mean >= max(2 * base.sd, 4) {
-            signals.append("Resting heart rate +\(Int((rhr - base.mean).rounded())) bpm")
-        }
-        if let rate = inputs.respiratoryRate, let base = inputs.respiratoryBaseline,
-           rate - base.mean >= max(2 * base.sd, 1) {
-            signals.append(String(format: "Breathing rate +%.1f/min", rate - base.mean))
-        }
-        if let delta = inputs.temperatureDelta, delta >= 0.5 {
-            signals.append(String(format: "Temperature +%.1f °C", delta))
-        }
+        let luteal = inputs.inCycleWindow
+        let today = bodySignals(
+            restingHeartRate: inputs.restingHeartRate, rhrBaseline: inputs.rhrBaseline,
+            respiratoryRate: inputs.respiratoryRate, respiratoryBaseline: inputs.respiratoryBaseline,
+            temperatureDelta: inputs.temperatureDelta, luteal: luteal
+        )
+        var signals = today.map(\.text)
         if let hrv = inputs.hrvChangePercent, hrv <= -20, !signals.isEmpty {
+            // HRV falls days before diagnosis (Hirten et al., JMIR 2021), but only counts alongside another signal.
             signals.append("HRV \(Int(hrv.rounded()))%")
         }
-        let bodySignals = signals.count
-        let total = bodySignals + (inputs.reportedSymptoms ? 1 : 0)
+        let bodySignalCount = signals.count
+        let total = bodySignalCount + (inputs.reportedSymptoms ? 1 : 0)
         guard total > 0 else { return nil }
+
+        // Two-day rule: without symptoms, at least one of today's signals must
+        // also have been up yesterday before the alert can be "major".
+        let yesterday = inputs.previousDay.map { previous in
+            bodySignals(
+                restingHeartRate: previous.restingHeartRate, rhrBaseline: inputs.rhrBaseline,
+                respiratoryRate: previous.respiratoryRate, respiratoryBaseline: inputs.respiratoryBaseline,
+                temperatureDelta: previous.temperatureDelta, luteal: luteal
+            )
+        } ?? []
+        let repeated = today.contains { signal in yesterday.contains { $0.id == signal.id } }
+        let confirmed = inputs.reportedSymptoms || repeated
+
         var level: Level = total >= 2 ? .major : .minor
+        let awaitingSecondDay = level == .major && !confirmed
+        if awaitingSecondDay { level = .minor }
         let explained = (inputs.drinksLastNight ?? 0) >= 2 || (inputs.yesterdayStrain ?? 0) >= 80
-        if explained && !inputs.reportedSymptoms && bodySignals < 3 { level = .minor }
+        if explained && !inputs.reportedSymptoms && bodySignalCount < 3 { level = .minor }
         if inputs.reportedSymptoms { signals.append("You feel unwell") }
 
         var message: String
         switch level {
         case .major:
             message = "Several signs together suggest your body may be fighting something. Keep today easy, sleep early and drink fluids. Consider rest mode until you feel better."
-        case .minor where bodySignals == 0:
+        case .minor where bodySignalCount == 0:
             message = "You said you're feeling unwell. Your vitals look normal so far, but keep today easy and see how you feel."
+        case .minor where awaitingSecondDay && !explained:
+            message = "A couple of your vitals are up compared with your normal. One day is often noise; if they're still up tomorrow, treat it as a sign to rest."
         case .minor:
             message = "One of your vitals is up compared with your normal. On its own that's common; keep an eye on how you feel."
         }
         if explained {
             message += " Alcohol or yesterday's hard training can also cause this."
         }
-        return Alert(level: level, signals: signals, message: message)
+        if luteal && !today.isEmpty {
+            message += " Temperature and heart rate also shift across a menstrual cycle, so the bar is set higher for now."
+        }
+        return Alert(level: level, signals: signals, message: message, awaitingSecondDay: awaitingSecondDay)
     }
 }
 

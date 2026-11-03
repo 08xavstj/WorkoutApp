@@ -57,7 +57,7 @@ struct CameraHRVView: View {
             step("figure.seated.side.left", "Sit or lie still and breathe normally for one minute. Rest your hand on something.")
             step("sunrise.fill", "Measure at the same time each morning, before coffee or exercise, in the same position.")
             step("arrow.triangle.2.circlepath", "Stick to one method. Camera readings are a 1-minute spot check, while watches average HRV overnight, so the numbers aren't comparable.")
-            Text("The camera sees tiny colour changes as blood pulses through your finger and times each beat. In a study, 1-minute phone-camera readings closely matched ECG (Plews et al., IJSPP 2017).")
+            Text("The camera sees tiny colour changes as blood pulses through your finger and times each beat. Phone-camera readings matched ECG closely over 5 minutes (Plews et al., IJSPP 2017), and 1-minute readings at rest agree well with 5-minute ones (Esco & Flatt, J Sports Sci Med 2014). Expect about ±15% vs a chest strap: a spot check, not a lab test.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -137,7 +137,7 @@ struct CameraHRVView: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
             if result.quality < 70 {
-                Text("Quite a few beats were unclear. If this looks off, measure again with your hand resting still.")
+                Text("Quite a few beats were unclear (under a minute of clean pulse). Treat this as rough: it's about ±15% at best, so if it looks off, measure again with your hand resting still.")
                     .font(.caption)
                     .foregroundStyle(Theme.recoveryModerateText)
             }

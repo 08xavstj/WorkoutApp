@@ -274,7 +274,8 @@ extension CoachView {
             lines.append("Vitamins/minerals (7-day avg vs target): " + lowNutrients.map { "\($0.nutrient.name) \(Int($0.percentOfTarget.rounded()))% (\($0.kind.rawValue))" }.joined(separator: ", ") + ".")
         }
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
-        if let alert = vitals.illnessAlert(metrics: metrics, drinksLastNight: checkIns.evening(on: yesterday)?.drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false) {
+        if let alert = vitals.illnessAlert(metrics: metrics, drinksLastNight: checkIns.evening(on: yesterday)?.drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false,
+                                           daysSinceLastPeriod: checkIns.daysSinceLastPeriod()) {
             lines.append("Illness watch (\(alert.level.label)): " + alert.signals.joined(separator: ", ") + ".")
         }
         if let deload = muscles.deload { lines.append("Deload suggested: stalled " + deload.stalledLifts.joined(separator: ", ") + ".") }

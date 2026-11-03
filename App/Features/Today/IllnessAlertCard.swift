@@ -15,7 +15,8 @@ struct IllnessAlertCard: View {
         let alert = vitals.illnessAlert(
             metrics: metrics,
             drinksLastNight: checkIns.evening(on: yesterday)?.drinks,
-            reportedSymptoms: checkIns.morning()?.isSick ?? false
+            reportedSymptoms: checkIns.morning()?.isSick ?? false,
+            daysSinceLastPeriod: checkIns.daysSinceLastPeriod()
         )
         if settings.isRestMode {
             RestModeBanner()

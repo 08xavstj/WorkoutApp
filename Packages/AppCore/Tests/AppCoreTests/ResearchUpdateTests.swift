@@ -82,13 +82,60 @@ struct WellbeingTests {
         #expect(Hydration.assess(drank: 7, target: target, hour: 15).status == .high)
     }
 
-    @Test func twoRaisedVitalsMeanLikelyIllness() throws {
-        let alert = try #require(IllnessWatch.evaluate(.init(
+    /// Two raised vitals are "major" once one of them has been up two days
+    /// running (Mishra 2020; Quer 2021); the first day is held at "minor".
+    @Test func twoRaisedVitalsMeanLikelyIllnessOnTheSecondDay() throws {
+        let firstDay = try #require(IllnessWatch.evaluate(.init(
             restingHeartRate: 62, rhrBaseline: (54, 1.5),
             respiratoryRate: 16.5, respiratoryBaseline: (14.5, 0.4)
         )))
-        #expect(alert.level == .major)
-        #expect(alert.signals.count == 2)
+        #expect(firstDay.level == .minor)
+        #expect(firstDay.awaitingSecondDay)
+        #expect(firstDay.signals.count == 2)
+        #expect(firstDay.message.contains("tomorrow"))
+
+        let secondDay = try #require(IllnessWatch.evaluate(.init(
+            restingHeartRate: 62, rhrBaseline: (54, 1.5),
+            respiratoryRate: 16.5, respiratoryBaseline: (14.5, 0.4),
+            previousDay: .init(restingHeartRate: 60)
+        )))
+        #expect(secondDay.level == .major)
+        #expect(!secondDay.awaitingSecondDay)
+        #expect(secondDay.signals.count == 2)
+
+        // Yesterday was normal: still the first day.
+        let normalYesterday = try #require(IllnessWatch.evaluate(.init(
+            restingHeartRate: 62, rhrBaseline: (54, 1.5),
+            respiratoryRate: 16.5, respiratoryBaseline: (14.5, 0.4),
+            previousDay: .init(restingHeartRate: 55, respiratoryRate: 14.6)
+        )))
+        #expect(normalYesterday.level == .minor)
+        #expect(normalYesterday.awaitingSecondDay)
+    }
+
+    /// Within 16 days of a logged period the temperature bar is +0.8 °C and
+    /// resting heart rate gets 3 bpm of room (luteal rise ≈ 0.3-0.5 °C, 2-4 bpm).
+    @Test func cycleRaisesTheIllnessBar() throws {
+        func inputs(daysSinceLastPeriod: Int?) -> IllnessWatch.Inputs {
+            .init(restingHeartRate: 59, rhrBaseline: (54, 1.5), temperatureDelta: 0.6,
+                  previousDay: .init(restingHeartRate: 59, temperatureDelta: 0.6),
+                  daysSinceLastPeriod: daysSinceLastPeriod)
+        }
+        let untracked = try #require(IllnessWatch.evaluate(inputs(daysSinceLastPeriod: nil)))
+        #expect(untracked.level == .major)
+        // Luteal phase (about 10-32 days after a period): the small rise is expected.
+        #expect(IllnessWatch.evaluate(inputs(daysSinceLastPeriod: 20)) == nil)
+        // Just after a period the bar is the normal one.
+        let follicular = try #require(IllnessWatch.evaluate(inputs(daysSinceLastPeriod: 3)))
+        #expect(follicular.level == .major)
+
+        // A real fever still shows: +0.9 °C and +8 bpm clear the higher bar.
+        let fever = try #require(IllnessWatch.evaluate(.init(
+            restingHeartRate: 62, rhrBaseline: (54, 1.5), temperatureDelta: 0.9,
+            previousDay: .init(temperatureDelta: 0.9), daysSinceLastPeriod: 20
+        )))
+        #expect(fever.level == .major)
+        #expect(fever.message.contains("cycle"))
     }
 
     @Test func alcoholDowngradesTheAlert() throws {

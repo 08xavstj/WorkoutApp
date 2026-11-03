@@ -9,22 +9,62 @@ import Foundation
 /// - Need: 8 h by default. Adults need 7 h or more (Watson et al., Sleep 2015,
 ///   AASM/SRS consensus); no study ties extra need to the previous day's
 ///   training load, so strain doesn't change it.
-/// - Efficiency: 85% or more is good sleep quality (Ohayon et al., Sleep Health
-///   2017, National Sleep Foundation), so it gets full marks from 85% and
-///   none at 65%.
+/// - Efficiency: 85% or more is good sleep quality and under 74% is poor
+///   (Ohayon et al., Sleep Health 2017, National Sleep Foundation), so it gets
+///   full marks from 85% and none at 70%.
 /// - Deep + REM: weighted lightly because wrist trackers detect sleep well but
 ///   stage it poorly (Chinoy et al., Sleep 2021; Schyvens et al., Sleep Adv 2025).
+///   The target falls with age, as deep and REM sleep do (Ohayon et al., Sleep
+///   2004 meta-analysis): 40% under 40, 35% at 40-59, 30% from 60.
+/// - Interruptions: awakenings over 5 minutes; 0-1 is good and 4 or more is
+///   poor (Ohayon et al., Sleep Health 2017), so 0-1 → full marks, 2-3 → half,
+///   4+ → none.
+/// - Regularity: the Sleep Regularity Index, mapped so 85+ is full marks and
+///   50 or less is none (`regularityScore`), because the UK Biobank median is
+///   about 81 and the bottom fifth starts near 72 (Windred et al., Sleep 2024).
 public struct SleepCalculator: Sendable {
     public var baseSleepNeedHours: Double = 8
     /// Extra sleep needed per strain point (%) above 48 the previous day.
     /// Off (0) by default: there's no research for a load-based sleep need.
     public var extraNeedPerStrainPoint: TimeInterval = 0
-    /// Deep + REM share of total sleep that earns full marks.
+    /// Deep + REM share of total sleep that earns full marks when `age` is
+    /// unknown (the under-40 target; see `restorativeShareTarget(age:)`).
     public var targetRestorativeShare: Double = 0.40
+    /// Your age, which scales the deep + REM target. Nil uses `targetRestorativeShare`.
+    public var age: Int?
     /// Awake periods at least this long count as an interruption.
     public var minimumInterruption: TimeInterval = 5 * 60
 
     public init() {}
+
+    /// Deep + REM share that earns full marks at an age. Normal adult N3 is
+    /// about 13-23% and REM 20-25%, both falling with age (AASM; Ohayon et
+    /// al., Sleep 2004); the steps are the app's.
+    public static func restorativeShareTarget(age: Int) -> Double {
+        switch age {
+        case ..<40: 0.40
+        case 40..<60: 0.35
+        default: 0.30
+        }
+    }
+
+    /// Interruption marks: 0-1 awakenings over 5 min is good, 4+ is poor
+    /// (Ohayon et al., Sleep Health 2017, NSF sleep quality indicators).
+    public static func interruptionScore(_ interruptions: Int) -> Double {
+        switch interruptions {
+        case ..<2: 1.0
+        case 2...3: 0.5
+        default: 0
+        }
+    }
+
+    /// Regularity marks from the Sleep Regularity Index: (SRI − 50) / 35,
+    /// clamped 0-1, so 85+ is full marks, 67.5 is half and 50 or under is none.
+    /// SRI/100 would score almost everyone high: the UK Biobank median is 81
+    /// and the bottom quintile begins near 72 (Windred et al., Sleep 2024).
+    public static func regularityScore(sri: Int) -> Double {
+        min(1, max(0, (Double(sri) - 50) / 35))
+    }
 
     public struct Result: Sendable, Equatable {
         public var score: Int
@@ -103,13 +143,15 @@ public struct SleepCalculator: Sendable {
 
         let durationScore = min(1, asleep / need)
         let rawEfficiency = inBed > 0 ? min(1, asleep / inBed) : 0
-        let efficiency = min(1, max(0, (rawEfficiency - 0.65) / 0.20))
-        let restorative = hasStages ? min(1, (deep + rem) / asleep / targetRestorativeShare) : 0.75
-        let interruptionScore = max(0, 1 - Double(interruptions) / 8)
+        // Full marks from 85%, none at 70% (Ohayon et al., Sleep Health 2017: ≥ 85% good, < 74% poor).
+        let efficiency = min(1, max(0, (rawEfficiency - 0.70) / 0.15))
+        let restorativeTarget = age.map(Self.restorativeShareTarget(age:)) ?? targetRestorativeShare
+        let restorative = hasStages ? min(1, (deep + rem) / asleep / restorativeTarget) : 0.75
+        let interruptionScore = Self.interruptionScore(interruptions)
 
         let weighted: Double
         if let consistency {
-            let regularity: Double = Double(consistency) / 100
+            let regularity = Self.regularityScore(sri: consistency)
             weighted = 0.45 * durationScore + 0.2 * efficiency + 0.1 * restorative + 0.1 * interruptionScore
                 + 0.15 * regularity
         } else {

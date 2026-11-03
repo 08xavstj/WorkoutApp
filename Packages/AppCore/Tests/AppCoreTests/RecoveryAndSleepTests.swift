@@ -28,26 +28,36 @@ struct RecoveryCalculatorTests {
         #expect(result.isCalibrated)
     }
 
-    @Test func highHRVAndLowRestingHeartRateIsHigh() throws {
+    /// One great night with a 7-day HRV average still inside the normal range
+    /// stays in the moderate band (the trend sets the band; the night moves
+    /// the number within it).
+    @Test func oneGreatNightWithinNormalTrendStaysModerate() throws {
         let result = try #require(calculator.score(
             today: DailyVitals(date: today, hrvMilliseconds: 75, restingHeartRate: 52),
             history: history,
             sleepScore: 90
         ))
-        #expect(result.status == .high)
+        #expect(result.hrvTrend?.status == .within)
+        #expect(result.bandFollowsTrend)
+        #expect(result.status == .moderate)
+        #expect(result.score >= 55)
+        #expect(result.score <= RecoveryCalculator.moderateBand.upperBound)
         #expect((result.hrvChangePercent ?? 0) > 20)
     }
 
-    @Test func lowHRVAndHighRestingHeartRateIsLow() throws {
+    @Test func oneBadNightWithinNormalTrendIsLowModerate() throws {
         let result = try #require(calculator.score(
             today: DailyVitals(date: today, hrvMilliseconds: 45, restingHeartRate: 60),
             history: history,
             sleepScore: 55
         ))
-        #expect(result.status == .low)
+        #expect(result.hrvTrend?.status == .within)
+        #expect(result.status == .moderate)
+        #expect(result.score <= 45)
+        #expect(result.score >= RecoveryCalculator.moderateBand.lowerBound)
     }
 
-    @Test func weekOfLowHRVIsBelowNormalRange() throws {
+    @Test func weekOfLowHRVIsBelowNormalRangeAndAnEasyDay() throws {
         let lowWeek = (1...6).map { day in
             DailyVitals(date: today.addingTimeInterval(Double(-day) * 86_400), hrvMilliseconds: 48, restingHeartRate: 56)
         }
@@ -60,6 +70,115 @@ struct RecoveryCalculatorTests {
         let trend = try #require(result.hrvTrend)
         #expect(trend.status == .below)
         #expect(trend.nights == 7)
+        #expect(result.status == .low)
+        #expect(result.score <= RecoveryCalculator.lowBand.upperBound)
+        #expect(result.status.label == "Easy day")
+    }
+
+    /// A week above the normal range is "high" only when resting heart rate
+    /// and sleep agree.
+    @Test func weekAboveNormalRangeIsHighUnlessRHROrSleepDisagree() throws {
+        let highWeek = (1...6).map { day in
+            DailyVitals(date: today.addingTimeInterval(Double(-day) * 86_400), hrvMilliseconds: 75, restingHeartRate: 54)
+        }
+        let older = history.map { DailyVitals(date: $0.date.addingTimeInterval(-7 * 86_400), hrvMilliseconds: $0.hrvMilliseconds, restingHeartRate: $0.restingHeartRate) }
+        let high = try #require(calculator.score(
+            today: DailyVitals(date: today, hrvMilliseconds: 76, restingHeartRate: 54),
+            history: highWeek + older,
+            sleepScore: 80
+        ))
+        #expect(high.hrvTrend?.status == .above)
+        #expect(high.status == .high)
+        #expect(high.score >= RecoveryCalculator.highBand.lowerBound)
+
+        let raisedRHR = try #require(calculator.score(
+            today: DailyVitals(date: today, hrvMilliseconds: 76, restingHeartRate: 60),
+            history: highWeek + older,
+            sleepScore: 80
+        ))
+        #expect(raisedRHR.hrvTrend?.status == .above)
+        #expect(raisedRHR.status == .moderate)
+
+        let badSleep = try #require(calculator.score(
+            today: DailyVitals(date: today, hrvMilliseconds: 76, restingHeartRate: 54),
+            history: highWeek + older,
+            sleepScore: 50
+        ))
+        #expect(badSleep.status == .moderate)
+    }
+
+    @Test func scoresScaleIntoTheirBand() {
+        #expect(RecoveryCalculator.scale(1, into: RecoveryCalculator.moderateBand) == 34)
+        #expect(RecoveryCalculator.scale(99, into: RecoveryCalculator.moderateBand) == 66)
+        #expect(RecoveryCalculator.scale(99, into: RecoveryCalculator.lowBand) == 33)
+        #expect(RecoveryCalculator.scale(1, into: RecoveryCalculator.highBand) == 67)
+        #expect(RecoveryCalculator.status(for: 33) == .low)
+        #expect(RecoveryCalculator.status(for: 34) == .moderate)
+        #expect(RecoveryCalculator.status(for: 67) == .high)
+    }
+
+    /// Without an HRV trend (no HRV at all) the score alone sets the band, as before.
+    @Test func withoutHRVTheScoreSetsTheBand() throws {
+        let noHRV = history.map { DailyVitals(date: $0.date, hrvMilliseconds: nil, restingHeartRate: $0.restingHeartRate) }
+        let result = try #require(calculator.score(
+            today: DailyVitals(date: today, hrvMilliseconds: nil, restingHeartRate: 52),
+            history: noHRV,
+            sleepScore: 90
+        ))
+        #expect(result.hrvTrend == nil)
+        #expect(!result.bandFollowsTrend)
+        #expect(result.status == .high)
+    }
+
+    @Test func sleepIsComparedWithYourOwnBaseline() throws {
+        let tonight = DailyVitals(date: today, hrvMilliseconds: 60, restingHeartRate: 55)
+        let population = try #require(calculator.score(today: tonight, history: history, sleepScore: 75))
+        #expect(population.sleepBaselineNights == 0)
+        #expect(population.contributors.first { $0.id == "sleep" }?.effect == .neutral)
+
+        // 75 is a great night for someone who usually scores 60.
+        let own = try #require(calculator.score(today: tonight, history: history, sleepScore: 75,
+                                                sleepScoreHistory: Array(repeating: 60, count: 30)))
+        #expect(own.sleepBaselineNights == 30)
+        #expect(own.contributors.first { $0.id == "sleep" }?.effect == .raises)
+        #expect(own.score > population.score)
+
+        // Fewer than 14 nights: still the population anchor.
+        let early = try #require(calculator.score(today: tonight, history: history, sleepScore: 75,
+                                                  sleepScoreHistory: Array(repeating: 60, count: 10)))
+        #expect(early.sleepBaselineNights == 0)
+        #expect(early.score == population.score)
+    }
+
+    @Test func sleepingHeartRateReplacesHealthKitOnlyWithEnoughNights() throws {
+        var sleeping: [Date: Double] = [:]
+        for day in 0...14 {
+            sleeping[today.addingTimeInterval(Double(-day) * 86_400)] = 50
+        }
+        let swapped = RecoveryCalculator.preferSleepingHeartRate(history, sleeping: sleeping, minimumNights: 15)
+        #expect(swapped.source == .sleeping)
+        #expect(swapped.vitals.count == 15)
+        #expect(swapped.vitals.allSatisfy { $0.restingHeartRate == 50 })
+        #expect(swapped.vitals.first.map { Calendar.current.isDate($0.date, inSameDayAs: today) } == true)
+        // HRV is untouched.
+        #expect(swapped.vitals.compactMap(\.hrvMilliseconds).count == 14)
+
+        var fewNights: [Date: Double] = [:]
+        for day in 0..<5 {
+            fewNights[today.addingTimeInterval(Double(-day) * 86_400)] = 50
+        }
+        let few = RecoveryCalculator.preferSleepingHeartRate(history, sleeping: fewNights, minimumNights: 15)
+        #expect(few.source == .healthKit)
+        #expect(few.vitals == history)
+
+        let result = try #require(calculator.score(
+            today: DailyVitals(date: today, hrvMilliseconds: 60, restingHeartRate: 53),
+            history: Array(swapped.vitals.dropFirst()),
+            sleepScore: nil,
+            restingHeartRateSource: swapped.source
+        ))
+        #expect(result.restingHeartRateSource == .sleeping)
+        #expect(result.contributors.first { $0.id == "rhr" }?.name == "Sleeping heart rate")
     }
 
     @Test func notCalibratedWithoutHistory() throws {
@@ -211,6 +330,56 @@ struct SleepCalculatorTests {
     @Test func noSleepReturnsNil() {
         #expect(calculator.score(samples: []) == nil)
         #expect(calculator.score(samples: [SleepSample(stage: .inBed, start: at(0), end: at(8))]) == nil)
+    }
+
+    /// SRI 85+ is full marks, 50 or under none (Windred 2024: median 81).
+    @Test func regularityMapsTheRealWorldRange() {
+        #expect(SleepCalculator.regularityScore(sri: 100) == 1)
+        #expect(SleepCalculator.regularityScore(sri: 85) == 1)
+        #expect(abs(SleepCalculator.regularityScore(sri: 67) - 17.0 / 35) < 0.001)
+        #expect(SleepCalculator.regularityScore(sri: 50) == 0)
+        #expect(SleepCalculator.regularityScore(sri: 30) == 0)
+    }
+
+    /// 0-1 awakenings good, 4+ poor (Ohayon 2017).
+    @Test func interruptionsFollowTheNSFIndicator() {
+        #expect(SleepCalculator.interruptionScore(0) == 1)
+        #expect(SleepCalculator.interruptionScore(1) == 1)
+        #expect(SleepCalculator.interruptionScore(2) == 0.5)
+        #expect(SleepCalculator.interruptionScore(3) == 0.5)
+        #expect(SleepCalculator.interruptionScore(4) == 0)
+        #expect(SleepCalculator.interruptionScore(7) == 0)
+    }
+
+    @Test func efficiencyIsZeroAt70Percent() throws {
+        // 5.6 h asleep: 70% of 8 h in bed earns nothing, 80% of 7 h earns two thirds.
+        let seventy = [SleepSample(stage: .core, start: at(0), end: at(5.6)), SleepSample(stage: .inBed, start: at(0), end: at(8))]
+        let eighty = [SleepSample(stage: .core, start: at(0), end: at(5.6)), SleepSample(stage: .inBed, start: at(0), end: at(7))]
+        let a = try #require(calculator.score(samples: seventy))
+        let b = try #require(calculator.score(samples: eighty))
+        #expect(abs(a.efficiency - 0.7) < 0.001)
+        #expect(b.score - a.score >= 15)
+    }
+
+    @Test func restorativeTargetFallsWithAge() throws {
+        #expect(SleepCalculator.restorativeShareTarget(age: 30) == 0.40)
+        #expect(SleepCalculator.restorativeShareTarget(age: 45) == 0.35)
+        #expect(SleepCalculator.restorativeShareTarget(age: 65) == 0.30)
+        // Deep + REM at 31% of the night: full marks at 65, not at 30.
+        let samples = [
+            SleepSample(stage: .core, start: at(0), end: at(5.5)),
+            SleepSample(stage: .deep, start: at(5.5), end: at(6.5)),
+            SleepSample(stage: .rem, start: at(6.5), end: at(8)),
+        ]
+        var young = SleepCalculator()
+        young.age = 30
+        var older = SleepCalculator()
+        older.age = 65
+        let a = try #require(young.score(samples: samples))
+        let b = try #require(older.score(samples: samples))
+        #expect(b.score > a.score)
+        let unknownAge = try #require(calculator.score(samples: samples))
+        #expect(unknownAge.score == a.score)
     }
 }
 

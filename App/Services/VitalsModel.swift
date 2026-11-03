@@ -63,6 +63,10 @@ final class VitalsModel {
     private(set) var bodyAge: BodyAge.Result?
     @ObservationIgnored private var respirationHistory: [DatedValue] = []
     @ObservationIgnored private var wristTemperatureHistory: [DatedValue] = []
+    /// Daily resting heart rate (HealthKit) and the app's own sleeping heart
+    /// rate by night, kept for the illness watch's two-day check.
+    @ObservationIgnored private var restingHeartRateHistory: [DatedValue] = []
+    @ObservationIgnored private var sleepingHeartRateHistory: [DatedValue] = []
     private(set) var isLoading = false
     @ObservationIgnored private var isRefreshing = false
 
@@ -170,6 +174,8 @@ final class VitalsModel {
         )
         stress = derived.stressToday
         intensityMinutes = derived.intensityWeek
+        restingHeartRateHistory = rhrSeries
+        sleepingHeartRateHistory = derived.sleepingHeartRateByNight
 
         var result: [Stat] = []
         func fmt(_ value: Double, _ digits: Int = 0) -> String { value.formatted(.number.precision(.fractionLength(digits))) }
@@ -454,30 +460,58 @@ final class VitalsModel {
     // MARK: - Illness watch
 
     /// Compares today's resting heart rate, breathing rate and temperature
-    /// with your normal.
-    func illnessAlert(metrics: DailyMetricsModel, drinksLastNight: Int?, reportedSymptoms: Bool) -> IllnessWatch.Alert? {
-        let respiration = respirationHistory.filter { !Calendar.current.isDateInToday($0.date) }.map(\.value)
+    /// with your normal, and with yesterday's, so a sign has to last two days
+    /// before it counts as "major" without symptoms (Mishra et al., Nat Biomed
+    /// Eng 2020; Quer et al., Nat Med 2021). The resting heart rate is whatever
+    /// `DailyMetricsModel` used for the recovery baseline (sleeping heart rate
+    /// when there are enough nights, HealthKit's otherwise), so the two never
+    /// mix sources.
+    ///
+    /// - Parameter daysSinceLastPeriod: from `CheckInStore.daysSinceLastPeriod()`;
+    ///   within 16 days of a logged period the temperature and heart-rate bars
+    ///   are higher (luteal rise). Nil when the cycle isn't tracked.
+    func illnessAlert(metrics: DailyMetricsModel, drinksLastNight: Int?, reportedSymptoms: Bool,
+                      daysSinceLastPeriod: Int? = nil) -> IllnessWatch.Alert? {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+        let respiration = respirationHistory.filter { !calendar.isDateInToday($0.date) }.map(\.value)
         let respirationBaseline = Self.meanSD(respiration)
         let rhrBaseline: (mean: Double, sd: Double)? = {
             guard let mean = metrics.baseline?.meanRHR, let sd = metrics.baseline?.sdRHR, (metrics.baseline?.nights ?? 0) >= 7 else { return nil }
             return (mean, sd)
         }()
-        var temperatureDelta: Double?
-        if let last = wristTemperatureHistory.last, Calendar.current.isDateInToday(last.date) {
-            let previous = wristTemperatureHistory.dropLast().suffix(14).map(\.value)
-            if previous.count >= 5 { temperatureDelta = last.value - previous.reduce(0, +) / Double(previous.count) }
-        }
+        // Yesterday's values from the same sources as today's.
+        let rhrHistory = metrics.baseline?.restingHeartRateSource == .sleeping ? sleepingHeartRateHistory : restingHeartRateHistory
+        let previousDay = IllnessWatch.PreviousDay(
+            restingHeartRate: rhrHistory.last { calendar.isDate($0.date, inSameDayAs: yesterday) }?.value,
+            respiratoryRate: respirationHistory.last { calendar.isDate($0.date, inSameDayAs: yesterday) }?.value,
+            temperatureDelta: temperatureDelta(on: yesterday)
+        )
         return IllnessWatch.evaluate(.init(
             restingHeartRate: metrics.restingHeartRate,
             rhrBaseline: rhrBaseline,
             respiratoryRate: metrics.respiratoryRate,
             respiratoryBaseline: respiration.count >= 7 ? respirationBaseline : nil,
-            temperatureDelta: temperatureDelta,
+            temperatureDelta: temperatureDelta(on: today),
             hrvChangePercent: metrics.recovery?.hrvChangePercent,
             drinksLastNight: drinksLastNight,
             yesterdayStrain: metrics.yesterdayStrain,
-            reportedSymptoms: reportedSymptoms
+            reportedSymptoms: reportedSymptoms,
+            previousDay: previousDay,
+            daysSinceLastPeriod: daysSinceLastPeriod
         ))
+    }
+
+    /// Sleeping wrist temperature on `day` minus the mean of the 14 nights
+    /// before it (needs 5); nil without a reading that day (Smarr et al., Sci
+    /// Rep 2020: fever onset shows as a rise against your own baseline).
+    private func temperatureDelta(on day: Date) -> Double? {
+        let calendar = Calendar.current
+        guard let index = wristTemperatureHistory.lastIndex(where: { calendar.isDate($0.date, inSameDayAs: day) }) else { return nil }
+        let previous = wristTemperatureHistory[..<index].suffix(14).map(\.value)
+        guard previous.count >= 5 else { return nil }
+        return wristTemperatureHistory[index].value - previous.reduce(0, +) / Double(previous.count)
     }
 
     private static func meanSD(_ values: [Double]) -> (mean: Double, sd: Double)? {

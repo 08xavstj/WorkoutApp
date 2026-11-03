@@ -81,8 +81,11 @@ public enum SleepRegularity {
 /// Two weeks of 6 h nights built up deficits as large as a night without
 /// sleep, while people felt only slightly sleepy (Van Dongen et al., Sleep
 /// 2003). Adults need 7 h or more (Watson et al., Sleep 2015). Extra sleep on
-/// later nights can partly make up for short ones (Sletten et al., Sleep Health
-/// 2023, NSF consensus), so longer nights pay the debt down.
+/// later nights partly makes up for short ones (Banks et al., Sleep 2010: one
+/// longer recovery night restores part of the loss, more with more sleep;
+/// Kitamura et al., Sci Rep 2016: debt is paid back over days), so longer
+/// nights pay the debt down. (Sletten et al., Sleep Health 2023 is the NSF
+/// consensus on sleep regularity, not on catch-up sleep.)
 public enum SleepDebt {
     public static let nights = 14
     /// More than this is shown as "over 20 h": beyond it the number means little.

@@ -29,6 +29,9 @@ final class DailyMetricsModel {
     private(set) var hrv: Double?
     private(set) var hrvIsManual = false
     private(set) var baseline: RecoveryCalculator.Baseline?
+    // [Recovery research] Where `restingHeartRate` and the baseline come from: the
+    // app's sleeping heart rate once there are enough nights, else HealthKit's.
+    private(set) var restingHeartRateSource: RestingHeartRateSource = .healthKit
     private(set) var respiratoryRate: Double?
     private(set) var yesterdayStrain: Double?
     private(set) var weekStrain: [DayStrain] = []
@@ -307,14 +310,20 @@ final class DailyMetricsModel {
             let beatToBeat = await health.nightlyRMSSD(nights: nights)
             let rmssd = beatToBeat.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
             hrvMetric = rmssd.isEmpty ? (healthVitals.contains { $0.hrvMilliseconds != nil } ? "SDNN" : nil) : "RMSSD"
-            let vitals = DailyVitals.merging(healthVitals, manualHRV: rmssd, manualOnlyHRV: true, calendar: calendar)
+            // [Recovery research] Sleeping heart rate as the resting heart rate, all nights or none
+            // (HealthKit RHR as the fallback); see RecoveryCalculator.preferSleepingHeartRate.
+            let sleepingHeartRate = await health.nightlySleepingHeartRate(nights: nights)
+            let (vitals, rhrSource) = RecoveryCalculator.preferSleepingHeartRate(
+                DailyVitals.merging(healthVitals, manualHRV: rmssd, manualOnlyHRV: true, calendar: calendar),
+                sleeping: sleepingHeartRate, minimumNights: recoveryCalculator.minimumBaselineDays + 1, calendar: calendar)
+            restingHeartRateSource = rhrSource
             // Today's HRV is the typed one when you entered a value for today
             // (typed values replace Health's, see `merging`).
             let typedToday = manualHRV.contains { calendar.isDate($0.key, inSameDayAs: today) && $0.value > 0 }
             let todayVitals = vitals.first { calendar.isDate($0.date, inSameDayAs: today) }
                 ?? DailyVitals(date: today, hrvMilliseconds: nil, restingHeartRate: nil)
             let history = vitals.filter { !calendar.isDate($0.date, inSameDayAs: today) }
-            let base = recoveryCalculator.baseline(from: history)
+            let base = recoveryCalculator.baseline(from: history, restingHeartRateSource: rhrSource)
             baseline = base
 
             restingHeartRate = todayVitals.restingHeartRate
@@ -378,8 +387,13 @@ final class DailyMetricsModel {
 
             var sleepCalculator = self.sleepCalculator
             sleepCalculator.baseSleepNeedHours = settings.sleepNeedHours
+            sleepCalculator.age = settings.age // [Recovery research] age-scaled deep + REM target
             sleep = sleepCalculator.score(samples: sleepSamples, previousDayStrain: yesterdayStrain, consistency: sleepConsistency)
-            recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: sleep?.score)
+            // [Recovery research] Sleep is compared with your own last 30 scores; RHR source as above.
+            SleepScoreLog.record(sleep?.score, on: today)
+            recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: sleep?.score,
+                                                sleepScoreHistory: SleepScoreLog.recentScores(before: today),
+                                                restingHeartRateSource: rhrSource)
 
             // Today's activities: logged lifts plus workouts from other apps.
             let todaysHR = todaysHeartRate
@@ -456,6 +470,7 @@ final class DailyMetricsModel {
                     strengthSessions: todaysSessions,
                     stepsOutsideWorkouts: stepResult?.outside ?? 0,
                     intake: nutritionToday?.calories,
+                    macros: nutritionToday.flatMap { EnergyCalculator.Macros($0) },
                     dayStart: today, now: now,
                     measuredRestingPerDay: watchResting
                 )

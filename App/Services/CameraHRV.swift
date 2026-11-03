@@ -169,7 +169,9 @@ final class CameraHRVModel {
         case failed(String)
     }
 
-    static let duration = 60.0
+    /// 65 s so that, after the filter margins, a clean take still has the
+    /// 55-60 s the HRV reading needs (Esco & Flatt 2014).
+    static let duration = 65.0
 
     private(set) var phase: Phase = .idle
     private(set) var progress = 0.0

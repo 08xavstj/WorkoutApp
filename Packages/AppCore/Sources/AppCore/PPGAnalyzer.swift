@@ -3,8 +3,15 @@ import Foundation
 /// Heart rate variability from the phone camera: with the flashlight on and a
 /// fingertip over the lens, each heartbeat pushes blood into the finger and
 /// the picture gets slightly darker. Timing those pulses gives beat-to-beat
-/// intervals and RMSSD, the HRV measure Garmin reports. A 1-minute camera
-/// reading agreed closely with ECG rMSSD in Plews et al. (IJSPP 2017).
+/// intervals and RMSSD, the HRV measure Garmin reports. Phone-camera PPG
+/// matched ECG rMSSD closely over 5-minute recordings (Plews et al., IJSPP
+/// 2017: 29 subjects, trivial differences, error about 6%), and at rest
+/// 60-second RMSSD agrees well with the 5-minute standard (Esco & Flatt, J
+/// Sports Sci Med 2014: ICC 0.98; 30 s is noticeably worse), which is why a
+/// reading needs about a minute of clean signal (`goodCleanSeconds`). In
+/// athletes a PPG app's RMSSD was still off by roughly 15-20% vs ECG (2025
+/// study cited in the app's evidence audit), so a reading is a spot check,
+/// about ±15% vs a chest strap, not a lab measure.
 ///
 /// Steps: resample to an even rate, band-pass 0.7-3.5 Hz (42-210 bpm) with a
 /// zero-phase Butterworth filter, find pulse peaks with a refractory period,
@@ -31,9 +38,15 @@ public enum PPGAnalyzer {
         /// Clean beat-to-beat intervals used.
         public var cleanIntervals: Int
         public var totalIntervals: Int
-        /// 0-100: share of clean intervals, scaled down for short recordings.
+        /// 0-100: share of clean intervals, scaled down when there's under a minute of clean signal.
         public var quality: Int
         public var intervals: [Double]
+        /// Seconds of signal covered by clean beat-to-beat intervals.
+        public var cleanSeconds: Double = 0
+
+        /// Under `goodCleanSeconds` of clean signal: show as a short reading
+        /// (Esco & Flatt 2014: 60 s agrees with 5 min at rest, 30 s does not).
+        public var isShort: Bool { cleanSeconds < PPGAnalyzer.goodCleanSeconds }
     }
 
     public enum Failure: Error, Equatable, Sendable {
@@ -44,6 +57,10 @@ public enum PPGAnalyzer {
 
     /// Clean intervals needed for a reading.
     public static let minimumCleanIntervals = 40
+    /// Clean signal needed for a "good" reading: just under the 60 s window
+    /// validated at rest (Esco & Flatt, J Sports Sci Med 2014), leaving room
+    /// for the filter's edge margins and a dropped beat or two.
+    public static let goodCleanSeconds = 55.0
     static let resampleRate = 60.0
 
     public static func analyze(_ samples: [Sample]) -> Swift.Result<Result, Failure> {
@@ -75,14 +92,16 @@ public enum PPGAnalyzer {
         let cleanIntervals = intervals.indices.filter { clean[$0] }.map { intervals[$0] }
         let meanInterval = cleanIntervals.reduce(0, +) / Double(cleanIntervals.count)
         let cleanShare = Double(cleanCount) / Double(intervals.count)
-        let lengthFactor = min(1, (last.time - first.time) / 60)
+        let cleanSeconds = cleanIntervals.reduce(0, +) / 1000
+        let lengthFactor = min(1, cleanSeconds / 60)
         return .success(Result(
             rmssd: rmssd,
             meanHeartRate: 60_000 / meanInterval,
             cleanIntervals: cleanCount,
             totalIntervals: intervals.count,
             quality: Int((cleanShare * lengthFactor * 100).rounded()),
-            intervals: cleanIntervals
+            intervals: cleanIntervals,
+            cleanSeconds: cleanSeconds
         ))
     }
 

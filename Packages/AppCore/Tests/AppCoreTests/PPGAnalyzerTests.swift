@@ -61,6 +61,19 @@ struct PPGAnalyzerTests {
         }
     }
 
+    /// A good reading needs 55 s of clean signal (Esco & Flatt 2014: 60 s
+    /// agrees with 5 min at rest, 30 s does not).
+    @Test func shortCleanSignalIsFlagged() throws {
+        let short = try PPGAnalyzer.analyze(signal(duration: 40)).get()
+        #expect(short.isShort)
+        #expect(short.cleanSeconds < PPGAnalyzer.goodCleanSeconds)
+        #expect(short.quality < 70)
+        let full = try PPGAnalyzer.analyze(signal(duration: 65)).get()
+        #expect(!full.isShort)
+        #expect(full.cleanSeconds >= PPGAnalyzer.goodCleanSeconds)
+        #expect(full.quality >= 95)
+    }
+
     @Test func fingerDetection() {
         #expect(PPGAnalyzer.fingerDetected(red: 0.85, green: 0.2, blue: 0.15))
         #expect(!PPGAnalyzer.fingerDetected(red: 0.5, green: 0.45, blue: 0.4))
