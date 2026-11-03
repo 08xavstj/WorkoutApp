@@ -962,6 +962,19 @@ private struct CalorieDetailsSheet: View {
                             // Monday adjustment of at most ±100 kcal (`CalorieBand`).
                             Text(note)
                         }
+                        // Cut × sleep debt (`CutAndSleep`, Nedeltcheva 2010): advice to pick a
+                        // slower rate; the weekly adjustment itself is unchanged.
+                        if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt) {
+                            Text(CutAndSleep.title + ". " + cut.message)
+                        }
+                        // Carbs by training day (`NutritionTargets.carbsText`: Burke 2011; Kerksick 2017) and
+                        // low energy availability (`EnergyAvailability`: IOC REDs 2023). Calorie targets are unchanged.
+                        if let carbs = NutritionTargets.carbsText(bodyMassKg: metrics.bodyMassKg, trainingDay: !metrics.activities.isEmpty, goals: metrics.goals) {
+                            Text(carbs + " The calorie target doesn't change; this is how to split it, with protein first.")
+                        }
+                        if let availability = metrics.energyAvailability, let message = EnergyAvailability.message(availability, goals: metrics.goals) {
+                            Text("Energy availability is low. " + message)
+                        }
                     } header: {
                         Text("Where your target comes from")
                     }

@@ -24,6 +24,24 @@ struct BodyAgeTests {
         #expect(!result.factors.contains { $0.name == "BMI" })
     }
 
+    @Test func waistToHeightReplacesBMIAndBodyFat() throws {
+        // Ashwell 2012: WHtR beats BMI and ignores muscle, so a fresh waist reading wins.
+        let inputs = BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, bodyFatPercent: 15, bmi: 31, waistToHeightRatio: 0.46)
+        let result = try #require(BodyAge.estimate(inputs))
+        let waist = try #require(result.factors.first { $0.name == "Waist-to-height" })
+        #expect(waist.years == 0)
+        #expect(waist.detail.contains("0.46"))
+        #expect(!result.factors.contains { $0.name == "BMI" || $0.name == "Body fat" })
+        // Raised (0.5-0.6) borrows the BMI 27.5-30 hazard; high (0.6+) the 30-35 one.
+        let raised = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, waistToHeightRatio: 0.55)))
+        #expect(abs((raised.factors.first { $0.name == "Waist-to-height" }?.years ?? 0) - BodyAge.gompertzYears(hazard: 1.20)) < 0.001)
+        let high = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, waistToHeightRatio: 0.62)))
+        #expect(abs((high.factors.first { $0.name == "Waist-to-height" }?.years ?? 0) - BodyAge.gompertzYears(hazard: 1.45)) < 0.001)
+        // Without a waist reading, BMI is still the fallback.
+        let fallback = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, bmi: 31)))
+        #expect(fallback.factors.contains { $0.name == "BMI" })
+    }
+
     @Test func needsAtLeastTwoFactors() {
         #expect(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .female, vo2Max: 40)) == nil)
     }

@@ -130,15 +130,21 @@ struct WeeklySetsCard: View {
 
 // MARK: - Strength days
 
-/// Strength training on 2+ days a week (WHO 2020).
+/// Strength training on 2+ days a week (WHO 2020), with the lifting "health
+/// floor" (2+ days and 30–60 min a week, Momma 2022; Shailendra 2022) and,
+/// for muscle and strength goals, this week's cardio minutes as one line.
 struct StrengthDaysCard: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(DailyMetricsModel.self) private var metrics
 
     var body: some View {
-        let dates = sessions.filter { !$0.isActive && !$0.workingSets.isEmpty }.map(\.startedAt)
+        let finished = sessions.filter { !$0.isActive && !$0.workingSets.isEmpty }
+        let dates = finished.map(\.startedAt)
         let thisWeek = StrengthDays.lastSevenDays(dates)
         let weeks = StrengthDays.weekly(dates, weeks: 4)
         let met = thisWeek >= StrengthDays.weeklyTarget
+        let floorStatus = StrengthHealthFloor.assess(finished.map(\.strainSummary))
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 CardLabel(text: "Strength days", color: Theme.lifting)
@@ -168,64 +174,169 @@ struct StrengthDaysCard: View {
                     .accessibilityLabel("\(index == weeks.count - 1 ? "This week" : "\(weeks.count - 1 - index) weeks ago"): \(days) strength days")
                 }
             }
-            Text("Health guidelines recommend strength training on 2 or more days a week (WHO 2020). It's linked with 10-17% lower risk of early death, with most of the benefit by 30-60 minutes a week (Momma et al., Br J Sports Med 2022).")
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
+            healthFloor(floorStatus)
+            if WeeklyActivityBand.emphasis(for: metrics.goals) == .secondary {
+                cardioLine
+            }
         }
         .card()
+    }
+
+    /// Met / not met this week: 2+ days and 30+ minutes (Momma 2022; Shailendra 2022).
+    private func healthFloor(_ floor: StrengthHealthFloor.Result) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: floor.isMet ? "checkmark.seal.fill" : "seal")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(floor.isMet ? Theme.recoveryHigh : Theme.secondaryText)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Health floor · \(floor.summary)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(StrengthHealthFloor.explanation)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// For muscle and strength goals the 150-minute WHO floor is enough, so
+    /// cardio minutes sit here as a line instead of their own card (`WeeklyActivityBand`).
+    private var cardioLine: some View {
+        let total = vitals.intensityMinutes?.total ?? 0
+        return VStack(alignment: .leading, spacing: 4) {
+            Divider().overlay(Theme.separator)
+            Text("Cardio minutes this week: \(WeeklyActivityBand.line(total: total, goals: metrics.goals))")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// MARK: - Weekly active minutes
+
+/// This week's moderate and vigorous minutes against the 150-floor / 300-best
+/// band (WHO 2020, Bull et al.; Lee et al., Circulation 2022). Vigorous minutes
+/// count double, as `IntensityMinutes` already does. Shown as its own card for
+/// health, stamina and weight-loss goals (`WeeklyActivityBand.emphasis`).
+struct WeeklyMinutesCard: View {
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        let minutes = vitals.intensityMinutes ?? IntensityMinutes.Result(moderate: 0, vigorous: 0)
+        let status = WeeklyActivityBand.status(total: minutes.total)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                CardLabel(text: "Weekly active minutes", color: Theme.oxygen)
+                Spacer()
+                Chip(text: status.rawValue, color: status == .belowFloor ? Theme.oxygen : Theme.recoveryHigh)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(minutes.total)")
+                    .font(.largeTitle.weight(.bold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(Theme.primaryText)
+                Text("of \(WeeklyActivityBand.target(for: metrics.goals)) this week")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            MinutesBandBar(total: minutes.total)
+            Text("\(minutes.moderate) moderate + \(minutes.vigorous) vigorous ×2, from heart rate over the last 7 days.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+            Text(WeeklyActivityBand.line(total: minutes.total, goals: metrics.goals))
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("WHO: 150–300 minutes moderate or 75–150 vigorous a week (Bull 2020). In a 30-year cohort of 116,221 adults, risk was lowest from about 300 moderate-equivalent minutes, with no extra benefit or harm above (Lee 2022).")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .card(tint: Theme.oxygen)
+    }
+}
+
+/// Minutes on a 0–360 bar with the 150–300 band shaded.
+struct MinutesBandBar: View {
+    let total: Int
+
+    private let scale = Double(WeeklyActivityBand.scaleMinutes)
+    private let floorMinutes = WeeklyActivityBand.floorMinutes
+    private let bestMinutes = WeeklyActivityBand.bestMinutes
+
+    var body: some View {
+        VStack(spacing: 4) {
+            GeometryReader { geo in
+                let width = geo.size.width
+                let floorX = width * Double(floorMinutes) / scale
+                let bestX = width * Double(bestMinutes) / scale
+                let fillX = width * min(1, Double(total) / scale)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.track)
+                    Rectangle()
+                        .fill(Theme.recoveryHigh.opacity(0.18))
+                        .frame(width: max(0, bestX - floorX))
+                        .offset(x: floorX)
+                    Capsule()
+                        .fill(LinearGradient(colors: [Theme.oxygenLight, Theme.oxygen], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(6, fillX))
+                }
+            }
+            .frame(height: 12)
+            GeometryReader { geo in
+                let width = geo.size.width
+                ZStack(alignment: .topLeading) {
+                    Text("0")
+                    Text("\(floorMinutes) floor")
+                        .foregroundStyle(Theme.recoveryHigh)
+                        .offset(x: width * Double(floorMinutes) / scale - 18)
+                    Text("\(bestMinutes) best")
+                        .foregroundStyle(Theme.recoveryHigh)
+                        .offset(x: width * Double(bestMinutes) / scale - 26)
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+            }
+            .frame(height: 14)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(total) active minutes this week; floor \(floorMinutes), best \(bestMinutes)")
     }
 }
 
 // MARK: - Cardio fitness
 
-/// VO₂ max against your age group, and what to do when it stalls.
+/// The Fitness headline: VO₂ max with its 90-day trend, where it sits against
+/// people your age and sex, a fitness age from this one measure, and the
+/// interval nudge when the trend is flat or falling (`CardioFitness`;
+/// Mandsager 2018; Kokkinos 2022; Milanović 2015; Wen 2019).
 struct CardioFitnessCard: View {
     @Environment(VitalsModel.self) private var vitals
     @Environment(UserSettings.self) private var settings
 
     var body: some View {
-        let series = (vitals.stat("vo2")?.series ?? []).map { DayValue(date: $0.date, value: $0.value) }
+        let history = vitals.vo2MaxHistory
+        let series = history.map { DayValue(date: $0.date, value: $0.value) }
         let result = CardioFitness.assess(series, age: settings.age, sex: settings.sex)
+        let trend = CardioFitness.trend(series)
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                CardLabel(text: "Cardio fitness (VO₂ max)", color: Theme.oxygen)
-                Spacer()
-                if let result {
-                    Chip(text: result.label, color: result.label == "Poor" ? Theme.recoveryModerate : Theme.recoveryHigh)
-                }
-            }
+            header(result)
             if let result {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(result.latest.formatted(.number.precision(.fractionLength(1))))
-                        .font(.largeTitle.weight(.bold))
-                        .fontDesign(.rounded)
-                        .foregroundStyle(Theme.primaryText)
-                    Text("ml/kg/min")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.secondaryText)
-                    Spacer()
-                    if let change = result.change {
-                        Text("\(change >= 0 ? "+" : "−")\(abs(change).formatted(.number.precision(.fractionLength(1)))) in 8 weeks")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(change >= CardioFitness.meaningfulChange ? Theme.recoveryHighText : Theme.secondaryText)
-                    }
-                }
-                Text("The typical \(settings.sex == .male ? "man" : "woman") your age is about \(result.median.formatted(.number.precision(.fractionLength(0)))); you're at \(Int(result.percentOfMedian.rounded()))% of that (FRIEND registry, Kaminsky et al., Mayo Clin Proc 2015).")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                Label {
-                    Text(advice(result))
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: result.isPlateau ? "arrow.up.right.circle.fill" : "checkmark.circle.fill")
-                        .foregroundStyle(result.isPlateau ? Theme.strain : Theme.recoveryHigh)
-                }
-                Text("Higher fitness is strongly linked with longer life, with no upper limit found (Mandsager et al., JAMA Netw Open 2018). Watch VO₂ max is an estimate; watch the trend.")
+                headline(result, trend: trend)
+                trendChart(history)
+                normsLine(result)
+                fitnessAgeLine(result)
+                adviceLabel(result, trend: trend)
+                Text("Higher fitness is strongly linked with longer life, with no upper limit found (Mandsager et al., JAMA Netw Open 2018; Kokkinos et al., J Am Coll Cardiol 2022). Watch VO₂ max is an estimate, about 10% low in fit people; watch the trend.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("No VO₂ max yet. Your watch estimates it from outdoor walks and runs with heart rate; it appears here once it's in Apple Health.")
                     .font(.subheadline)
@@ -235,9 +346,95 @@ struct CardioFitnessCard: View {
         .card(tint: Theme.oxygen)
     }
 
-    private func advice(_ result: CardioFitness.Result) -> String {
+    private func header(_ result: CardioFitness.Result?) -> some View {
+        HStack {
+            CardLabel(text: "Cardio fitness (VO₂ max)", color: Theme.oxygen)
+            Spacer()
+            if let result {
+                Chip(text: result.label, color: result.label == "Poor" ? Theme.recoveryModerate : Theme.recoveryHigh)
+            }
+        }
+    }
+
+    private func headline(_ result: CardioFitness.Result, trend: CardioFitness.Trend?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(result.latest.formatted(.number.precision(.fractionLength(1))))
+                .font(.largeTitle.weight(.bold))
+                .fontDesign(.rounded)
+                .foregroundStyle(Theme.primaryText)
+            Text("ml/kg/min")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+            Spacer()
+            Text(trendText(trend))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(trend?.direction == .rising ? Theme.recoveryHighText : Theme.secondaryText)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// "+1.2 over 90 days, rising" / "flat over 90 days" / "needs 90 days of readings"
+    private func trendText(_ trend: CardioFitness.Trend?) -> String {
+        guard let trend, let change = trend.change else { return "Needs readings across 90 days" }
+        let amount = "\(change >= 0 ? "+" : "−")\(abs(change).formatted(.number.precision(.fractionLength(1))))"
+        return "\(amount) over 90 days, \(trend.direction.rawValue)"
+    }
+
+    /// The last 90 days of readings.
+    @ViewBuilder
+    private func trendChart(_ history: [DatedValue]) -> some View {
+        let start = Date.now.addingTimeInterval(-Double(CardioFitness.trendDays) * 86_400)
+        let recent = history.filter { $0.date >= start }
+        if recent.count >= 2 {
+            Sparkline(values: recent, color: Theme.oxygen)
+                .frame(height: 56)
+        }
+    }
+
+    private func normsLine(_ result: CardioFitness.Result) -> some View {
+        Text("The typical \(settings.sex == .male ? "man" : "woman") your age is about \(result.median.formatted(.number.precision(.fractionLength(0)))); you're at \(Int(result.percentOfMedian.rounded()))% of that (FRIEND registry, Kaminsky et al., Mayo Clin Proc 2015).")
+            .font(.subheadline)
+            .foregroundStyle(Theme.primaryText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Fitness age from VO₂ max alone (Loe 2013 norms; Nes 2011), with the
+    /// ±5-year range a watch estimate deserves. An estimate from one measure.
+    private func fitnessAgeLine(_ result: CardioFitness.Result) -> some View {
+        let age = CardioFitness.fitnessAge(vo2Max: result.latest, sex: settings.sex)
+        let spread = CardioFitness.watchUncertaintyYears
+        return Text("Fitness age about \(age) (\(max(18, age - spread))–\(age + spread)): the age whose average VO₂ max matches yours, estimated from this one measure (Loe 2013; Nes 2011). Your age: \(settings.age).")
+            .font(.subheadline)
+            .foregroundStyle(Theme.primaryText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func adviceLabel(_ result: CardioFitness.Result, trend: CardioFitness.Trend?) -> some View {
+        let nudging = trend.flatMap(CardioFitness.nudge(for:)) != nil || (trend?.change == nil && result.isPlateau)
+        return Label {
+            Text(advice(result, trend: trend))
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: nudging ? "arrow.up.right.circle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(nudging ? Theme.strain : Theme.recoveryHigh)
+        }
+    }
+
+    /// The 90-day trend decides: flat or falling → the interval nudge
+    /// (Milanović 2015; Wen 2019); rising → keep going. Without 90 days of
+    /// readings, the 8-week comparison from `CardioFitness.assess` stands in.
+    private func advice(_ result: CardioFitness.Result, trend: CardioFitness.Trend?) -> String {
+        if let trend, let nudge = CardioFitness.nudge(for: trend) {
+            let lead = trend.direction == .falling ? "It has fallen over 90 days. " : "It has been flat over 90 days. "
+            return lead + nudge + " Keep easy, conversational cardio as your base, not as the way to push VO₂ max up (Storoschuk 2025)."
+        }
+        if trend?.direction == .rising {
+            return "It's rising over 90 days. Keep the mix of easy cardio and 1-2 harder sessions a week."
+        }
         if result.isPlateau {
-            return "It hasn't risen in about 8 weeks. Add 1-2 interval sessions a week (for example 4 × 4 minutes hard with 3 minutes easy between): intervals raise VO₂ max more than steady cardio (Milanović et al., Sports Med 2015). Keep easy, conversational cardio as your base, not as the way to push VO₂ max up (Storoschuk et al., Sports Med 2025)."
+            return "It hasn't risen in about 8 weeks. " + CardioFitness.intervalNudge
         }
         if let change = result.change, change >= CardioFitness.meaningfulChange {
             return "It's rising. Keep the mix of easy cardio and 1-2 harder sessions a week."

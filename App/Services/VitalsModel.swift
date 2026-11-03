@@ -61,6 +61,9 @@ final class VitalsModel {
     private(set) var bloodOxygen: Double?
     private(set) var intensityMinutes: IntensityMinutes.Result?
     private(set) var bodyAge: BodyAge.Result?
+    /// Waist / height from a reading in the last 90 days (set by the app from
+    /// `BodyMeasurementsStore`); body age uses it instead of BMI (Ashwell 2012).
+    var waistToHeightRatio: Double?
     @ObservationIgnored private var respirationHistory: [DatedValue] = []
     @ObservationIgnored private var wristTemperatureHistory: [DatedValue] = []
     /// Daily resting heart rate (HealthKit) and the app's own sleeping heart
@@ -77,6 +80,10 @@ final class VitalsModel {
     func stat(_ id: String) -> Stat? {
         stats.first { $0.id == id }
     }
+
+    /// VO₂ max readings from Apple Health (last 180 days), for the Fitness
+    /// headline's 90-day trend (`CardioFitness.trend`).
+    var vo2MaxHistory: [DatedValue] { stat("vo2")?.series ?? [] }
 
     /// - Parameters:
     ///   - profile: today's heart-rate profile (from the main refresh), if known.
@@ -447,7 +454,8 @@ final class VitalsModel {
             bodyFatPercent: fatSeries.last?.value,
             bmi: bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm),
             vo2MaxAgeDays: vo2Series.last.map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 },
-            bodyCompositionAgeDays: (fatSeries.last ?? bmiSeries.last ?? rawWeight.last).map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 }
+            bodyCompositionAgeDays: (fatSeries.last ?? bmiSeries.last ?? rawWeight.last).map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 },
+            waistToHeightRatio: waistToHeightRatio
         ))
     }
 

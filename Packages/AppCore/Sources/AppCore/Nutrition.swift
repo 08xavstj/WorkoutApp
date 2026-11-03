@@ -45,6 +45,69 @@ public enum NutritionTargets {
         return (bodyMassKg * gramsPerKg).rounded()
     }
 
+    // MARK: Protein per meal
+
+    /// Protein per meal: about 0.4 g/kg at each of 4 meals reaches the daily
+    /// 1.6 g/kg with every dose in the range that fully stimulates muscle
+    /// protein synthesis (Schoenfeld & Aragon, JISSN 2018: 0.4 g/kg across at
+    /// least 4 meals, 0.25-0.55 g/kg per dose; Moore et al., J Gerontol A 2015:
+    /// about 0.24 g/kg young, 0.40 g/kg older per dose; Kerksick et al., ISSN
+    /// nutrient timing 2017: 20-40 g every 3-4 h). With 3 logged meals the
+    /// per-meal dose rises so the day still reaches 1.6 g/kg (0.53 g/kg, inside
+    /// Schoenfeld's 0.55 ceiling). Endurance or health-only goals get the
+    /// lighter 3 × 0.3 g/kg pattern from docs/research/nutrition.md. Long-term
+    /// body-composition trials are few, so the UI says "about".
+    public static let proteinPerMealGramsPerKg = ProteinMeals.gramsPerKgPerMeal
+    public static let proteinPerMealCeilingGramsPerKg = 0.55
+
+    /// Grams per meal and how many meals, or nil without a weight.
+    /// - Parameter loggedMeals: meals seen in today's food log (3 switches to the 3-meal spread).
+    public static func proteinPerMeal(bodyMassKg: Double?, goals: Goals?, loggedMeals: Int? = nil) -> (grams: Double, meals: Int)? {
+        guard let bodyMassKg, bodyMassKg > 0 else { return nil }
+        let lifting = goals.map { $0.focuses.contains(.muscle) || $0.focuses.contains(.strength) || $0.weight == .lose } ?? true
+        if !lifting {
+            // Endurance / health only: 3 meals of about 0.3 g/kg (nutrition.md).
+            return ((bodyMassKg * 0.3).rounded(), 3)
+        }
+        let meals = loggedMeals == 3 ? 3 : ProteinMeals.targetMeals
+        let perKg = min(proteinPerMealCeilingGramsPerKg, max(proteinPerMealGramsPerKg, 1.6 / Double(meals)))
+        return ((bodyMassKg * perKg).rounded(), meals)
+    }
+
+    // MARK: Carbohydrate by training day
+
+    /// Carbohydrate per kg body weight, a training-day and rest-day pair.
+    /// Burke et al. (J Sports Sci 2011): 3-5 g/kg for light or skill-based
+    /// days, 5-7 g/kg for about an hour a day of moderate training, 6-10 for
+    /// 1-3 h; Kerksick et al. (ISSN nutrient timing 2017) for the refuelling
+    /// side. For lifters carbs are what's left after protein and fat (Helms
+    /// et al., JISSN 2014), so the lifting bands are the low end of Burke's
+    /// table: 3-5 g/kg on training days and, as an app choice below Burke's
+    /// lowest band, 2-3 g/kg on rest days. Endurance focus: 5-7 training,
+    /// 3-5 rest. Calorie targets are untouched; this only shapes the split.
+    public static func carbsPerKg(trainingDay: Bool, goals: Goals?) -> ClosedRange<Double> {
+        let endurance = goals?.focuses.contains(.endurance) == true
+        if endurance { return trainingDay ? 5...7 : 3...5 }
+        return trainingDay ? 3...5 : 2...3
+    }
+
+    /// Grams for the day, from the per-kg band; nil without a weight.
+    public static func carbsGrams(bodyMassKg: Double?, trainingDay: Bool, goals: Goals?) -> ClosedRange<Double>? {
+        guard let bodyMassKg, bodyMassKg > 0 else { return nil }
+        let band = carbsPerKg(trainingDay: trainingDay, goals: goals)
+        return (bodyMassKg * band.lowerBound).rounded()...(bodyMassKg * band.upperBound).rounded()
+    }
+
+    /// "Carbs: about 240-400 g today (training day), 160-240 g on rest days."
+    public static func carbsText(bodyMassKg: Double?, trainingDay: Bool, goals: Goals?) -> String? {
+        guard let today = carbsGrams(bodyMassKg: bodyMassKg, trainingDay: trainingDay, goals: goals),
+              let other = carbsGrams(bodyMassKg: bodyMassKg, trainingDay: !trainingDay, goals: goals) else { return nil }
+        func text(_ range: ClosedRange<Double>) -> String { "\(Int(range.lowerBound))-\(Int(range.upperBound)) g" }
+        return trainingDay
+            ? "Carbs: about \(text(today)) today (training day), \(text(other)) on rest days."
+            : "Carbs: about \(text(today)) today (rest day), \(text(other)) on training days."
+    }
+
     // MARK: Fibre
 
     /// Daily fibre target: 25-29 g a day gave the largest fall in all-cause

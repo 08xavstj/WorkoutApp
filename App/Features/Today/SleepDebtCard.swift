@@ -25,6 +25,14 @@ struct SleepDebtCard: View {
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                             .multilineTextAlignment(.leading)
+                        if let line = regularityLine {
+                            // Regularity next to duration: SRI predicted mortality better than
+                            // sleep length (Windred 2024); the weekend shift is social jet lag (Phillips 2017).
+                            Text(line)
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                                .multilineTextAlignment(.leading)
+                        }
                         if let window = metrics.bedtimeWindow {
                             // Tonight's bed-by window (`BedtimeWindow`): the wake time stays put
                             // (Windred et al., Sleep 2024) and the repayment comes from going earlier.
@@ -46,6 +54,27 @@ struct SleepDebtCard: View {
                     .presentationDetents([.medium, .large])
             }
         }
+    }
+
+    /// "Regularity 81/100 (85+ is where the benefit is) · weekend shift 1h 20m later, aim within 1 h"
+    private var regularityLine: String? {
+        var parts: [String] = []
+        if let sri = metrics.sleepConsistency {
+            parts.append("Regularity \(sri)/100 (\(SleepRegularity.benefitIndex)+ is where the benefit is)")
+        }
+        if let shift = SleepMidpointShift.current(metrics.sleepNights) {
+            parts.append("weekend shift \(shift.text.lowercased())" + (shift.isWithinTarget ? "" : ", aim within 1 h"))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// The weekday/weekend sleep-midpoint shift from the last two weeks of nights
+/// (`SleepRegularity.midpointShift`; Phillips et al., Sci Rep 2017).
+enum SleepMidpointShift {
+    static func current(_ nights: [SleepNight]) -> SleepRegularity.MidpointShift? {
+        let recent = nights.suffix(14).map { SleepConsistency.Night(bedtime: $0.bedtime, wake: $0.wake) }
+        return SleepRegularity.midpointShift(nights: recent)
     }
 }
 
@@ -103,7 +132,12 @@ struct LastNightSleepSheet: View {
             row("Efficiency", "\(Int((sleep.efficiency * 100).rounded()))%", detail: "Time asleep while in bed. 85% or more is good (National Sleep Foundation).")
             row("Woke up", "\(sleep.interruptions) time\(sleep.interruptions == 1 ? "" : "s")", detail: "Awake 5 minutes or more.")
             if let regularity = metrics.sleepConsistency {
-                row("Regularity", "\(regularity) / 100", detail: "Sleep Regularity Index over the last week.")
+                // UK Biobank median about 81; the benefit sat in the top quintiles, ~85+ (Windred 2024).
+                row("Regularity", "\(regularity) / 100", detail: "Sleep Regularity Index over the last week. " + SleepRegularity.indexNote(regularity))
+            }
+            if let shift = SleepMidpointShift.current(metrics.sleepNights) {
+                // Social jet lag: weekday vs weekend sleep midpoint, 1-hour target (Phillips 2017).
+                row("Weekend shift", shift.text, detail: shift.note + " Target: within about 1 hour (\(shift.weekdayNights) weekday and \(shift.weekendNights) weekend nights).")
             }
         }
         .card()

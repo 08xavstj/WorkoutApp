@@ -18,6 +18,7 @@ struct CoachView: View {
     @Environment(MuscleModel.self) private var muscles
     @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(WeeklyPlanStore.self) private var weeklyPlans
+    @Environment(BodyMeasurementsStore.self) private var measurements
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var draft = ""
@@ -266,11 +267,31 @@ extension CoachView {
         if let debt = metrics.sleepDebt {
             lines.append("Sleep debt \(debt.hours.formatted(.number.precision(.fractionLength(1)))) h over 14 nights (need \(settings.sleepNeedHours.formatted()) h)" + (debt.plan.map { "; plan: " + $0 } ?? "") + ".")
         }
+        // Cut × sleep debt (`CutAndSleep`, Nedeltcheva 2010) and the 90-day VO₂ max trend (`CardioFitness.trend`).
+        if let cut = CutAndSleep.advice(goals: settings.goalsSet ? settings.goals : nil, sleepDebt: metrics.sleepDebt) {
+            lines.append("Cutting with high sleep debt: " + cut.message)
+        }
+        if let trend = CardioFitness.trend(vitals.vo2MaxHistory.map { DayValue(date: $0.date, value: $0.value) }) {
+            let fitnessAge = CardioFitness.fitnessAge(vo2Max: trend.latest, sex: settings.sex)
+            lines.append("VO₂ max \(trend.latest.formatted(.number.precision(.fractionLength(1)))) ml/kg/min, 90-day trend \(trend.direction.rawValue); fitness age about \(fitnessAge) ±\(CardioFitness.watchUncertaintyYears) (one measure, Loe 2013)." + (CardioFitness.nudge(for: trend).map { " " + $0 } ?? ""))
+        }
         if settings.isRestMode {
             lines.append("REST MODE is on (the user is sick or resting): no strain target; suggest rest, sleep, fluids and at most easy walking, not workouts.")
         }
         if let metric = metrics.hrvMetric { lines.append("HRV metric: \(metric).") }
         if let water = metrics.nutritionToday?.waterLiters { lines.append("Water today \(water.formatted(.number.precision(.fractionLength(1)))) L.") }
+        // Protein per meal and carbs by training day (`NutritionTargets`: Schoenfeld & Aragon 2018; Burke 2011),
+        // low energy availability (`EnergyAvailability`: IOC REDs 2023) and the hand-typed body measurements.
+        if let spread = NutritionTargets.proteinPerMeal(bodyMassKg: metrics.bodyMassKg, goals: settings.goalsSet ? settings.goals : nil) {
+            let trainingDay = !metrics.activities.isEmpty || weeklyPlans.todayPlan() != nil
+            var line = "Protein per meal: about \(whole(spread.grams)) g at each of \(spread.meals) meals."
+            if let carbs = NutritionTargets.carbsText(bodyMassKg: metrics.bodyMassKg, trainingDay: trainingDay, goals: settings.goalsSet ? settings.goals : nil) { line += " " + carbs }
+            if let availability = metrics.energyAvailability, availability.isLow { line += " Energy availability is low (\(availability.valueText) over 7 days): suggest easing the deficit, not pushing through." }
+            lines.append(line)
+        }
+        if let measured = measurements.coachSummary(heightCm: metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil), age: settings.age, sex: settings.sex) {
+            lines.append(measured)
+        }
         let lowNutrients = metrics.micronutrients.filter { $0.kind != .ok }
         if !lowNutrients.isEmpty {
             lines.append("Vitamins/minerals (7-day avg vs target): " + lowNutrients.map { "\($0.nutrient.name) \(Int($0.percentOfTarget.rounded()))% (\($0.kind.rawValue))" }.joined(separator: ", ") + ".")

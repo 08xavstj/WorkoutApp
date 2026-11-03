@@ -24,6 +24,7 @@ struct WorkoutAppApp: App {
     @State private var progressPhotos: ProgressPhotosModel
     @State private var labs: LabsModel
     @State private var weeklyPlans = WeeklyPlanStore()
+    @State private var measurements = BodyMeasurementsStore()
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -95,6 +96,7 @@ struct WorkoutAppApp: App {
                 .environment(progressPhotos)
                 .environment(labs)
                 .environment(weeklyPlans)
+                .environment(measurements)
                 .environment(\.healthClient, health)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)
@@ -144,6 +146,7 @@ struct RootView: View {
     @Environment(ConditionsModel.self) private var conditions
     @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(WeeklyPlanStore.self) private var weeklyPlans
+    @Environment(BodyMeasurementsStore.self) private var measurements
     @Environment(ExerciseLibrary.self) private var library
     @Environment(GymStore.self) private var gym
     @Environment(WorkoutLauncher.self) private var launcher
@@ -194,6 +197,7 @@ struct RootView: View {
             CheckInView(kind: kind)
         }
         .modifier(WeeklySheets(router: router))
+        .modifier(MeasurementSheets(router: router))
         .sheet(item: $launcher.builderRequest) { request in
             WorkoutBuilderView(initialFocus: request.focus, initialMinutes: request.minutes)
         }
@@ -218,6 +222,7 @@ struct RootView: View {
             scheduleHRVReminder()
             await refreshMetrics()
             scheduleCheckInReminders() // after the refresh, so the evening reminder carries tonight's bed-by window
+            measurements.scheduleReminders() // monthly waist, 6-monthly grip ("measure|waist", "measure|grip")
             await Reminders.scheduleDoses()
             await Reminders.startMedsActivityIfNeeded()
             // Keep today's numbers current while the app is open.
@@ -288,6 +293,8 @@ struct RootView: View {
         gym.style = settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
         metrics.plannedSessionTomorrow = plannedSlots().first { Calendar.current.isDateInTomorrow($0.start) }?.start // bed-by window
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
+        // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old (`BodyMeasurementsStore`).
+        vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil))
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         checkIns.recordSleepScore(metrics.sleep?.score)
@@ -442,6 +449,19 @@ private struct WeeklySheets: ViewModifier {
         content
             .sheet(isPresented: $router.showWeeklyReview) { WeeklyReviewView() }
             .sheet(isPresented: $router.showWeeklyPlan) { WeeklyPlanView() }
+    }
+}
+
+/// Body measurements (workoutapp://measurements) and the home blood pressure
+/// check (workoutapp://bp), opened from reminders, the "+" tab and Biology.
+private struct MeasurementSheets: ViewModifier {
+    let router: AppRouter
+
+    func body(content: Content) -> some View {
+        @Bindable var router = router
+        content
+            .sheet(isPresented: $router.showMeasurements) { BodyMeasurementsView() }
+            .sheet(isPresented: $router.showBloodPressure) { BloodPressureView() }
     }
 }
 

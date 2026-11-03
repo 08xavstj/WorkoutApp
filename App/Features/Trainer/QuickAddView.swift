@@ -52,6 +52,9 @@ struct QuickAddView: View {
                     action("Lab results", "Blood tests by hand or from a PDF", "testtube.2", Theme.sleep) {
                         showingLabs = true
                     }
+                    action("Body measurements", "Waist, grip strength and the sleep apnoea screen", "ruler", Theme.nutrition) {
+                        router.showMeasurements = true
+                    }
                     action("Progress photos", "Front and side, compared weekly by Claude", "camera.fill", Theme.lifting) {
                         router.showProgressPhotos = true
                     }

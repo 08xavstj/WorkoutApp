@@ -90,6 +90,12 @@ final class DailyMetricsModel {
     /// Tomorrow's planned session start from the weekly plan, if any (set by the app before a refresh).
     var plannedSessionTomorrow: Date?
 
+    // MARK: Energy availability (body & nutrition measures)
+
+    /// (intake − workout energy) / fat-free mass over the last 7 logged days;
+    /// nil without body fat or 5 logged days (`EnergyAvailability`, IOC REDs 2023).
+    private(set) var energyAvailability: EnergyAvailability.Result?
+
     /// Daily calorie target from your goal (or maintenance when no goal is set).
     var calorieTarget: Double? {
         // This week's target (Monday-updated) wins while there's measured maintenance behind it.
@@ -477,6 +483,16 @@ final class DailyMetricsModel {
             weightTrendWeekly = WeightTrend.weeklyChange(weights.filter { $0.date >= today.addingTimeInterval(-28 * 86_400) })
             lastWeighIn = weights.map(\.date).max()
             updateWeeklyCalorieTarget(settings: settings, now: now)
+            // Energy availability: the last 7 logged days against workout calories (`EnergyAvailability`).
+            let workoutEnergy = (try? await health.workoutEnergyPerDay(days: 8)) ?? []
+            let weekAgo = today.addingTimeInterval(-7 * 86_400)
+            energyAvailability = EnergyAvailability.assess(
+                days: intake.filter { $0.date >= weekAgo }.map { day in
+                    EnergyAvailability.Day(date: day.date, intakeKcal: day.value,
+                                           exerciseKcal: workoutEnergy.first { calendar.isDate($0.date, inSameDayAs: day.date) }?.value ?? 0)
+                },
+                fatFreeMassKg: EnergyAvailability.fatFreeMass(bodyMassKg: bodyMassKg, bodyFatPercent: bodyFatPercent)
+            )
             if let nutrients = try? await nutrientTask {
                 micronutrients = Micronutrients.assess(averages: nutrients.averages, daysLogged: nutrients.daysLogged, sex: settings.sex)
             }

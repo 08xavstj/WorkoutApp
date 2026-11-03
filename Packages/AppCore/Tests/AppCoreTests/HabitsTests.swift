@@ -259,3 +259,31 @@ struct BodyAgeConfidenceTests {
         #expect(stale.confidenceReason.contains("VO₂ max"))
     }
 }
+
+struct AlcoholWeekTests {
+    @Test func canadianTiers() {
+        // CCSA 2023: 0–2 low, 3–6 moderate, 7+ increasingly high.
+        #expect(AlcoholWeek.tier(drinks: 0) == .low)
+        #expect(AlcoholWeek.tier(drinks: 2) == .low)
+        #expect(AlcoholWeek.tier(drinks: 2.5) == .moderate)
+        #expect(AlcoholWeek.tier(drinks: 3) == .moderate)
+        #expect(AlcoholWeek.tier(drinks: 6.9) == .moderate)
+        #expect(AlcoholWeek.tier(drinks: 7) == .high)
+        #expect(AlcoholWeek.Tier.high.range == "7+")
+    }
+
+    @Test func weeklyTotalPrefersItemisedDrinks() {
+        var itemised = EveningCheckIn(day: .now)
+        itemised.alcohol = [AlcoholEntry(kind: .beer, millilitres: 355, abv: 10)]
+        itemised.syncDrinksFromAlcohol()
+        var quick = EveningCheckIn(day: .now)
+        quick.drinks = 1
+        let empty = EveningCheckIn(day: .now)
+        let total = AlcoholWeek.total(evenings: [itemised, quick, empty])
+        // Two standard drinks from the strong beer plus one quick count; the blank evening isn't logged.
+        #expect(abs(total.drinks - 3) < 0.05)
+        #expect(total.nightsLogged == 2)
+        #expect(total.tier == .moderate)
+        #expect(AlcoholWeek.sentence(total).contains("moderate risk"))
+    }
+}

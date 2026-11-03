@@ -38,6 +38,15 @@ struct HabitsCard: View {
                 row(icon: "scalemass", color: Theme.nutrition, title: WeighInNudge.title,
                     detail: WeighInNudge.detail(lastWeighIn: metrics.lastWeighIn))
             }
+            // Cut × sleep debt: a lose goal with high 14-night sleep debt costs muscle
+            // (Nedeltcheva 2010; `CutAndSleep`). Advice only; the calorie loop is unchanged.
+            if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt) {
+                row(icon: "moon.zzz.fill", color: Theme.recoveryModerateText, title: CutAndSleep.title, detail: cut.message)
+            }
+            // Low energy availability over the last 7 logged days (`EnergyAvailability`: IOC REDs 2023; Loucks 2011).
+            if let availability = metrics.energyAvailability, let message = EnergyAvailability.message(availability, goals: metrics.goals) {
+                row(icon: "bolt.slash.fill", color: Theme.recoveryModerateText, title: "Energy availability is low", detail: message)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(tint: Theme.sleep)

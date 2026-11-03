@@ -30,13 +30,20 @@ struct FitnessView: View {
                     WeekStrip(days: metrics.weekStrain)
                     DayStrainCard()
                     DeloadCard()
+                    // VO₂ max is the headline (health-metrics.md item 1); the
+                    // minutes band gets its own card for health, stamina and
+                    // weight-loss goals, else a line under the strength floor.
+                    SectionTitle(text: "Cardio fitness", trailing: "90-day trend")
+                    CardioFitnessCard()
+                    if WeeklyActivityBand.emphasis(for: metrics.goals) == .primary {
+                        WeeklyMinutesCard()
+                    }
                     YourWorkoutsCard()
                     SectionTitle(text: "Muscles")
                     MuscleMapCard()
                     WeeklySetsCard()
-                    SectionTitle(text: "Strength & cardio fitness")
+                    SectionTitle(text: "Strength", trailing: "Health floor")
                     StrengthDaysCard()
-                    CardioFitnessCard()
                     SectionTitle(text: "Training Load", trailing: "Last 7 days vs usual")
                     HStack(spacing: 12) {
                         LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.oxygenLight, Theme.oxygen, Theme.sleep])
@@ -421,6 +428,10 @@ private struct DeloadCard: View {
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                 Text("Deloads are standard in strength training (Bell et al., Sports Med Open 2023 consensus): keep the weights, cut sets by about half, for about a week.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+                // 2+ days and 30+ min a week keep the mortality benefit (Momma 2022; `StrengthHealthFloor`).
+                Text(StrengthHealthFloor.deloadNote)
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
             }

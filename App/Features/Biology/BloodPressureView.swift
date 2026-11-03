@@ -14,6 +14,16 @@ struct BloodPressureView: View {
         HomeBloodPressure.weekCheck(readings.map(\.asCore))
     }
 
+    /// The last full 7-day check and when the next is due (3 months if it was
+    /// elevated or high, 6 if normal: `HomeBloodPressure.nextCheckDue`).
+    private var lastCompleted: (ended: Date, check: HomeBloodPressure.WeekCheck)? {
+        HomeBloodPressure.lastCompletedCheck(readings.map(\.asCore))
+    }
+
+    private var nextCheckDue: Date? {
+        lastCompleted.map { HomeBloodPressure.nextCheckDue(lastCheck: $0.ended, category: $0.check.category) }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -57,6 +67,20 @@ struct BloodPressureView: View {
         guard let health else { isLoading = false; return }
         readings = (try? await health.bloodPressureReadings(days: 90)) ?? []
         isLoading = false
+        // The 3-6-monthly reminder to repeat the protocol ("measure|bp"), from the last completed check.
+        await Reminders.scheduleBloodPressureReminder(due: nextCheckDue)
+    }
+
+    /// "Next check due 7 Sep: every 6 months while normal."
+    @ViewBuilder
+    private var nextCheckLine: some View {
+        if let last = lastCompleted, let due = nextCheckDue {
+            let months = HomeBloodPressure.repeatMonths(after: last.check.category)
+            Text("Next check due \(due.formatted(date: .abbreviated, time: .omitted)): repeat the 7-day protocol every \(months) months while your average is \(last.check.category == .normal ? "normal" : "above normal") (ESH 2021; ACC/AHA). Your doctor's plan comes first.")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Calendar.current.startOfDay(for: .now) >= due ? Theme.recoveryModerateText : Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var weekCard: some View {
@@ -91,6 +115,7 @@ struct BloodPressureView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
+            nextCheckLine
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(tint: Theme.heart)

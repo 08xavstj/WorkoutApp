@@ -156,6 +156,104 @@ public enum AlcoholEffect {
     }
 }
 
+// MARK: - Weekly alcohol
+
+/// Standard drinks over the last 7 nights against Canada's 2023 guidance
+/// (Canadian Centre on Substance Use and Addiction, Canada's Guidance on
+/// Alcohol and Health, 2023): 0–2 a week low risk, 3–6 moderate, 7 or more
+/// increasingly high. The guidance's own authors rate its evidence base as
+/// low quality, GBD 2020 puts the risk-minimising amount under 40 at about
+/// 0–0.6 drinks a day (Lancet 2022), and GBD 2016 said "no safe level", so
+/// the tiers are a reference band, not a verdict (health-metrics.md §7).
+/// The next-morning effect on your own HRV and heart rate (`AlcoholEffect`)
+/// is the personal measure and stays alongside.
+public enum AlcoholWeek {
+    public static let nights = 7
+    /// Top of the low-risk tier, standard drinks a week (CCSA 2023).
+    public static let lowMax = 2.0
+    /// Top of the moderate tier; 7 and up is "increasingly high" (CCSA 2023).
+    public static let moderateMax = 6.0
+
+    public enum Tier: String, Sendable, Equatable, CaseIterable {
+        case low = "Low risk"
+        case moderate = "Moderate risk"
+        case high = "Increasingly high risk"
+
+        /// "0–2", "3–6", "7+"
+        public var range: String {
+            switch self {
+            case .low: "0–2"
+            case .moderate: "3–6"
+            case .high: "7+"
+            }
+        }
+    }
+
+    /// Fractions count up: 2.5 standard drinks is past the low tier.
+    public static func tier(drinks: Double) -> Tier {
+        if drinks <= lowMax { return .low }
+        if drinks < moderateMax + 1 { return .moderate }
+        return .high
+    }
+
+    public struct Total: Sendable, Equatable {
+        public var drinks: Double
+        /// Evenings with a known drink count (zero counts).
+        public var nightsLogged: Int
+        public var tier: Tier { AlcoholWeek.tier(drinks: drinks) }
+
+        public init(drinks: Double, nightsLogged: Int) {
+            self.drinks = drinks
+            self.nightsLogged = nightsLogged
+        }
+    }
+
+    /// Sums the itemised standard drinks where logged, else the quick count.
+    public static func total(evenings: [EveningCheckIn]) -> Total {
+        var drinks = 0.0
+        var logged = 0
+        for evening in evenings {
+            if let standard = evening.standardDrinks {
+                drinks += standard
+                logged += 1
+            } else if let count = evening.drinks {
+                drinks += Double(count)
+                logged += 1
+            }
+        }
+        return Total(drinks: drinks, nightsLogged: logged)
+    }
+
+    /// Neutral wording for the card.
+    public static func sentence(_ total: Total) -> String {
+        let amount = total.drinks.formatted(.number.precision(.fractionLength(0...1)))
+        let base = "\(amount) standard drink\(total.drinks == 1 ? "" : "s") in the last 7 nights (\(total.nightsLogged) of 7 logged): \(total.tier.rawValue.lowercased()) on Canada's 2023 guidance (0–2 low, 3–6 moderate, 7+ increasingly high)."
+        switch total.tier {
+        case .low: return base + " Within the band the guidance calls low risk; its authors rate the evidence as low quality."
+        case .moderate: return base + " The guidance's own evidence is rated low quality; your morning numbers below are the measure that's yours."
+        case .high: return base + " From 7 a week the guidance's risk estimates climb with each drink; your morning numbers below show what it does to you."
+        }
+    }
+}
+
+// MARK: - Sauna and cold water
+
+/// Check-in footer copy for the two recovery habits.
+///
+/// - Cold water right after lifting blunted strength and muscle gains over 12
+///   weeks (type II fibre area, satellite cells, p70S6K; Roberts et al.,
+///   J Physiol 2015, 21 men) and a meta-analysis of 8 studies found smaller
+///   hypertrophy (Piñero et al., Eur J Sport Sci 2024). Fine on rest days or
+///   after cardio; the report says not within ~4–6 h of lifting.
+/// - Sauna 4–7 times a week vs once was linked with HR 0.60 for all-cause and
+///   0.50 for fatal cardiovascular events in 2,315 Finnish men, with sessions
+///   over 19 minutes doing best (Laukkanen et al., JAMA Intern Med 2015; one
+///   cohort, observational). It adds heat stress, so it counts as a hot day.
+public enum HeatAndCold {
+    public static let coldPlungeNote = "Cold water right after lifting blunts muscle growth (Roberts 2015; Piñero 2024); on lifting days, keep it to the morning or skip."
+    public static let saunaNote = "Regular sauna (4–7 times a week, about 20 minutes) was linked with fewer heart deaths in Finnish men (Laukkanen 2015); it also adds heat stress, so count it as a hot day."
+}
+
 // MARK: - Protein per meal
 
 /// Protein spread across meals. About 0.4 g per kg of body weight per meal,

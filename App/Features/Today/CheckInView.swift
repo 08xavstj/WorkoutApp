@@ -209,10 +209,18 @@ struct CheckInView: View {
         Section("Food") {
             optionalTime("Last meal", \.lastMealMinutes, default: 19 * 60)
         }
-        Section("Anything else today?") {
+        Section {
             Toggle("Nicotine or vaping", isOn: boolBinding(\.nicotine))
             Toggle("Sauna", isOn: boolBinding(\.sauna))
             Toggle("Cold plunge", isOn: boolBinding(\.coldPlunge))
+        } header: {
+            Text("Anything else today?")
+        } footer: {
+            // Roberts 2015; Piñero 2024 (cold) and Laukkanen 2015 (sauna); see `HeatAndCold`.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Cold plunge: " + HeatAndCold.coldPlungeNote)
+                Text("Sauna: " + HeatAndCold.saunaNote)
+            }
         }
         let untaken = meds.todayDoses.filter { !meds.isTaken($0) }
         if !untaken.isEmpty {

@@ -76,6 +76,84 @@ public enum SleepRegularity {
     }
 }
 
+// MARK: - Weekday/weekend midpoint shift
+
+/// How much later (or earlier) the middle of your sleep falls on weekend
+/// nights than on weekday nights: "social jet lag". A shift of more than
+/// about 1–2 hours is linked with cardiometabolic risk, and irregular
+/// sleepers run a later body clock even at the same sleep length (Phillips
+/// et al., Sci Rep 2017; health-metrics.md §5, evidence rated moderate). The
+/// 1-hour target is the roadmap's, so the copy says "about an hour".
+extension SleepRegularity {
+    /// Shift to stay within, minutes (roadmap Phase 3 item 4: a 1-hour target).
+    public static let midpointShiftTargetMinutes = 60
+    /// Nights needed on each side.
+    public static let minimumWeekdayNights = 3
+    public static let minimumWeekendNights = 2
+
+    public struct MidpointShift: Sendable, Equatable {
+        /// Weekend midpoint minus weekday midpoint, minutes; positive = later at weekends.
+        public var minutes: Int
+        public var weekdayNights: Int
+        public var weekendNights: Int
+
+        public init(minutes: Int, weekdayNights: Int, weekendNights: Int) {
+            self.minutes = minutes
+            self.weekdayNights = weekdayNights
+            self.weekendNights = weekendNights
+        }
+
+        public var isWithinTarget: Bool { abs(minutes) <= SleepRegularity.midpointShiftTargetMinutes }
+
+        /// "1h 20m later" / "20 min earlier" / "Same as weekdays", for use after
+        /// a "weekend shift" label.
+        public var text: String {
+            let magnitude = abs(minutes)
+            let span = magnitude >= 60 ? "\(magnitude / 60)h \(magnitude % 60)m" : "\(magnitude) min"
+            if magnitude < 15 { return "Same as weekdays" }
+            return "\(span) \(minutes > 0 ? "later" : "earlier")"
+        }
+
+        /// One line of meaning for the UI.
+        public var note: String {
+            isWithinTarget
+                ? "Your weekend sleep sits within about an hour of weekdays, which keeps your body clock in one place (Phillips 2017)."
+                : "Weekend sleep more than about an hour off weekdays shifts your body clock, like a small time-zone change twice a week (Phillips 2017). Keeping the wake time within an hour matters more than the bedtime."
+        }
+    }
+
+    /// - Parameter nights: bed and wake times; a night is a weekend night when
+    ///   its wake time falls on a weekend day (Saturday or Sunday morning).
+    /// - Returns: nil with fewer than 3 weekday or 2 weekend nights.
+    public static func midpointShift(nights: [SleepConsistency.Night], calendar: Calendar = .current) -> MidpointShift? {
+        var weekday: [Double] = []
+        var weekend: [Double] = []
+        for night in nights where night.wake > night.bedtime {
+            let mid = night.bedtime.addingTimeInterval(night.wake.timeIntervalSince(night.bedtime) / 2)
+            let parts = calendar.dateComponents([.hour, .minute], from: mid)
+            // Minutes after noon, so a 3 am midpoint (900) and a 1 am one (780) average sensibly.
+            let fromNoon = Double(((parts.hour ?? 0) * 60 + (parts.minute ?? 0) - 12 * 60 + 1440) % 1440)
+            if calendar.isDateInWeekend(night.wake) { weekend.append(fromNoon) } else { weekday.append(fromNoon) }
+        }
+        guard weekday.count >= minimumWeekdayNights, weekend.count >= minimumWeekendNights else { return nil }
+        let weekdayMean = weekday.reduce(0, +) / Double(weekday.count)
+        let weekendMean = weekend.reduce(0, +) / Double(weekend.count)
+        return MidpointShift(minutes: Int((weekendMean - weekdayMean).rounded()), weekdayNights: weekday.count, weekendNights: weekend.count)
+    }
+
+    /// One line of meaning for the Sleep Regularity Index: the UK Biobank
+    /// median is about 81 and the mortality benefit sat in the top quintiles,
+    /// from roughly 85 up (Windred et al., Sleep 2024).
+    public static let typicalIndex = 81
+    public static let benefitIndex = 85
+
+    public static func indexNote(_ sri: Int) -> String {
+        if sri >= benefitIndex { return "\(sri): where the benefit is (85+); 81 is typical (Windred 2024)." }
+        if sri >= typicalIndex - 5 { return "\(sri): about typical (81); 85+ is where the benefit is (Windred 2024)." }
+        return "\(sri): below typical (81); 85+ is where the benefit is (Windred 2024). A steady wake time moves it most."
+    }
+}
+
 /// Sleep debt: how far behind your sleep need you are over the last 14 nights.
 ///
 /// Two weeks of 6 h nights built up deficits as large as a night without

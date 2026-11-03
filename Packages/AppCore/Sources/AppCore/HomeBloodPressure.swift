@@ -97,4 +97,41 @@ public enum HomeBloodPressure {
             category: category(systolic: systolic, diastolic: diastolic)
         )
     }
+
+    // MARK: Repeat cadence
+
+    /// How often to repeat the 7-day home check: every 3 months when the
+    /// last average was elevated or high, every 6 months when it was normal.
+    /// Guidelines ask for home monitoring to be repeated at intervals rather
+    /// than once (ESH 2021 home BP practice guidelines; ACC/AHA 2017 and the
+    /// 2025 AHA/ACC guideline); the research round put the interval at 3-6
+    /// months (docs/research/health-metrics.md, section 3), and the exact
+    /// months here are the app's choice within that. A doctor's plan wins.
+    public static func repeatMonths(after category: Category?) -> Int {
+        switch category {
+        case .normal, nil: 6
+        case .elevated, .stage1, .stage2, .severe: 3
+        }
+    }
+
+    /// When the next 7-day check is due, from the day the last one ended.
+    public static func nextCheckDue(lastCheck: Date, category: Category?, calendar: Calendar = .current) -> Date {
+        let months = repeatMonths(after: category)
+        return calendar.date(byAdding: .month, value: months, to: calendar.startOfDay(for: lastCheck))
+            ?? lastCheck.addingTimeInterval(Double(months) * 30 * 86_400)
+    }
+
+    public static func isCheckDue(lastCheck: Date, category: Category?, now: Date = .now, calendar: Calendar = .current) -> Bool {
+        calendar.startOfDay(for: now) >= nextCheckDue(lastCheck: lastCheck, category: category, calendar: calendar)
+    }
+
+    /// The most recent completed home check: the 7 days ending on the day of
+    /// the latest reading, when that week had enough readings to count
+    /// (`recommendedReadings`). Nil until a full check exists.
+    public static func lastCompletedCheck(_ readings: [Reading], calendar: Calendar = .current) -> (ended: Date, check: WeekCheck)? {
+        guard let latest = readings.map(\.date).max() else { return nil }
+        let check = weekCheck(readings, asOf: latest, calendar: calendar)
+        guard check.isReliable else { return nil }
+        return (calendar.startOfDay(for: latest), check)
+    }
 }

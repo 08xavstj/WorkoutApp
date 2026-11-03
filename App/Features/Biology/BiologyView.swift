@@ -12,10 +12,12 @@ struct BiologyView: View {
     @Environment(CheckInStore.self) private var checkIns
     @Environment(AppRouter.self) private var router
     @Environment(ProgressPhotosModel.self) private var progressPhotos
+    @Environment(BodyMeasurementsStore.self) private var measurements
     @Environment(\.healthClient) private var health
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var selected: VitalsModel.Stat?
+    @State private var showingStopBang = false
 
     var body: some View {
         NavigationStack {
@@ -54,6 +56,13 @@ struct BiologyView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+                            if category == .body {
+                                measurementTiles
+                            }
+                        }
+                        if category == .breathing {
+                            // The yearly STOP-Bang screen sits next to overnight blood oxygen.
+                            StopBangSummaryCard { showingStopBang = true }
                         }
                     }
                     if vitals.stats.isEmpty {
@@ -86,6 +95,7 @@ struct BiologyView: View {
                 VitalDetailView(stat: stat, colors: VitalTile.colors(for: stat.category))
                     .presentationDetents([.medium, .large])
             }
+            .sheet(isPresented: $showingStopBang) { StopBangView() }
             .background(Theme.background)
             .toolbarVisibility(.hidden, for: .navigationBar)
             .task { await load() }
@@ -105,6 +115,74 @@ struct BiologyView: View {
         return stat
     }
 
+    // MARK: Body measurements (waist-to-height, grip)
+
+    private var heightCm: Double? {
+        metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil)
+    }
+
+    /// Waist-to-height and grip tiles for the Body grid, from the hand-typed measurements.
+    @ViewBuilder
+    private var measurementTiles: some View {
+        let whtr = waistStat
+        Button { selected = whtr } label: {
+            VitalTile(stat: whtr, colors: VitalTile.colors(for: .body))
+        }
+        .buttonStyle(.plain)
+        let grip = gripStat
+        Button { selected = grip } label: {
+            VitalTile(stat: grip, colors: VitalTile.colors(for: .body))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Waist-to-height ratio: under 0.5 is the target (Ashwell 2012); the history chart is the ratio per measurement.
+    private var waistStat: VitalsModel.Stat {
+        let ratio = measurements.waistToHeightRatio(heightCm: heightCm)
+        let category = ratio.map(WaistToHeightRatio.category)
+        let tone: VitalsModel.Tone = switch category {
+        case .healthy: .good
+        case .raised, .high: .caution
+        case .low, nil: .neutral
+        }
+        var stat = VitalsModel.Stat(
+            id: "whtr", category: .body, title: "Waist-to-height", icon: "ruler",
+            value: ratio.map { $0.formatted(.number.precision(.fractionLength(2))) },
+            unit: ratio == nil ? "" : "ratio",
+            status: category?.rawValue ?? (measurements.latestWaist == nil ? "Add a waist measurement" : "Add your height"),
+            tone: tone,
+            series: waistRatioSeries
+        )
+        stat.digits = 2
+        stat.defaultDays = 180
+        stat.goal = WaistToHeightRatio.target
+        stat.normalRange = 0.4...WaistToHeightRatio.target
+        stat.about = "Waist divided by height. Keep it under 0.5 (waist less than half your height): across 31 studies it picked out diabetes, high blood pressure and heart-disease risk better than BMI, and it isn't fooled by muscle (Ashwell, Gunn & Gibson, Obes Rev 2012; Browning 2010 for the 0.5 line). 0.5-0.6 is raised, over 0.6 high. Measure monthly from Add → Body measurements. When a reading is less than 90 days old, body age uses it instead of BMI."
+        stat.footnote = measurements.waistDue ? "A waist measurement is due (monthly)." : nil
+        return stat
+    }
+
+    /// One ratio per measurement day, for the history chart.
+    private var waistRatioSeries: [DatedValue] {
+        guard let heightCm else { return [] }
+        return measurements.waistSeries.compactMap { point in
+            WaistToHeightRatio.ratio(waistCm: point.value, heightCm: heightCm).map { DatedValue(date: point.date, value: $0) }
+        }
+    }
+
+    private var gripStat: VitalsModel.Stat {
+        var stat = GripCard.stat(series: measurements.gripSeries, unit: settings.weightUnit, age: settings.age, sex: settings.sex)
+        if let latest = measurements.latestGrip {
+            let reading = GripStrength.reading(kg: latest.kilograms, age: settings.age, sex: settings.sex)
+            stat.status = reading.rawValue
+            stat.tone = reading == .aboveAverage ? .good : (reading == .average ? .neutral : .caution)
+        } else {
+            stat.status = "Add a reading twice a year"
+        }
+        stat.footnote = measurements.gripDue && measurements.latestGrip != nil ? "A grip reading is due (every 6 months)." : nil
+        return stat
+    }
+
     private func load() async {
         guard let health else { return }
         var manual: [Date: Double] = [:]
@@ -113,6 +191,8 @@ struct BiologyView: View {
         }
         let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now
         let recent = sessions.filter { !$0.isActive && $0.startedAt >= cutoff }.map(\.strainSummary)
+        // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old.
+        vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: heightCm)
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         await checkIns.refreshInsights(health: health, manualHRV: manual)
@@ -356,7 +436,7 @@ struct BodyAgeCard: View {
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
             } else {
-                Text(isLoading ? "Working it out…" : "Needs at least two of: VO₂ max, resting heart rate, sleep, steps, body fat or BMI. Wear your watch day and night and add your height and weight in Settings.")
+                Text(isLoading ? "Working it out…" : "Needs at least two of: VO₂ max, resting heart rate, sleep, steps, waist-to-height, body fat or BMI. Wear your watch day and night and add your height and weight in Settings.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }

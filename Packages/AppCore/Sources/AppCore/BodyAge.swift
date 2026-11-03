@@ -30,9 +30,18 @@ import Foundation
 ///     60, then flattens (Paluch et al., Lancet Public Health 2022). About 0.6
 ///     years per 1,000 steps from 7,000 (6,000 from age 60), with no extra
 ///     credit past the plateau.
-///   - BMI hazards (never-smokers, vs 22.5-25) from the Global BMI Mortality
-///     Collaboration (Lancet 2016). Body-fat bands are an app heuristic (no
-///     mortality study by body-fat %), used because BMI overrates muscular people.
+///   - Body composition, one of three (best available first):
+///     - Waist-to-height ratio when a waist reading from the last 90 days
+///       exists. WHtR predicts cardiometabolic risk better than BMI and ignores
+///       muscle mass (Ashwell, Gunn & Gibson, Obes Rev 2012; Browning 2010 for
+///       the 0.5 line). Ashwell 2012 reports risk discrimination, not mortality
+///       hazards, so the step sizes borrow the BMI overweight and obese hazards
+///       below: 0.5-0.6 ("raised") counts like BMI 27.5-30, 0.6+ ("high") like
+///       BMI 30-35 (app mapping from the research round).
+///     - Body-fat bands, an app heuristic (no mortality study by body-fat %),
+///       used because BMI overrates muscular people.
+///     - BMI hazards (never-smokers, vs 22.5-25) from the Global BMI Mortality
+///       Collaboration (Lancet 2016), as the fallback.
 public enum BodyAge {
     public struct Inputs: Sendable, Equatable {
         public var age: Int
@@ -43,6 +52,9 @@ public enum BodyAge {
         public var dailySteps: Double?
         public var bodyFatPercent: Double?
         public var bmi: Double?
+        /// Waist / height from a reading in the last 90 days (the caller checks
+        /// the age; see `WaistToHeightRatio.isFresh`). Replaces BMI and body fat.
+        public var waistToHeightRatio: Double?
         /// How old the VO₂ max reading is, in days (nil if unknown).
         public var vo2MaxAgeDays: Int?
         /// How old the body fat or BMI reading is, in days (nil if unknown).
@@ -50,7 +62,7 @@ public enum BodyAge {
 
         public init(age: Int, sex: BiologicalSex, vo2Max: Double? = nil, restingHeartRate: Double? = nil,
                     sleepHours: Double? = nil, dailySteps: Double? = nil, bodyFatPercent: Double? = nil, bmi: Double? = nil,
-                    vo2MaxAgeDays: Int? = nil, bodyCompositionAgeDays: Int? = nil) {
+                    vo2MaxAgeDays: Int? = nil, bodyCompositionAgeDays: Int? = nil, waistToHeightRatio: Double? = nil) {
             self.age = age
             self.sex = sex
             self.vo2Max = vo2Max
@@ -61,6 +73,7 @@ public enum BodyAge {
             self.bmi = bmi
             self.vo2MaxAgeDays = vo2MaxAgeDays
             self.bodyCompositionAgeDays = bodyCompositionAgeDays
+            self.waistToHeightRatio = waistToHeightRatio
         }
     }
 
@@ -163,7 +176,17 @@ public enum BodyAge {
             let years = clamp(-(min(steps, plateau) - reference) / 1000 * 0.6, -2.5, 4)
             factors.append(Factor(name: "Daily steps", years: years, detail: "\(Int(steps.rounded())) a day"))
         }
-        if let fat = inputs.bodyFatPercent, fat > 3, fat < 60 {
+        if let ratio = inputs.waistToHeightRatio, ratio > 0.25, ratio < 1 {
+            // Waist-to-height ratio (Ashwell 2012 bands; hazard steps borrowed from the BMI table below).
+            let hazard: Double
+            switch WaistToHeightRatio.category(ratio) {
+            case .low, .healthy: hazard = 1.0
+            case .raised: hazard = 1.20
+            case .high: hazard = 1.45
+            }
+            factors.append(Factor(name: "Waist-to-height", years: gompertzYears(hazard: hazard),
+                                  detail: "\(String(format: "%.2f", ratio)) (\(WaistToHeightRatio.category(ratio).rawValue.lowercased()); under 0.5 is the target)"))
+        } else if let fat = inputs.bodyFatPercent, fat > 3, fat < 60 {
             let (healthy, high, veryHigh) = inputs.sex == .male ? (20.0, 25.0, 30.0) : (30.0, 35.0, 40.0)
             let years: Double = fat <= healthy ? -0.5 : (fat <= high ? 1 : (fat <= veryHigh ? 2.5 : 4.5))
             factors.append(Factor(name: "Body fat", years: years, detail: "\(format(fat))%"))

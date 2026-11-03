@@ -15,6 +15,9 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     /// The weekly review and this week's plan (Monday notification, Home card, "+" tab).
     var showWeeklyReview = false
     var showWeeklyPlan = false
+    /// Body measurements (workoutapp://measurements) and blood pressure (workoutapp://bp) sheets.
+    var showMeasurements = false
+    var showBloodPressure = false
     /// Bumped to bring the running workout back on screen (Live Activity tap).
     var openWorkout = 0
     /// Bumped when doses change outside the app (Live Activity, notification).
@@ -46,6 +49,8 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         case "checkin": openCheckIn(url.lastPathComponent == "evening" ? .evening : .morning)
         case "review": showWeeklyReview = true
         case "plan": showWeeklyPlan = true
+        case "measurements": showMeasurements = true
+        case "bp": showBloodPressure = true
         default: break
         }
     }
@@ -53,7 +58,8 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     /// A sheet can't open while another one is showing, so close any other
     /// screen first and open the check-in once it has gone.
     private func openCheckIn(_ kind: CheckInKind) {
-        let otherOpen = showHRVEntry || showMedications || showProgressPhotos || (checkIn != nil && checkIn != kind)
+        let otherOpen = showHRVEntry || showMedications || showProgressPhotos || showWeeklyReview || showWeeklyPlan
+            || showMeasurements || showBloodPressure || (checkIn != nil && checkIn != kind)
         guard otherOpen else {
             checkIn = kind
             return
@@ -61,6 +67,10 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         showHRVEntry = false
         showMedications = false
         showProgressPhotos = false
+        showWeeklyReview = false
+        showWeeklyPlan = false
+        showMeasurements = false
+        showBloodPressure = false
         checkIn = nil
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(700))
@@ -512,6 +522,67 @@ nonisolated enum Reminders {
         let request = UNNotificationRequest(identifier: weeklyReviewIdentifier, content: content,
                                             trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true))
         try? await center.add(request)
+    }
+
+    // MARK: - Measurements
+
+    static let waistReminderIdentifier = "measure|waist"
+    static let gripReminderIdentifier = "measure|grip"
+    static let bloodPressureReminderIdentifier = "measure|bp"
+    /// Measurement reminders arrive mid-morning (app choice: a tape or a cuff
+    /// reading is best taken rested, before food; 9:00 leaves the morning
+    /// check-in alone).
+    static let measurementMinutes = 9 * 60
+
+    /// The monthly waist reminder and the 6-monthly grip reminder
+    /// (`WaistToHeightRatio.nextDue`, `GripStrength.nextDue`; Ashwell 2012,
+    /// EWGSOP2 via docs/research/health-metrics.md). A nil due date clears that
+    /// reminder; one already in the past fires tomorrow morning.
+    static func scheduleMeasurementReminders(waistDue: Date?, gripDue: Date?) async {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [waistReminderIdentifier, gripReminderIdentifier])
+        guard waistDue != nil || gripDue != nil, await requestPermission() else { return }
+        let calendar = Calendar.current
+        if let waistDue, let fire = measurementFireDate(due: waistDue, calendar: calendar) {
+            let content = UNMutableNotificationContent()
+            content.title = "Monthly waist check"
+            content.body = "Tape at the navel, relaxed, after breathing out. Under half your height is the target."
+            content.sound = .default
+            content.userInfo = ["link": "workoutapp://measurements"]
+            await add(content, identifier: waistReminderIdentifier, at: fire, center: center, calendar: calendar)
+        }
+        if let gripDue, let fire = measurementFireDate(due: gripDue, calendar: calendar) {
+            let content = UNMutableNotificationContent()
+            content.title = "Grip strength, twice a year"
+            content.body = "Dominant hand, best of three squeezes on a dynamometer. Two minutes."
+            content.sound = .default
+            content.userInfo = ["link": "workoutapp://measurements"]
+            await add(content, identifier: gripReminderIdentifier, at: fire, center: center, calendar: calendar)
+        }
+    }
+
+    /// The 3-6-monthly reminder to repeat the 7-day home blood pressure check
+    /// (`HomeBloodPressure.nextCheckDue`; ESH 2021, ACC/AHA). Nil clears it.
+    static func scheduleBloodPressureReminder(due: Date?) async {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [bloodPressureReminderIdentifier])
+        guard let due, await requestPermission() else { return }
+        let calendar = Calendar.current
+        guard let fire = measurementFireDate(due: due, calendar: calendar) else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Time to repeat your home blood pressure check"
+        content.body = "Two readings morning and evening for 7 days; the average is what counts."
+        content.sound = .default
+        content.userInfo = ["link": "workoutapp://bp"]
+        await add(content, identifier: bloodPressureReminderIdentifier, at: fire, center: center, calendar: calendar)
+    }
+
+    /// `measurementMinutes` on the due day, or tomorrow when that has passed.
+    static func measurementFireDate(due: Date, now: Date = .now, calendar: Calendar = .current) -> Date? {
+        let day = calendar.startOfDay(for: max(due, now))
+        if let fire = fireDate(day: day, minutes: measurementMinutes, calendar: calendar), fire > now { return fire }
+        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: day) else { return nil }
+        return fireDate(day: tomorrow, minutes: measurementMinutes, calendar: calendar)
     }
 }
 

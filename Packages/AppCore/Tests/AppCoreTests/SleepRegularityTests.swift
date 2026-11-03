@@ -123,3 +123,57 @@ struct RecoveryContributorTests {
         #expect(weights == weights.sorted(by: >))
     }
 }
+
+struct MidpointShiftTests {
+    var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        calendar.locale = Locale(identifier: "en_US")
+        return calendar
+    }
+
+    /// Bed at `bedHour` on January `day` 2027 (a Monday is the 11th), up at `wakeHour` the next morning.
+    func night(bedDay day: Int, bedHour: Int, wakeHour: Int, wakeMinute: Int = 0) -> SleepConsistency.Night {
+        let bed = calendar.date(from: DateComponents(year: 2027, month: 1, day: day, hour: bedHour))!
+        let wake = calendar.date(from: DateComponents(year: 2027, month: 1, day: day + 1, hour: wakeHour, minute: wakeMinute))!
+        return SleepConsistency.Night(bedtime: bed, wake: wake)
+    }
+
+    @Test func weekendNightsAreLater() throws {
+        // Sun 10th–Thu 14th: 23:00–07:00 (midpoint 03:00). Fri 15th and Sat 16th: 01:00–10:00 the next day (midpoint 05:30).
+        var nights = (10...14).map { night(bedDay: $0, bedHour: 23, wakeHour: 7) }
+        nights += [16, 17].map { day -> SleepConsistency.Night in
+            let bed = calendar.date(from: DateComponents(year: 2027, month: 1, day: day, hour: 1))!
+            let wake = calendar.date(from: DateComponents(year: 2027, month: 1, day: day, hour: 10))!
+            return SleepConsistency.Night(bedtime: bed, wake: wake)
+        }
+        let shift = try #require(SleepRegularity.midpointShift(nights: nights, calendar: calendar))
+        #expect(shift.minutes == 150)
+        #expect(shift.weekdayNights == 5)
+        #expect(shift.weekendNights == 2)
+        #expect(!shift.isWithinTarget)
+        #expect(shift.text == "2h 30m later")
+    }
+
+    @Test func sameTimingIsWithinTarget() throws {
+        let nights = (10...16).map { night(bedDay: $0, bedHour: 23, wakeHour: 7) }
+        let shift = try #require(SleepRegularity.midpointShift(nights: nights, calendar: calendar))
+        #expect(shift.minutes == 0)
+        #expect(shift.isWithinTarget)
+        #expect(shift.text == "Same as weekdays")
+    }
+
+    @Test func needsNightsOnBothSides() {
+        let weekdaysOnly = (10...14).map { night(bedDay: $0, bedHour: 23, wakeHour: 7) }
+        #expect(SleepRegularity.midpointShift(nights: weekdaysOnly, calendar: calendar) == nil)
+        let oneWeekend = weekdaysOnly + [night(bedDay: 15, bedHour: 23, wakeHour: 7)]
+        #expect(SleepRegularity.midpointShift(nights: oneWeekend, calendar: calendar) == nil)
+    }
+
+    @Test func indexNoteBandsFollowWindred() {
+        // UK Biobank median about 81; benefit from about 85 (Windred 2024).
+        #expect(SleepRegularity.indexNote(90).contains("where the benefit is"))
+        #expect(SleepRegularity.indexNote(80).hasPrefix("80: about typical"))
+        #expect(SleepRegularity.indexNote(70).hasPrefix("70: below typical"))
+    }
+}
