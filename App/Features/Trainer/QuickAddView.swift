@@ -13,6 +13,7 @@ struct QuickAddView: View {
     @State private var showingMeds = false
     @State private var showingBloodPressure = false
     @State private var showingLabs = false
+    @State private var showingFoodEstimate = false
     @Environment(AppRouter.self) private var router
 
     var body: some View {
@@ -52,6 +53,9 @@ struct QuickAddView: View {
                     action("Lab results", "Blood tests by hand or from a PDF", "testtube.2", Theme.sleep) {
                         showingLabs = true
                     }
+                    action("Estimate a meal", "Describe it or add a photo; Claude estimates calories and macros (±30%)", "fork.knife", Theme.nutrition) {
+                        showingFoodEstimate = true
+                    }
                     action("Body measurements", "Waist, grip strength and the sleep apnoea screen", "ruler", Theme.nutrition) {
                         router.showMeasurements = true
                     }
@@ -80,6 +84,7 @@ struct QuickAddView: View {
             .sheet(isPresented: $showingMeds) { MedicationsView() }
             .sheet(isPresented: $showingBloodPressure) { BloodPressureView() }
             .sheet(isPresented: $showingLabs) { LabsView() }
+            .sheet(isPresented: $showingFoodEstimate) { FoodEstimateView() }
             .sheet(isPresented: $showingHRV) {
                 HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
                     .presentationDetents([.medium])

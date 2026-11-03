@@ -67,6 +67,18 @@ final class CloudCoach {
         try await call(function: "labs", body: LabsBody(pdf: pdfBase64, filename: filename), settings: settings)
     }
 
+    nonisolated private struct FoodBody: Encodable {
+        let description: String
+        let photo: String?
+    }
+
+    /// Quick meal estimate via the `food-estimate` Edge Function (see
+    /// `FoodEstimateModel`). Returns JSON text: `{"estimate": {...}, "caveat": "..."}`.
+    /// The photo (base64 JPEG, optional) is held only for the request.
+    func estimateFood(description: String, photoBase64: String?, settings: UserSettings) async throws -> String {
+        try await call(function: "food-estimate", body: FoodBody(description: description, photo: photoBase64), settings: settings)
+    }
+
     private func call<Body: Encodable>(function: String, body: Body, settings: UserSettings) async throws -> String {
         let base = settings.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let anonKey = settings.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines)

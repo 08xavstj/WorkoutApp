@@ -352,6 +352,7 @@ private struct StrainGoalCard: View {
             Text(rangeNote(target: target))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
+            BreathingOfferRow() // easy days and stressful evenings (BreathingView.swift; Laborde 2022)
 
             switch status {
             case .below:

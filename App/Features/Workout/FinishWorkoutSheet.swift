@@ -137,6 +137,12 @@ struct FinishWorkoutSheet: View {
                     // The workout is saved in the app either way.
                 }
             }
+            // Session RPE → Apple Health workout effort score, linked to the
+            // workout just saved so Apple's Training Load counts lifting
+            // (iOS 18 type; HealthKitClient+Writes; competitors.md §1g).
+            if session.savedToHealth, let health {
+                try? await health.saveWorkoutEffort(score: Int(rpe), start: session.startedAt, end: end)
+            }
             try? modelContext.save()
         }
         await WorkoutLiveActivity.endAll()

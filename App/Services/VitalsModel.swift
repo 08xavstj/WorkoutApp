@@ -70,6 +70,11 @@ final class VitalsModel {
     /// rate by night, kept for the illness watch's two-day check.
     @ObservationIgnored private var restingHeartRateHistory: [DatedValue] = []
     @ObservationIgnored private var sleepingHeartRateHistory: [DatedValue] = []
+    // iOS 17/18 reads (HealthKitClient+iOS26), for Biology and the coach.
+    /// Nights in the last 30 on which the watch flagged possible sleep apnoea.
+    private(set) var apnoeaNights30: [Date] = []
+    /// Minutes in daylight today (Apple Watch), nil without the data.
+    private(set) var daylightMinutesToday: Double?
     private(set) var isLoading = false
     @ObservationIgnored private var isRefreshing = false
 
@@ -161,6 +166,9 @@ final class VitalsModel {
         async let perMinute = health.heartRatePerMinute(from: twoWeeksAgo, to: now)
         async let lastNight = health.sleepSamples(forNightEnding: today)
         async let sleepHistory = health.sleepHistory(nights: 90)
+        // iOS 17/18 types (HealthKitClient+iOS26; competitors.md §1g).
+        async let daylight = health.timeInDaylight(days: 90)
+        async let apnoea = health.sleepApneaNights(days: 30)
 
         func get(_ value: [DatedValue]?) -> [DatedValue] { value ?? [] }
         let rhrSeries = get(try? await rhr)
@@ -269,6 +277,13 @@ final class VitalsModel {
             tone: { $0 >= 95 ? .good : .caution },
             gaugeRange: 85...100
         ))
+        // Apnoea beside blood oxygen, and daylight (iOS 18 / iOS 17 types; see the extension below).
+        let apnoeaNights = (try? await apnoea) ?? []
+        apnoeaNights30 = apnoeaNights
+        result.append(Self.apnoeaStat(nights: apnoeaNights, today: today))
+        let daylightSeries = get(try? await daylight)
+        daylightMinutesToday = daylightSeries.isEmpty ? nil : (latestToday(daylightSeries)?.value ?? 0)
+        result.append(Self.daylightStat(series: daylightSeries, today: today))
         let respirationSeries = get(try? await respiration)
         respirationHistory = Array(respirationSeries.suffix(31))
         result.append(makeStat(
@@ -733,5 +748,69 @@ final class VitalsModel {
         }
         derived.sleepingHeartRate = SleepingHeartRate.measure(sorted.filter { $0.date >= today.addingTimeInterval(-8 * 3600) }, during: sleep)
         return derived
+    }
+}
+
+// MARK: - Apnoea and daylight (iOS 18 / iOS 17 types)
+
+extension VitalsModel {
+    /// 2 hours a day is the anchor, not a proven dose: more daytime light
+    /// tracked with lower depression risk in 86,772 UK Biobank adults (Burns et
+    /// al., Nature Mental Health 2023; observational, one cohort), and the
+    /// 2-hour figure comes from children's outdoor-time trials for eyesight
+    /// (health-metrics.md "Light exposure", "Eye health": weak in adults).
+    static let daylightAnchorMinutes = 120.0
+
+    /// Nights Apple flagged possible breathing disturbances, as a Biology
+    /// stat beside blood oxygen (competitors.md §1g; Series 9+/Ultra 2 only).
+    static func apnoeaStat(nights: [Date], today: Date) -> Stat {
+        let calendar = Calendar.current
+        let flagged = Set(nights.map { calendar.startOfDay(for: $0) })
+        let series: [DatedValue] = (0..<30).reversed().compactMap { back in
+            guard let day = calendar.date(byAdding: .day, value: -back, to: today) else { return nil }
+            return DatedValue(date: day, value: flagged.contains(day) ? 1 : 0)
+        }
+        var stat = Stat(
+            id: "apnoea", category: .breathing, title: "Breathing disturbances", icon: "lungs",
+            value: "\(nights.count)", unit: "nights in 30",
+            status: nights.isEmpty ? "None flagged" : "Possible apnoea flagged",
+            tone: nights.isEmpty ? .good : .caution,
+            gauge: min(1, Double(nights.count) / 5),
+            series: series,
+            footnote: nights.isEmpty
+                ? "From Apple Watch sleep-apnoea notifications (Series 9+/Ultra 2). None flagged doesn't rule it out."
+                : "Apple flagged possible breathing disturbances on \(nights.count) night\(nights.count == 1 ? "" : "s") in 30; talk to a doctor."
+        )
+        stat.chart = .bars
+        stat.historyUnit = "flag"
+        stat.defaultDays = 30
+        stat.about = "Nights on which your Apple Watch's sleep-apnoea feature flagged breathing disturbances. The notification catches about two thirds of moderate-to-severe cases, so a quiet month isn't an all-clear; a flag is a reason to talk to a doctor, not a diagnosis. The STOP-Bang screen below is the other check."
+        return stat
+    }
+
+    /// Minutes in daylight today against the 2-hour anchor (Apple Watch only).
+    static func daylightStat(series: [DatedValue], today: Date) -> Stat {
+        let calendar = Calendar.current
+        var stat = Stat(id: "daylight", category: .breathing, title: "Time in daylight", icon: "sun.max.fill", unit: "min", series: series)
+        stat.chart = .bars
+        stat.goal = daylightAnchorMinutes
+        stat.defaultDays = 14
+        stat.about = "Minutes outdoors in daylight, measured by an Apple Watch. More daytime light went with lower risk of depression in a large UK cohort (Burns 2023; observational, so not proof), and daylight anchors your body clock. The 2-hour line is an anchor rather than a tested dose: it comes from outdoor-time studies in children's eyesight, not adults, so treat it as a rough aim."
+        guard !series.isEmpty else {
+            stat.footnote = "Needs an Apple Watch (watchOS 10+). Garmin doesn't share daylight."
+            return stat
+        }
+        let todayMinutes = series.last.flatMap { calendar.isDate($0.date, inSameDayAs: today) ? $0.value : nil } ?? 0
+        stat.value = todayMinutes.formatted(.number.precision(.fractionLength(0)))
+        stat.gauge = min(1, todayMinutes / daylightAnchorMinutes)
+        if todayMinutes >= daylightAnchorMinutes {
+            stat.status = "2-hour anchor reached"
+            stat.tone = .good
+        } else {
+            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to the 2-hour anchor"
+            stat.tone = .neutral
+        }
+        stat.footnote = "About 2 hours a day is the anchor (Burns 2023; evidence is observational)."
+        return stat
     }
 }

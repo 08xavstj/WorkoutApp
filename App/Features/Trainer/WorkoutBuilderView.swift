@@ -16,6 +16,7 @@ struct WorkoutBuilderView: View {
     @Environment(MedicationsModel.self) private var medications
     @Environment(CheckInStore.self) private var checkIns
     @Environment(MuscleModel.self) private var muscles
+    @Environment(WeeklyPlanStore.self) private var plans
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     @State private var focus: WorkoutFocus?
@@ -25,6 +26,8 @@ struct WorkoutBuilderView: View {
     @State private var didSetUp = false
 
     private let durations = [30, 45, 60, 75]
+    /// "I have N minutes": short sessions are fitted with fewer sets and supersets (`Supersets`).
+    private let quickMinutes = [15, 20, 30, 45, 60]
 
     var body: some View {
         NavigationStack {
@@ -62,6 +65,7 @@ struct WorkoutBuilderView: View {
                     .buttonStyle(.plain)
                     focusPicker
                     durationPicker
+                    quickPicker
                     if let plan {
                         if plan.exercises.isEmpty {
                             ContentUnavailableView(
@@ -74,7 +78,8 @@ struct WorkoutBuilderView: View {
                             ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { index, exercise in
                                 PlannedExerciseRow(
                                     index: index + 1, exercise: exercise, unit: plan.unit,
-                                    onSwap: canSwap(at: index, in: plan) ? { swap(at: index) } : nil
+                                    onSwap: canSwap(at: index, in: plan) ? { swap(at: index) } : nil,
+                                    label: Supersets.label(for: index, in: plan.exercises)
                                 )
                             }
                         }
@@ -147,7 +152,11 @@ struct WorkoutBuilderView: View {
 
     private func rebuild() {
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
-        plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history)
+        // This week in the training block scales the sets and sets the RIR target;
+        // recovery still lowers the effort on a low day (`TrainingBlock`, `WorkoutPlanner.targetRPE`).
+        plans.trainingStyle = gym.style
+        let block = plans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
+        plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history, block: block)
     }
 
     /// True when there's another exercise for the same movement to swap to.
@@ -166,7 +175,12 @@ struct WorkoutBuilderView: View {
               let position = options.firstIndex(where: { $0.id == current.exercises[index].exerciseID }) else { return }
         let next = options[(position + 1) % options.count]
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
-        current.exercises[index] = gym.planner.prescribe(next, slot: slot, minutes: minutes, sessionRPE: current.targetRPE, history: history)
+        var replacement = gym.planner.prescribe(next, slot: slot, minutes: minutes, sessionRPE: current.targetRPE, history: history)
+        // Keep the fitted set count and any superset pairing; redo the warm-up ramp for the new lift.
+        replacement.sets = current.exercises[index].sets
+        replacement.supersetGroup = current.exercises[index].supersetGroup
+        current.exercises[index] = replacement
+        gym.planner.addWarmUps(&current.exercises)
         plan = current
     }
 
@@ -222,6 +236,26 @@ struct WorkoutBuilderView: View {
         }
     }
 
+    /// "I have 20 minutes": the same plan, fitted with fewer sets and paired
+    /// exercises. Paired sets keep growth and most strength while cutting
+    /// time by about a third (Iversen et al., Sports Med 2021).
+    private var quickPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CardLabel(text: "I have…")
+            HStack(spacing: 8) {
+                ForEach(quickMinutes, id: \.self) { value in
+                    SelectChip(title: "\(value)", isSelected: minutes == value) { minutes = value }
+                }
+                Text("min")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Text("Short on time: fewer sets, then paired exercises (A1/A2) with one rest after both.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+    }
+
     private func summaryCard(_ plan: PlannedWorkout) -> some View {
         let planner = StrainPlanner()
         let estimated = WorkoutPlanner.estimatedMinutes(plan.exercises)
@@ -244,8 +278,27 @@ struct WorkoutBuilderView: View {
                     .font(.subheadline)
                     .foregroundStyle(inRange ? Theme.recoveryHighText : Theme.secondaryText)
             }
+            blockLine(plan)
         }
         .card()
+    }
+
+    /// "Block week 3 of 5 · RIR 1" and what it means, plus the superset note.
+    @ViewBuilder
+    private func blockLine(_ plan: PlannedWorkout) -> some View {
+        if let week = plan.blockWeek {
+            VStack(alignment: .leading, spacing: 4) {
+                Chip(text: week.label, color: week.isDeload ? Theme.oxygen : Theme.lifting)
+                Text(week.note)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        if plan.hasSupersets {
+            Text("Paired exercises (A1/A2): one set of each, then rest. About a third less time for the same work (Iversen et al. 2021).")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
     }
 }
 
@@ -275,14 +328,20 @@ struct PlannedExerciseRow: View {
     let exercise: PlannedExercise
     let unit: LoadUnit
     var onSwap: (() -> Void)?
+    /// "A1" / "A2" when the exercise is in a superset; the number otherwise.
+    var label: String? = nil
+
+    /// Supersets are shown in the sleep colour so the pair stands out from the numbering.
+    private var badgeColor: Color { label == nil ? Theme.lifting : Theme.sleep }
+    private var badgeTextColor: Color { label == nil ? Theme.liftingText : Theme.sleepDeep }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Text("\(index)")
+            Text(label ?? "\(index)")
                 .font(.headline)
-                .foregroundStyle(Theme.liftingText)
+                .foregroundStyle(badgeTextColor)
                 .frame(width: 34, height: 34)
-                .background(Theme.lifting.opacity(0.12), in: .rect(cornerRadius: 10))
+                .background(badgeColor.opacity(0.12), in: .rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 4) {
                 Text(exercise.name)
                     .font(.headline)
@@ -297,6 +356,12 @@ struct PlannedExerciseRow: View {
                 }
                 if let note = exercise.note {
                     Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                // Ramp sets rounded to the gym's loads (`WarmUp`; Ribeiro et al. 2020).
+                if let warmUps = exercise.warmUpSets, !warmUps.isEmpty {
+                    Text("Warm-up: \(WarmUp.summary(warmUps))")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }

@@ -225,6 +225,8 @@ struct RootView: View {
             measurements.scheduleReminders() // monthly waist, 6-monthly grip ("measure|waist", "measure|grip")
             await Reminders.scheduleDoses()
             await Reminders.startMedsActivityIfNeeded()
+            // Medications the Health app knows about (read-only merge; off unless the build enables the API).
+            if let health { await medications.importFromHealth(health) }
             // Keep today's numbers current while the app is open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(300))
@@ -293,6 +295,10 @@ struct RootView: View {
         gym.style = settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
         metrics.plannedSessionTomorrow = plannedSlots().first { Calendar.current.isDateInTomorrow($0.start) }?.start // bed-by window
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
+        // Training block (`TrainingBlock`): the trainer's style from the goals, then this week's
+        // state; a week that starts with 7-day HRV below normal holds the ramp instead of adding sets.
+        weeklyPlans.trainingStyle = gym.style
+        weeklyPlans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
         // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old (`BodyMeasurementsStore`).
         vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil))
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,

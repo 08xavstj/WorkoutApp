@@ -81,8 +81,9 @@ targets:
           WorkoutApp uses your location once to get local weather, air quality and
           daylight hours for training advice. You can type your city instead.
         NSHealthUpdateUsageDescription: >-
-          WorkoutApp saves the gym workouts and blood pressure readings you log to Apple
-          Health.
+          WorkoutApp saves the gym workouts (with your effort rating), blood pressure
+          readings, breathing sessions, check-in mood and quick meal estimates you log to
+          Apple Health.
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

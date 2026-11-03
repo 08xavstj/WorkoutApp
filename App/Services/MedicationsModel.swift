@@ -76,6 +76,43 @@ final class MedicationsModel {
         save(entry)
     }
 
+    // MARK: Apple Health Medications (iOS 26 API; HealthKitClient+iOS26)
+
+    /// Marker kept in `notes` so an imported entry isn't imported twice.
+    static let healthImportNote = "From Apple Health"
+
+    /// Adds medications from the Health app's list that aren't here yet
+    /// (matched by name, case-insensitive, or by Apple's id in the notes).
+    /// Read-only merge: nothing the user typed is changed or removed, and
+    /// imported entries carry no reminder times so Apple's reminders aren't
+    /// doubled (competitors.md item 7). Archived ones are skipped. Returns
+    /// how many were added.
+    @discardableResult
+    func merge(healthMedications: [HealthMedication]) -> Int {
+        var all = MedicationStore.medications()
+        let names = Set(all.map { $0.name.lowercased().trimmingCharacters(in: .whitespaces) })
+        var added = 0
+        for imported in healthMedications where !imported.isArchived {
+            let name = (imported.nickname?.isEmpty == false ? imported.nickname! : imported.name).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            let marker = "\(Self.healthImportNote) (\(imported.id))"
+            if names.contains(name.lowercased()) || all.contains(where: { $0.notes.contains(marker) }) { continue }
+            all.append(Medication(name: name, notes: marker))
+            added += 1
+        }
+        guard added > 0 else { return 0 }
+        MedicationStore.save(all)
+        changed()
+        return added
+    }
+
+    /// Reads the Health app's medications (when the API is enabled in this
+    /// build) and merges them in.
+    func importFromHealth(_ health: HealthKitClient) async {
+        guard let imported = try? await health.importedMedications(), !imported.isEmpty else { return }
+        merge(healthMedications: imported)
+    }
+
     // MARK: What the medications mean
 
     struct Match: Identifiable {

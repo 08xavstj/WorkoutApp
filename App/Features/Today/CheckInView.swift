@@ -293,6 +293,11 @@ struct CheckInView: View {
                 try? modelContext.save()
             }
             store.save(morning)
+            // Mood → Apple Health state of mind (daily mood; iOS 18 type;
+            // HealthKitClient+Writes), so Health's mental-wellbeing view sees it.
+            if let mood = morning.mood, let health {
+                Task { try? await health.saveStateOfMind(mood: mood, date: .now) }
+            }
             // Late hard workout last night is filled in from your data, not asked.
             let yesterday = Calendar.current.date(byAdding: .day, value: -2, to: .now) ?? .now
             let recent = sessions.filter { !$0.isActive && $0.startedAt >= yesterday }.map(\.strainSummary)

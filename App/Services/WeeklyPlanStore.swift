@@ -14,12 +14,18 @@ import AppCore
 final class WeeklyPlanStore {
     private struct Saved: Codable {
         var plans: [WeeklyPlan] = []
+        /// The current training block (`TrainingBlock`); nil until the first plan is confirmed.
+        var block: TrainingBlock? = nil
     }
 
     /// Weeks of plans kept (this week included).
     static let keptWeeks = 12
 
     private var saved = Saved()
+
+    /// The trainer's style from the user's goals; new blocks take it. Set by
+    /// the views that know the goals before they save or refresh.
+    var trainingStyle: TrainingStyle = .balanced
 
     @ObservationIgnored private let fileURL: URL = {
         let folder = URL.applicationSupportDirectory
@@ -86,13 +92,70 @@ final class WeeklyPlanStore {
         plans.last { $0.weekStart < weekStart }
     }
 
-    /// Saves (or replaces) the plan for its week and drops weeks older than `keptWeeks`.
+    /// Saves (or replaces) the plan for its week and drops weeks older than
+    /// `keptWeeks`. The first confirmed plan with training days starts a
+    /// training block (`startBlockIfNeeded`).
     func save(_ plan: WeeklyPlan) {
         saved.plans.removeAll { Calendar.current.isDate($0.weekStart, inSameDayAs: plan.weekStart) }
         saved.plans.append(plan)
         let cutoff = Calendar.current.date(byAdding: .day, value: -7 * Self.keptWeeks, to: WeeklyPlan.weekStart(containing: .now)) ?? .distantPast
         saved.plans.removeAll { $0.weekStart < cutoff }
+        if !plan.plannedDays.isEmpty { startBlockIfNeeded(now: .now, persist: false) }
         write()
+    }
+
+    // MARK: Training block
+
+    /// The current block, as last refreshed. Views read `block?.week` for the
+    /// "Block week 3 of 5 · RIR 1" line after calling `refreshBlock` from a
+    /// task or action (never from a view body: it may write).
+    var block: TrainingBlock? { saved.block }
+
+    /// This week's block state, if a block has started.
+    var blockWeek: TrainingBlock.WeekState? { saved.block?.week }
+
+    /// The block state for the week containing `now` without saving it, for
+    /// view bodies that only read (`refreshBlock` persists the same move).
+    func projectedBlockWeek(now: Date = .now, hrvBelowNormal: Bool = false) -> TrainingBlock.WeekState? {
+        saved.block?.advanced(to: now, hrvBelowNormal: hrvBelowNormal, style: trainingStyle).week
+    }
+
+    /// True when the block's planned deload falls in the week starting `weekStart`.
+    func isDeloadWeek(_ weekStart: Date) -> Bool {
+        guard let block = saved.block, block.week.isDeload else { return false }
+        return block.covers(weekStart: weekStart)
+    }
+
+    /// Starts a block in `trainingStyle` from this week if none exists.
+    func startBlockIfNeeded(now: Date = .now, persist: Bool = true) {
+        guard saved.block == nil else { return }
+        saved.block = TrainingBlock(start: WeeklyPlan.weekStart(containing: now), style: trainingStyle)
+        if persist { write() }
+    }
+
+    /// Starts over from week 1 this week (e.g. after changing goals).
+    func restartBlock(now: Date = .now) {
+        saved.block = TrainingBlock(start: WeeklyPlan.weekStart(containing: now), style: trainingStyle)
+        write()
+    }
+
+    /// Moves the block on to the week containing `now` if a new calendar week
+    /// has begun (`TrainingBlock.advanced`). `hrvBelowNormal` is the 7-day HRV
+    /// flag (`DailyMetricsModel.trainEasyToday`): when a week starts with it
+    /// on, the ramp holds instead of adding sets. Starts a block if a plan
+    /// exists but no block does (plans saved before blocks existed).
+    @discardableResult
+    func refreshBlock(now: Date = .now, hrvBelowNormal: Bool = false) -> TrainingBlock.WeekState? {
+        guard let current = saved.block else {
+            if plans.contains(where: { !$0.plannedDays.isEmpty }) { startBlockIfNeeded(now: now) }
+            return saved.block?.week
+        }
+        let advanced = current.advanced(to: now, hrvBelowNormal: hrvBelowNormal, style: trainingStyle)
+        if advanced != current {
+            saved.block = advanced
+            write()
+        }
+        return advanced.week
     }
 
     private func write() {
@@ -155,6 +218,9 @@ final class WeeklyPlanStore {
         line += "; done \(sessionsDone(sessions: sessions, extra: extra, now: now)) of \(plan.plannedDays.count) so far"
         if result.plannedWeeks > 0 { line += "; consistency \(result.label) on plan" }
         if !plan.changes.isEmpty { line += ". Changes this week: " + plan.changes.prefix(3).joined(separator: "; ") }
-        return line + "."
+        line += "."
+        // Training block (`TrainingBlock.coachLine`): week, RIR target, deload or held ramp.
+        if let block = saved.block { line += " " + block.coachLine }
+        return line
     }
 }

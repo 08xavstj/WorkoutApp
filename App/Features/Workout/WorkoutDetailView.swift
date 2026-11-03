@@ -9,6 +9,7 @@ struct WorkoutDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var reloadToken = 0
     @State private var savedTemplate = false
+    @State private var supersetGroups: [Int: Int] = [:]
 
     var body: some View {
         let unit = settings.weightUnit
@@ -28,7 +29,7 @@ struct WorkoutDetailView: View {
             HeartRateSourcesSection(start: session.startedAt, end: session.endedAt ?? session.startedAt, reload: reloadToken)
 
             ForEach(session.orderedExercises) { exercise in
-                Section(exercise.name) {
+                Section {
                     let working = exercise.orderedSets.filter { !$0.isWarmup }
                     ForEach(exercise.orderedSets) { set in
                         HStack {
@@ -50,6 +51,14 @@ struct WorkoutDetailView: View {
                     } label: {
                         Label("Progress", systemImage: "chart.line.uptrend.xyaxis")
                             .font(.subheadline)
+                    }
+                } header: {
+                    HStack(spacing: 8) {
+                        Text(exercise.name)
+                        // Superset pairing from the plan, kept for recent sessions (`SupersetRegistry`).
+                        if let label = SupersetRegistry.label(order: exercise.order, groups: supersetGroups) {
+                            Chip(text: label, color: Theme.sleep)
+                        }
                     }
                 }
                 .listRowBackground(Theme.card)
@@ -75,6 +84,7 @@ struct WorkoutDetailView: View {
         }
         // On the List itself: a Section's .refreshable is never used.
         .refreshable { reloadToken += 1 }
+        .task { supersetGroups = SupersetRegistry.groups(for: session.startedAt) }
     }
 }
 

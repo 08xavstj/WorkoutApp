@@ -247,6 +247,12 @@ public struct PlannedExercise: Codable, Sendable, Equatable, Identifiable {
     public var loadKind: EquipmentKind?
     /// e.g. "45 + 25 per side", or "first time: pick a weight you can do for 8 at RPE 7".
     public var note: String?
+    /// Exercises with the same group are a superset: one set of each, then
+    /// rest (`Supersets`). Nil for a straight set.
+    public var supersetGroup: Int? = nil
+    /// Ramp sets before the working sets (`WarmUp`), in the gym's unit. Nil or
+    /// empty when the lift gets none.
+    public var warmUpSets: [WarmUp.RampSet]? = nil
 }
 
 extension PlannedExercise {
@@ -268,6 +274,11 @@ public struct PlannedWorkout: Codable, Sendable, Equatable {
     public var targetRPE: Double
     public var exercises: [PlannedExercise]
     public var unit: LoadUnit
+    /// The training-block week this session was planned in, if any.
+    public var blockWeek: TrainingBlock.WeekState? = nil
+
+    /// True when at least one superset was made to fit the time.
+    public var hasSupersets: Bool { exercises.contains { $0.supersetGroup != nil } }
 }
 
 public struct WorkoutPlanner: Sendable {
@@ -313,6 +324,18 @@ public struct WorkoutPlanner: Sendable {
         case 34..<67: return 7.5
         default: return 8
         }
+    }
+
+    /// Inside a training block the week sets the effort (RIR 3 → 2 → 1, deload
+    /// 3; `TrainingBlock`), and the recovery rule above still backs off a
+    /// low-recovery day by the same amount it would outside a block (0.5 for
+    /// moderate, 1.5 for low recovery). Kept between RPE 6 and 9: no block
+    /// week asks for failure (Refalo et al. 2024; Robinson et al. 2024).
+    public static func targetRPE(recovery: Int?, block: TrainingBlock.WeekState?) -> Double {
+        let daily = targetRPE(recovery: recovery)
+        guard let block else { return daily }
+        let backOff = 8 - daily
+        return max(6, min(9, block.targetRPE - backOff))
     }
 
     public func choose(_ slot: MovementSlot) -> CatalogExercise? {
@@ -373,21 +396,50 @@ public struct WorkoutPlanner: Sendable {
         return planned
     }
 
+    /// Builds a session. With a `block` week the sets scale by the week's
+    /// multiplier (`TrainingBlock.scaledSets`) and the effort comes from its
+    /// RIR target, still lowered on a low-recovery day. Sessions that overrun
+    /// the time are trimmed, paired into supersets, then shortened (`fit`),
+    /// and compound lifts get warm-up ramp sets (`WarmUp`).
     public func plan(
         focus: WorkoutFocus,
         minutes: Int,
         recovery: Int?,
-        history: [String: ExerciseHistory]
+        history: [String: ExerciseHistory],
+        block: TrainingBlock.WeekState? = nil
     ) -> PlannedWorkout {
-        let rpe = Self.targetRPE(recovery: recovery)
+        let rpe = Self.targetRPE(recovery: recovery, block: block)
         let exerciseCount = minutes <= 30 ? 4 : (minutes <= 45 ? 5 : 6)
         var exercises: [PlannedExercise] = []
         for slot in focus.slots {
             guard exercises.count < exerciseCount, let choice = choose(slot) else { continue }
-            exercises.append(prescribe(choice, slot: slot, minutes: minutes, sessionRPE: rpe, history: history))
+            var planned = prescribe(choice, slot: slot, minutes: minutes, sessionRPE: rpe, history: history)
+            if let block {
+                planned.sets = TrainingBlock.scaledSets(planned.sets, multiplier: block.setMultiplier)
+            }
+            exercises.append(planned)
         }
-        Self.fit(&exercises, minutes: minutes)
-        return PlannedWorkout(focus: focus, title: focus.title, minutes: minutes, targetRPE: rpe, exercises: exercises, unit: gym.unit)
+        Self.fit(&exercises, minutes: minutes, style: style)
+        addWarmUps(&exercises)
+        var workout = PlannedWorkout(focus: focus, title: focus.title, minutes: minutes, targetRPE: rpe, exercises: exercises, unit: gym.unit)
+        workout.blockWeek = block
+        return workout
+    }
+
+    /// Ramp sets for the loaded compound lifts: a full ramp on the first,
+    /// one feeler set on later ones, none on isolation work (`WarmUp`).
+    public func addWarmUps(_ exercises: inout [PlannedExercise]) {
+        var seenCompound = false
+        for index in exercises.indices {
+            let exercise = exercises[index]
+            exercises[index].warmUpSets = nil
+            guard ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound == true,
+                  let load = exercise.load, let kind = exercise.loadKind else { continue }
+            let role: WarmUp.Role = seenCompound ? .laterCompound : .firstCompound
+            seenCompound = true
+            let sets = WarmUp.sets(workingLoad: load, kind: kind, gym: gym, role: role)
+            exercises[index].warmUpSets = sets.isEmpty ? nil : sets
+        }
     }
 
     /// Fewest sets an exercise is cut to so a session fits the time you picked.
@@ -398,17 +450,24 @@ public struct WorkoutPlanner: Sendable {
 
     /// Cuts sets until the estimated length fits `minutes`: always from the
     /// exercise with the most sets, the later one on a tie, so the main lifts
-    /// keep theirs longest. If every exercise is down to two sets, the last
-    /// exercise goes (keeping at least two). With little time, fewer sets of
-    /// the big multi-joint lifts are the efficient choice (Iversen et al.,
-    /// Sports Med 2021).
-    static func fit(_ exercises: inout [PlannedExercise], minutes: Int) {
+    /// keep theirs longest. If every exercise is down to two sets, the
+    /// exercises are paired into supersets (`Supersets.pair`), which keeps
+    /// the work and cuts the time; only then does the last exercise go
+    /// (keeping at least two). With little time, fewer sets of the big
+    /// multi-joint lifts and paired sets are the efficient choices (Iversen
+    /// et al., Sports Med 2021).
+    static func fit(_ exercises: inout [PlannedExercise], minutes: Int, style: TrainingStyle = .balanced) {
+        var triedPairing = exercises.contains { $0.supersetGroup != nil }
         while estimatedMinutes(exercises) > minutes {
             let trimmable = exercises.indices.filter { exercises[$0].sets > minimumSetsWhenShort }
             if let index = trimmable.reversed().max(by: { exercises[$0].sets < exercises[$1].sets }) {
                 exercises[index].sets -= 1
+            } else if !triedPairing {
+                triedPairing = true
+                exercises = Supersets.pair(exercises: exercises, style: style)
             } else if exercises.count > 2 {
                 exercises.removeLast()
+                Supersets.dropOrphans(&exercises)
             } else {
                 return
             }
@@ -480,14 +539,16 @@ public struct WorkoutPlanner: Sendable {
 
     /// Rough session length: 5 minutes of warm-up, then per set about 45 s of
     /// work plus the default rest (`RestTimer`, balanced style): 3.25 min for
-    /// big lifts, 2.25 min for small ones.
+    /// big lifts, 2.25 min for small ones. Sets in a superset count at about
+    /// 60% of that (`Supersets.timeFraction`): the pair shares one rest.
     public static func estimatedMinutes(_ exercises: [PlannedExercise]) -> Int {
         let workSeconds = 45
         let compound = Double(RestTimer.defaultSeconds(style: .balanced, compound: true) + workSeconds) / 60
         let isolation = Double(RestTimer.defaultSeconds(style: .balanced, compound: false) + workSeconds) / 60
         let setMinutes = exercises.reduce(0.0) { total, exercise in
             let perSet = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound == true ? compound : isolation
-            return total + Double(exercise.sets) * perSet
+            let fraction = exercise.supersetGroup == nil ? 1 : Supersets.timeFraction
+            return total + Double(exercise.sets) * perSet * fraction
         }
         return Int((5 + setMinutes).rounded())
     }

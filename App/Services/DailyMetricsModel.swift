@@ -468,7 +468,12 @@ final class DailyMetricsModel {
             async let intakeSeries = health.dailySeries(.dietaryEnergyConsumed, unit: .kilocalorie(), days: 35, cumulative: true)
             async let weightSeries = health.dailySeries(.bodyMass, unit: .gramUnit(with: .kilo), days: 35, cumulative: false)
             async let nutrientTask = health.nutrientAverages(days: 7)
-            let intake = ((try? await intakeSeries) ?? []).filter { $0.date < today }.map { DayValue(date: $0.date, value: $0.value) }
+            let rawIntake = ((try? await intakeSeries) ?? []).filter { $0.date < today }.map { DayValue(date: $0.date, value: $0.value) }
+            // Quick-estimate meals: a day logged only as this app's estimates
+            // counts as a partial day, not a measured one (`EstimatedIntake`;
+            // O'Hara 2025; nutrition.md "how accurate").
+            let estimatedDays = (try? await health.estimateOnlyDays(days: 35)) ?? []
+            let intake = EstimatedIntake.downWeight(rawIntake, estimatedOnlyDays: estimatedDays)
             let weights = ((try? await weightSeries) ?? []).map { DayValue(date: $0.date, value: $0.value) }
             // Water from starting creatine isn't tissue, so it's taken out of the trend.
             let creatine = MedicationStore.medications().first {

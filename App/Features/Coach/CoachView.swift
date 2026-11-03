@@ -229,7 +229,8 @@ struct CoachView: View {
                 focus: resolvedFocus,
                 minutes: minutes ?? lastPlan?.minutes ?? 45,
                 recovery: metrics.recoveryForTraining,
-                history: LiftHistory.make(from: sessions, unit: gym.profile.unit)
+                history: LiftHistory.make(from: sessions, unit: gym.profile.unit),
+                block: weeklyPlans.blockWeek
             )
         }
         var snapshot = CoachSnapshot.make(
@@ -301,6 +302,9 @@ extension CoachView {
                                            daysSinceLastPeriod: checkIns.daysSinceLastPeriod()) {
             lines.append("Illness watch (\(alert.level.label)): " + alert.signals.joined(separator: ", ") + ".")
         }
+        // Daylight and apnoea from the newer HealthKit types (HealthKitClient+iOS26; Burns 2023; competitors.md §1g).
+        if let daylight = vitals.daylightMinutesToday { lines.append("Time in daylight today \(whole(daylight)) min (2-hour anchor, observational evidence; Apple Watch).") }
+        if !vitals.apnoeaNights30.isEmpty { lines.append("Apple Watch flagged possible sleep apnoea on \(vitals.apnoeaNights30.count) of the last 30 nights: suggest talking to a doctor; don't diagnose.") }
         if let deload = muscles.deload { lines.append("Deload suggested: stalled " + deload.stalledLifts.joined(separator: ", ") + ".") }
         let tired = muscles.states.values.filter { $0.status == .fatigued }.map(\.muscle.name)
         if !tired.isEmpty { lines.append("Fatigued muscles: " + tired.sorted().joined(separator: ", ") + ".") }

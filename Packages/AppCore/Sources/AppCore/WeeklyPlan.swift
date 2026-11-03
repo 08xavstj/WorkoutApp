@@ -47,6 +47,11 @@ public struct PlannedDay: Codable, Sendable, Equatable, Identifiable {
 
 /// A week (Monday start) of planned training days, plus the changes chosen
 /// at the weekly review.
+///
+/// Which training-block week a plan falls in (sets ramp, RIR target, planned
+/// deload) is not stored here: the block lives beside the plans
+/// (`TrainingBlock`, kept by the app's `WeeklyPlanStore`) and its
+/// `weekStart` says which plan week it covers.
 public struct WeeklyPlan: Codable, Sendable, Equatable {
     /// Start of the Monday that begins the week.
     public var weekStart: Date

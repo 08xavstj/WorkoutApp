@@ -442,3 +442,93 @@ struct CardioFitnessCard: View {
         return "Keep at least 150 minutes of moderate cardio a week, with 1-2 harder interval sessions to keep it improving."
     }
 }
+
+// MARK: - Strength for health
+
+/// Relative strength (best e1RM ÷ body weight) for bench, squat and
+/// deadlift against age-and-sex bands (`StrengthForHealth`): a health marker
+/// next to VO₂ max, not a leaderboard. The bands are an app choice adapted
+/// from strength-standards tables; the mortality link is for strength in
+/// general (García-Hermoso 2018; Leong 2015).
+struct StrengthForHealthCard: View {
+    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
+    @Environment(UserSettings.self) private var settings
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        let results = StrengthForHealth.assess(lifts: bestLifts, bodyMassKg: bodyMassKg, sex: settings.sex, age: settings.age)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                CardLabel(text: "Strength for health", color: Theme.lifting)
+                Spacer()
+                Chip(text: "App choice", color: Theme.secondaryText)
+            }
+            ForEach(results) { result in
+                liftRow(result)
+            }
+            Text(StrengthForHealth.summary(results, goals: metrics.goals))
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Best estimated 1RM ÷ body weight from the last year's sets. " + StrengthForHealth.evidenceNote)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .card()
+    }
+
+    /// Body weight from Apple Health, else the profile.
+    private var bodyMassKg: Double {
+        metrics.bodyMassKg ?? settings.weightKg
+    }
+
+    /// Best e1RM per exercise name over the last year (completed working sets).
+    private var bestLifts: [(name: String, estimatedOneRepMaxKg: Double)] {
+        let cutoff = Date.now.addingTimeInterval(-365 * 86_400)
+        var best: [String: Double] = [:]
+        for session in sessions where !session.isActive && session.startedAt >= cutoff {
+            for exercise in session.exercises {
+                let top = exercise.sets.filter { $0.isCompleted && !$0.isWarmup }.map(\.estimatedOneRepMax).max() ?? 0
+                if top > 0 { best[exercise.name] = max(best[exercise.name] ?? 0, top) }
+            }
+        }
+        return best.map { (name: $0.key, estimatedOneRepMaxKg: $0.value) }
+    }
+
+    private func liftRow(_ result: StrengthForHealth.Result) -> some View {
+        let unit = settings.weightUnit
+        let e1RM = unit.display(result.estimatedOneRepMaxKg).formatted(.number.precision(.fractionLength(0)))
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.lift.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text("e1RM \(e1RM) \(unit.rawValue) · \(result.ratio.formatted(.number.precision(.fractionLength(2)))) × body weight")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Spacer(minLength: 8)
+            BandDots(band: result.band)
+            Chip(text: result.band.label, color: result.band >= StrengthForHealth.healthTargetBand ? Theme.recoveryHigh : Theme.lifting)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(result.lift.name): \(result.band.label), \(result.ratio.formatted(.number.precision(.fractionLength(2)))) times body weight")
+    }
+}
+
+/// Five dots, filled up to the band.
+private struct BandDots: View {
+    let band: StrengthForHealth.Band
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(StrengthForHealth.Band.allCases, id: \.rawValue) { step in
+                Circle()
+                    .fill(step <= band ? Theme.lifting : Theme.track)
+                    .frame(width: 7, height: 7)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}

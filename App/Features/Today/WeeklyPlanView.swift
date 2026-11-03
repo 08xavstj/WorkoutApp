@@ -15,6 +15,7 @@ struct WeeklyPlanView: View {
 
     @Environment(WeeklyPlanStore.self) private var store
     @Environment(UserSettings.self) private var settings
+    @Environment(DailyMetricsModel.self) private var metrics
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var days: [PlannedDay] = []
@@ -27,6 +28,16 @@ struct WeeklyPlanView: View {
         WeeklyPlan.suggestedDayCount(goals: settings.goalsSet ? settings.goals : nil)
     }
 
+    /// The trainer's style from the goals; new training blocks take it.
+    private var style: TrainingStyle {
+        settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
+    }
+
+    /// This week in the training block, if one has started.
+    private var blockWeek: TrainingBlock.WeekState? {
+        store.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday)
+    }
+
     var body: some View {
         @Bindable var settings = settings
         NavigationStack {
@@ -36,6 +47,7 @@ struct WeeklyPlanView: View {
                     PlannedDaySection(day: $day)
                 }
                 ifThenSection
+                blockSection
                 Section {
                     Toggle("Monday review reminder", isOn: $settings.weeklyReviewOn)
                     if settings.weeklyReviewOn {
@@ -58,7 +70,11 @@ struct WeeklyPlanView: View {
                         .disabled(!WeeklyPlan.dayRange.contains(days.count))
                 }
             }
-            .task { load() }
+            .task {
+                load()
+                store.trainingStyle = style
+                store.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
+            }
         }
     }
 
@@ -71,7 +87,55 @@ struct WeeklyPlanView: View {
             Text("Training days")
         } footer: {
             // Days per week from the goal: 2-3 health, 3-4 muscle/strength (report rec. 2).
-            Text("\(days.count) of \(WeeklyPlan.dayRange.lowerBound)–\(WeeklyPlan.dayRange.upperBound) days. About \(suggestedCount) a week suits your goal; a plan you can keep beats a bigger one.")
+            Text(daysFooter)
+        }
+    }
+
+    private var daysFooter: String {
+        var text = "\(days.count) of \(WeeklyPlan.dayRange.lowerBound)–\(WeeklyPlan.dayRange.upperBound) days. About \(suggestedCount) a week suits your goal; a plan you can keep beats a bigger one."
+        // A block's deload week keeps the days; the trainer halves the sets (`TrainingBlock`).
+        if blockWeek?.isDeload == true {
+            text += " This is the block's planned deload week: keep the days, the sessions will be lighter."
+        }
+        return text
+    }
+
+    /// Where the training block is: "Block week 3 of 5 · RIR 1" (`TrainingBlock`).
+    private var blockSection: some View {
+        Section {
+            if let week = blockWeek {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(week.label)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.primaryText)
+                        if week.isDeload {
+                            Chip(text: "Deload", color: Theme.oxygen)
+                        } else if week.isHeld {
+                            Chip(text: "Held", color: Theme.recoveryModerate)
+                        }
+                    }
+                    Text(week.note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Button("Start a new block from this week") {
+                    store.trainingStyle = style
+                    store.restartBlock()
+                }
+            } else {
+                Text("Saving this plan starts a \(TrainingBlock.length(for: style))-week training block: sets ramp up week by week and the effort target moves from 3 reps left to 1, then one easier week.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+            }
+        } header: {
+            Text("Training block")
+        } footer: {
+            // Williams et al. 2017 (strength, ES 0.43); Grgic et al. 2017 (muscle: no difference between
+            // periodisation types); Bell et al. 2023 (deload consensus); Coleman et al. 2024 (not re-verified).
+            Text(style == .endurance
+                 ? "Stamina and health goals keep steady weeks: no ramp, no deload. Planned training builds more strength than the same work unplanned (Williams et al. 2017)."
+                 : "Planned training builds more strength than the same work unplanned (Williams et al. 2017); for muscle size the evidence is less clear. The easier week follows the Bell et al. 2023 consensus; one trial found no advantage over training straight through, so it stays light rather than off. If your 7-day HRV is below normal when a week starts, the sets stay where they were.")
         }
     }
 
@@ -148,6 +212,8 @@ struct WeeklyPlanView: View {
             copy.ifThen = text.isEmpty ? nil : text
             return copy
         }
+        // The first confirmed plan starts a training block in the goal's style (`WeeklyPlanStore.save`).
+        store.trainingStyle = style
         store.save(plan)
         dismiss()
     }

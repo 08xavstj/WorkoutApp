@@ -19,6 +19,8 @@ struct ActiveWorkoutView: View {
     @State private var showingDiscard = false
     @State private var expanded: Set<PersistentIdentifier> = []
     @State private var savedTemplate = false
+    /// Exercise order → superset group for this session (`SupersetRegistry`).
+    @State private var supersetGroups: [Int: Int] = [:]
     @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
 
     var body: some View {
@@ -86,6 +88,7 @@ struct ActiveWorkoutView: View {
                     .presentationDetents([.medium])
             }
             .task {
+                supersetGroups = SupersetRegistry.groups(for: session.startedAt)
                 guard session.isActive else { return }
                 // Lock Screen / Dynamic Island: elapsed time, next set and rest timer.
                 let next = nextSetText()
@@ -227,7 +230,9 @@ struct ActiveWorkoutView: View {
     private func exerciseCard(_ exercise: ExerciseLog) -> some View {
         let isCurrent = exercise.persistentModelID == currentExerciseID
         let isDone = !exercise.sets.isEmpty && exercise.sets.allSatisfy(\.isCompleted)
-        if isCurrent || expanded.contains(exercise.persistentModelID) || exercise.sets.isEmpty {
+        // A superset partner stays open with the current exercise: one set of each, then rest.
+        let isPairedWithCurrent = partner(of: exercise)?.persistentModelID == currentExerciseID
+        if isCurrent || isPairedWithCurrent || expanded.contains(exercise.persistentModelID) || exercise.sets.isEmpty {
             ExerciseCard(
                 exercise: exercise,
                 isCurrent: isCurrent,
@@ -236,7 +241,8 @@ struct ActiveWorkoutView: View {
                 unit: workoutUnit,
                 gym: gym.profile,
                 onSetCompleted: { startRest(for: exercise) },
-                onCollapse: { expanded.remove(exercise.persistentModelID) }
+                onCollapse: { expanded.remove(exercise.persistentModelID) },
+                supersetLabel: supersetLabel(exercise)
             )
         } else {
             Button {
@@ -247,11 +253,24 @@ struct ActiveWorkoutView: View {
                     isDone: isDone,
                     isNext: isNext(exercise),
                     unit: workoutUnit,
-                    position: (session.orderedExercises.firstIndex(where: { $0.persistentModelID == exercise.persistentModelID }) ?? 0) + 1
+                    position: (session.orderedExercises.firstIndex(where: { $0.persistentModelID == exercise.persistentModelID }) ?? 0) + 1,
+                    supersetLabel: supersetLabel(exercise)
                 )
             }
             .buttonStyle(.plain)
         }
+    }
+
+    // MARK: Supersets
+
+    /// "A1" / "A2" when the exercise was planned as half of a superset (`Supersets`).
+    private func supersetLabel(_ exercise: ExerciseLog) -> String? {
+        SupersetRegistry.label(order: exercise.order, groups: supersetGroups)
+    }
+
+    private func partner(of exercise: ExerciseLog) -> ExerciseLog? {
+        guard let order = SupersetRegistry.partner(of: exercise.order, groups: supersetGroups) else { return nil }
+        return session.exercises.first { $0.order == order }
     }
 
     private func isNext(_ exercise: ExerciseLog) -> Bool {
@@ -262,19 +281,30 @@ struct ActiveWorkoutView: View {
     }
 
     private func startRest(for exercise: ExerciseLog) {
+        // Superset: no rest between the first lift and its partner, one rest after both
+        // (paired sets, Iversen et al., Sports Med 2021; `Supersets`).
+        if let mate = partner(of: exercise), mate.order > exercise.order,
+           mate.sets.contains(where: { !$0.isCompleted }) {
+            let next = nextSetText()
+            Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
+            return
+        }
         let seconds = RestPreferences.resolved(for: exercise.exerciseID, style: gym.style)
         RestTimerStore.start(seconds: Double(seconds))
         let next = nextSetText()
         Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
     }
 
-    /// The next set to do, for the Live Activity ("Bench Press", "Set 3 of 4 · 135 lb × 8").
+    /// The next set to do, for the Live Activity ("Bench Press", "Set 3 of 4 · 135 lb × 8";
+    /// warm-up ramp sets read "Warm-up 2 of 3").
     private func nextSetText() -> (exercise: String, detail: String) {
         for exercise in session.orderedExercises {
             let sets = exercise.orderedSets
             guard let index = sets.firstIndex(where: { !$0.isCompleted }) else { continue }
             let set = sets[index]
-            var detail = "Set \(index + 1) of \(sets.count)"
+            let same = sets.filter { $0.isWarmup == set.isWarmup }
+            let number = (same.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1
+            var detail = "\(set.isWarmup ? "Warm-up" : "Set") \(number) of \(same.count)"
             if set.weightKg > 0 || set.reps > 0 {
                 detail += " · \(workoutUnit.format(set.weightKg)) \(workoutUnit.rawValue) × \(set.reps)"
             }
@@ -306,6 +336,8 @@ private struct ExerciseCard: View {
     let gym: GymProfile
     let onSetCompleted: () -> Void
     let onCollapse: () -> Void
+    /// "A1" / "A2" when this exercise is half of a superset.
+    var supersetLabel: String? = nil
 
     @Environment(\.modelContext) private var modelContext
     @Environment(ExerciseLibrary.self) private var library
@@ -332,6 +364,10 @@ private struct ExerciseCard: View {
                         Text([info.equipment?.capitalized, info.primaryMuscleLabel].compactMap { $0 }.joined(separator: " · "))
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
+                    }
+                    if let supersetLabel {
+                        Chip(text: "\(supersetLabel) · superset", color: Theme.sleep)
+                            .padding(.top, 2)
                     }
                 }
                 Spacer()
@@ -429,6 +465,11 @@ private struct ExerciseCard: View {
 
             if !previous.isEmpty {
                 Text("Last time: \(previous.map { "\(unit.format($0.weightKg)) × \($0.reps)" }.joined(separator: ", "))")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if supersetLabel?.hasSuffix("1") == true {
+                Text("Superset: one set of this, one of the next, then rest.")
                     .font(.footnote)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -785,6 +826,8 @@ private struct CollapsedExerciseRow: View {
     let unit: WeightUnit
     /// 1-based position in the workout.
     var position: Int
+    /// "A1" / "A2" when this exercise is half of a superset.
+    var supersetLabel: String? = nil
 
     var body: some View {
         HStack(spacing: 14) {
@@ -795,9 +838,9 @@ private struct CollapsedExerciseRow: View {
                     .frame(width: 40, height: 40)
                     .background(Theme.recoveryHigh, in: .circle)
             } else {
-                Text("\(position)")
+                Text(supersetLabel ?? "\(position)")
                     .font(.headline)
-                    .foregroundStyle(Theme.secondaryText)
+                    .foregroundStyle(supersetLabel == nil ? Theme.secondaryText : Theme.sleepDeep)
                     .frame(width: 40, height: 40)
                     .background(Theme.cardRaised, in: .circle)
             }

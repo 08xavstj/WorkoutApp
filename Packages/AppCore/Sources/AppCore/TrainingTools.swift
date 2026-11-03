@@ -79,8 +79,15 @@ extension WorkoutPlanner {
     /// (exercises, sets, reps, effort, fixed weights) are kept as they are;
     /// only missing weights are filled in, from history: a weight you can
     /// load for the target reps and effort, or last time's weight when the
-    /// exercise isn't loaded on this gym's equipment.
+    /// exercise isn't loaded on this gym's equipment. Catalog compound lifts
+    /// with a weight get warm-up ramp sets (`WarmUp`), like planned sessions.
     public func prescribe(template items: [TemplateItem], history: [String: ExerciseHistory]) -> [PlannedExercise] {
+        var planned = prescribeWithoutWarmUps(template: items, history: history)
+        addWarmUps(&planned)
+        return planned
+    }
+
+    func prescribeWithoutWarmUps(template items: [TemplateItem], history: [String: ExerciseHistory]) -> [PlannedExercise] {
         items.map { item in
             let rpe = item.rpe ?? Self.defaultTemplateRPE
             let catalogKind = ExerciseCatalog.exercise(id: item.exerciseID)?.load

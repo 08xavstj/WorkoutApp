@@ -9,3 +9,6 @@ verify_jwt = true
 
 [functions.labs]
 verify_jwt = true
+
+[functions.food-estimate]
+verify_jwt = true

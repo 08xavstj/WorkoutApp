@@ -10,6 +10,11 @@ struct HabitsCard: View {
     @Environment(\.healthClient) private var health
     @State private var caffeineToday: [DatedValue] = []
     @State private var proteinToday: [DatedValue] = []
+    // Movement breaks and the post-meal walk (`MovementBreaks`; Buffey 2022; Dunstan 2012).
+    @State private var movementNudge: MovementBreaks.Nudge?
+    /// The one nudge allowed per day: the day it was shown and which one.
+    @AppStorage("movementNudgeDay") private var movementNudgeDay = ""
+    @AppStorage("movementNudgeID") private var movementNudgeID = ""
 
     private var bedtime: Int { CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes) }
 
@@ -47,10 +52,46 @@ struct HabitsCard: View {
             if let availability = metrics.energyAvailability, let message = EnergyAvailability.message(availability, goals: metrics.goals) {
                 row(icon: "bolt.slash.fill", color: Theme.recoveryModerateText, title: "Energy availability is low", detail: message)
             }
+            movementRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(tint: Theme.sleep)
-        .task(id: metrics.nutritionToday?.proteinGrams) { await load() }
+        .task(id: "\(metrics.nutritionToday?.proteinGrams ?? 0)|\(metrics.steps ?? 0)") { await load() }
+    }
+
+    // MARK: Movement breaks and the post-meal walk
+
+    /// At most one nudge a day (`MovementBreaks.assess`; the once-a-day rule is applied in `load`).
+    @ViewBuilder
+    private var movementRow: some View {
+        switch movementNudge {
+        case .postMealWalk:
+            row(icon: "figure.walk", color: Theme.nutrition, title: MovementBreaks.postMealTitle, detail: MovementBreaks.postMealDetail)
+        case .sedentary(let hours):
+            row(icon: "figure.walk.motion", color: Theme.strain, title: MovementBreaks.sedentaryTitle, detail: MovementBreaks.sedentaryDetail(hours: hours))
+        case nil:
+            EmptyView()
+        }
+    }
+
+    /// Meal times from the food app's timed calorie entries (entries within
+    /// 90 minutes are one meal, as `ProteinMeals` groups them).
+    private func updateMovementNudge(hourlySteps: [MovementBreaks.HourSteps], energyEntries: [DatedValue]) {
+        let meals = ProteinMeals.meals(energyEntries.map { (date: $0.date, grams: $0.value) }).map(\.time)
+        let nudge = MovementBreaks.assess(hourlySteps: hourlySteps, mealTimes: meals, wake: metrics.sleep?.wakeTime, goals: metrics.goals)
+        let today = Dose.dayKey(Calendar.current.startOfDay(for: .now))
+        guard let nudge else {
+            movementNudge = nil
+            return
+        }
+        // One nudge a day: a second, different one waits for tomorrow.
+        if movementNudgeDay == today, movementNudgeID != nudge.id {
+            movementNudge = nil
+            return
+        }
+        movementNudgeDay = today
+        movementNudgeID = nudge.id
+        movementNudge = nudge
     }
 
     // MARK: Caffeine
@@ -130,5 +171,9 @@ struct HabitsCard: View {
         let start = Calendar.current.startOfDay(for: .now)
         caffeineToday = (try? await health.timedSamples(.dietaryCaffeine, unit: .gramUnit(with: .milli), from: start, to: .now)) ?? []
         proteinToday = (try? await health.timedSamples(.dietaryProtein, unit: .gram(), from: start, to: .now)) ?? []
+        // Movement breaks: today's hourly steps and the times meals were logged.
+        let hourly = (try? await health.hourlySteps(for: .now)) ?? []
+        let energyEntries = (try? await health.timedSamples(.dietaryEnergyConsumed, unit: .kilocalorie(), from: start, to: .now)) ?? []
+        updateMovementNudge(hourlySteps: hourly, energyEntries: energyEntries)
     }
 }

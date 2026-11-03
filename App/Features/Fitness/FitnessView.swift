@@ -44,6 +44,7 @@ struct FitnessView: View {
                     WeeklySetsCard()
                     SectionTitle(text: "Strength", trailing: "Health floor")
                     StrengthDaysCard()
+                    StrengthForHealthCard()
                     SectionTitle(text: "Training Load", trailing: "Last 7 days vs usual")
                     HStack(spacing: 12) {
                         LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.oxygenLight, Theme.oxygen, Theme.sleep])
@@ -411,12 +412,29 @@ private struct ZonesCard: View {
     }
 }
 
-/// Suggests a lighter week when lifts stall (and HRV is down).
+/// Suggests a lighter week when lifts stall (and HRV is down), and names the
+/// training block's planned deload when this is that week (`TrainingBlock`).
 private struct DeloadCard: View {
     @Environment(MuscleModel.self) private var muscles
+    @Environment(WeeklyPlanStore.self) private var plans
+    @Environment(DailyMetricsModel.self) private var metrics
 
     var body: some View {
-        if let advice = muscles.deload {
+        // Training block: the planned easier week (Bell et al. 2023 consensus; `TrainingBlock`).
+        if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.isDeload {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Planned deload this week", systemImage: "arrow.down.right.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(Theme.oxygen)
+                Text("\(week.label). The trainer plans about half the sets at the same weights; your lifts should feel easy. The next block starts next week.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                Text(StrengthHealthFloor.deloadNote)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .card(tint: Theme.oxygen)
+        } else if let advice = muscles.deload {
             VStack(alignment: .leading, spacing: 8) {
                 Label(advice.strong ? "Time for a deload week" : "Consider a lighter week", systemImage: "arrow.down.right.circle.fill")
                     .font(.headline)

@@ -31,7 +31,7 @@ Most of the planner already matched the literature: big lifts first, 10–20 har
 | Deloads | Suggested on high volume + poor recovery | Consensus: planned or reactive, both fine (Bell et al., 2023) | Supported | None |
 | Warm-up | 5 min allowance; no ramp sets | Ramp sets help performance (Ribeiro et al., 2020) | Gap | Future: warm-up calculator rounded to plates |
 
-## Open items (not done, for later)
-- Warm-up ramp calculator (2–3 sets at 50/70/85% rounded to your plates).
-- Supersets for short sessions, instead of only trimming sets.
-- Training blocks (4–6 weeks, volume ramp, planned deload) under the HRV guidance.
+## Open items (done in roadmap Phase 4, November 2026)
+- Warm-up ramp calculator (2–3 sets at 50/70/85% rounded to your plates): `WarmUp` in AppCore, shown in the builder and prefilled as "W" sets (Ribeiro 2020; Fradkin 2010; ACSM 2009). The 50/70/85% pattern is coaching practice, not a tested optimum.
+- Supersets for short sessions, instead of only trimming sets: `Supersets` pairs non-competing movements once sets are down to two, before any exercise is dropped; paired sets are estimated at ~60% of their separate time (Iversen 2021; Weakley 2017). Strength style keeps big lifts as straight sets.
+- Training blocks (4–6 weeks, volume ramp, planned deload) under the HRV guidance: `TrainingBlock` (strength/balanced 5 weeks, muscle 6, sets ×1.0 → 1.25/1.4 then 0.6, RIR 3 → 1 then 3; Williams 2017, Bell 2023, Pelland 2026). A week that starts with 7-day HRV below normal repeats the previous week's sets; a low-recovery day still lowers the RPE inside the block. Stamina/health goals keep steady weeks.

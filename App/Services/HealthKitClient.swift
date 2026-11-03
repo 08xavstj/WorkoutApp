@@ -65,7 +65,11 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.dietarySelenium),
             HKObjectType.workoutType(),
             HKCharacteristicType(.dateOfBirth),
-            HKCharacteristicType(.biologicalSex)
+            HKCharacteristicType(.biologicalSex),
+            // iOS 17/18 types (see HealthKitClient+iOS26): minutes outdoors from an
+            // Apple Watch, and its sleep-apnoea (breathing disturbance) notifications.
+            HKQuantityType(.timeInDaylight),
+            HKCategoryType(.sleepApneaEvent)
         ]
     }
 
@@ -73,7 +77,12 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         // Heart rate and energy are written by the live workout session (AirPods Pro 3 / chest strap).
         [HKObjectType.workoutType(), HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned),
          // Home blood pressure readings you type in.
-         HKQuantityType(.bloodPressureSystolic), HKQuantityType(.bloodPressureDiastolic)]
+         HKQuantityType(.bloodPressureSystolic), HKQuantityType(.bloodPressureDiastolic),
+         // Paced-breathing sessions, the check-in mood and the session RPE (HealthKitClient+Writes).
+         HKCategoryType(.mindfulSession), HKObjectType.stateOfMindType(), HKQuantityType(.workoutEffortScore),
+         // Quick-estimate meals, flagged as estimates in their metadata.
+         HKQuantityType(.dietaryEnergyConsumed), HKQuantityType(.dietaryProtein), HKQuantityType(.dietaryCarbohydrates),
+         HKQuantityType(.dietaryFatTotal), HKQuantityType(.dietaryFiber)]
     }
 
     @concurrent
@@ -562,6 +571,29 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             inside += try await dailySum(.stepCount, unit: .count(), start: from, end: to) ?? 0
         }
         return (total, max(0, total - inside))
+    }
+
+    /// Steps in each clock hour of `day` (hours with no steps are left out),
+    /// for movement-break and post-meal-walk nudges (`MovementBreaks`).
+    @concurrent
+    func hourlySteps(for day: Date) async throws -> [MovementBreaks.HourSteps] {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: day)
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: min(end, .now))
+        let descriptor = HKStatisticsCollectionQueryDescriptor(
+            predicate: .quantitySample(type: HKQuantityType(.stepCount), predicate: predicate),
+            options: .cumulativeSum,
+            anchorDate: start,
+            intervalComponents: DateComponents(hour: 1)
+        )
+        do {
+            return try await descriptor.result(for: store).statistics().compactMap { statistics in
+                statistics.sumQuantity().map { MovementBreaks.HourSteps(start: statistics.startDate, steps: $0.doubleValue(for: .count())) }
+            }
+        } catch let error as HKError where error.code == .errorNoData {
+            return []
+        }
     }
 
     /// Average resting calories a day over recent complete days, as written by

@@ -145,12 +145,21 @@ final class WorkoutLauncher {
             log.session = session
             context.insert(log)
             let weightKg = planned.load.map { unit.toKilograms($0) } ?? 0
+            // Warm-up ramp sets first (`WarmUp`), marked so they stay out of volume, strain and PRs.
+            let warmUps = planned.warmUpSets ?? []
+            for (index, ramp) in warmUps.enumerated() {
+                let set = SetLog(order: index, weightKg: unit.toKilograms(ramp.load), reps: ramp.reps, rpe: nil, isWarmup: true)
+                set.exercise = log
+                context.insert(set)
+            }
             for index in 0..<max(1, planned.sets) {
-                let set = SetLog(order: index, weightKg: weightKg, reps: planned.reps.upperBound, rpe: nil)
+                let set = SetLog(order: warmUps.count + index, weightKg: weightKg, reps: planned.reps.upperBound, rpe: nil)
                 set.exercise = log
                 context.insert(set)
             }
         }
+        // Superset pairs (`Supersets`) for the live view: exercise order → group.
+        SupersetRegistry.save(SupersetRegistry.groups(in: exercises), for: session.startedAt)
         try? context.save()
         activeSession = session
     }
