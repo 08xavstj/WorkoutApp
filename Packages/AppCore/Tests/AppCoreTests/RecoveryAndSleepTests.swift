@@ -352,9 +352,24 @@ struct SleepCalculatorTests {
     }
 
     @Test func efficiencyIsZeroAt70Percent() throws {
-        // 5.6 h asleep: 70% of 8 h in bed earns nothing, 80% of 7 h earns two thirds.
-        let seventy = [SleepSample(stage: .core, start: at(0), end: at(5.6)), SleepSample(stage: .inBed, start: at(0), end: at(8))]
-        let eighty = [SleepSample(stage: .core, start: at(0), end: at(5.6)), SleepSample(stage: .inBed, start: at(0), end: at(7))]
+        // 5.6 h asleep with three wakings: 70% of 8 h in bed earns nothing,
+        // 80% of 7 h earns two thirds. (Wake time sits inside the night, since
+        // in-bed time outside the main sleep is clipped.)
+        func night(awakeHours: Double) -> [SleepSample] {
+            var samples: [SleepSample] = []
+            var t = 0.0
+            for block in 0..<4 {
+                samples.append(SleepSample(stage: .core, start: at(t), end: at(t + 1.4)))
+                t += 1.4
+                if block < 3 {
+                    samples.append(SleepSample(stage: .awake, start: at(t), end: at(t + awakeHours / 3)))
+                    t += awakeHours / 3
+                }
+            }
+            return samples
+        }
+        let seventy = night(awakeHours: 2.4)
+        let eighty = night(awakeHours: 1.4)
         let a = try #require(calculator.score(samples: seventy))
         let b = try #require(calculator.score(samples: eighty))
         #expect(abs(a.efficiency - 0.7) < 0.001)
