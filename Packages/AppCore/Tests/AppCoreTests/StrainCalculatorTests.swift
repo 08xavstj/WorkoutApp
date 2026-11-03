@@ -101,7 +101,7 @@ struct StrainCalculatorTests {
         #expect(result.zoneMinutes.reduce(0, +) - 30 < 0.001)
     }
 
-    @Test(arguments: [(10, 20.0...45.0), (50, 45.0...65.0), (90, 65.0...85.0)])
+    @Test(arguments: [(10, 20.0...45.0), (50, 50.0...70.0), (90, 50.0...70.0)])
     func targetStrainFollowsRecovery(recovery: Int, expected: ClosedRange<Double>) {
         #expect(StrainCalculator.targetStrain(forRecovery: recovery) == expected)
     }

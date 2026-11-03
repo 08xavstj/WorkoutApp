@@ -85,22 +85,31 @@ extension StrainCalculator {
     /// The strain the fixed bands are built around (a regular trainee).
     public static let referenceUsualStrain = 65.0
 
-    /// Today's target, scaled to your fitness. Around your usual training-day
-    /// strain (U): high recovery aims up to 20 points above it (room to
-    /// progress), moderate recovery up to U, low recovery well below.
+    /// Today's target, scaled to your fitness, following HRV-guided training.
+    ///
+    /// The trials all use the same simple rule: when HRV is in your normal
+    /// range, train as planned; when it's below normal, go easy or rest
+    /// (Kiviniemi et al., Eur J Appl Physiol 2007; Vesterinen et al., Med Sci
+    /// Sports Exerc 2016; Javaloyes et al., IJSPP 2019). Done that way, it
+    /// matches or beats a fixed plan (meta-analyses: Granero-Gallegos et al.,
+    /// IJERPH 2020; Manresa-Rocamora et al., IJERPH 2021). None of them told
+    /// people to train harder than planned on a good day, so high recovery
+    /// doesn't raise the target past your usual training day (U), apart from
+    /// a little room to progress gradually (ACSM, Med Sci Sports Exerc 2009).
+    ///
+    /// - Normal or high recovery: train as planned, U − 15 to U + 5.
+    /// - Low recovery: an easy day, U − 45 to U − 20.
+    /// The 7-day HRV trend being below normal also caps the target at an easy
+    /// day (see `DailyMetricsModel.targetStrain`).
     ///
     /// As you get fitter, the same workout costs less heart rate and so less
     /// strain, while your usual days climb; both nudge you to do a little more.
-    /// If you train less, U drops and so do the targets. Gradual progression
-    /// keeps week-to-week load jumps modest (Gabbett, Br J Sports Med 2016).
+    /// If you train less, U drops and so do the targets.
     public static func targetStrain(forRecovery recovery: Int, usualTrainingStrain usual: Double?) -> ClosedRange<Double> {
         let u = min(85, max(35, usual ?? referenceUsualStrain))
-        let low = max(10, u - 45)
-        let moderate = max(25, u - 20)
         switch recovery {
-        case ..<34: return low...moderate
-        case 34..<67: return moderate...u
-        default: return u...min(95, u + 20)
+        case ..<34: return max(10, u - 45)...max(25, u - 20)
+        default: return max(25, u - 15)...min(95, u + 5)
         }
     }
 }

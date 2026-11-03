@@ -39,16 +39,17 @@ struct ObservedMaxHeartRateTests {
 
 struct AdaptiveTargetTests {
     @Test func defaultMatchesTheFixedBands() {
-        #expect(StrainCalculator.targetStrain(forRecovery: 80, usualTrainingStrain: nil) == 65...85)
-        #expect(StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: nil) == 45...65)
+        // HRV-guided: normal or high recovery trains as planned; low goes easy.
+        #expect(StrainCalculator.targetStrain(forRecovery: 80, usualTrainingStrain: nil) == 50...70)
+        #expect(StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: nil) == 50...70)
         #expect(StrainCalculator.targetStrain(forRecovery: 20, usualTrainingStrain: nil) == 20...45)
     }
 
     @Test func targetsRiseAsYourTrainingDaysGetHarder() {
         let beginner = StrainCalculator.targetStrain(forRecovery: 80, usualTrainingStrain: 40)
         let fitter = StrainCalculator.targetStrain(forRecovery: 80, usualTrainingStrain: 75)
-        #expect(beginner == 40...60)
-        #expect(fitter == 75...95)
+        #expect(beginner == 25...45)
+        #expect(fitter == 60...80)
     }
 
     @Test func usualStrainNeedsSixTrainingDays() {
