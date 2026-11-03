@@ -16,6 +16,9 @@ final class WatchSync: NSObject {
 
     /// The session id the Watch is running an HKWorkoutSession for.
     private(set) var recordingSessionID: String?
+    /// Sessions finished on the phone whose Watch recording hasn't confirmed it
+    /// stopped yet: the stop is sent again whenever the Watch reconnects.
+    private var pendingStops: Set<String> = []
     private(set) var isPaired = false
     private(set) var isWatchAppInstalled = false
     private(set) var isReachable = false
@@ -62,6 +65,7 @@ final class WatchSync: NSObject {
     /// through `apply(_ summary:)`) and clears the session from its start screen.
     func sessionFinished(_ session: WorkoutSession) {
         let id = WatchSession.id(for: session.startedAt)
+        pendingStops.insert(id)
         sendRequest(WatchRequest(kind: .stopRecording, sessionID: id, sentAt: .now))
         send(makeSnapshot(session, finished: true))
     }
@@ -230,6 +234,7 @@ final class WatchSync: NSObject {
             return
         case .recordingStopped:
             if recordingSessionID == message.sessionID || message.sessionID == nil { recordingSessionID = nil }
+            if let id = message.sessionID { pendingStops.remove(id) } else { pendingStops.removeAll() }
             return
         default:
             break
@@ -304,6 +309,7 @@ final class WatchSync: NSObject {
     private func apply(_ summary: WatchWorkoutSummary) {
         guard let context else { return }
         if recordingSessionID == summary.sessionID || summary.sessionID == nil { recordingSessionID = nil }
+        if let id = summary.sessionID { pendingStops.remove(id) } else { pendingStops.removeAll() }
         let session: WorkoutSession
         if let found = matchingSession(for: summary) {
             session = found
@@ -354,6 +360,12 @@ final class WatchSync: NSObject {
         // A freshly reachable Watch gets the latest state straight away.
         if isReachable, let lastSnapshot, let data = WatchMessage.encode(lastSnapshot) {
             connection.sendMessage([WatchMessage.snapshot: data], replyHandler: nil, errorHandler: nil)
+        }
+        // A stop that may have been missed goes again until the Watch confirms it.
+        if isReachable {
+            for id in pendingStops {
+                sendRequest(WatchRequest(kind: .stopRecording, sessionID: id, sentAt: .now))
+            }
         }
     }
 }

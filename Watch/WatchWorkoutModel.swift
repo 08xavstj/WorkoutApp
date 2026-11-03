@@ -323,6 +323,9 @@ final class WatchWorkoutModel: NSObject {
         if incoming.isFinished {
             if previous?.id == incoming.id || previous == nil { snapshot = nil }
             selectedExercise = nil
+            // Finished on the phone: the Watch's recording of it ends too (no
+            // second effort question; the phone already asked).
+            if belongsToRecording(incoming.id) { Task { await end(sessionRPE: nil) } }
             return
         }
         snapshot = incoming
@@ -340,8 +343,9 @@ final class WatchWorkoutModel: NSObject {
     }
 
     private func handle(_ request: WatchRequest) {
-        // A request queued long ago (phone out of reach) shouldn't start a workout now.
-        guard request.sentAt > Date.now.addingTimeInterval(-10 * 60) else { return }
+        // A start queued long ago (phone out of reach) shouldn't start a workout now;
+        // stops and discards always apply.
+        if request.kind == .startRecording, request.sentAt <= Date.now.addingTimeInterval(-10 * 60) { return }
         switch request.kind {
         case .startRecording:
             switch phase {
@@ -353,12 +357,26 @@ final class WatchWorkoutModel: NSObject {
                 if recordingSessionID == nil || recordingSessionID == request.sessionID { adopt(request.sessionID) }
             }
         case .stopRecording:
-            guard isRecording, recordingSessionID == request.sessionID else { return }
+            guard belongsToRecording(request.sessionID) else {
+                // Already ended here: confirm, so the phone stops resending.
+                if !isRecording { send(.recordingStopped, sessionID: request.sessionID) }
+                return
+            }
             Task { await end(sessionRPE: nil) }
         case .discardRecording:
-            guard isRecording, recordingSessionID == request.sessionID else { return }
+            guard belongsToRecording(request.sessionID) else { return }
             discard()
         }
+    }
+
+    /// Whether a phone session is the one being recorded: its id matches, or the
+    /// recording was started from the phone before the session was attached and
+    /// began within a few minutes of it.
+    private func belongsToRecording(_ sessionID: String) -> Bool {
+        guard isRecording else { return false }
+        if let recordingSessionID { return recordingSessionID == sessionID }
+        guard let phoneStart = WatchSession.startDate(for: sessionID), let startedAt else { return false }
+        return abs(startedAt.timeIntervalSince(phoneStart)) < 5 * 60
     }
 
     private func activated(snapshot: WatchSession?, reachable: Bool) {
