@@ -13,6 +13,13 @@ final class WorkoutSession {
     var notes: String
     /// True once the session has been written to Apple Health.
     var savedToHealth: Bool
+    /// The workout another device (Apple Watch, Garmin) recorded for this same
+    /// session in Apple Health, found by `WorkoutLinker`; nil until matched.
+    var linkedWorkoutUUID: UUID?
+    var linkedWorkoutSource: String?
+    /// The HKWorkout the Tensile Watch app saved for this session (`WatchSync`):
+    /// when set, the Watch's workout is the Health record and the phone saves none.
+    var watchWorkoutUUID: UUID?
 
     @Relationship(deleteRule: .cascade, inverse: \ExerciseLog.session)
     var exercises: [ExerciseLog] = []
@@ -51,7 +58,9 @@ final class WorkoutSession {
             sessionRPE: sessionRPE.map(Double.init),
             setRPEs: workingSets.compactMap(\.rpe),
             workingSets: workingSets.count,
-            totalVolumeKg: totalVolumeKg
+            totalVolumeKg: totalVolumeKg,
+            linkedWorkoutUUID: linkedWorkoutUUID,
+            linkedWorkoutSource: linkedWorkoutSource
         )
     }
 }
@@ -137,9 +146,21 @@ nonisolated enum WorkoutSchemaV2: VersionedSchema {
     }
 }
 
+/// Adds the link from a session to the watch workout recorded alongside it
+/// (`linkedWorkoutUUID`, `linkedWorkoutSource`) and the Tensile Watch app's own
+/// workout (`watchWorkoutUUID`): optional properties on `WorkoutSession`, nil by
+/// default, so another lightweight migration.
+nonisolated enum WorkoutSchemaV3: VersionedSchema {
+    static let versionIdentifier = Schema.Version(1, 2, 0)
+    static var models: [any PersistentModel.Type] { WorkoutSchemaV2.models }
+}
+
 nonisolated enum WorkoutMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [WorkoutSchema.self, WorkoutSchemaV2.self] }
+    static var schemas: [any VersionedSchema.Type] { [WorkoutSchema.self, WorkoutSchemaV2.self, WorkoutSchemaV3.self] }
     static var stages: [MigrationStage] {
-        [.lightweight(fromVersion: WorkoutSchema.self, toVersion: WorkoutSchemaV2.self)]
+        [
+            .lightweight(fromVersion: WorkoutSchema.self, toVersion: WorkoutSchemaV2.self),
+            .lightweight(fromVersion: WorkoutSchemaV2.self, toVersion: WorkoutSchemaV3.self)
+        ]
     }
 }

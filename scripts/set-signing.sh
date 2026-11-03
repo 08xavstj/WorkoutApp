@@ -20,6 +20,7 @@ cd "$(dirname "$0")/.."
 cat > Config/Signing.local.xcconfig <<CONF
 DEVELOPMENT_TEAM = $1
 PRODUCT_BUNDLE_IDENTIFIER = $2
+COMPANION_APP_BUNDLE_IDENTIFIER = $2
 CONF
 echo "Saved signing settings to Config/Signing.local.xcconfig"
 if command -v xcodegen >/dev/null; then

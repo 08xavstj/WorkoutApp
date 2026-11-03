@@ -26,7 +26,11 @@ struct WorkoutDetailView: View {
             }
             .listRowBackground(Theme.card)
 
-            HeartRateSourcesSection(start: session.startedAt, end: session.endedAt ?? session.startedAt, reload: reloadToken)
+            HeartRateSourcesSection(
+                start: session.startedAt, end: session.endedAt ?? session.startedAt,
+                linkedWorkoutUUID: session.linkedWorkoutUUID, linkedWorkoutSource: session.linkedWorkoutSource,
+                reload: reloadToken
+            )
 
             ForEach(session.orderedExercises) { exercise in
                 Section {
@@ -93,10 +97,14 @@ struct WorkoutDetailView: View {
 private struct HeartRateSourcesSection: View {
     let start: Date
     let end: Date
+    var linkedWorkoutUUID: UUID?
+    var linkedWorkoutSource: String?
     var reload = 0
 
     @Environment(\.healthClient) private var health
     @State private var sources: [HeartRateSource] = []
+    @State private var merged: HeartRateMerge.Result = .empty
+    @State private var linkedWorkout: ExternalWorkout?
     @State private var loaded = false
 
     var body: some View {
@@ -108,6 +116,7 @@ private struct HeartRateSourcesSection: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             } else {
+                MergedHeartRateRow(merged: merged, linkedWorkout: linkedWorkout, linkedSource: linkedWorkoutSource)
                 ForEach(sources) { source in
                     if let summary = HeartRateComparison.summary(source.samples) {
                         HStack {
@@ -155,6 +164,13 @@ private struct HeartRateSourcesSection: View {
         }
         let found = (try? await health.heartRateBySource(from: start, to: end)) ?? []
         sources = found.sorted { $0.samples.count > $1.samples.count }
+        // The same merge strain uses: ear over wrist during this lift, no averaging (`HeartRateMerge`).
+        merged = HeartRateMerge.merge(sources: sources.map(\.mergeSource), liftingWindows: [DateInterval(start: start, end: end)])
+        if let linkedWorkoutUUID {
+            let margin = WorkoutLinker.searchMargin
+            let workouts = (try? await health.externalWorkouts(from: start.addingTimeInterval(-margin), to: end.addingTimeInterval(margin))) ?? []
+            linkedWorkout = workouts.first { $0.uuid == linkedWorkoutUUID }
+        }
         loaded = true
     }
 
@@ -171,5 +187,61 @@ private struct HeartRateSourcesSection: View {
         if abs(bias) < 1 { return "Neither source reads consistently higher." }
         let higher = bias > 0 ? sources[0].name : sources[1].name
         return "\(higher) reads about \(whole(abs(bias))) bpm higher on average. Optical sensors often lag or drop out during heavy sets; ear and wrist can also differ in how fast they react."
+    }
+}
+
+/// Which sources the merged series came from, any stretch where they
+/// disagreed (the preferred source was kept; see `HeartRateMerge`), and the
+/// watch workout linked to this session (`WorkoutLinker`).
+private struct MergedHeartRateRow: View {
+    let merged: HeartRateMerge.Result
+    let linkedWorkout: ExternalWorkout?
+    let linkedSource: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(mergedText)
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+            if let disagreementText {
+                Text(disagreementText)
+                    .font(.caption)
+                    .foregroundStyle(Theme.recoveryModerateText)
+            }
+            if let linkedText {
+                Label(linkedText, systemImage: "applewatch")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var mergedText: String {
+        let names = merged.sourceNames
+        switch names.count {
+        case 0: return "Heart rate: no usable readings"
+        case 1: return "Heart rate: from \(names[0])"
+        default:
+            let summary = HeartRateComparison.summary(merged.samples)
+            let stats = summary.map { " · avg \(whole($0.average)), max \(whole($0.maximum))" } ?? ""
+            return "Heart rate: merged from \(names.dropLast().joined(separator: ", ")) and \(names[names.count - 1])\(stats)"
+        }
+    }
+
+    /// The longest disagreement, e.g. "Apple Watch read 12 bpm lower during sets (3 min)".
+    private var disagreementText: String? {
+        guard let worst = merged.disagreements.max(by: { $0.minutes < $1.minutes }) else { return nil }
+        let direction = worst.meanDifference < 0 ? "lower" : "higher"
+        var text = "\(worst.otherSource) read \(whole(abs(worst.meanDifference))) bpm \(direction) during sets (\(worst.minutes) min); \(worst.preferredSource) was used."
+        if merged.disagreements.count > 1 { text += " \(merged.disagreements.count) stretches disagreed." }
+        return text
+    }
+
+    private var linkedText: String? {
+        guard let source = linkedSource else { return nil }
+        var text = "Linked to \(linkedWorkout?.name ?? "the workout") on \(source)"
+        if let kcal = linkedWorkout?.activeKcal, kcal > 0 { text += " · \(whole(kcal)) kcal" }
+        return text
     }
 }

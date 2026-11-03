@@ -106,6 +106,10 @@ public struct StrengthSessionSummary: Sendable, Equatable {
     public var workingSets: Int
     public var totalVolumeKg: Double
     public var name: String?
+    /// The Apple Health workout another device recorded for this same session
+    /// (see `WorkoutLinking`), so the activities list shows one entry, not two.
+    public var linkedWorkoutUUID: UUID?
+    public var linkedWorkoutSource: String?
 
     public init(
         name: String? = nil,
@@ -114,7 +118,9 @@ public struct StrengthSessionSummary: Sendable, Equatable {
         sessionRPE: Double? = nil,
         setRPEs: [Double] = [],
         workingSets: Int = 0,
-        totalVolumeKg: Double = 0
+        totalVolumeKg: Double = 0,
+        linkedWorkoutUUID: UUID? = nil,
+        linkedWorkoutSource: String? = nil
     ) {
         self.name = name
         self.start = start
@@ -123,6 +129,8 @@ public struct StrengthSessionSummary: Sendable, Equatable {
         self.setRPEs = setRPEs
         self.workingSets = workingSets
         self.totalVolumeKg = totalVolumeKg
+        self.linkedWorkoutUUID = linkedWorkoutUUID
+        self.linkedWorkoutSource = linkedWorkoutSource
     }
 
     public var duration: TimeInterval { max(0, end.timeIntervalSince(start)) }

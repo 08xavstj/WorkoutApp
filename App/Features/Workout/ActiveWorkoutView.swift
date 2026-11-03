@@ -13,6 +13,7 @@ struct ActiveWorkoutView: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(GymStore.self) private var gym
     @Environment(LiveWorkoutRecorder.self) private var recorder
+    @Environment(WorkoutLauncher.self) private var launcher
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var showingPicker = false
     @State private var showingFinish = false
@@ -41,6 +42,7 @@ struct ActiveWorkoutView: View {
                                     RestTimerStore.stop()
                                 }
                                 Task { await WorkoutLiveActivity.refresh() }
+                                WatchSync.shared.update(from: session) // Apple Watch rest timer
                             }
                         }
                     }
@@ -84,8 +86,21 @@ struct ActiveWorkoutView: View {
                 ExercisePickerView { exercise in add(exercise) }
             }
             .sheet(isPresented: $showingFinish) {
-                FinishWorkoutSheet(session: session) { dismiss() }
-                    .presentationDetents([.medium])
+                FinishWorkoutSheet(session: session) {
+                    WatchSync.shared.sessionFinished(session) // Apple Watch: end its recording
+                    dismiss()
+                }
+                .presentationDetents([.medium])
+            }
+            // Apple Watch (`WatchSync`): the wrist gets the session whenever a set, exercise
+            // or rest changes; the Watch's Finish opens the finish sheet here.
+            .onChange(of: watchFingerprint, initial: true) { _, _ in
+                WatchSync.shared.update(from: session)
+            }
+            .onChange(of: launcher.pendingFinish, initial: true) { _, pending in
+                guard pending else { return }
+                launcher.pendingFinish = false
+                showingFinish = true
             }
             .task {
                 supersetGroups = SupersetRegistry.groups(for: session.startedAt)
@@ -100,6 +115,14 @@ struct ActiveWorkoutView: View {
                     await recorder.start(at: session.startedAt)
                 }
             }
+            .alert("Apple Watch", isPresented: Binding(
+                get: { WatchSync.shared.startProblem != nil },
+                set: { if !$0 { WatchSync.shared.startProblem = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(WatchSync.shared.startProblem ?? "")
+            }
             .alert("Saved to My workouts", isPresented: $savedTemplate) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -108,6 +131,7 @@ struct ActiveWorkoutView: View {
             .confirmationDialog("Discard this workout?", isPresented: $showingDiscard, titleVisibility: .visible) {
                 Button("Discard", role: .destructive) {
                     if recorder.sessionStart == session.startedAt { recorder.discard() }
+                    WatchSync.shared.sessionDiscarded(session) // Apple Watch: drop its recording
                     Task { await WorkoutLiveActivity.endAll() }
                     modelContext.delete(session)
                     try? modelContext.save()
@@ -123,6 +147,15 @@ struct ActiveWorkoutView: View {
         HStack {
             Menu {
                 Button("Minimize", systemImage: "chevron.down") { dismiss() }
+                // Apple Watch records heart rate and calories for this session (`WatchSync`).
+                if WatchSync.shared.watchOwnsWorkout(session) {
+                    Button("Recording on Apple Watch", systemImage: "applewatch") {}
+                        .disabled(true)
+                } else {
+                    Button("Start on Apple Watch", systemImage: "applewatch") {
+                        Task { await WatchSync.shared.startOnWatch(session) }
+                    }
+                }
                 Button("Save as my workout", systemImage: "square.and.arrow.down") {
                     _ = WorkoutTemplate.from(session, in: modelContext)
                     savedTemplate = true
@@ -208,6 +241,12 @@ struct ActiveWorkoutView: View {
         session.exercises.filter { !$0.sets.isEmpty && $0.sets.allSatisfy(\.isCompleted) }.count
     }
 
+    /// Changes whenever a set is ticked, added or removed, so the Watch is told (`WatchSync`).
+    private var watchFingerprint: String {
+        let sets = session.exercises.flatMap(\.sets)
+        return "\(session.exercises.count)/\(sets.count)/\(sets.filter(\.isCompleted).count)/\(session.name)"
+    }
+
     /// Strain this session has added on top of today's strain, from time and effort.
     private func liveStrain(elapsed: TimeInterval) -> Double {
         let rpes = session.workingSets.compactMap(\.rpe)
@@ -281,6 +320,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func startRest(for exercise: ExerciseLog) {
+        defer { WatchSync.shared.update(from: session) } // Apple Watch: rest timer and next set
         // Superset: no rest between the first lift and its partner, one rest after both
         // (paired sets, Iversen et al., Sports Med 2021; `Supersets`).
         if let mate = partner(of: exercise), mate.order > exercise.order,

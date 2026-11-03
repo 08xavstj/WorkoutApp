@@ -163,16 +163,70 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             sortDescriptors: [SortDescriptor(\.startDate)]
         )
         let unit = HKUnit.count().unitDivided(by: .minute())
+        let ownBundle = Bundle.main.bundleIdentifier
         var groups: [String: [HeartRateSample]] = [:]
         var order: [String] = []
+        var own: Set<String> = []
         for sample in try await descriptor.result(for: store) {
             let source = sample.sourceRevision.source.name
             let device = sample.device?.name
             let label = device.map { "\($0) (\(source))" } ?? source
             if groups[label] == nil { order.append(label) }
+            if sample.sourceRevision.source.bundleIdentifier == ownBundle { own.insert(label) }
             groups[label, default: []].append(HeartRateSample(date: sample.startDate, bpm: sample.quantity.doubleValue(for: unit)))
         }
-        return order.map { HeartRateSource(name: $0, samples: groups[$0] ?? []) }
+        return order.map { HeartRateSource(name: $0, samples: groups[$0] ?? [], isOwnRecording: own.contains($0)) }
+    }
+
+    /// Heart rate averaged per minute, one series per source, for
+    /// `HeartRateMerge` (so a lift wearing AirPods and a watch counts each
+    /// minute once, from the better sensor). The statistics are split by
+    /// HKSource (the app that wrote them); one tiny query per source adds the
+    /// device name so labels match `heartRateBySource` ("AirPods Pro (Tensile)").
+    @concurrent
+    func heartRatePerMinuteBySource(from start: Date, to end: Date) async throws -> [HeartRateSource] {
+        let type = HKQuantityType(.heartRate)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKStatisticsCollectionQueryDescriptor(
+            predicate: .quantitySample(type: type, predicate: predicate),
+            options: [.discreteAverage, .separateBySource],
+            anchorDate: Calendar.current.startOfDay(for: start),
+            intervalComponents: DateComponents(minute: 1)
+        )
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        var bySource: [HKSource: [HeartRateSample]] = [:]
+        do {
+            for statistics in try await descriptor.result(for: store).statistics() {
+                for source in statistics.sources ?? [] {
+                    guard let average = statistics.averageQuantity(for: source) else { continue }
+                    bySource[source, default: []].append(HeartRateSample(date: statistics.startDate, bpm: average.doubleValue(for: unit)))
+                }
+            }
+        } catch let error as HKError where error.code == .errorNoData {
+            return []
+        }
+        let ownBundle = Bundle.main.bundleIdentifier
+        var result: [HeartRateSource] = []
+        for (source, samples) in bySource {
+            let device = try? await deviceName(for: source, type: type, from: start, to: end)
+            let label = device.map { "\($0) (\(source.name))" } ?? source.name
+            result.append(HeartRateSource(name: label, samples: samples, isOwnRecording: source.bundleIdentifier == ownBundle))
+        }
+        return result.sorted { $0.samples.count > $1.samples.count }
+    }
+
+    /// The device name on `source`'s newest sample in the range, if it set one.
+    private func deviceName(for source: HKSource, type: HKQuantityType, from start: Date, to end: Date) async throws -> String? {
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForSamples(withStart: start, end: end),
+            HKQuery.predicateForObjects(from: source)
+        ])
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: type, predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)],
+            limit: 1
+        )
+        return try await descriptor.result(for: store).first?.device?.name
     }
 
     // MARK: - Nightly vitals
@@ -504,13 +558,16 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return try await descriptor.result(for: store).compactMap { workout in
             guard workout.sourceRevision.source.bundleIdentifier != ownBundle else { return nil }
             let distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meterUnit(with: .kilo))
+            let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
             return ExternalWorkout(
                 name: Self.name(for: workout.workoutActivityType),
                 isStrength: strengthTypes.contains(workout.workoutActivityType),
                 start: workout.startDate,
                 end: workout.endDate,
                 distanceKm: distance,
-                uuid: workout.uuid
+                uuid: workout.uuid,
+                sourceName: workout.device?.name ?? workout.sourceRevision.source.name,
+                activeKcal: energy
             )
         }
     }
@@ -717,14 +774,30 @@ nonisolated struct ExternalWorkout: Sendable, Identifiable, Equatable {
     var distanceKm: Double?
     /// HealthKit's ID, so two sources recording the same time stay distinct.
     var uuid = UUID()
+    /// The device or app that recorded it ("Apple Watch", "Connect" for Garmin).
+    var sourceName: String? = nil
+    /// Active calories the workout reports, if any.
+    var activeKcal: Double? = nil
     var id: UUID { uuid }
     var minutes: Int { Int(end.timeIntervalSince(start) / 60) }
+
+    /// For pairing with a logged session (`WorkoutLinking`).
+    var linkCandidate: WorkoutLinking.Candidate {
+        WorkoutLinking.Candidate(id: uuid, start: start, end: end, source: sourceName ?? name, isStrength: isStrength)
+    }
 }
 
 nonisolated struct HeartRateSource: Sendable, Identifiable {
     var name: String
     var samples: [HeartRateSample]
+    /// True when this app wrote the readings (a live AirPods or strap session).
+    var isOwnRecording = false
     var id: String { name }
+
+    /// The same readings for `HeartRateMerge`.
+    var mergeSource: HeartRateMerge.Source {
+        HeartRateMerge.Source(name: name, samples: samples, isOwnRecording: isOwnRecording)
+    }
 }
 
 // MARK: - Timed samples (caffeine, protein per meal)

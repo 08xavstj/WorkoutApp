@@ -152,6 +152,10 @@ final class DailyMetricsModel {
     @ObservationIgnored private let sleepCalculator = SleepCalculator()
 
     @ObservationIgnored private var todaysHeartRate: [HeartRateSample] = []
+    /// Stretches today where two heart-rate sources read far apart; the
+    /// preferred one (ear sensor while lifting, steadier series otherwise)
+    /// was kept (`HeartRateMerge`).
+    private(set) var todaysDisagreements: [HeartRateMerge.Disagreement] = []
 
     /// 1.6 g/kg, raised by some medications (see MedicationsModel).
     var proteinGramsPerKg = 1.6
@@ -170,12 +174,26 @@ final class DailyMetricsModel {
     /// Heat-day change to the strain target's upper end (negative on hot days).
     var heatAdjustment: Double = 0
 
-    /// Highest sustained heart rate inside workouts, computed off the main thread.
+    /// Highest sustained heart rate inside workouts, computed off the main
+    /// thread. Only minutes another source confirms (within 5 bpm) or a clean
+    /// run supports count (`HeartRateMerge.peakSupport`); the sustained-run
+    /// and plausibility rules in `ObservedMaxHeartRate` still apply after.
     @concurrent
-    nonisolated private static func workoutPeak(_ heartRate: [HeartRateSample], windows: [DateInterval]) async -> Double? {
+    nonisolated private static func workoutPeak(
+        _ merged: HeartRateMerge.Result, sources: [HeartRateMerge.Source], windows: [DateInterval]
+    ) async -> Double? {
         guard !windows.isEmpty else { return nil }
-        let inside = heartRate.filter { sample in windows.contains { $0.contains(sample.date) } }
-        return ObservedMaxHeartRate.peak(inside)
+        return ObservedMaxHeartRate.peak(HeartRateMerge.peakSupport(merged, sources: sources, windows: windows))
+    }
+
+    /// One per-minute series from several sources (AirPods via this app, a
+    /// watch, Garmin), off the main thread: no minute counts twice, and the
+    /// ear sensor wins while lifting (`HeartRateMerge`; Spierer 2015; Bunn 2019).
+    @concurrent
+    nonisolated private static func mergeHeartRate(
+        _ sources: [HeartRateMerge.Source], liftingWindows: [DateInterval]
+    ) async -> HeartRateMerge.Result {
+        HeartRateMerge.merge(sources: sources, liftingWindows: liftingWindows)
     }
 
     /// Strain per day, computed off the main thread.
@@ -385,18 +403,27 @@ final class DailyMetricsModel {
                 day >= recentStart || dayCache[day]?.key != key(for: day)
             }
             if let firstNeeded = needed.first {
-                let heartRate = try await health.heartRatePerMinute(from: firstNeeded, to: now)
-                // Learn max heart rate from workouts only (used from the next refresh).
+                // Per-minute heart rate from every source, merged so each minute is counted
+                // once from the better sensor (`HeartRateMerge`): ear over wrist during logged
+                // lifts and external strength workouts, the steadier series during cardio.
+                let sourceSeries = try await health.heartRatePerMinuteBySource(from: firstNeeded, to: now)
+                let mergeSources = sourceSeries.map(\.mergeSource)
                 let fetchedWorkouts = (try? await health.externalWorkouts(from: firstNeeded, to: now)) ?? []
-                let workoutWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
-                    + fetchedWorkouts.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
-                let peak = await Self.workoutPeak(heartRate, windows: workoutWindows)
+                let liftingWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+                    + fetchedWorkouts.filter(\.isStrength).map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+                let merged = await Self.mergeHeartRate(mergeSources, liftingWindows: liftingWindows)
+                let heartRate = merged.samples
+                // Learn max heart rate from workouts only (used from the next refresh).
+                let workoutWindows = liftingWindows
+                    + fetchedWorkouts.filter { !$0.isStrength }.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+                let peak = await Self.workoutPeak(merged, sources: mergeSources, windows: workoutWindows)
                 settings.noteHeartRatePeak(peak)
                 let computed = await Self.computeDays(needed, heartRate: heartRate, sessions: sessions, profile: profile)
                 for (date, result) in computed {
                     dayCache[date] = (key(for: date), result)
                 }
                 todaysHeartRate = heartRate.filter { $0.date >= today }
+                todaysDisagreements = merged.disagreements.filter { $0.start >= today }
             }
             dayCache = dayCache.filter { $0.key >= historyStart }
             let days: [(Date, StrainCalculator.Result)] = allDays.map { ($0, dayCache[$0]?.result ?? .empty) }
@@ -586,10 +613,18 @@ final class DailyMetricsModel {
             ).cardioLoad
             let load = max(hrLoad, strainCalculator.rpeLoad(for: session))
             let minutes = Int(session.duration / 60)
+            // The watch workout linked to this session (`WorkoutLinker`) lends its source and calories.
+            var detail = "\(minutes) min · \(session.workingSets) sets"
+            if let source = session.linkedWorkoutSource {
+                detail += " · \(source)"
+                if let kcal = external.first(where: { $0.uuid == session.linkedWorkoutUUID })?.activeKcal, kcal > 0 {
+                    detail += " · \(whole(kcal)) kcal"
+                }
+            }
             items.append(ActivityItem(
                 id: "s\(session.start.timeIntervalSince1970)",
                 name: session.name ?? "Strength",
-                detail: "\(minutes) min · \(session.workingSets) sets",
+                detail: detail,
                 start: session.start,
                 strainAdded: contribution(load),
                 isStrength: true,
@@ -597,6 +632,8 @@ final class DailyMetricsModel {
             ))
         }
         for workout in external {
+            // A workout linked to a logged session is shown as that session, not twice.
+            if sessions.contains(where: { $0.linkedWorkoutUUID == workout.uuid }) { continue }
             // Skip watch strength workouts that overlap a logged session (same workout).
             if workout.isStrength, sessions.contains(where: { $0.start < workout.end && $0.end > workout.start }) { continue }
             let load = strainCalculator.dailyStrain(

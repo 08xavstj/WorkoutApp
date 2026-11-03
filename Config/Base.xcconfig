@@ -4,6 +4,9 @@
 // `xcodegen generate` and `git pull`).
 DEVELOPMENT_TEAM =
 PRODUCT_BUNDLE_IDENTIFIER = com.lontraindustries.workoutapp
+// The iPhone app's ID again, for the Watch app's WKCompanionAppBundleIdentifier
+// (the Watch target overrides PRODUCT_BUNDLE_IDENTIFIER with ".watchkitapp").
+COMPANION_APP_BUNDLE_IDENTIFIER = com.lontraindustries.workoutapp
 CODE_SIGN_STYLE = Automatic
 
 #include? "Signing.local.xcconfig"

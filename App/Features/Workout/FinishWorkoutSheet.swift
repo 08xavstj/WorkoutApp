@@ -54,6 +54,8 @@ struct FinishWorkoutSheet: View {
                 }
             }
             .navigationTitle("Finish workout")
+            // Effort already rated on the Apple Watch (`WatchSync`) pre-fills the slider.
+            .task { if let rated = session.sessionRPE { rpe = Double(max(1, min(10, rated))) } }
             .sheet(isPresented: $showingRPEGuide) {
                 RPEGuideView()
                     .presentationDetents([.medium, .large])
@@ -117,6 +119,11 @@ struct FinishWorkoutSheet: View {
             _ = WorkoutTemplate.from(session, in: modelContext)
         }
         if let end = session.endedAt {
+            // Apple Watch (`WatchSync`): when the Watch records this session, its HKWorkout is
+            // the record, so the phone saves no bare workout of its own. An AirPods
+            // recording is still finished (discarding it would drop its heart-rate
+            // samples); the linker pairs the two and the merge dedupes the minutes.
+            let watchRecords = WatchSync.shared.watchOwnsWorkout(session)
             if recorder.isRecording && recorder.sessionStart == session.startedAt {
                 // The live session already holds the heart rate (AirPods / strap); save it with the workout.
                 if saveToHealth {
@@ -129,7 +136,7 @@ struct FinishWorkoutSheet: View {
                 } else {
                     recorder.discard()
                 }
-            } else if saveToHealth, let health {
+            } else if saveToHealth, !watchRecords, let health {
                 do {
                     try await health.saveStrengthWorkout(start: session.startedAt, end: end)
                     session.savedToHealth = true
@@ -142,6 +149,11 @@ struct FinishWorkoutSheet: View {
             // (iOS 18 type; HealthKitClient+Writes; competitors.md §1g).
             if session.savedToHealth, let health {
                 try? await health.saveWorkoutEffort(score: Int(rpe), start: session.startedAt, end: end)
+            }
+            // Pair the session with the workout a watch recorded alongside it, so
+            // history shows one entry with the watch's heart rate (`WorkoutLinker`).
+            if let health {
+                await WorkoutLinker.link(session, health: health)
             }
             try? modelContext.save()
         }

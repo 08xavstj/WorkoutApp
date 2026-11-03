@@ -5,6 +5,7 @@ import SwiftData
 struct WorkoutHistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(UserSettings.self) private var settings
+    @Environment(\.healthClient) private var health
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     @State private var pendingDelete: IndexSet?
@@ -47,6 +48,12 @@ struct WorkoutHistoryView: View {
         .navigationDestination(for: WorkoutSession.self) { session in
             WorkoutDetailView(session: session)
         }
+        // Watch workouts can sync days late (Garmin), so pair recent sessions on each load (`WorkoutLinker`).
+        .task {
+            guard let health else { return }
+            let since = Calendar.current.date(byAdding: .day, value: -28, to: .now) ?? .now
+            await WorkoutLinker.linkRecent(sessions, since: since, health: health, context: modelContext)
+        }
     }
 
     private func delete(at offsets: IndexSet) {
@@ -78,6 +85,10 @@ private struct SessionRow: View {
                 Label(Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)), systemImage: "clock")
                 Label("\(session.workingSets.count) sets", systemImage: "square.stack.3d.up")
                 Label("\(unit.format(session.totalVolumeKg)) \(unit.rawValue)", systemImage: "scalemass")
+                if let source = session.linkedWorkoutSource {
+                    Label(source, systemImage: "applewatch")
+                        .lineLimit(1)
+                }
             }
             .font(.caption)
             .foregroundStyle(Theme.secondaryText)

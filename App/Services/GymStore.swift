@@ -99,6 +99,9 @@ final class WorkoutLauncher {
     var activeSession: WorkoutSession?
     /// Set to open the workout builder sheet.
     var builderRequest: BuilderRequest?
+    /// Set when the Apple Watch asks to finish (`WatchSync`): the workout
+    /// screen opens its finish sheet and clears it.
+    var pendingFinish = false
 
     struct BuilderRequest: Identifiable, Equatable {
         let id = UUID()

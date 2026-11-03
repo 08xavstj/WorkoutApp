@@ -67,7 +67,7 @@ struct WorkoutAppApp: App {
         Reminders.registerCategories()
         do {
             container = try ModelContainer(
-                for: Schema(versionedSchema: WorkoutSchemaV2.self),
+                for: Schema(versionedSchema: WorkoutSchemaV3.self),
                 migrationPlan: WorkoutMigrationPlan.self
             )
         } catch {
@@ -234,6 +234,7 @@ struct RootView: View {
             }
         }
         .modifier(PendingLinkOpener(router: router))
+        .modifier(WatchSyncBootstrap()) // Apple Watch app (`WatchSync`)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 medications.reload()

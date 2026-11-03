@@ -20,6 +20,11 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      # The Watch app builds as a dependency of the iOS app, so the watchOS
+      # simulator SDK must be present (a no-op when the runner already has it).
+      - name: Install the watchOS platform
+        run: xcodebuild -downloadPlatform watchOS
+
       - name: Test scoring package
         run: swift test --package-path Packages/AppCore
 

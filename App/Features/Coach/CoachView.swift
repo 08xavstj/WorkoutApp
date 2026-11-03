@@ -280,6 +280,11 @@ extension CoachView {
             lines.append("REST MODE is on (the user is sick or resting): no strain target; suggest rest, sleep, fluids and at most easy walking, not workouts.")
         }
         if let metric = metrics.hrvMetric { lines.append("HRV metric: \(metric).") }
+        // Heart-rate sources that disagreed today (`HeartRateMerge`): the ear sensor while lifting,
+        // or the steadier series, was kept; averaging would have hidden the bad readings.
+        if let worst = metrics.todaysDisagreements.max(by: { $0.minutes < $1.minutes }) {
+            lines.append("Heart-rate sources disagreed today: \(worst.lowerSource) read about \(whole(abs(worst.meanDifference))) bpm lower than \(worst.higherSource) for \(worst.minutes) min; \(worst.preferredSource) was used for strain.")
+        }
         if let water = metrics.nutritionToday?.waterLiters { lines.append("Water today \(water.formatted(.number.precision(.fractionLength(1)))) L.") }
         // Protein per meal and carbs by training day (`NutritionTargets`: Schoenfeld & Aragon 2018; Burke 2011),
         // low energy availability (`EnergyAvailability`: IOC REDs 2023) and the hand-typed body measurements.

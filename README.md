@@ -59,6 +59,14 @@ The `.xcodeproj` is generated, so it isn't committed. Re-run `xcodegen generate`
 
 Run the score tests any time: `swift test --package-path Packages/AppCore`.
 
+## Apple Watch
+
+Tensile has a Watch app for lifting days. It shows the session running on your iPhone (exercise, set x of y, target reps and weight, superset partner as A1/A2), ticks sets off with a quick "how hard?" step (effort 6–10 as reps left, plus reps and weight you can adjust by your gym's real plate jumps), runs the rest timer with a tap at the end, and records heart rate and calories with its own workout session. Pause, resume, skip the exercise, and finish (with a 1–10 rating for the whole session) all work from the wrist; the iPhone's finish sheet opens pre-filled.
+
+The Watch's workout is the single record. Tap **Start on Apple Watch** from the workout's menu on the phone (or start the session from the Watch) and the Watch saves the one `HKWorkout` for that session with its heart rate and calories; the phone then doesn't save a second one. AirPods heart rate still streams into Apple Health as before and is merged with the watch's. If the Watch starts a workout with no session on the phone, the phone creates one ("Watch workout, N min") when the summary arrives, and if the phone is out of reach the Watch keeps recording and queues what you did until it reconnects.
+
+Installing: the Watch app ships inside the iPhone app, so it installs with it when "Automatic app install" is on in the Watch app on your iPhone; otherwise open the Watch app → **Available Apps** → Tensile. Signing: it uses the same team and the bundle ID `<your app id>.watchkitapp` (set by `scripts/set-signing.sh`; if you set signing before the Watch app existed, run the script again so `COMPANION_APP_BUNDLE_IDENTIFIER` is written). Xcode's automatic signing creates the Watch provisioning profile the first time you run on a device.
+
 ## Connect a Garmin watch
 
 The app reads everything through Apple Health, so it works with Garmin watches (like the Instinct 2) as well as Apple Watch.
@@ -110,6 +118,8 @@ App/                        iPhone app (SwiftUI + SwiftData)
   Services/Coach/           On-device (Foundation Models) and Claude coaches
   Features/                 Today, Workout, Coach, Settings screens
   Resources/exercises.json  Exercise library (free-exercise-db, public domain)
+Watch/                      Apple Watch app (SwiftUI + HealthKit + WatchConnectivity)
+Shared/                     Code the app, widget and Watch share (WatchSession is the wrist's session model)
 Packages/AppCore/           Strain/recovery/sleep math + tests (no UI, no HealthKit)
 supabase/functions/coach/   Claude proxy (Deno/TypeScript)
 .claude/skills/             Claude Code skills for this project
