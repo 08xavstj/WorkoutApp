@@ -31,7 +31,7 @@ final class FoodEstimateModel {
     }
 
     /// Photos are sent at up to 1024 px on the long side and under 1 MB.
-    static let maxPhotoBytes = 1_000_000
+    nonisolated static let maxPhotoBytes = 1_000_000
 
     func estimate(description: String, photo: UIImage?, settings: UserSettings) async {
         let text = description.trimmingCharacters(in: .whitespacesAndNewlines)
