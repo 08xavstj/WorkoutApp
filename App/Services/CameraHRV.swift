@@ -35,6 +35,8 @@ nonisolated final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBuff
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
                 do {
+                    // The device is only used on `queue` from here on.
+                    guard let camera = self.device else { throw CaptureError.noCamera }
                     try self.configure(camera)
                     self.session.startRunning()
                     try self.setTorch(on: true)

@@ -348,9 +348,11 @@ struct CameraCapture: UIViewControllerRepresentable {
             overlay.contentMode = .scaleAspectFit
             overlay.alpha = 0.28
             overlay.isUserInteractionEnabled = false
-            let bounds = UIScreen.main.bounds
-            // Roughly where the 4:3 preview sits, below the top bar.
-            overlay.frame = CGRect(x: 0, y: 90, width: bounds.width, height: bounds.width * 4 / 3)
+            // Roughly where the 4:3 preview sits, below the top bar. The
+            // picker fills the screen, so its view's size stands in for it.
+            let width = picker.view.bounds.width > 0 ? picker.view.bounds.width : 390
+            overlay.frame = CGRect(x: 0, y: 90, width: width, height: width * 4 / 3)
+            overlay.autoresizingMask = [.flexibleWidth]
             picker.cameraOverlayView = overlay
         }
         return picker
