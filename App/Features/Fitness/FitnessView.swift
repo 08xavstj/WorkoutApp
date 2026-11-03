@@ -123,7 +123,7 @@ private struct DayStrainCard: View {
                 CardLabel(text: "Day strain")
                 Spacer()
                 if let target {
-                    Text("Target \(strainRangeText(target))")
+                    Text("Range \(strainRangeText(target))")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.recoveryHighText)
                 }
@@ -153,21 +153,25 @@ private struct DayStrainCard: View {
         .card(tint: Theme.strain)
     }
 
+    /// Where today sits against the planned range, as information: no "x% to
+    /// go" and no second session to close a gap (Ntoumanis et al. 2021; Swann
+    /// et al. 2021; docs/research/behaviour-change.md §5).
     @ViewBuilder
     private func encouragement(current: Double, target: ClosedRange<Double>?) -> some View {
         if let target {
             let status = StrainPlanner().status(current: current, target: target)
+            let range = strainRangeText(target)
             let (lead, rest): (String, String) = {
                 switch status {
-                case .below(let remaining):
-                    let amount = strainText(remaining)
-                    return ("\(amount) to go:", metrics.activities.contains(where: \.isStrength)
-                        ? "one more session today will get you there."
-                        : "a workout today will get you into your target range.")
+                case .below:
+                    if metrics.trainEasyToday {
+                        return ("Easy day:", "anything in \(range) is fine. Tap if you'd like a light session planned.")
+                    }
+                    return ("Today: \(strainText(current)),", "planned range \(range). Tap if you want a session that fits.")
                 case .inRange:
-                    return ("Target reached:", "nice work. Anything more is a bonus; prioritise sleep tonight.")
+                    return ("In range:", "anything more is optional. Sleep tonight does the rest.")
                 case .above:
-                    return ("Above target:", "take it easy for the rest of the day so you recover for tomorrow.")
+                    return ("Above range:", "an easy rest of the day helps you recover for tomorrow.")
                 }
             }()
             let isBelow: Bool = { if case .below = status { return true } else { return false } }()
@@ -196,7 +200,7 @@ private struct DayStrainCard: View {
                 message
             }
         } else {
-            Text("Wear your watch to sleep so the app can set a daily strain target from your recovery.")
+            Text("Wear your watch to sleep so the app can set a daily strain range from your recovery.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
         }

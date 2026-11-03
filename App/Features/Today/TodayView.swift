@@ -2,8 +2,8 @@ import SwiftUI
 import SwiftData
 import AppCore
 
-/// Home: score rings and coaching, the strain goal with ways to reach it,
-/// nutrition and energy balance, and the health monitor.
+/// Home: score rings and coaching, today's strain against its planned range
+/// with sessions that fit, nutrition and energy balance, and the health monitor.
 struct TodayView: View {
     let askCoach: (String) -> Void
 
@@ -218,7 +218,7 @@ private struct ScoresCard: View {
                     title: "Strain",
                     value: metrics.strain.map { "\(whole($0.strain))" } ?? "--",
                     unit: metrics.strain == nil ? "" : "%",
-                    subtitle: metrics.targetStrain.map { "Goal \(strainRangeText($0))" } ?? "Day strain",
+                    subtitle: metrics.targetStrain.map { "Range \(strainRangeText($0))" } ?? "Day strain",
                     progress: (metrics.strain?.strain ?? 0) / StrainCalculator.maximum,
                     colors: Theme.strainColors,
                     size: 100
@@ -229,12 +229,12 @@ private struct ScoresCard: View {
                     value: metrics.recovery.map { "\($0.score)" } ?? "--",
                     unit: metrics.recovery == nil ? "" : "%",
                     subtitle: metrics.recovery.map { result in
-                        guard !result.isCalibrated else { return result.status.rawValue.capitalized }
+                        guard !result.isCalibrated else { return RecoveryWording.label(for: result.status) }
                         let left = max(1, RecoveryCalculator().minimumBaselineDays - (metrics.baseline?.nights ?? 0))
                         return "Learning · \(left) more night\(left == 1 ? "" : "s")"
                     },
                     progress: Double(metrics.recovery?.score ?? 0) / 100,
-                    colors: Theme.recoveryColors(for: metrics.recovery?.score),
+                    colors: RecoveryWording.colors(for: metrics.recovery?.status),
                     size: 100
                 )
                 .frame(maxWidth: .infinity)
@@ -288,14 +288,19 @@ private struct ScoresCard: View {
     }
 }
 
-// MARK: - Strain goal
+// MARK: - Strain range
 
+/// Today's strain against the planned range, shown as information rather
+/// than a target to chase. "x% to go" and "close the gap" are controlling,
+/// outcome-framed feedback that lowers autonomous motivation (Ntoumanis et
+/// al. 2021; Swann et al. 2021; docs/research/behaviour-change.md §5), and
+/// HRV-guided training supports "train as planned / go easy", not a daily
+/// load quota.
 private struct StrainGoalCard: View {
     let sessions: [WorkoutSession]
 
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
-    @Environment(WorkoutLauncher.self) private var launcher
     /// Big number that still grows with Dynamic Type.
     @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 48
 
@@ -304,10 +309,10 @@ private struct StrainGoalCard: View {
             content(target: target)
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                CardLabel(text: "Strain goal")
+                CardLabel(text: "Strain range")
                 Text(metrics.restMode
-                     ? "Rest mode is on: no strain target until you feel better. Turn it off from the illness card or Settings."
-                     : "No target yet. Wear your watch to sleep so the app can set today's strain target from your recovery.")
+                     ? "Rest mode is on: no strain range until you feel better. Turn it off from the illness card or Settings."
+                     : "No range yet. Wear your watch to sleep so the app can set today's strain range from your recovery.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -321,15 +326,15 @@ private struct StrainGoalCard: View {
         let suggestions = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions)
         return VStack(alignment: .leading, spacing: 16) {
             HStack {
-                CardLabel(text: "Strain goal")
+                CardLabel(text: "Strain range")
                 Spacer()
                 switch status {
-                case .below(let remaining):
-                    Chip(text: "\(strainText(remaining)) to go")
+                case .below:
+                    Chip(text: "Below range", color: Theme.secondaryText)
                 case .inRange:
-                    Chip(text: "Target reached", color: Theme.recoveryHigh)
+                    Chip(text: "In range", color: Theme.recoveryHigh)
                 case .above:
-                    Chip(text: "Above target", color: Theme.recoveryModerate)
+                    Chip(text: "Above range", color: Theme.recoveryModerate)
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -337,56 +342,95 @@ private struct StrainGoalCard: View {
                     .font(.system(size: heroSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
-                Text("target \(strainRangeText(target))")
+                Text("today · planned range \(strainRangeText(target))")
                     .font(.title3)
                     .foregroundStyle(Theme.secondaryText)
             }
             StrainGoalBar(current: current, target: target)
-            Text(metrics.usualTrainingStrain.map { "Based on your usual training days (\(whole($0))%)." }
-                 ?? "Adapts to you after 6 training days.")
+            Text(rangeNote(target: target))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
 
             switch status {
             case .below:
-                CardLabel(text: "Suggested to close the gap")
-                ForEach(suggestions) { suggestion in
-                    if suggestion.option.kind == .strength {
-                        Button {
-                            launcher.openBuilder(focus: suggestion.focus, minutes: suggestion.minutes)
-                        } label: {
-                            SuggestionRow(suggestion: suggestion)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        // Cardio is done on the watch, so this row is information only.
-                        SuggestionRow(suggestion: suggestion)
-                    }
-                }
-                Button {
-                    let strength = suggestions.first { $0.option.kind == .strength }
-                    launcher.openBuilder(focus: strength?.focus, minutes: strength?.minutes)
-                } label: {
-                    Label("Start workout", systemImage: "play.fill")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
-                        .shadow(color: Theme.strain.opacity(0.35), radius: 10, y: 5)
-                }
-                .buttonStyle(.plain)
+                StrainOptions(
+                    suggestions: suggestions,
+                    trainedToday: !metrics.activities.isEmpty,
+                    easyDay: metrics.trainEasyToday
+                )
             case .inRange:
-                Text("You've hit today's target. Anything more is optional; recovery work and sleep will pay off tomorrow.")
+                Text("You're in today's range. Anything more is optional; recovery work and sleep do the rest.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             case .above:
-                Text("You're past today's target. Keep the rest of the day easy and get to bed early.")
+                Text("You're above today's range. The rest of the day suits going easy, and an early night helps you recover for tomorrow.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
         }
         .card(tint: Theme.strain)
+    }
+
+    /// Where today's range comes from, in one line.
+    private func rangeNote(target: ClosedRange<Double>) -> String {
+        if metrics.trainEasyToday {
+            return "Easy day: your 7-day HRV is below your normal range, so anything in \(strainRangeText(target)) is fine."
+        }
+        return metrics.usualTrainingStrain.map { "Based on your usual training days (\(whole($0))%)." }
+            ?? "Adapts to you after 6 training days."
+    }
+}
+
+/// Sessions that fit today's range, offered as options to take or leave,
+/// never as what's needed to reach a number (autonomy support: Teixeira et
+/// al. 2020, cited from memory in docs/research/behaviour-change.md).
+private struct StrainOptions: View {
+    let suggestions: [TrainerSuggestions.Suggestion]
+    let trainedToday: Bool
+    let easyDay: Bool
+
+    @Environment(WorkoutLauncher.self) private var launcher
+
+    var body: some View {
+        Text(intro)
+            .font(.subheadline)
+            .foregroundStyle(Theme.secondaryText)
+        ForEach(suggestions) { suggestion in
+            if suggestion.option.kind == .strength {
+                Button {
+                    launcher.openBuilder(focus: suggestion.focus, minutes: suggestion.minutes)
+                } label: {
+                    SuggestionRow(suggestion: suggestion)
+                }
+                .buttonStyle(.plain)
+            } else {
+                // Cardio is done on the watch, so this row is information only.
+                SuggestionRow(suggestion: suggestion)
+            }
+        }
+        Button {
+            let strength = suggestions.first { $0.option.kind == .strength }
+            launcher.openBuilder(focus: strength?.focus, minutes: strength?.minutes)
+        } label: {
+            Label("Plan a workout", systemImage: "play.fill")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
+                .shadow(color: Theme.strain.opacity(0.35), radius: 10, y: 5)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var intro: String {
+        if trainedToday {
+            return "You've trained today, so anything more is optional. If a second session is part of your plan, these fit:"
+        }
+        if easyDay {
+            return "If you want to move today, these fit an easy day:"
+        }
+        return "If you want to train today, these fit:"
     }
 }
 
@@ -715,66 +759,50 @@ private struct MedsTodayCard: View {
 
 // MARK: - Energy and nutrition
 
+/// Calories as a flexible band, never a daily "over" in red: daily deficit
+/// judgement adds burden, and calorie counting correlates with eating-
+/// disorder symptoms in some users (Simpson & Mazzeo 2017; Levinson 2017,
+/// cited from memory in docs/research/behaviour-change.md). The weekly
+/// average is what moves weight. "Hide calories" in Settings leaves protein
+/// and fibre only.
 private struct EnergyCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(UserSettings.self) private var settings
     @State private var showingDetails = false
 
     var body: some View {
         let food = metrics.nutritionToday
-        let summary = metrics.calories
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                CardLabel(text: "Calories today")
-                Spacer()
-                Button {
-                    showingDetails = true
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.title3)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                .accessibilityLabel("How calories are calculated")
-            }
-            if let summary, let target = metrics.calorieTarget {
-                let left = target - (summary.eaten ?? 0)
-                HStack(alignment: .center, spacing: 20) {
-                    GradientRing(
-                        progress: (summary.eaten ?? 0) / max(target, 1),
-                        colors: Theme.nutritionColors,
-                        lineWidth: 13
-                    ) {
-                        VStack(spacing: 0) {
-                            Text(whole(abs(left)).formatted())
-                                .font(.system(size: 24, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundStyle(left >= 0 ? Theme.primaryText : Theme.recoveryModerate)
-                                .minimumScaleFactor(0.6)
-                            Text(left >= 0 ? "kcal left" : "kcal over")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        .padding(.horizontal, 14)
-                    }
-                    .frame(width: 124, height: 124)
-                    VStack(alignment: .leading, spacing: 12) {
-                        CalorieLine(icon: "target", color: Theme.sleep, label: metrics.goals == nil ? "Maintenance" : "Daily target", value: target)
-                        CalorieLine(icon: "fork.knife", color: Theme.nutrition, label: "Eaten", value: summary.eaten ?? 0)
-                    }
-                }
-                Text(left >= 0 ? "Left = daily target − eaten. Your burn is already in the target; tap ⓘ for details." : "Over = eaten − daily target. Tap ⓘ for details.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
+            if settings.hideCalories {
+                CardLabel(text: "Nutrition")
             } else {
-                Text("Add your weight in Apple Health (or Settings) to see calories burned.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
+                HStack {
+                    CardLabel(text: "Calories today")
+                    Spacer()
+                    Button {
+                        showingDetails = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.title3)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    .accessibilityLabel("How calories are calculated")
+                }
+                CaloriesToday()
+                Divider().overlay(Theme.separator)
             }
-            Divider().overlay(Theme.separator)
             if let food, !food.isEmpty {
                 HStack(spacing: 14) {
                     MacroColumn(label: "Protein", value: food.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
-                    MacroColumn(label: "Carbs", value: food.carbsGrams ?? 0, goal: nil, color: Theme.strain)
-                    MacroColumn(label: "Fat", value: food.fatGrams ?? 0, goal: nil, color: Theme.sleep)
+                    if settings.hideCalories {
+                        // The app's fibre table (25/38 g Adequate Intake); 25-29 g/day
+                        // and above is where the benefit sits (Reynolds et al., Lancet 2019).
+                        MacroColumn(label: "Fibre", value: food.fiberGrams ?? 0,
+                                    goal: Micronutrients.Nutrient.fiber.target(settings.sex, age: settings.age), color: Theme.oxygen)
+                    } else {
+                        MacroColumn(label: "Carbs", value: food.carbsGrams ?? 0, goal: nil, color: Theme.strain)
+                        MacroColumn(label: "Fat", value: food.fatGrams ?? 0, goal: nil, color: Theme.sleep)
+                    }
                 }
             } else {
                 HStack(spacing: 10) {
@@ -801,11 +829,62 @@ private struct EnergyCard: View {
 
 }
 
+/// Today's intake against the daily target and its flexible band. Only
+/// today is available here (`DailyMetricsModel` keeps no intake history), so
+/// the number is shown without a verdict and the weekly view is noted.
+private struct CaloriesToday: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        if let summary = metrics.calories, let target = metrics.calorieTarget {
+            let eaten = summary.eaten ?? 0
+            // ±10% flexible band: flexible targets kept more fat-free mass than
+            // rigid ones for the same fat loss (Conlin et al., JISSN 2021;
+            // docs/research/nutrition.md). Switch to `GoalPlanner.calorieBand`
+            // once the other builder adds it to AppCore.
+            let band = (target * 0.9)...(target * 1.1)
+            HStack(alignment: .center, spacing: 20) {
+                GradientRing(
+                    progress: eaten / max(target, 1),
+                    colors: Theme.nutritionColors,
+                    lineWidth: 13
+                ) {
+                    VStack(spacing: 0) {
+                        Text(whole(eaten).formatted())
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.primaryText)
+                            .minimumScaleFactor(0.6)
+                        Text("kcal eaten")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    .padding(.horizontal, 14)
+                }
+                .frame(width: 124, height: 124)
+                VStack(alignment: .leading, spacing: 12) {
+                    CalorieLine(icon: "target", color: Theme.sleep, label: metrics.goals == nil ? "Maintenance" : "Daily target",
+                                text: "\(whole(target).formatted()) kcal")
+                    CalorieLine(icon: "arrow.left.and.right", color: Theme.nutrition, label: "Flexible band (±10%)",
+                                text: "\(whole(band.lowerBound).formatted())–\(whole(band.upperBound).formatted()) kcal")
+                }
+            }
+            Text("One day over or under the band is fine; the weekly average is what moves weight. A weekly view is coming. Your burn is already in the target; tap ⓘ for details.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        } else {
+            Text("Add your weight in Apple Health (or Settings) to see calories burned.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+        }
+    }
+}
+
 private struct CalorieLine: View {
     let icon: String
     let color: Color
     let label: String
-    let value: Double
+    let text: String
 
     var body: some View {
         HStack(spacing: 10) {
@@ -818,7 +897,7 @@ private struct CalorieLine: View {
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
-                Text("\(whole(value).formatted()) kcal")
+                Text(text)
                     .font(.headline)
                     .monospacedDigit()
                     .foregroundStyle(Theme.primaryText)

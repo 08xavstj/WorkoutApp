@@ -1,7 +1,7 @@
 import Foundation
 import AppCore
 
-/// Workout options that would close today's strain gap, and the coaching line.
+/// Workout options that fit today's strain range, and the coaching line.
 enum TrainerSuggestions {
     struct Suggestion: Identifiable, Equatable {
         var option: StrainPlanner.Option
@@ -44,10 +44,16 @@ enum TrainerSuggestions {
     }
 
     /// One or two sentences for the coaching line under the rings.
+    ///
+    /// Autonomy-supportive: the reason, then options the user chooses between,
+    /// with the range as information. No "push", no "your body needs extra
+    /// care": a good recovery is not a reason to train harder than planned,
+    /// and a low one is an easy day, not a failure (Teixeira et al. 2020;
+    /// Ntoumanis et al. 2021; docs/research/behaviour-change.md rec. 5).
     @MainActor
     static func coachingLine(metrics: DailyMetricsModel) -> (text: String, highlight: String?) {
         if metrics.restMode {
-            return ("Rest mode is on, so there's no strain target today. Sleep, fluids and an easy walk if you feel up to it.", nil)
+            return ("Rest mode is on, so there's no strain range today. Sleep, fluids and an easy walk if you feel up to it.", nil)
         }
         guard let recovery = metrics.recovery else {
             return ("Wear your watch to sleep tonight to get recovery and daily coaching.", nil)
@@ -55,17 +61,17 @@ enum TrainerSuggestions {
         guard let target = metrics.targetStrain else { return ("", nil) }
         let range = "\(Int(target.lowerBound))–\(Int(target.upperBound))%"
         if metrics.trainEasyToday, let trend = recovery.hrvTrend {
-            return ("Your 7-day HRV (\(Int(trend.average.rounded())) ms) is below your normal range (\(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms). Make today easy: technique, mobility or Zone 2,",
-                    "under \(Int(target.upperBound))% strain.")
+            return ("Your 7-day HRV (\(Int(trend.average.rounded())) ms) is below your normal range (\(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms), so today suits an easy session: technique work, mobility or a Zone 2 ride, whichever you prefer,",
+                    "anything under \(Int(target.upperBound))% strain is fine.")
         }
         let sleptWell = (metrics.sleep?.score ?? 80) >= 75
         switch recovery.status {
         case .high:
-            return (sleptWell ? "Recovery is high and you slept well. Push today:" : "Recovery is high. Push today, but get to bed on time:", "aim for strain \(range).")
+            return (sleptWell ? "You're recovered and slept well, so today fits your planned session:" : "You're recovered, though sleep was short. Train as planned and get to bed on time:", "your range is \(range).")
         case .moderate:
-            return (sleptWell ? "Recovery is moderate. Train, but keep the effort controlled:" : "Recovery is moderate and sleep was short. Keep it controlled:", "aim for strain \(range).")
+            return (sleptWell ? "Recovery is normal. A planned session or an easier one both fit; keep the effort controlled:" : "Recovery is normal and sleep was short. A controlled session or an easy day both fit:", "your range is \(range).")
         case .low:
-            return ("Your body needs extra care. Keep it light and prioritise sleep:", "stay under \(Int(target.upperBound))% strain.")
+            return ("Easy day: HRV or resting heart rate is off your normal, so a light session or a walk suits today, and an early night helps:", "anything under \(Int(target.upperBound))% strain is fine.")
         }
     }
 }

@@ -22,7 +22,7 @@ struct RecoveryContributorsSheet: View {
                                 .font(.largeTitle.weight(.bold))
                                 .fontDesign(.rounded)
                                 .foregroundStyle(Theme.primaryText)
-                            Text(recovery.isCalibrated ? recovery.status.rawValue.capitalized : "Still learning your normal")
+                            Text(recovery.isCalibrated ? RecoveryWording.label(for: recovery.status) : "Still learning your normal")
                                 .font(.subheadline)
                                 .foregroundStyle(Theme.secondaryText)
                         }
@@ -97,10 +97,12 @@ private struct ContributorRow: View {
         }
     }
 
+    /// Amber, not red, for what lowered recovery: it's information to plan
+    /// an easier day around, not an alarm (see `RecoveryWording`).
     private var color: Color {
         switch item.effect {
         case .raises: Theme.recoveryHighText
-        case .lowers: Theme.recoveryLowText
+        case .lowers: Theme.recoveryModerateText
         case .neutral: Theme.secondaryText
         }
     }

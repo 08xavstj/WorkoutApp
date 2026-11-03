@@ -345,7 +345,7 @@ struct StrainGoalBar: View {
             .frame(height: 16)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Strain \(strainText(current)), target \(whole(target.lowerBound)) to \(whole(target.upperBound)) percent")
+        .accessibilityLabel("Strain \(strainText(current)), planned range \(whole(target.lowerBound)) to \(whole(target.upperBound)) percent")
     }
 }
 
@@ -502,7 +502,7 @@ struct StatView: View {
     }
 }
 
-/// Rounded pill label, e.g. "2.6 to go" or "Optimal".
+/// Rounded pill label, e.g. "In range" or "Optimal".
 struct Chip: View {
     let text: String
     var color: Color = Theme.strain

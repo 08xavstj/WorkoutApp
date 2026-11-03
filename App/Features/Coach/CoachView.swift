@@ -114,7 +114,8 @@ struct CoachView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 if let recovery = metrics.recovery {
-                    ContextChip(color: Theme.recoveryColor(for: recovery.score), label: "Recovery", value: "\(recovery.score)%")
+                    ContextChip(color: RecoveryWording.color(for: recovery.status), label: "Recovery",
+                                value: recovery.isCalibrated ? "\(recovery.score)% · \(RecoveryWording.label(for: recovery.status))" : "\(recovery.score)%")
                 }
                 if let strain = metrics.strain {
                     let target = metrics.targetStrain.map { " / \(whole($0.lowerBound))–\(whole($0.upperBound))%" } ?? ""
@@ -123,10 +124,10 @@ struct CoachView: View {
                 if let protein = metrics.nutritionToday?.proteinGrams {
                     ContextChip(color: Theme.nutrition, label: "Protein", value: "\(whole(protein)) g")
                 }
-                // Same number as Home's calorie card: today's target minus food eaten.
-                if let target = metrics.calorieTarget, let eaten = metrics.calories?.eaten {
-                    let left = target - eaten
-                    ContextChip(color: Theme.lifting, label: left >= 0 ? "Left" : "Over", value: "\(whole(abs(left))) kcal")
+                // Same numbers as Home's calorie card, eaten against the target with no
+                // "over" verdict; hidden with the Settings switch.
+                if !settings.hideCalories, let target = metrics.calorieTarget, let eaten = metrics.calories?.eaten {
+                    ContextChip(color: Theme.lifting, label: "Calories", value: "\(whole(eaten)) / \(whole(target)) kcal")
                 }
             }
         }
@@ -257,7 +258,7 @@ extension CoachView {
             lines.append("Measured maintenance \(whole(maintenance.maintenance)) kcal/day from \(maintenance.loggedDays) days of food logs; weight trend \(maintenance.weeklyChangeKg.formatted(.number.precision(.fractionLength(2)))) kg/week.")
         }
         if let trend = metrics.recovery?.hrvTrend {
-            lines.append("7-day HRV \(whole(trend.average)) ms, normal range \(whole(trend.normalRange.lowerBound))-\(whole(trend.normalRange.upperBound)) ms (\(trend.status.rawValue)).\(metrics.trainEasyToday ? " HRV-guided: today should be easy." : "")")
+            lines.append("7-day HRV \(whole(trend.average)) ms, normal range \(whole(trend.normalRange.lowerBound))-\(whole(trend.normalRange.upperBound)) ms (\(trend.status.rawValue)).\(metrics.trainEasyToday ? " HRV-guided: an easy day suits today." : "")")
         }
         if let consistency = metrics.sleepConsistency { lines.append("Sleep Regularity Index \(consistency)/100 (last week).") }
         if let debt = metrics.sleepDebt {

@@ -123,6 +123,8 @@ final class UserSettings {
     func setRestMode(_ on: Bool, days: Int = 3) {
         restModeUntil = on ? Calendar.current.date(byAdding: .day, value: days, to: .now) : nil
     }
+    /// Hide calorie numbers on Home and in the coach chips (protein and fibre stay).
+    var hideCalories: Bool { didSet { defaults.set(hideCalories, forKey: "hideCalories") } }
     var checkInRemindersOn: Bool { didSet { defaults.set(checkInRemindersOn, forKey: "checkInRemindersOn") } }
     var morningCheckInMinutes: Int { didSet { defaults.set(morningCheckInMinutes, forKey: "morningCheckInMinutes") } }
     var eveningCheckInMinutes: Int { didSet { defaults.set(eveningCheckInMinutes, forKey: "eveningCheckInMinutes") } }
@@ -156,6 +158,7 @@ final class UserSettings {
         let need = defaults.double(forKey: "sleepNeedHours")
         sleepNeedHours = need >= 6 && need <= 11 ? need : 8
         restModeUntil = defaults.object(forKey: "restModeUntil") as? Date
+        hideCalories = defaults.bool(forKey: "hideCalories")
         checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
         morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30

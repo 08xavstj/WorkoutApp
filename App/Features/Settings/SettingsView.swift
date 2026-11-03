@@ -204,6 +204,14 @@ struct SettingsView: View {
                     Text("Sleep need sets your sleep score and sleep debt; adults need 7 hours or more. Rest mode pauses strain targets and workout nudges for 3 days, then turns itself off.")
                 }
 
+                Section {
+                    Toggle("Hide calories", isOn: $settings.hideCalories)
+                } header: {
+                    Text("Nutrition")
+                } footer: {
+                    Text("Shows protein and fibre only, on Home and in the coach's chips. Calorie numbers aren't helpful for everyone; the app still uses them for maintenance and the coach.")
+                }
+
                 Section("Appearance") {
                     Picker("Theme", selection: $settings.appearance) {
                         ForEach(AppAppearance.allCases) { appearance in
