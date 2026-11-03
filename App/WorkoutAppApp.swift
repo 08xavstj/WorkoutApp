@@ -23,6 +23,7 @@ struct WorkoutAppApp: App {
     @State private var conditions = ConditionsModel()
     @State private var progressPhotos: ProgressPhotosModel
     @State private var labs: LabsModel
+    @State private var weeklyPlans = WeeklyPlanStore()
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -93,6 +94,7 @@ struct WorkoutAppApp: App {
                 .environment(conditions)
                 .environment(progressPhotos)
                 .environment(labs)
+                .environment(weeklyPlans)
                 .environment(\.healthClient, health)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)
@@ -141,6 +143,7 @@ struct RootView: View {
     @Environment(MuscleModel.self) private var muscles
     @Environment(ConditionsModel.self) private var conditions
     @Environment(ProgressPhotosModel.self) private var progressPhotos
+    @Environment(WeeklyPlanStore.self) private var weeklyPlans
     @Environment(ExerciseLibrary.self) private var library
     @Environment(GymStore.self) private var gym
     @Environment(WorkoutLauncher.self) private var launcher
@@ -190,6 +193,13 @@ struct RootView: View {
         .sheet(item: $router.checkIn, onDismiss: scheduleCheckInReminders) { kind in
             CheckInView(kind: kind)
         }
+        // The weekly loop: Monday review (workoutapp://review) and this week's plan (workoutapp://plan).
+        .sheet(isPresented: $router.showWeeklyReview) {
+            WeeklyReviewView()
+        }
+        .sheet(isPresented: $router.showWeeklyPlan) {
+            WeeklyPlanView()
+        }
         .sheet(item: $launcher.builderRequest) { request in
             WorkoutBuilderView(initialFocus: request.focus, initialMinutes: request.minutes)
         }
@@ -212,8 +222,8 @@ struct RootView: View {
                 health?.enableBackgroundDelivery()
             }
             scheduleHRVReminder()
-            scheduleCheckInReminders()
             await refreshMetrics()
+            scheduleCheckInReminders() // after the refresh, so the evening reminder carries tonight's bed-by window
             await Reminders.scheduleDoses()
             await Reminders.startMedsActivityIfNeeded()
             // Keep today's numbers current while the app is open.
@@ -228,6 +238,7 @@ struct RootView: View {
                 medications.reload()
                 Task {
                     await refreshMetrics()
+                    scheduleCheckInReminders()
                     await Reminders.scheduleDoses()
                     await Reminders.startMedsActivityIfNeeded()
                 }
@@ -245,11 +256,17 @@ struct RootView: View {
         .onChange(of: settings.sleepNeedHours) { Task { await refreshMetrics() } }
         .onChange(of: settings.morningCheckInMinutes) { scheduleCheckInReminders() }
         .onChange(of: settings.eveningCheckInMinutes) { scheduleCheckInReminders() }
+        .onChange(of: settings.workoutRemindersOn) { scheduleWorkoutReminders() }
+        .onChange(of: weeklyPlans.plans) {
+            // A saved plan is a fresh commitment: paused workout reminders come back.
+            Reminders.resumeWorkoutReminders()
+            scheduleWorkoutReminders()
+        }
         .onChange(of: finishedSessionCount) {
             Task { await refreshMetrics() }
         }
         .onChange(of: hrvReadings.map(\.milliseconds)) {
-            scheduleHRVReminder()
+            scheduleCheckInReminders() // a typed HRV can complete the morning check-in
             Task { await refreshMetrics() }
         }
     }
@@ -287,6 +304,7 @@ struct RootView: View {
         metrics.proteinGramsPerKg = max(goalProtein, medications.proteinGramsPerKg ?? 0)
         metrics.medicationProteinPerKg = medications.proteinGramsPerKg
         gym.style = settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
+        metrics.plannedSessionTomorrow = plannedSlots().first { Calendar.current.isDateInTomorrow($0.start) }?.start // bed-by window
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
@@ -341,20 +359,72 @@ struct RootView: View {
         return lines.joined(separator: "\n")
     }
 
+    // MARK: - Reminders: one morning, one evening, workouts before planned slots only
+
     private func scheduleCheckInReminders() {
+        let calendar = Calendar.current
         let enabled = settings.checkInRemindersOn
         let morning = settings.morningCheckInMinutes
         let evening = settings.eveningCheckInMinutes
-        let morningDone = checkIns.morning() != nil
+        let checkedIn = checkIns.morning() != nil
         let eveningDone = checkIns.evening() != nil
-        Task { await Reminders.scheduleCheckIns(enabled: enabled, morningMinutes: morning, eveningMinutes: evening, morningDone: morningDone, eveningDone: eveningDone) }
+        // HRV is "in" from Apple Health or a typed reading. If you never type
+        // HRV (none in the last week), the reminder doesn't wait for it.
+        let weekAgo = calendar.date(byAdding: .day, value: -7, to: .now) ?? .now
+        let typesHRV = hrvReadings.contains { $0.date >= weekAgo }
+        let hrvIn = metrics.hrv != nil || hrvReadings.contains { calendar.isDateInToday($0.date) }
+        let hrvMissing = checkedIn && !hrvIn && typesHRV
+        let weighIn = weighInNudgeDue
+        let bedBy = metrics.bedtimeWindow?.windowText
+        Task {
+            let nudgeDay = await Reminders.scheduleCheckIns(
+                enabled: enabled, morningMinutes: morning, eveningMinutes: evening,
+                morningDone: checkedIn, eveningDone: eveningDone,
+                hrvMissing: hrvMissing, weighInNudge: weighIn, bedByTonight: bedBy
+            )
+            if let nudgeDay { settings.weighInNudgeDay = nudgeDay }
+        }
+        scheduleWorkoutReminders()
     }
 
+    /// The weigh-in line goes on a morning reminder at most once a week, and
+    /// only while a lose/gain goal has had no weigh-in for 3+ days (`WeighInNudge`).
+    private var weighInNudgeDue: Bool {
+        let goals = settings.goalsSet ? settings.goals : nil
+        guard WeighInNudge.isDue(goals: goals, lastWeighIn: metrics.lastWeighIn) else { return false }
+        guard let last = settings.weighInNudgeDay else { return true }
+        let today = Calendar.current.startOfDay(for: .now)
+        // Still on a reminder that hasn't fired: keep it. Otherwise wait a week.
+        if last >= today { return true }
+        return (Calendar.current.dateComponents([.day], from: last, to: today).day ?? 0) >= 7
+    }
+
+    /// The separate HRV reminder is folded into the morning check-in; this clears old ones.
     private func scheduleHRVReminder() {
         let loggedToday = hrvReadings.contains { Calendar.current.isDateInToday($0.date) }
         let enabled = settings.hrvReminderOn
         let minutes = settings.hrvReminderMinutes
         Task { await Reminders.scheduleHRV(enabled: enabled, minutes: minutes, loggedToday: loggedToday) }
+    }
+
+    /// Planned slots over the next week from the weekly plan (this week's and,
+    /// once saved, next week's), as dates.
+    private func plannedSlots() -> [Reminders.PlannedSlot] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        return (0..<8).compactMap { offset -> Reminders.PlannedSlot? in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today),
+                  let planned = weeklyPlans.plan(containing: day)?.day(for: calendar.component(.weekday, from: day)),
+                  let start = Reminders.fireDate(day: day, minutes: planned.time, calendar: calendar) else { return nil }
+            return Reminders.PlannedSlot(start: start, name: planned.focus.shortTitle, ifThen: planned.ifThen)
+        }
+    }
+
+    private func scheduleWorkoutReminders() {
+        let slots = plannedSlots()
+        let enabled = settings.workoutRemindersOn && !settings.isRestMode
+        let trained = Set(WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays))
+        Task { await Reminders.scheduleWorkoutReminders(slots: slots, enabled: enabled, trainedDays: trained) }
     }
 }
 

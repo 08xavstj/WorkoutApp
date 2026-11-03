@@ -29,6 +29,8 @@ struct TodayView: View {
                     }
                     IllnessAlertCard()
                     ScoresCard()
+                    // This week: planned days, today's slot, the 4-week consistency score (never a streak).
+                    ConsistencyCard(sessions: sessions)
                     SleepDebtCard()
                     GoalsPromptCard()
                     CheckInCard()
@@ -839,10 +841,8 @@ private struct CaloriesToday: View {
         if let summary = metrics.calories, let target = metrics.calorieTarget {
             let eaten = summary.eaten ?? 0
             // ±10% flexible band: flexible targets kept more fat-free mass than
-            // rigid ones for the same fat loss (Conlin et al., JISSN 2021;
-            // docs/research/nutrition.md). Switch to `GoalPlanner.calorieBand`
-            // once the other builder adds it to AppCore.
-            let band = (target * 0.9)...(target * 1.1)
+            // rigid ones for the same fat loss (Conlin et al., JISSN 2021; see `CalorieBand`).
+            let band = GoalPlanner.calorieBand(target: target)
             HStack(alignment: .center, spacing: 20) {
                 GradientRing(
                     progress: eaten / max(target, 1),
@@ -958,6 +958,10 @@ private struct CalorieDetailsSheet: View {
                              ?? "Maintenance is estimated from your watch until there are 14 fully logged days of food and enough weigh-ins.")
                         Text(metrics.goals.map { "Goal: \($0.title.lowercased()). Your daily target is maintenance adjusted for that goal." }
                              ?? "Set your goals on the Home tab to turn maintenance into a daily target.")
+                        if let note = metrics.calorieAdjustmentNote {
+                            // Monday adjustment of at most ±100 kcal (`CalorieBand`).
+                            Text(note)
+                        }
                     } header: {
                         Text("Where your target comes from")
                     }

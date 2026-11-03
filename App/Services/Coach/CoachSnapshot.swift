@@ -59,6 +59,8 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     var health: String?
     /// Latest blood-test results the user logged, flagged when outside the range.
     var labs: [String]?
+    /// This week's planned training days, sessions done, the 4-week consistency and the review's changes.
+    var weeklyPlan: String?
 
     /// Food totals from Apple Health (logged in Cronometer or another food app).
     nonisolated struct Nutrition: Codable, Sendable, Equatable {
@@ -115,6 +117,7 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     private var extraLines: [String] {
         var lines: [String] = []
         if let name, !name.isEmpty { lines.append("The user's name is \(name).") }
+        if let weeklyPlan { lines.append(weeklyPlan) }
         if let weather { lines.append(weather) }
         if let medications, !medications.isEmpty {
             lines.append("Medications: " + medications.joined(separator: "; "))

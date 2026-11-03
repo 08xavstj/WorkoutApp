@@ -28,6 +28,9 @@ struct QuickAddView: View {
                     action("Empty workout", "Add exercises as you go", "dumbbell.fill", Theme.strain) {
                         launcher.startEmpty(in: modelContext)
                     }
+                    action("This week's plan", "Pick your training days, and what to do when the day goes wrong", "calendar.badge.clock", Theme.lifting) {
+                        router.showWeeklyPlan = true
+                    }
                     NavigationLink {
                         MyWorkoutsView()
                     } label: {

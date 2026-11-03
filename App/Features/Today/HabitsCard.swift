@@ -33,6 +33,11 @@ struct HabitsCard: View {
             if let message = weightMessage {
                 row(icon: "scalemass.fill", color: Theme.recoveryModerateText, title: "Weight is changing fast", detail: message)
             }
+            if weighInDue {
+                // Lose/gain goal with no weigh-in for 3+ days (`WeighInNudge`: Zheng 2015; Madigan 2015).
+                row(icon: "scalemass", color: Theme.nutrition, title: WeighInNudge.title,
+                    detail: WeighInNudge.detail(lastWeighIn: metrics.lastWeighIn))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(tint: Theme.sleep)
@@ -80,6 +85,12 @@ struct HabitsCard: View {
     private var weightMessage: String? {
         guard let weekly = metrics.weightTrendWeekly, let weight = metrics.bodyMassKg else { return nil }
         return WeightPace.message(WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: weight, goals: metrics.goals))
+    }
+
+    // MARK: Weigh-in cadence
+
+    private var weighInDue: Bool {
+        WeighInNudge.isDue(goals: metrics.goals, lastWeighIn: metrics.lastWeighIn)
     }
 
     // MARK: Pieces

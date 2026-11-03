@@ -76,8 +76,24 @@ final class DailyMetricsModel {
     /// Sick / rest mode (from settings): strain targets and training nudges pause.
     var restMode = false
 
+    // MARK: Weekly calorie target, weigh-ins and the bed-by window
+
+    /// The target in force this week, set on Mondays from measured maintenance
+    /// by at most ±100 kcal (`CalorieBand`; kept in `UserSettings`).
+    private(set) var calorieTargetOverride: Double?
+    /// "Target adjusted −60 kcal this week: weight moved slower than planned", for the ⓘ sheet.
+    private(set) var calorieAdjustmentNote: String?
+    /// The last weigh-in in Apple Health (last 35 days), for the weigh-in nudge.
+    private(set) var lastWeighIn: Date?
+    /// Tonight's bed-by window (`BedtimeWindow`), from sleep need, debt, usual wake time and tomorrow's plan.
+    private(set) var bedtimeWindow: BedtimeWindow.Result?
+    /// Tomorrow's planned session start from the weekly plan, if any (set by the app before a refresh).
+    var plannedSessionTomorrow: Date?
+
     /// Daily calorie target from your goal (or maintenance when no goal is set).
     var calorieTarget: Double? {
+        // This week's target (Monday-updated) wins while there's measured maintenance behind it.
+        if let calorieTargetOverride, goals != nil, maintenance != nil { return calorieTargetOverride }
         guard let base = maintenance?.maintenance ?? calories?.projected else { return nil }
         guard let goals, let weight = bodyMassKg else { return base }
         return GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: sex)
@@ -303,6 +319,11 @@ final class DailyMetricsModel {
             restMode = settings.isRestMode
             sleepDebt = SleepDebt.compute(nightlyHours: nights.map(\.hoursAsleep), needHours: settings.sleepNeedHours)
             recentBedtimes = nights.map(\.bedtime)
+            bedtimeWindow = BedtimeWindow.compute(
+                sleepNeedHours: settings.sleepNeedHours, sleepDebt: sleepDebt,
+                usualWakeMinutes: BedtimeWindow.usualWakeMinutes(nights.suffix(14).map(\.wake)),
+                regularity: sleepConsistency, plannedSessionStart: plannedSessionTomorrow, now: now
+            )
 
             // RMSSD (typed-in Garmin values, camera readings, Apple Watch
             // beat-to-beat) and Apple Health's SDNN aren't comparable, so once
@@ -454,6 +475,8 @@ final class DailyMetricsModel {
                                                 expectedExpenditure: expected)
             maintenanceProgress = AdaptiveTDEE.progress(intake: intake, weights: weights, now: now, expectedExpenditure: expected)
             weightTrendWeekly = WeightTrend.weeklyChange(weights.filter { $0.date >= today.addingTimeInterval(-28 * 86_400) })
+            lastWeighIn = weights.map(\.date).max()
+            updateWeeklyCalorieTarget(settings: settings, now: now)
             if let nutrients = try? await nutrientTask {
                 micronutrients = Micronutrients.assess(averages: nutrients.averages, daysLogged: nutrients.daysLogged, sex: settings.sex)
             }
@@ -483,6 +506,44 @@ final class DailyMetricsModel {
         } catch {
             errorMessage = "Couldn't read Apple Health: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: Weekly calorie target
+
+    /// Keeps the week's target in `UserSettings`: seeded from measured
+    /// maintenance and the goal, then moved on Mondays by `CalorieBand`
+    /// (at most ±100 kcal, guarded by the 1%/week loss and 0.5%/week gain
+    /// limits). Cleared when there's no measured maintenance or goal, so the
+    /// target floats with the watch estimate as before.
+    private func updateWeeklyCalorieTarget(settings: UserSettings, now: Date) {
+        guard let maintenance, let goals, let weight = bodyMassKg else {
+            calorieTargetOverride = nil
+            calorieAdjustmentNote = nil
+            return
+        }
+        let goalKey = "\(goals.weight.rawValue)|\(goals.weeklyRatePercent)"
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let weekday = calendar.component(.weekday, from: today)
+        let thisMonday = calendar.date(byAdding: .day, value: -((weekday + 5) % 7), to: today) ?? today
+        if settings.calorieTargetOverride == nil || settings.calorieTargetOverrideGoal != goalKey {
+            settings.calorieTargetOverride = GoalPlanner.calorieTarget(maintenance: maintenance.maintenance, bodyMassKg: weight, goals: goals, sex: sex)
+            settings.calorieTargetOverrideGoal = goalKey
+            settings.calorieTargetOverrideDate = today
+            settings.calorieAdjustmentNote = ""
+        } else if let current = settings.calorieTargetOverride, (settings.calorieTargetOverrideDate ?? .distantPast) < thisMonday {
+            let adjustment = CalorieBand.weeklyAdjustment(
+                measuredMaintenance: maintenance.maintenance, currentTarget: current, goals: goals, bodyMassKg: weight,
+                weeklyChangeKg: maintenance.weeklyChangeKg, loggedDays: maintenance.loggedDays, sex: sex
+            )
+            if let adjustment {
+                settings.calorieTargetOverride = adjustment.newTarget
+            }
+            settings.calorieAdjustmentNote = adjustment?.note ?? ""
+            settings.calorieTargetOverrideDate = today
+        }
+        calorieTargetOverride = settings.calorieTargetOverride
+        calorieAdjustmentNote = settings.calorieAdjustmentNote.isEmpty ? nil : settings.calorieAdjustmentNote
     }
 
     private func makeActivities(

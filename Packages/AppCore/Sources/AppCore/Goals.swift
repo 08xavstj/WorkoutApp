@@ -73,8 +73,36 @@ public enum GoalPlanner {
         case .gain: maintenance + daily
         }
         // Don't go below a safe floor without medical supervision.
-        let floor: Double = sex == .male ? 1500 : 1200
-        return max(floor, target)
+        return max(calorieFloor(sex: sex), target)
+    }
+
+    /// Lowest daily target without medical supervision: 1,500 kcal (men) / 1,200 kcal (women).
+    public static func calorieFloor(sex: BiologicalSex) -> Double {
+        sex == .male ? 1500 : 1200
+    }
+
+    /// The flexible ±10% band around a daily target (Conlin et al., JISSN 2021; see `CalorieBand`).
+    public static func calorieBand(target: Double) -> ClosedRange<Double> {
+        CalorieBand.range(target: target)
+    }
+
+    /// This week's change to the daily target, kcal (at most ±100), or nil
+    /// when it should stay. Needs 14 fully logged days behind the measured
+    /// maintenance; guarded by the 1%/week loss and 0.5%/week gain limits.
+    /// See `CalorieBand.weeklyAdjustment` for the reason text.
+    public static func weeklyAdjustment(
+        measuredMaintenance: Double,
+        currentTarget: Double,
+        goals: Goals,
+        bodyMassKg: Double,
+        weeklyChangeKg: Double,
+        loggedDays: Int = AdaptiveTDEE.minimumLoggedDays,
+        sex: BiologicalSex = .male
+    ) -> Double? {
+        CalorieBand.weeklyAdjustment(
+            measuredMaintenance: measuredMaintenance, currentTarget: currentTarget, goals: goals,
+            bodyMassKg: bodyMassKg, weeklyChangeKg: weeklyChangeKg, loggedDays: loggedDays, sex: sex
+        )?.deltaKcal
     }
 
     public static func proteinPerKg(_ goals: Goals) -> Double {

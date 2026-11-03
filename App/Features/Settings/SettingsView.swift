@@ -47,16 +47,6 @@ struct SettingsView: View {
         )
     }
 
-    private var reminderTime: Binding<Date> {
-        Binding(
-            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(settings.hrvReminderMinutes * 60)) },
-            set: { date in
-                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
-                settings.hrvReminderMinutes = (parts.hour ?? 7) * 60 + (parts.minute ?? 30)
-            }
-        )
-    }
-
     private func locked(_ field: String) -> Bool {
         settings.profileFromHealth && settings.healthFilledFields.contains(field)
     }
@@ -171,9 +161,11 @@ struct SettingsView: View {
                         DatePicker("Morning", selection: minutesBinding(\.morningCheckInMinutes), displayedComponents: .hourAndMinute)
                         DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
                     }
-                    Toggle("Separate HRV reminder", isOn: $settings.hrvReminderOn)
-                    if settings.hrvReminderOn {
-                        DatePicker("Time", selection: reminderTime, displayedComponents: .hourAndMinute)
+                    Toggle("Workout reminders", isOn: $settings.workoutRemindersOn)
+                    if settings.workoutRemindersOn, Reminders.workoutRemindersPaused {
+                        Text("Paused: two in a row went unanswered. They come back when you confirm next week's plan.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondaryText)
                     }
                     Toggle("Daily creatine", isOn: creatineOn)
                     if meds.creatineReminderOn {
@@ -187,7 +179,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Reminders")
                 } footer: {
-                    Text("The morning check-in includes last night's HRV, so most people only need check-in reminders. Reminders are skipped once done. Medication and creatine reminders have a Taken button, and today's doses also show on your Lock Screen. Add the HRV widget from your Home Screen: hold an empty spot → Edit → Add Widget → Tensile.")
+                    Text("Two check-ins a day: a morning one for last night's HRV and how you feel, and an evening one for one win and how today felt, with tonight's bed-by time. Each is skipped once it's done. Workout reminders come 30 minutes before a planned training day only, with your if-then line; after two go unanswered they pause until you confirm the next week's plan. Medication and creatine reminders have a Taken button, and today's doses also show on your Lock Screen.")
                 }
 
                 Section {

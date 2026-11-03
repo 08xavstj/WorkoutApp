@@ -128,6 +128,25 @@ final class UserSettings {
     var checkInRemindersOn: Bool { didSet { defaults.set(checkInRemindersOn, forKey: "checkInRemindersOn") } }
     var morningCheckInMinutes: Int { didSet { defaults.set(morningCheckInMinutes, forKey: "morningCheckInMinutes") } }
     var eveningCheckInMinutes: Int { didSet { defaults.set(eveningCheckInMinutes, forKey: "eveningCheckInMinutes") } }
+    /// Monday "weekly review" reminder and its time (default 8:00).
+    var weeklyReviewOn: Bool { didSet { defaults.set(weeklyReviewOn, forKey: "weeklyReviewOn") } }
+    var weeklyReviewMinutes: Int { didSet { defaults.set(weeklyReviewMinutes, forKey: "weeklyReviewMinutes") } }
+
+    // MARK: Workout reminders, the weigh-in nudge and the weekly calorie target
+
+    /// Workout reminders 30 minutes before a planned slot (they pause by
+    /// themselves after two go unanswered; see `Reminders.WorkoutReminderLog`).
+    var workoutRemindersOn: Bool { didSet { defaults.set(workoutRemindersOn, forKey: "workoutRemindersOn") } }
+    /// The morning whose reminder last carried the weigh-in line (at most once a week).
+    var weighInNudgeDay: Date? { didSet { defaults.set(weighInNudgeDay, forKey: "weighInNudgeDay") } }
+    /// The calorie target in force this week; it moves on Mondays only, by at
+    /// most ±100 kcal (`CalorieBand`). Nil until there's measured maintenance.
+    var calorieTargetOverride: Double? { didSet { defaults.set(calorieTargetOverride, forKey: "calorieTargetOverride") } }
+    var calorieTargetOverrideDate: Date? { didSet { defaults.set(calorieTargetOverrideDate, forKey: "calorieTargetOverrideDate") } }
+    /// The goal the override was set for ("lose|0.5"); a changed goal starts fresh.
+    var calorieTargetOverrideGoal: String { didSet { defaults.set(calorieTargetOverrideGoal, forKey: "calorieTargetOverrideGoal") } }
+    /// "Target adjusted −60 kcal this week: …", empty when nothing changed this week.
+    var calorieAdjustmentNote: String { didSet { defaults.set(calorieAdjustmentNote, forKey: "calorieAdjustmentNote") } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -162,6 +181,14 @@ final class UserSettings {
         checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
         morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30
+        weeklyReviewOn = defaults.bool(forKey: "weeklyReviewOn")
+        weeklyReviewMinutes = defaults.object(forKey: "weeklyReviewMinutes") as? Int ?? 8 * 60
+        workoutRemindersOn = defaults.object(forKey: "workoutRemindersOn") as? Bool ?? true
+        weighInNudgeDay = defaults.object(forKey: "weighInNudgeDay") as? Date
+        calorieTargetOverride = defaults.object(forKey: "calorieTargetOverride") as? Double
+        calorieTargetOverrideDate = defaults.object(forKey: "calorieTargetOverrideDate") as? Date
+        calorieTargetOverrideGoal = defaults.string(forKey: "calorieTargetOverrideGoal") ?? ""
+        calorieAdjustmentNote = defaults.string(forKey: "calorieAdjustmentNote") ?? ""
     }
 
     /// Fills the profile from Apple Health (only fields Health actually has).

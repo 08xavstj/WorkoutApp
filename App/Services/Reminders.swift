@@ -12,6 +12,9 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var showMedications = false
     var checkIn: CheckInKind?
     var showProgressPhotos = false
+    /// The weekly review and this week's plan (Monday notification, Home card, "+" tab).
+    var showWeeklyReview = false
+    var showWeeklyPlan = false
     /// Bumped to bring the running workout back on screen (Live Activity tap).
     var openWorkout = 0
     /// Bumped when doses change outside the app (Live Activity, notification).
@@ -41,6 +44,8 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         case "photos": showProgressPhotos = true
         case "workout": openWorkout += 1
         case "checkin": openCheckIn(url.lastPathComponent == "evening" ? .evening : .morning)
+        case "review": showWeeklyReview = true
+        case "plan": showWeeklyPlan = true
         default: break
         }
     }
@@ -105,6 +110,10 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
                 break
             }
         }
+        if let dayKey = Reminders.workoutDayKey(fromIdentifier: identifier) {
+            // A tapped workout reminder counts as answered (see `Reminders.WorkoutReminderLog`).
+            Reminders.WorkoutReminderLog.noteTapped(dayKey: dayKey)
+        }
         if let link, let url = URL(string: link) {
             pendingLink = url
         }
@@ -116,7 +125,15 @@ extension Logger {
     nonisolated static let diagnostics = Logger(subsystem: "com.lontraindustries.workoutapp", category: "diagnostics")
 }
 
-/// Local notifications for the morning HRV reminder and medication doses.
+/// Local notifications: one morning check-in (which covers last night's HRV),
+/// one evening reflection (with tonight's bed-by window), workout reminders
+/// only before a planned slot, and medication doses.
+///
+/// Fewer, better-timed prompts: support should arrive when the person can act
+/// on it (Nahum-Shani et al., Ann Behav Med 2018), and the effect of repeated
+/// prompts decays with habituation (Klasnja et al., Ann Behav Med 2019:
+/// +107% early, +14% on average), so each kind is sent at most once a day,
+/// skipped once done, and workout reminders pause after two ignored in a row.
 nonisolated enum Reminders {
     static func registerCategories() {
         let taken = UNNotificationAction(identifier: DoseNotifications.takenAction, title: "Taken", options: [], icon: UNNotificationActionIcon(systemImageName: "checkmark.circle"))
@@ -138,80 +155,235 @@ nonisolated enum Reminders {
 
     // MARK: HRV
 
-    /// One reminder a day for the next week at `minutes` after midnight,
-    /// skipping today if HRV is already logged.
+    /// The separate HRV reminder is gone: last night's HRV is part of the
+    /// morning check-in notification (one morning prompt, one evening prompt;
+    /// docs/research/behaviour-change.md rec. 8). This only clears reminders
+    /// left over from older versions; the arguments are kept so call sites compile.
     static func scheduleHRV(enabled: Bool, minutes: Int, loggedToday: Bool) async {
-        let center = UNUserNotificationCenter.current()
-        let ids = (0..<7).map { "hrv|\($0)" }
-        center.removePendingNotificationRequests(withIdentifiers: ids)
-        guard enabled, await requestPermission() else { return }
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        for offset in 0..<7 {
-            if offset == 0 && loggedToday { continue }
-            guard let day = calendar.date(byAdding: .day, value: offset, to: today),
-                  let fire = fireDate(day: day, minutes: minutes, calendar: calendar), fire > .now else { continue }
-            let content = UNMutableNotificationContent()
-            content.title = "Log last night's HRV"
-            content.body = "Open Garmin Connect → HRV Status and add last night's average. Takes 10 seconds."
-            content.sound = .default
-            content.userInfo = ["link": "workoutapp://hrv"]
-            let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
-            let request = UNNotificationRequest(identifier: ids[offset], content: content,
-                                                trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false))
-            try? await center.add(request)
-        }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: (0..<7).map { "hrv|\($0)" })
     }
 
     // MARK: Check-ins
 
-    /// Morning and evening check-in reminders for the next week, skipping ones already done.
-    static func scheduleCheckIns(enabled: Bool, morningMinutes: Int, eveningMinutes: Int, morningDone: Bool, eveningDone: Bool) async {
+    /// Morning and evening reminders for the next week, skipping today's once done.
+    /// - Parameters:
+    ///   - morningDone: the morning check-in is saved. Today's prompt is skipped
+    ///     when it is and HRV is in too (or you don't type HRV at all).
+    ///   - hrvMissing: the check-in is saved but HRV isn't; today's prompt then
+    ///     asks only for HRV.
+    ///   - weighInNudge: add the weigh-in line to the first morning reminder
+    ///     (the caller sends it at most once a week).
+    ///   - bedByTonight: tonight's bed-by window ("21:50–22:20") for the evening reminder.
+    /// - Returns: the day whose morning reminder carries the weigh-in line, if any.
+    @discardableResult
+    static func scheduleCheckIns(enabled: Bool, morningMinutes: Int, eveningMinutes: Int, morningDone: Bool, eveningDone: Bool,
+                                 hrvMissing: Bool = false, weighInNudge: Bool = false, bedByTonight: String? = nil) async -> Date? {
         let center = UNUserNotificationCenter.current()
         let ids = (0..<7).flatMap { ["checkin|m|\($0)", "checkin|e|\($0)"] }
         center.removePendingNotificationRequests(withIdentifiers: ids)
-        guard enabled, await requestPermission() else { return }
+        guard enabled, await requestPermission() else { return nil }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
+        var nudgeDay: Date?
         for offset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
-            for (kind, minutes, done) in [("m", morningMinutes, morningDone), ("e", eveningMinutes, eveningDone)] {
-                if offset == 0 && done { continue }
-                guard let fire = fireDate(day: day, minutes: minutes, calendar: calendar), fire > .now else { continue }
-                let content = UNMutableNotificationContent()
-                if kind == "m" {
-                    content.title = "Morning check-in"
-                    content.body = "Last night's HRV and how you feel. 30 seconds."
-                    content.userInfo = ["link": "workoutapp://checkin/morning"]
-                } else {
-                    content.title = "Evening check-in"
-                    content.body = "Caffeine, drinks and stress today. 45 seconds."
-                    content.userInfo = ["link": "workoutapp://checkin/evening"]
-                }
-                content.sound = .default
-                let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
-                let request = UNNotificationRequest(identifier: "checkin|\(kind)|\(offset)", content: content,
-                                                    trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false))
-                try? await center.add(request)
+            let skipMorning = offset == 0 && morningDone && !hrvMissing
+            if !skipMorning, let fire = fireDate(day: day, minutes: morningMinutes, calendar: calendar), fire > .now {
+                let withNudge = weighInNudge && nudgeDay == nil
+                if withNudge { nudgeDay = day }
+                let content = morningContent(hrvOnly: offset == 0 && morningDone && hrvMissing, weighIn: withNudge)
+                await add(content, identifier: "checkin|m|\(offset)", at: fire, center: center, calendar: calendar)
+            }
+            let skipEvening = offset == 0 && eveningDone
+            if !skipEvening, let fire = fireDate(day: day, minutes: eveningMinutes, calendar: calendar), fire > .now {
+                let content = eveningContent(bedBy: offset == 0 ? bedByTonight : nil)
+                await add(content, identifier: "checkin|e|\(offset)", at: fire, center: center, calendar: calendar)
             }
         }
+        return nudgeDay
+    }
+
+    /// "Morning check-in: HRV and how you feel", or only the HRV when the rest is done.
+    static func morningContent(hrvOnly: Bool, weighIn: Bool) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = "Morning check-in"
+        if hrvOnly {
+            content.body = "Add last night's HRV; the rest of the check-in is done."
+            content.userInfo = ["link": "workoutapp://hrv"]
+        } else {
+            content.body = "Last night's HRV and how you feel. 30 seconds."
+            content.userInfo = ["link": "workoutapp://checkin/morning"]
+        }
+        if weighIn {
+            // Regular self-weighing goes with better weight control (Zheng et al., Obesity 2015;
+            // Madigan et al., IJBNPA 2015); the trend line needs 4+ readings over 10 days.
+            content.body += " Step on the scale too: weighing most mornings keeps your trend honest."
+        }
+        content.sound = .default
+        return content
+    }
+
+    /// Evening reflection: one win plus how the day felt (behaviour-change.md rec. 10),
+    /// with tonight's bed-by window when known (`BedtimeWindow`).
+    static func eveningContent(bedBy: String?) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = "Evening check-in"
+        content.body = "One win and how today felt. 45 seconds."
+        if let bedBy { content.body += " In bed by \(bedBy) tonight." }
+        content.userInfo = ["link": "workoutapp://checkin/evening"]
+        content.sound = .default
+        return content
+    }
+
+    private static func add(_ content: UNMutableNotificationContent, identifier: String, at fire: Date,
+                            center: UNUserNotificationCenter, calendar: Calendar) async {
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+        let request = UNNotificationRequest(identifier: identifier, content: content,
+                                            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false))
+        try? await center.add(request)
     }
 
     #if DEBUG
     /// For UI tests: the same notification as the daily check-in reminder, in 10 seconds.
     static func scheduleTestCheckIn(kind: String) async {
         guard await requestPermission() else { return }
-        let content = UNMutableNotificationContent()
         let morning = kind == "morning"
-        content.title = morning ? "Morning check-in" : "Evening check-in"
-        content.body = morning ? "Last night's HRV and how you feel. 30 seconds." : "Caffeine, drinks and stress today. 45 seconds."
-        content.userInfo = ["link": "workoutapp://checkin/\(morning ? "morning" : "evening")"]
-        content.sound = .default
+        let content = morning ? morningContent(hrvOnly: false, weighIn: false) : eveningContent(bedBy: nil)
         let request = UNNotificationRequest(identifier: "checkin|\(morning ? "m" : "e")|test", content: content,
                                             trigger: UNTimeIntervalNotificationTrigger(timeInterval: 10, repeats: false))
         try? await UNUserNotificationCenter.current().add(request)
     }
     #endif
+
+    // MARK: Workouts
+
+    /// A planned training slot from the weekly plan. The lead wires these from
+    /// `WeeklyPlanStore`; a workout reminder exists only for such a slot
+    /// (behaviour-change.md rec. 2 and 8: reminders fire only for pre-committed days).
+    struct PlannedSlot: Sendable, Equatable {
+        var start: Date
+        /// "Upper A", "Easy ride".
+        var name: String
+        /// The if-then line the user wrote ("If I'm late, I do the 15-minute version.").
+        var ifThen: String?
+
+        init(start: Date, name: String, ifThen: String? = nil) {
+            self.start = start
+            self.name = name
+            self.ifThen = ifThen
+        }
+    }
+
+    /// Minutes before the planned time (rec. 8: 30-60 minutes before a planned slot).
+    static let workoutLeadMinutes = 30
+    /// Ignored reminders in a row before they pause: each prompt spends attention
+    /// and repeated ones habituate (Klasnja et al., Ann Behav Med 2019).
+    static let ignoredBeforePause = 2
+
+    /// "2027-01-10": sortable, one per day.
+    static func dayKey(_ day: Date, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: day)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    static func workoutIdentifier(forDayKey key: String) -> String { "workout|\(key)" }
+
+    static func workoutDayKey(fromIdentifier identifier: String) -> String? {
+        let prefix = "workout|"
+        guard identifier.hasPrefix(prefix) else { return nil }
+        return String(identifier.dropFirst(prefix.count))
+    }
+
+    /// Workout reminders are paused after `ignoredBeforePause` went unanswered in a
+    /// row (no tap, no session that day). Settings says so; confirming the next
+    /// weekly plan resumes them.
+    static var workoutRemindersPaused: Bool { WorkoutReminderLog.isPaused }
+
+    /// Clears the pause and the ignored count. Call when the user confirms a weekly plan.
+    static func resumeWorkoutReminders() { WorkoutReminderLog.resume() }
+
+    /// One reminder per planned slot over the next week, `workoutLeadMinutes`
+    /// before it, with the user's if-then line in the body.
+    /// - Parameters:
+    ///   - slots: planned slots (from `WeeklyPlanStore`); none means no reminders.
+    ///   - trainedDays: start-of-day dates with a logged or watch workout, so an
+    ///     answered reminder (trained without tapping) doesn't count as ignored.
+    static func scheduleWorkoutReminders(slots: [PlannedSlot], enabled: Bool, trainedDays: Set<Date>, now: Date = .now) async {
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix("workout|") }
+        center.removePendingNotificationRequests(withIdentifiers: pending)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        WorkoutReminderLog.updatePause(trainedDays: trainedDays, today: today, calendar: calendar)
+        guard enabled, !WorkoutReminderLog.isPaused else { return }
+        let upcoming = slots.filter { $0.start > now }.sorted { $0.start < $1.start }
+        guard !upcoming.isEmpty, await requestPermission() else { return }
+        var scheduled: [String] = []
+        for slot in upcoming where scheduled.count < 7 {
+            let fire = slot.start.addingTimeInterval(-TimeInterval(workoutLeadMinutes * 60))
+            guard fire > now else { continue }
+            let key = dayKey(calendar.startOfDay(for: slot.start), calendar: calendar)
+            // One a day: a second slot the same day rides on the first.
+            guard !scheduled.contains(key) else { continue }
+            scheduled.append(key)
+            let content = UNMutableNotificationContent()
+            content.title = "\(slot.name) at \(slot.start.formatted(date: .omitted, time: .shortened))"
+            content.body = slot.ifThen ?? "Your planned session in 30 minutes. The short version counts too."
+            content.sound = .default
+            content.userInfo = ["link": "workoutapp://plan"]
+            await add(content, identifier: workoutIdentifier(forDayKey: key), at: fire, center: center, calendar: calendar)
+        }
+        WorkoutReminderLog.noteScheduled(dayKeys: scheduled, today: today, calendar: calendar)
+    }
+
+    /// Which workout reminders went out, which were tapped, and whether they're
+    /// paused. In UserDefaults so the notification delegate can write to it off
+    /// the main actor.
+    enum WorkoutReminderLog {
+        static let scheduledKey = "workoutRemindersScheduled"
+        static let tappedKey = "workoutRemindersTapped"
+        static let pausedKey = "workoutRemindersPaused"
+
+        static var isPaused: Bool { UserDefaults.standard.bool(forKey: pausedKey) }
+
+        static func noteTapped(dayKey: String) {
+            var tapped = UserDefaults.standard.stringArray(forKey: tappedKey) ?? []
+            guard !tapped.contains(dayKey) else { return }
+            tapped.append(dayKey)
+            UserDefaults.standard.set(Array(tapped.suffix(30)), forKey: tappedKey)
+        }
+
+        /// Keeps past days (they may still count as ignored) and replaces the upcoming ones.
+        static func noteScheduled(dayKeys: [String], today: Date, calendar: Calendar) {
+            let todayKey = Reminders.dayKey(today, calendar: calendar)
+            let past = (UserDefaults.standard.stringArray(forKey: scheduledKey) ?? []).filter { $0 < todayKey }
+            let merged = Array((past + dayKeys).sorted().suffix(30))
+            UserDefaults.standard.set(merged, forKey: scheduledKey)
+        }
+
+        /// Pauses when the last `ignoredBeforePause` past reminders were neither tapped nor followed by training.
+        static func updatePause(trainedDays: Set<Date>, today: Date, calendar: Calendar) {
+            guard !isPaused else { return }
+            let todayKey = Reminders.dayKey(today, calendar: calendar)
+            let scheduled = (UserDefaults.standard.stringArray(forKey: scheduledKey) ?? []).filter { $0 < todayKey }
+            let tapped = Set(UserDefaults.standard.stringArray(forKey: tappedKey) ?? [])
+            let trained = Set(trainedDays.map { Reminders.dayKey($0, calendar: calendar) })
+            var ignored = 0
+            for key in scheduled.sorted().reversed() {
+                if tapped.contains(key) || trained.contains(key) { break }
+                ignored += 1
+            }
+            if ignored >= ignoredBeforePause {
+                UserDefaults.standard.set(true, forKey: pausedKey)
+            }
+        }
+
+        static func resume() {
+            UserDefaults.standard.set(false, forKey: pausedKey)
+            UserDefaults.standard.removeObject(forKey: scheduledKey)
+            UserDefaults.standard.removeObject(forKey: tappedKey)
+        }
+    }
 
     // MARK: Medications
 
@@ -231,7 +403,7 @@ nonisolated enum Reminders {
     }
 
     /// The most dose reminders kept pending. iOS keeps only 64 per app, and
-    /// check-ins (14), HRV (7), the rest timer and snoozes need room too.
+    /// check-ins (14), workouts (up to 7), the rest timer and snoozes need room too.
     static let maxPendingDoses = 38
 
     /// Reminders for every untaken dose over the next 14 days (soonest first,
@@ -312,6 +484,34 @@ nonisolated enum Reminders {
             snapshot.save()
             WidgetCenter.shared.reloadAllTimelines()
         }
+    }
+
+    // MARK: - Weekly review
+
+    static let weeklyReviewIdentifier = "review|weekly"
+
+    /// One repeating reminder every Monday at `minutes` after midnight, opening
+    /// the weekly review. A new week is a "fresh start" landmark (Dai et al.,
+    /// Manag Sci 2014) and reviewing goals is what makes self-monitoring work
+    /// (Michie et al., Health Psychol 2009); a fixed, user-chosen time does as
+    /// well as inferred timing (Morrison et al., PLoS One 2017, cited from
+    /// memory in docs/research/behaviour-change.md).
+    static func scheduleWeeklyReview(enabled: Bool, minutes: Int) async {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [weeklyReviewIdentifier])
+        guard enabled, await requestPermission() else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Weekly review"
+        content.body = "Last week in plain numbers, then three changes for this week. Two minutes."
+        content.sound = .default
+        content.userInfo = ["link": "workoutapp://review"]
+        var components = DateComponents()
+        components.weekday = 2 // Monday
+        components.hour = minutes / 60
+        components.minute = minutes % 60
+        let request = UNNotificationRequest(identifier: weeklyReviewIdentifier, content: content,
+                                            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true))
+        try? await center.add(request)
     }
 }
 

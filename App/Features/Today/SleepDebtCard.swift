@@ -25,6 +25,14 @@ struct SleepDebtCard: View {
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                             .multilineTextAlignment(.leading)
+                        if let window = metrics.bedtimeWindow {
+                            // Tonight's bed-by window (`BedtimeWindow`): the wake time stays put
+                            // (Windred et al., Sleep 2024) and the repayment comes from going earlier.
+                            Text("In bed by \(window.windowText) tonight")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.primaryText)
+                                .multilineTextAlignment(.leading)
+                        }
                     }
                     Image(systemName: "chevron.right")
                         .font(.footnote.weight(.semibold))
@@ -135,8 +143,34 @@ struct LastNightSleepSheet: View {
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                bedByRows
             }
             .card(tint: Theme.sleep)
+        }
+    }
+
+    /// Tonight's bed-by window and why: need, debt repayment (at most an hour
+    /// a night, Kitamura et al., Sci Rep 2016) and your usual wake time, which
+    /// stays put because regular timing predicted mortality better than sleep
+    /// length (Windred et al., Sleep 2024); extra sleep improved sprint and
+    /// reaction times in athletes (Mah et al., Sleep 2011).
+    @ViewBuilder
+    private var bedByRows: some View {
+        if let window = metrics.bedtimeWindow {
+            Divider().overlay(Theme.separator)
+            Text("Tonight: in bed by \(window.windowText)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.primaryText)
+            Text(window.reason + ". Earlier to bed, not later up: a regular wake time predicted lower mortality more strongly than sleep length (Windred 2024), and athletes who extended their sleep ran faster and reacted quicker (Mah 2011). Debt is repaid an hour a night at most (Kitamura 2016).")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note = window.regularityNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
