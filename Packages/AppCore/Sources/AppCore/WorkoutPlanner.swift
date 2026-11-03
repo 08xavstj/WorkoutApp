@@ -65,7 +65,10 @@ public enum WorkoutFocus: String, Codable, Sendable, CaseIterable, Identifiable 
         }
     }
 
-    /// Slots in priority order; shorter sessions use the first few.
+    /// Slots in priority order; shorter sessions use the first few. Multi-joint
+    /// lifts come first: lifts done early in a session gain more strength,
+    /// while muscle growth doesn't depend on order (Nunes et al., Eur J Sport
+    /// Sci 2021; ACSM position stand, Med Sci Sports Exerc 2009).
     public var slots: [MovementSlot] {
         switch self {
         case .push: [.horizontalPress, .verticalPress, .inclinePress, .lateralRaise, .triceps, .chestFly]
@@ -125,10 +128,14 @@ public enum ExerciseCatalog {
             ex("Cable_Seated_Lateral_Raise", "Cable Lateral Raise", .cable),
             ex("Lateral_Raise_-_With_Bands", "Band Lateral Raise", nil, .bands)
         ],
+        // Overhead first: elbow extensions with the arm overhead (long head
+        // stretched) grew the triceps about 1.4-1.5x more than the same work
+        // with the arm at the side (Maeo et al., Eur J Sport Sci 2023).
         .triceps: [
+            ex("Cable_Rope_Overhead_Triceps_Extension", "Overhead Cable Triceps Extension", .cable),
+            ex("Dumbbell_One-Arm_Triceps_Extension", "Overhead Triceps Extension", .dumbbell),
             ex("Triceps_Pushdown_-_Rope_Attachment", "Rope Pushdown", .cable),
             ex("EZ-Bar_Skullcrusher", "EZ-Bar Skullcrusher", .ezBar, .bench),
-            ex("Dumbbell_One-Arm_Triceps_Extension", "Overhead Triceps Extension", .dumbbell),
             ex("Dips_-_Triceps_Version", "Dips", nil, .dipStation),
             ex("Bench_Dips", "Bench Dips", nil, .bench)
         ],
@@ -175,13 +182,18 @@ public enum ExerciseCatalog {
             ex("Barbell_Lunge", "Barbell Lunge", .barbell, .squatRack),
             ex("Bodyweight_Walking_Lunge", "Walking Lunge", nil)
         ],
+        // Seated first: with the hip bent the hamstrings work at longer
+        // lengths, and seated curls grew them more than lying curls (Maeo et
+        // al., Med Sci Sports Exerc 2021).
         .legCurl: [
-            ex("Lying_Leg_Curls", "Lying Leg Curl", .machine),
-            ex("Seated_Leg_Curl", "Seated Leg Curl", .machine)
+            ex("Seated_Leg_Curl", "Seated Leg Curl", .machine),
+            ex("Lying_Leg_Curls", "Lying Leg Curl", .machine)
         ],
         .legExtension: [
             ex("Leg_Extensions", "Leg Extension", .machine)
         ],
+        // Standing (knee straight) grew the gastrocnemius far more than seated
+        // calf raises (Kinoshita et al., Front Physiol 2023).
         .calves: [
             ex("Standing_Calf_Raises", "Standing Calf Raise", .machine),
             ex("Calf_Raise_On_A_Dumbbell", "Dumbbell Calf Raise", .dumbbell)
@@ -285,6 +297,15 @@ public struct WorkoutPlanner: Sendable {
     }
 
     /// Target RPE from recovery: train hard when recovered, back off when not.
+    ///
+    /// Adjusting effort to the day is autoregulation, which works for strength
+    /// (Larsen et al., PeerJ 2021). Steering by HRV-based readiness has small,
+    /// uncertain benefits in endurance training (Granero-Gallegos et al., IJERPH
+    /// 2020; Manresa-Rocamora et al., IJERPH 2021) and hasn't beaten fixed plans
+    /// for lifting, so the swing is kept small: 2-3.5 reps in reserve, never
+    /// skipping the session. Stopping 1-3 reps short of failure builds about as
+    /// much muscle as failure (Refalo et al., J Sports Sci 2024; ACSM position
+    /// stand, Med Sci Sports Exerc 2026).
     public static func targetRPE(recovery: Int?) -> Double {
         guard let recovery else { return 7.5 }
         switch recovery {
@@ -343,7 +364,7 @@ public struct WorkoutPlanner: Sendable {
             if let past = history[choice.id] {
                 planned.load = suggestedLoad(history: past, reps: reps, rpe: setRPE, kind: kind)
                 if let load = planned.load {
-                    planned.note = loadNote(load: load, kind: kind)
+                    planned.note = notes(load: load, history: past, reps: reps, rpe: setRPE, kind: kind)
                 }
             } else {
                 planned.note = "First time: pick a weight you can lift \(reps.upperBound) times with \(Int(10 - setRPE)) left in the tank."
@@ -365,24 +386,81 @@ public struct WorkoutPlanner: Sendable {
             guard exercises.count < exerciseCount, let choice = choose(slot) else { continue }
             exercises.append(prescribe(choice, slot: slot, minutes: minutes, sessionRPE: rpe, history: history))
         }
+        Self.fit(&exercises, minutes: minutes)
         return PlannedWorkout(focus: focus, title: focus.title, minutes: minutes, targetRPE: rpe, exercises: exercises, unit: gym.unit)
     }
 
+    /// Fewest sets an exercise is cut to so a session fits the time you picked.
+    /// Two sets per exercise is within the 2-3 the ACSM recommends (position
+    /// stand, Med Sci Sports Exerc 2026), and per-session strength gains level
+    /// off after about two sets (Remmert et al., SportRxiv 2025 preprint).
+    static let minimumSetsWhenShort = 2
+
+    /// Cuts sets until the estimated length fits `minutes`: always from the
+    /// exercise with the most sets, the later one on a tie, so the main lifts
+    /// keep theirs longest. If every exercise is down to two sets, the last
+    /// exercise goes (keeping at least three). With little time, fewer sets of
+    /// the big multi-joint lifts are the efficient choice (Iversen et al.,
+    /// Sports Med 2021).
+    static func fit(_ exercises: inout [PlannedExercise], minutes: Int) {
+        while estimatedMinutes(exercises) > minutes {
+            let trimmable = exercises.indices.filter { exercises[$0].sets > minimumSetsWhenShort }
+            if let index = trimmable.reversed().max(by: { exercises[$0].sets < exercises[$1].sets }) {
+                exercises[index].sets -= 1
+            } else if exercises.count > 3 {
+                exercises.removeLast()
+            } else {
+                return
+            }
+        }
+    }
+
+    /// The biggest jump in weight taken just for reaching the top of the rep
+    /// range: the ACSM suggests adding 2-10% at a time (position stand, Med Sci
+    /// Sports Exerc 2009).
+    static let routineJumpFraction = 0.10
+    /// When the next weight up is a bigger jump than that (light dumbbells,
+    /// coarse stacks), earn it by beating the top of the range by this many
+    /// reps first, as the ACSM's "1-2 reps over the desired number" rule does.
+    static let bigJumpExtraReps = 2
+
     /// Weight for the top of the rep range at the target RPE, from your best
     /// estimated 1RM, rounded down to something you can actually load. If you
-    /// beat the rep range last time at an easier effort, it moves up one jump.
+    /// reached the top of the range last time at the target effort or easier,
+    /// it moves up one jump (double progression); a jump of over 10% needs two
+    /// extra reps first.
     public func suggestedLoad(history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind) -> Double? {
         let repsInReserve = max(0, 10 - rpe)
         let effectiveReps = Double(reps.upperBound) + repsInReserve
         let target = history.bestEstimatedOneRepMax / (1 + effectiveReps / 30)
         guard var load = gym.load(atMost: target, on: kind) else { return nil }
-        let beatRange = history.lastReps >= reps.upperBound
-        let easier = (history.lastRPE ?? rpe) <= rpe
-        if beatRange && easier && load <= history.lastWeight + 0.001,
-           let next = gym.nextLoad(above: history.lastWeight, on: kind) {
+        if load <= history.lastWeight + 0.001,
+           let next = gym.nextLoad(above: history.lastWeight, on: kind),
+           history.lastReps >= reps.upperBound + (isBigJump(from: history.lastWeight, to: next) ? Self.bigJumpExtraReps : 0),
+           (history.lastRPE ?? rpe) <= rpe {
             load = next
         }
         return load
+    }
+
+    func isBigJump(from current: Double, to next: Double) -> Bool {
+        current > 0 && (next - current) / current > Self.routineJumpFraction + 0.0001
+    }
+
+    /// Plates or per-hand weight, plus a tip when the planner is holding you
+    /// at this weight because the next one up is a big jump.
+    func notes(load: Double, history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind) -> String? {
+        var parts: [String] = []
+        if let plates = loadNote(load: load, kind: kind) { parts.append(plates) }
+        if abs(load - history.lastWeight) < 0.001, history.lastReps >= reps.upperBound,
+           let next = gym.nextLoad(above: load, on: kind), isBigJump(from: load, to: next) {
+            let goal = reps.upperBound + Self.bigJumpExtraReps
+            if history.lastReps < goal {
+                let weight = next.formatted(.number.precision(.fractionLength(0...2)))
+                parts.append("The next weight up (\(weight) \(gym.unit.rawValue)) is a big jump: get \(goal) reps at this one first.")
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: ". ")
     }
 
     public func loadNote(load: Double, kind: EquipmentKind) -> String? {
@@ -400,10 +478,15 @@ public struct WorkoutPlanner: Sendable {
         }
     }
 
-    /// Rough session length: warm-up plus work and rest per set.
+    /// Rough session length: 5 minutes of warm-up, then per set about 45 s of
+    /// work plus the default rest (`RestTimer`, balanced style): 3.25 min for
+    /// big lifts, 2.25 min for small ones.
     public static func estimatedMinutes(_ exercises: [PlannedExercise]) -> Int {
+        let workSeconds = 45
+        let compound = Double(RestTimer.defaultSeconds(style: .balanced, compound: true) + workSeconds) / 60
+        let isolation = Double(RestTimer.defaultSeconds(style: .balanced, compound: false) + workSeconds) / 60
         let setMinutes = exercises.reduce(0.0) { total, exercise in
-            let perSet = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound == true ? 3.25 : 2.25
+            let perSet = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound == true ? compound : isolation
             return total + Double(exercise.sets) * perSet
         }
         return Int((5 + setMinutes).rounded())

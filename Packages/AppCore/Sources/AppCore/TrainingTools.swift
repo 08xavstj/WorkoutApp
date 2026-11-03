@@ -4,11 +4,14 @@ import Foundation
 
 /// Default rest between sets, from the user's training goal.
 ///
-/// - Muscle: rest of at least 60-90 s gave slightly more growth than shorter
+/// - Muscle: rest of more than 60 s gave slightly more growth than shorter
 ///   rest, with no clear extra benefit past ~90 s (Singer et al., Front Sports
-///   Act Living 2024), so 90 s for small lifts and 2 min for big ones.
+///   Act Living 2024), so 90 s for small lifts and 2 min for big ones, which
+///   need more time to keep their reps up.
 /// - Strength: 3 min between heavy sets lifted more and built more muscle than
-///   1 min in trained men (Schoenfeld et al., J Strength Cond Res 2016).
+///   1 min in trained men (Schoenfeld et al., J Strength Cond Res 2016); the
+///   ACSM suggests 2-3+ min for heavy multi-joint lifts (position stand, Med
+///   Sci Sports Exerc 2009).
 /// - Endurance / general health: shorter rests (60-90 s) keep the session
 ///   brisk; this is common practice rather than a tested optimum.
 public enum RestTimer {
@@ -86,11 +89,14 @@ extension WorkoutPlanner {
                 exerciseID: item.exerciseID, name: item.name, sets: max(1, item.sets), reps: item.reps,
                 rpe: rpe, load: nil, loadKind: kind, note: nil
             )
+            // History behind a suggested load, for the "big jump" tip.
+            var suggestedFrom: ExerciseHistory?
             if let fixed = item.weight, fixed > 0 {
                 planned.load = fixed
             } else if let past = history[item.exerciseID] {
                 if let kind, let suggested = suggestedLoad(history: past, reps: item.reps, rpe: rpe, kind: kind) {
                     planned.load = suggested
+                    suggestedFrom = past
                 } else if past.lastWeight > 0 {
                     planned.load = past.lastWeight
                 }
@@ -99,7 +105,11 @@ extension WorkoutPlanner {
                 planned.note = "First time: pick a weight you can lift \(item.reps.upperBound) times with \(left) left in the tank."
             }
             if let load = planned.load, let kind {
-                planned.note = loadNote(load: load, kind: kind)
+                if let suggestedFrom {
+                    planned.note = notes(load: load, history: suggestedFrom, reps: item.reps, rpe: rpe, kind: kind)
+                } else {
+                    planned.note = loadNote(load: load, kind: kind)
+                }
             }
             return planned
         }

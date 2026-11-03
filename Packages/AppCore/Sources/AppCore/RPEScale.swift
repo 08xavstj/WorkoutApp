@@ -59,7 +59,9 @@ public enum RPEScale {
 /// (Zourdos et al., J Strength Cond Res 2016). Ignoring RPE would make a set
 /// of 8 at RPE 8 look like a max effort and under-prescribe the next session.
 /// Rep-max equations lose accuracy past ~10-12 reps, so effective reps are
-/// capped at 15.
+/// capped at 15. Lifters misjudge reps left by about one on average, and
+/// guesses get worse further from failure and on high-rep sets (Halperin et
+/// al., Sports Med 2022), so at most 4 reps left are counted.
 public enum OneRepMax {
     public static func estimate(weight: Double, reps: Int, rpe: Double?) -> Double {
         guard reps > 0, weight > 0 else { return 0 }

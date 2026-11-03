@@ -247,3 +247,53 @@ struct EnergyTests {
         #expect(abs(result.exercise - 5 * 74.3) < 0.5) // (6 - 1) METs × kg × 1 h
     }
 }
+
+struct PlannerResearchTests {
+    let planner = WorkoutPlanner(gym: .commercialPounds)
+
+    @Test func sessionsFitTheTimePicked() {
+        for minutes in [20, 30, 45, 60] {
+            let plan = planner.plan(focus: .legs, minutes: minutes, recovery: 70, history: [:])
+            #expect(WorkoutPlanner.estimatedMinutes(plan.exercises) <= minutes)
+            #expect(plan.exercises.count >= 3)
+            #expect(plan.exercises.allSatisfy { $0.sets >= WorkoutPlanner.minimumSetsWhenShort })
+        }
+    }
+
+    @Test func fitTrimsTheExerciseWithMostSetsFirst() {
+        var exercises = [
+            PlannedExercise(exerciseID: "Barbell_Squat", name: "Squat", sets: 4, reps: 6...8, rpe: 8, load: nil, loadKind: .barbell, note: nil),
+            PlannedExercise(exerciseID: "Leg_Extensions", name: "Leg Extension", sets: 4, reps: 10...12, rpe: 9, load: nil, loadKind: .machine, note: nil),
+            PlannedExercise(exerciseID: "Standing_Calf_Raises", name: "Calf Raise", sets: 3, reps: 10...12, rpe: 9, load: nil, loadKind: .machine, note: nil),
+        ]
+        let before = WorkoutPlanner.estimatedMinutes(exercises)
+        WorkoutPlanner.fit(&exercises, minutes: before - 1)
+        // The later of the two 4-set exercises loses a set; the main lift keeps its sets.
+        #expect(exercises[0].sets == 4)
+        #expect(exercises[1].sets == 3)
+        #expect(exercises.count == 3)
+    }
+
+    @Test func bigJumpsNeedExtraRepsFirst() {
+        // Dumbbells go 5 lb at a time: from 20 lb, the next jump is 25%.
+        let gym = GymProfile.commercialPounds
+        let planner = WorkoutPlanner(gym: gym)
+        let topOfRange = ExerciseHistory(bestEstimatedOneRepMax: 32, lastWeight: 20, lastReps: 12, lastRPE: 9, lastDate: .now)
+        #expect(planner.suggestedLoad(history: topOfRange, reps: 10...12, rpe: 9, kind: .dumbbell) == 20)
+        let note = planner.notes(load: 20, history: topOfRange, reps: 10...12, rpe: 9, kind: .dumbbell)
+        #expect(note?.contains("big jump") == true)
+        let earned = ExerciseHistory(bestEstimatedOneRepMax: 34, lastWeight: 20, lastReps: 14, lastRPE: 9, lastDate: .now)
+        #expect(planner.suggestedLoad(history: earned, reps: 10...12, rpe: 9, kind: .dumbbell) == 25)
+    }
+
+    @Test func routineJumpsProgressAtTheTopOfTheRange() {
+        // A barbell at 185 lb: the next 5 lb is under 3%, so the top of the range is enough.
+        let history = ExerciseHistory(bestEstimatedOneRepMax: 234, lastWeight: 185, lastReps: 8, lastRPE: 8, lastDate: .now)
+        #expect(planner.suggestedLoad(history: history, reps: 6...8, rpe: 8, kind: .barbell) == 190)
+    }
+
+    @Test func stretchPositionExercisesComeFirst() {
+        #expect(ExerciseCatalog.options[.triceps]?.first?.id == "Cable_Rope_Overhead_Triceps_Extension")
+        #expect(ExerciseCatalog.options[.legCurl]?.first?.id == "Seated_Leg_Curl")
+    }
+}
