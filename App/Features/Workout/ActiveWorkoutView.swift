@@ -462,7 +462,13 @@ private struct ExerciseCard: View {
         let current = gym.unit.fromKilograms(set.weightKg)
         var next: Double?
         if let kind, gym.has(kind) {
-            next = up ? gym.nextLoad(above: current + 0.001, on: kind) : gym.load(atMost: current - 0.001, on: kind)
+            if up {
+                next = gym.nextLoad(above: current + 0.001, on: kind)
+            } else if let lighter = gym.achievableLoads(for: kind).last(where: { $0 < current - 0.001 }) {
+                next = lighter
+            }
+            // Nothing lighter on this equipment (e.g. an empty 45 lb bar):
+            // keep stepping down in small jumps, for a lighter or technique bar.
         }
         let fallback = gym.unit == .kg ? 2.5 : 5
         let value = next ?? max(0, current + (up ? fallback : -fallback))

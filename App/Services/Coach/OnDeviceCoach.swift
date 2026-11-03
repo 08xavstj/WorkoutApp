@@ -54,7 +54,12 @@ final class OnDeviceCoach {
             // The on-device context is small; start over and retry once.
             let fresh = makeSession(snapshot: snapshot)
             self.session = fresh
-            return try await fresh.respond(to: message).content
+            do {
+                return try await fresh.respond(to: message).content
+            } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
+                self.session = nil
+                throw CoachError.unavailable("That was more than the on-device coach can handle at once. Try a shorter question, or switch the coach to Claude in Settings for detailed workout plans.")
+            }
         }
     }
 
@@ -79,7 +84,7 @@ struct TodayMetricsTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> String {
-        snapshot.todaySummary
+        snapshot.onDeviceTodaySummary
     }
 }
 
@@ -95,7 +100,7 @@ struct RecentWorkoutsTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> String {
-        snapshot.workoutsSummary
+        CoachSnapshot.capped(snapshot.workoutsSummary, CoachSnapshot.onDeviceWorkoutsBudget)
     }
 }
 
@@ -111,6 +116,6 @@ struct TrainerTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> String {
-        snapshot.trainerSummary
+        CoachSnapshot.capped(snapshot.trainerSummary, CoachSnapshot.onDeviceTrainerBudget)
     }
 }

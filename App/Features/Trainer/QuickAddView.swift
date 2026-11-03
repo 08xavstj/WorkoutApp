@@ -37,6 +37,12 @@ struct QuickAddView: View {
                     action("Log overnight HRV", "From your watch's app", "waveform.path.ecg", Theme.recoveryHigh) {
                         showingHRV = true
                     }
+                    NavigationLink {
+                        AlcoholLogView()
+                    } label: {
+                        row("Alcohol", "Log drinks by type and amount, for today or an earlier day", "wineglass.fill", Theme.sleep)
+                    }
+                    .buttonStyle(.plain)
                     action("Blood pressure", "Log a cuff reading or run the 7-day home check", "heart.text.square", Theme.heart) {
                         showingBloodPressure = true
                     }

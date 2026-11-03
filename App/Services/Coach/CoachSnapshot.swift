@@ -88,21 +88,51 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
 
     /// Human-readable summary of today's scores.
     var todaySummary: String {
+        (coreLines + extraLines).joined(separator: "\n")
+    }
+
+    /// Today's data for Apple's on-device model, whose context window is
+    /// only about 4,000 tokens: the core numbers, then extras while they fit.
+    var onDeviceTodaySummary: String {
+        var lines = coreLines
+        var used = lines.reduce(0) { $0 + $1.count }
+        for line in extraLines {
+            let piece = line.count > 600 ? String(line.prefix(600)) + "…" : line
+            guard used + piece.count <= Self.onDeviceTodayBudget else { continue }
+            lines.append(piece)
+            used += piece.count
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Characters, roughly 3-4 per token.
+    static let onDeviceTodayBudget = 3200
+    static let onDeviceWorkoutsBudget = 1400
+    static let onDeviceTrainerBudget = 1800
+
+    /// Weather, habits, vitals detail, medications and labs: useful, but the
+    /// first to drop when space is short.
+    private var extraLines: [String] {
+        var lines: [String] = []
+        if let name, !name.isEmpty { lines.append("The user's name is \(name).") }
+        if let weather { lines.append(weather) }
+        if let medications, !medications.isEmpty {
+            lines.append("Medications: " + medications.joined(separator: "; "))
+        }
+        if let health { lines.append(health) }
+        if let labs, !labs.isEmpty {
+            lines.append("Lab results (latest of each; mention ones outside the range without diagnosing, and suggest discussing them with a doctor): " + labs.joined(separator: "; "))
+        }
+        return lines
+    }
+
+    private var coreLines: [String] {
         func fmt(_ value: Double?, _ digits: Int = 1) -> String {
             value.map { $0.formatted(.number.precision(.fractionLength(digits))) } ?? "n/a"
         }
         var lines: [String] = []
         lines.append("Date: \(date.formatted(date: .complete, time: .omitted))")
-        if let name, !name.isEmpty { lines.append("The user's name is \(name).") }
-        if let weather { lines.append(weather) }
-        if let health { lines.append(health) }
         if let checkIns { lines.append(checkIns) }
-        if let medications, !medications.isEmpty {
-            lines.append("Medications: " + medications.joined(separator: "; "))
-        }
-        if let labs, !labs.isEmpty {
-            lines.append("Lab results (latest of each; mention ones outside the range without diagnosing, and suggest discussing them with a doctor): " + labs.joined(separator: "; "))
-        }
         lines.append("Strain today: \(fmt(strain)) % of 100 (target \(targetStrain ?? "n/a")). Cardio load \(fmt(cardioLoad, 0)), lifting load \(fmt(liftingLoad, 0)).")
         if let zoneMinutes {
             lines.append("Heart-rate zone minutes (Z1-Z5): \(zoneMinutes.map(String.init).joined(separator: ", ")).")
@@ -125,7 +155,20 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
             lines.append("Body weight: \(bodyMassKg.formatted(.number.precision(.fractionLength(1)))) kg.")
         }
         lines.append("Sleep: score \(sleepScore.map(String.init) ?? "n/a"), \(fmt(sleepHours)) h asleep of \(fmt(sleepNeedHours)) h needed, deep \(fmt(deepHours)) h, REM \(fmt(remHours)) h, \(sleepInterruptions.map(String.init) ?? "n/a") interruptions.")
-        return lines.joined(separator: "\n")
+        return lines
+    }
+
+    /// Cuts text to `limit` characters at a line break, noting what was left out.
+    static func capped(_ text: String, _ limit: Int) -> String {
+        guard text.count > limit else { return text }
+        var kept: [Substring] = []
+        var used = 0
+        for line in text.split(separator: "\n") {
+            guard used + line.count + 1 <= limit else { break }
+            kept.append(line)
+            used += line.count + 1
+        }
+        return kept.joined(separator: "\n") + "\n(more left out to save space)"
     }
 
     static func describe(_ plan: PlannedWorkout) -> String {

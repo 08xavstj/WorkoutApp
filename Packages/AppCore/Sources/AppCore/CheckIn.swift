@@ -62,9 +62,35 @@ public struct EveningCheckIn: Codable, Sendable, Equatable {
     public var nicotine: Bool?
     public var sauna: Bool?
     public var coldPlunge: Bool?
+    /// Drinks logged one by one (type, amount, strength). When present,
+    /// `drinks` and `lastDrinkMinutes` are worked out from these.
+    public var alcohol: [AlcoholEntry]?
 
     public init(day: Date) {
         self.day = day
+    }
+
+    /// Standard drinks from the itemised log, or nil if nothing was itemised.
+    public var standardDrinks: Double? {
+        guard let alcohol, !alcohol.isEmpty else { return nil }
+        return alcohol.reduce(0) { $0 + $1.standardDrinks }
+    }
+
+    /// Keeps the simple drink count and last-drink time in step with the
+    /// itemised log, so the rest of the app (recovery, illness watch,
+    /// patterns, coach) keeps working off `drinks`.
+    public mutating func syncDrinksFromAlcohol() {
+        guard let alcohol else { return }
+        if alcohol.isEmpty {
+            drinks = 0
+            lastDrinkMinutes = nil
+            self.alcohol = nil
+            return
+        }
+        let total = alcohol.reduce(0) { $0 + $1.standardDrinks }
+        // Any drink counts as at least one, so a small glass isn't recorded as none.
+        drinks = max(1, Int(total.rounded()))
+        lastDrinkMinutes = alcohol.compactMap(\.minutes).max()
     }
 
     /// Common sources, mg (USDA FoodData Central / product labels).
@@ -72,6 +98,99 @@ public struct EveningCheckIn: Codable, Sendable, Equatable {
         ("Coffee (8 oz)", 95), ("Espresso shot", 63), ("Energy drink", 120),
         ("Pre-workout", 200), ("Black tea", 47), ("Cola (12 oz)", 34),
     ]
+}
+
+// MARK: - Alcohol
+
+/// One drink: what it was, how much, and how strong.
+///
+/// A US standard drink is 14 g of pure alcohol (NIAAA), e.g. 12 oz of 5% beer,
+/// 5 oz of 12% wine or 1.5 oz of 40% spirits. Grams = millilitres × ABV ×
+/// 0.789 g/mL (the density of ethanol).
+public struct AlcoholEntry: Codable, Sendable, Equatable, Identifiable {
+    public enum Kind: String, Codable, Sendable, CaseIterable, Identifiable {
+        case beer, lightBeer, strongBeer, wine, sparkling, spirits, cocktail, cider, seltzer, sake
+
+        public var id: String { rawValue }
+
+        public var label: String {
+            switch self {
+            case .beer: "Beer"
+            case .lightBeer: "Light beer"
+            case .strongBeer: "IPA / strong beer"
+            case .wine: "Wine"
+            case .sparkling: "Champagne / prosecco"
+            case .spirits: "Spirits (shot)"
+            case .cocktail: "Cocktail / mixed drink"
+            case .cider: "Cider"
+            case .seltzer: "Hard seltzer"
+            case .sake: "Sake"
+            }
+        }
+
+        /// Typical strength, % alcohol by volume.
+        public var typicalABV: Double {
+            switch self {
+            case .beer: 5
+            case .lightBeer: 4.2
+            case .strongBeer: 7
+            case .wine: 12
+            case .sparkling: 12
+            case .spirits: 40
+            case .cocktail: 13
+            case .cider: 5
+            case .seltzer: 5
+            case .sake: 15
+            }
+        }
+
+        /// Common serving sizes, in millilitres.
+        public var servings: [(name: String, millilitres: Double)] {
+            switch self {
+            case .beer, .lightBeer, .strongBeer, .cider:
+                [("Can or bottle (12 oz)", 355), ("Pint (16 oz)", 473), ("Imperial pint", 568), ("Tallboy (24 oz)", 710)]
+            case .wine:
+                [("Glass (5 oz)", 148), ("Large glass (8 oz)", 237), ("Bottle", 750)]
+            case .sparkling:
+                [("Flute (5 oz)", 148), ("Bottle", 750)]
+            case .spirits:
+                [("Shot (1.5 oz)", 44), ("Double (3 oz)", 89)]
+            case .cocktail:
+                [("Cocktail (6 oz)", 180), ("Large (10 oz)", 300)]
+            case .seltzer:
+                [("Can (12 oz)", 355), ("Tall can (19 oz)", 562)]
+            case .sake:
+                [("Glass (6 oz)", 180), ("Small carafe (10 oz)", 300)]
+            }
+        }
+    }
+
+    public static let gramsPerStandardDrink = 14.0
+    static let ethanolDensity = 0.789
+
+    public var id: UUID
+    public var kind: Kind
+    public var millilitres: Double
+    /// % alcohol by volume.
+    public var abv: Double
+    /// When it was finished, minutes after midnight (can be over 24 h for after midnight).
+    public var minutes: Int?
+
+    public init(id: UUID = UUID(), kind: Kind, millilitres: Double, abv: Double? = nil, minutes: Int? = nil) {
+        self.id = id
+        self.kind = kind
+        self.millilitres = millilitres
+        self.abv = abv ?? kind.typicalABV
+        self.minutes = minutes
+    }
+
+    public var gramsOfAlcohol: Double {
+        max(0, millilitres) * max(0, abv) / 100 * Self.ethanolDensity
+    }
+
+    public var standardDrinks: Double {
+        gramsOfAlcohol / Self.gramsPerStandardDrink
+    }
 }
 
 // MARK: - Coaching from this morning's answers

@@ -875,8 +875,8 @@ private struct CalorieDetailsSheet: View {
                 }
                 if let summary = metrics.calories {
                     Section {
-                        Text(metrics.maintenance.map { "Your maintenance is \(whole($0.maintenance).formatted()) kcal, worked out from \($0.loggedDays) days of food and your weight trend." }
-                             ?? "Maintenance is estimated from your watch until there are 2 weeks of food logs and weigh-ins.")
+                        Text(metrics.maintenance.map { "Your maintenance is \(whole($0.maintenance).formatted()) kcal, worked out from \($0.loggedDays) fully logged days of food and your weight trend." }
+                             ?? "Maintenance is estimated from your watch until there are 14 fully logged days of food and enough weigh-ins.")
                         Text(metrics.goals.map { "Goal: \($0.title.lowercased()). Your daily target is maintenance adjusted for that goal." }
                              ?? "Set your goals on the Home tab to turn maintenance into a daily target.")
                     } header: {
@@ -900,8 +900,22 @@ private struct CalorieDetailsSheet: View {
                             row("Maintenance (your data)", maintenance.maintenance, bold: true)
                             row("Average eaten", maintenance.averageIntake)
                             LabeledContent("Weight trend", value: "\(maintenance.weeklyChangeKg >= 0 ? "+" : "")\(maintenance.weeklyChangeKg.formatted(.number.precision(.fractionLength(2)))) kg/week")
+                            if maintenance.partialDaysSkipped > 0 {
+                                Text("\(maintenance.partialDaysSkipped) day\(maintenance.partialDaysSkipped == 1 ? " looks" : "s look") only partly logged, so \(maintenance.partialDaysSkipped == 1 ? "it's" : "they're") left out.")
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                            if maintenance.creatineWaterRemovedKg > 0.05 {
+                                Text("About \(maintenance.creatineWaterRemovedKg.formatted(.number.precision(.fractionLength(1)))) kg of the weight change is likely water from starting creatine, so it isn't counted as fat or muscle. Set the start date on Creatine in Medications if it's wrong.")
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
                         } else {
-                            Text("Needs 14+ days of food logged and 4+ weigh-ins over 10+ days in the last 4 weeks.")
+                            let progress = metrics.maintenanceProgress
+                            Text(progress.map { p -> String in
+                                let skipped = p.partialDays > 0 ? " (\(p.partialDays) partly logged day\(p.partialDays == 1 ? "" : "s") don't count)" : ""
+                                return "\(p.fullyLoggedDays) of 14 fully logged days in the last 4 weeks\(skipped), and 4+ weigh-ins over 10+ days. Until then, maintenance comes from your watch."
+                            } ?? "Needs 14 fully logged days of food and 4+ weigh-ins over 10+ days in the last 4 weeks.")
                                 .font(.footnote)
                                 .foregroundStyle(Theme.secondaryText)
                         }

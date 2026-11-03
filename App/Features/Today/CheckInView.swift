@@ -181,11 +181,27 @@ struct CheckInView: View {
         } footer: {
             Text("For your usual \(CaffeineTiming.clockText(usualBedtime)) bedtime: last coffee by \(CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: usualBedtime, mg: 100))), pre-workout by \(CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: usualBedtime, mg: 200))). In a review of 24 studies, caffeine closer to bed than that cut sleep by about 45 minutes.")
         }
-        Section("Alcohol") {
-            Stepper("\(evening.drinks ?? 0) drinks", value: Binding(get: { evening.drinks ?? 0 }, set: { evening.drinks = $0 }), in: 0...20)
-            if (evening.drinks ?? 0) > 0 {
-                optionalTime("Last drink", \.lastDrinkMinutes, default: 21 * 60)
+        Section {
+            if let logged = store.evening(on: evening.day), let total = logged.standardDrinks {
+                NavigationLink {
+                    AlcoholLogView(day: evening.day)
+                } label: {
+                    LabeledContent("\(logged.alcohol?.count ?? 0) drink\(logged.alcohol?.count == 1 ? "" : "s") logged",
+                                   value: "\(total.formatted(.number.precision(.fractionLength(1)))) standard")
+                }
+            } else {
+                Stepper("\(evening.drinks ?? 0) drinks", value: Binding(get: { evening.drinks ?? 0 }, set: { evening.drinks = $0 }), in: 0...20)
+                if (evening.drinks ?? 0) > 0 {
+                    optionalTime("Last drink", \.lastDrinkMinutes, default: 21 * 60)
+                }
+                NavigationLink("Log by type and amount") {
+                    AlcoholLogView(day: evening.day)
+                }
             }
+        } header: {
+            Text("Alcohol")
+        } footer: {
+            Text("A quick count is fine. Logging the type and amount counts standard drinks for you. Forgot last night? Use Add → Alcohol.")
         }
         Section("Stress today") {
             ScalePicker(value: $evening.stress, labels: ["Calm", "Low", "Some", "High", "Very high"], color: Theme.recoveryModerate)
@@ -283,6 +299,11 @@ struct CheckInView: View {
                 }
             }
         case .evening:
+            // Drinks logged one by one were saved straight to the store; keep them.
+            if let logged = store.evening(on: evening.day), logged.alcohol != nil {
+                evening.alcohol = logged.alcohol
+                evening.syncDrinksFromAlcohol()
+            }
             store.save(evening)
         }
         dismiss()

@@ -53,6 +53,8 @@ final class DailyMetricsModel {
     private(set) var watchRestingPerDay: Double?
     /// Maintenance calories from food log + weight trend, once there's enough data.
     private(set) var maintenance: AdaptiveTDEE.Result?
+    /// How close the maintenance estimate is (fully logged days so far).
+    private(set) var maintenanceProgress: AdaptiveTDEE.Progress?
     /// kg per week from the weight trend.
     private(set) var weightTrendWeekly: Double?
     private(set) var goals: Goals?
@@ -421,7 +423,16 @@ final class DailyMetricsModel {
             async let nutrientTask = health.nutrientAverages(days: 7)
             let intake = ((try? await intakeSeries) ?? []).filter { $0.date < today }.map { DayValue(date: $0.date, value: $0.value) }
             let weights = ((try? await weightSeries) ?? []).map { DayValue(date: $0.date, value: $0.value) }
-            maintenance = AdaptiveTDEE.estimate(intake: intake, weights: weights, now: now)
+            // Water from starting creatine isn't tissue, so it's taken out of the trend.
+            let creatine = MedicationStore.medications().first {
+                $0.isActive && MedicationKnowledge.match($0.name)?.id == "creatine"
+            }
+            let loading = creatine.map { $0.dose.contains("20") } ?? false
+            let expected = calories?.projected
+            maintenance = AdaptiveTDEE.estimate(intake: intake, weights: weights, now: now,
+                                                creatineStart: creatine?.startDate, creatineLoading: loading,
+                                                expectedExpenditure: expected)
+            maintenanceProgress = AdaptiveTDEE.progress(intake: intake, weights: weights, now: now, expectedExpenditure: expected)
             weightTrendWeekly = WeightTrend.weeklyChange(weights.filter { $0.date >= today.addingTimeInterval(-28 * 86_400) })
             if let nutrients = try? await nutrientTask {
                 micronutrients = Micronutrients.assess(averages: nutrients.averages, daysLogged: nutrients.daysLogged, sex: settings.sex)

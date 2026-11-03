@@ -158,7 +158,10 @@ final class CheckInStore {
         if let evening = evening(on: Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now) {
             var line = "Last evening:"
             if let caffeine = evening.caffeineMg { line += " caffeine \(Int(caffeine)) mg," }
-            if let drinks = evening.drinks { line += " \(drinks) drinks," }
+            if let total = evening.standardDrinks, let items = evening.alcohol {
+                let kinds = Dictionary(grouping: items, by: \.kind).map { "\($0.value.count) \($0.key.label.lowercased())" }.sorted()
+                line += " \(total.formatted(.number.precision(.fractionLength(1)))) standard drinks (\(kinds.joined(separator: ", ")))" + (evening.lastDrinkMinutes.map { ", last at \(DrinkVolume.clock($0))" } ?? "") + ","
+            } else if let drinks = evening.drinks { line += " \(drinks) drinks," }
             if let stress = evening.stress { line += " stress \(stress)/5," }
             parts.append(String(line.dropLast()))
         }
