@@ -1,18 +1,28 @@
 import Foundation
 
 /// Training load trend: this week's average daily load compared with your
-/// usual (last 4 weeks), on the strain scale.
+/// usual (the 3 weeks before it), on the strain scale.
 ///
 /// This is a description, not an injury predictor. The acute:chronic ratio's
-/// link with injury hasn't held up (Impellizzeri et al., Sports Med 2021,
-/// "Time to dismiss the ACWR"), so the app only flags big jumps, which are
-/// worth easing into.
+/// link with injury hasn't held up (Impellizzeri et al., IJSPP 2020; "Time to
+/// dismiss the ACWR", Sports Med 2021), so the app only flags big jumps, which
+/// are worth easing into (Gabbett, Br J Sports Med 2016).
+///
+/// "Usual" leaves out the current week ("uncoupled"). When the week being
+/// judged is also inside the 4-week average, the ratio is pulled towards 1 and
+/// can never pass 4 (Lolli et al., Br J Sports Med 2019); without it, "50% more
+/// than usual" means exactly that. Plain averages are used rather than
+/// exponentially weighted ones: neither has been shown to be better (Williams
+/// et al. 2017 vs Sampson et al. 2017, Br J Sports Med), and averages are
+/// easier to explain.
 public struct TrainingLoadCalculator: Sendable {
     public var calculator = StrainCalculator()
-    /// "Your usual": 80-130% of the 4-week average.
+    /// "Your usual": 80-130% of the previous 3 weeks' average.
     public var usualRatio: ClosedRange<Double> = 0.8...1.3
     /// More than 50% above usual counts as a big jump.
     public var spikeRatio = 1.5
+    /// Days in the "this week" window.
+    public static let acuteDays = 7
 
     public init() {}
 
@@ -26,17 +36,19 @@ public struct TrainingLoadCalculator: Sendable {
         /// Your usual range on the same scale.
         public var usual: ClosedRange<Double>
         public var status: Status
-        /// This week vs the 4-week average, e.g. 1.2 = 20% more.
+        /// This week vs the weeks before it, e.g. 1.2 = 20% more.
         public var ratio: Double?
     }
 
     /// - Parameter dailyLoads: one value per day, oldest first, ideally 28 days.
+    ///   The last 7 are "this week"; the ones before are "usual" (at least 7).
     public func evaluate(dailyLoads: [Double]) -> Result {
-        let recent = dailyLoads.suffix(7)
+        let recent = dailyLoads.suffix(Self.acuteDays)
+        let earlier = dailyLoads.dropLast(Self.acuteDays)
         let acute = recent.isEmpty ? 0 : recent.reduce(0, +) / Double(recent.count)
-        let chronic = dailyLoads.isEmpty ? 0 : dailyLoads.reduce(0, +) / Double(dailyLoads.count)
+        let chronic = earlier.isEmpty ? 0 : earlier.reduce(0, +) / Double(earlier.count)
         let value = calculator.strain(forLoad: acute)
-        guard dailyLoads.count >= 14, chronic > 0 else {
+        guard dailyLoads.count >= 2 * Self.acuteDays, chronic > 0 else {
             return Result(value: value, usual: 0...0, status: .calibrating, ratio: nil)
         }
         let low = calculator.strain(forLoad: chronic * usualRatio.lowerBound)

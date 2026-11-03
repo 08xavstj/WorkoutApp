@@ -54,7 +54,18 @@ struct StrainCalculatorTests {
         let result = calculator.dailyStrain(heartRate: samples, strengthSessions: [session], profile: profile)
         #expect(result.liftingLoad == calculator.rpeLoad(for: session))
         #expect(result.cardioLoad == 0)
-        #expect((57...69).contains(result.strain))
+        // 480 sRPE units x 0.33 ≈ 158 TRIMP ≈ 72%.
+        #expect((66...77).contains(result.strain))
+    }
+
+    @Test func liftingAndCardioThatFeelEquallyHardCountAboutTheSame() {
+        // An hour of cardio at 75% of reserve feels "hard" (CR-10 ~6); an hour
+        // of lifting rated 6 should carry about the same load (sRPE is meant
+        // to compare across exercise modes).
+        let run = calculator.dailyStrain(heartRate: steady(bpm: bpm(atReserve: 0.75), minutes: 60, from: start), strengthSessions: [], profile: profile)
+        let session = StrengthSessionSummary(start: start, end: start.addingTimeInterval(3600), sessionRPE: 6)
+        let lift = calculator.rpeLoad(for: session)
+        #expect(abs(lift - run.totalLoad) / run.totalLoad < 0.15)
     }
 
     @Test func gymHeartRateIsNotCountedTwice() {

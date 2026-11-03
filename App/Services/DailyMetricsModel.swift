@@ -320,7 +320,11 @@ final class DailyMetricsModel {
             restingHeartRate = todayVitals.restingHeartRate
             hrv = todayVitals.hrvMilliseconds
             hrvIsManual = hrv != nil && typedToday
-            let profile = settings.heartRateProfile(restingHeartRate: todayVitals.restingHeartRate ?? base.meanRHR)
+            // Heart-rate reserve uses your baseline resting heart rate (whole
+            // bpm), not today's: a high reading after a bad night or a drink
+            // shouldn't shrink every past day's strain, and a steady value
+            // keeps the 28-day cache valid.
+            let profile = settings.heartRateProfile(restingHeartRate: base.meanRHR.map { $0.rounded() } ?? todayVitals.restingHeartRate)
             heartRateProfile = profile
 
             // Strain for each of the last 28 days (today last). Past days come from
@@ -367,8 +371,10 @@ final class DailyMetricsModel {
             usualTrainingStrain = StrainCalculator.usualTrainingStrain(days.dropLast().map(\.1.strain))
             recentTrainingDays = Set(days.filter { $0.1.strain >= 25 }.map(\.0))
             let loadCalculator = TrainingLoadCalculator()
-            cardioLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.cardioLoad))
-            muscularLoad = loadCalculator.evaluate(dailyLoads: days.map(\.1.liftingLoad))
+            // Completed days only: today isn't over, so it would make this week read low.
+            let completeDays = days.dropLast()
+            cardioLoad = loadCalculator.evaluate(dailyLoads: completeDays.map(\.1.cardioLoad))
+            muscularLoad = loadCalculator.evaluate(dailyLoads: completeDays.map(\.1.liftingLoad))
 
             var sleepCalculator = self.sleepCalculator
             sleepCalculator.baseSleepNeedHours = settings.sleepNeedHours

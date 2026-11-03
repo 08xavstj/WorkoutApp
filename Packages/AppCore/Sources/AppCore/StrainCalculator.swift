@@ -3,26 +3,39 @@ import Foundation
 /// Daily strain as a percentage (0-100), built from two kinds of load:
 ///
 /// 1. **Cardio load** - Banister TRIMP from heart rate (time x intensity,
-///    weighted exponentially so hard minutes count much more than easy ones).
+///    weighted exponentially so hard minutes count much more than easy ones),
+///    summed minute by minute.
 /// 2. **Lifting load** - session RPE x minutes (Foster's sRPE). Heart rate badly
-///    undercounts lifting because you rest between sets, so a gym session counts
-///    as whichever is higher: its heart-rate load or its RPE load.
+///    undercounts lifting (rest between sets; the pressor response isn't
+///    metabolic work), so a gym session counts as whichever is higher: its
+///    heart-rate load or its RPE load (Foster et al., J Strength Cond Res 2001).
 ///
 /// Load maps onto 0-100% with a saturating curve, so going from 85% to 90% takes
 /// much more work than going from 40% to 45%.
 ///
 /// Calibration (30-year-old man, resting 60, max 187):
 /// - an hour's run at 75% of heart-rate reserve ≈ 62%;
-/// - an hour of hard lifting (session RPE 8) ≈ 61%; 45 min at RPE 7 ≈ 46%;
+/// - an hour of hard lifting (session RPE 8) ≈ 72%; 45 min at RPE 7 ≈ 56%;
 /// - a brisk 60-minute walk (35% of reserve) ≈ 20%;
 /// - a day of sitting, standing and light chores ≈ 0-10%.
+///
+/// See docs/research/strain-science.md for the evidence behind each choice.
 public struct StrainCalculator: Sendable {
-    /// Load at which strain reaches ~63% of the scale. This and `rpeToTrimp`
-    /// are the app's calibration choices; no study defines them.
+    /// Load at which strain reaches ~63% of the scale (≈ an hour at 75% of
+    /// heart-rate reserve). The app's calibration choice; no study defines a
+    /// 0-100 scale for TRIMP.
     public var saturationLoad: Double = 126
-    /// Converts sRPE units into TRIMP-equivalent units. Calibrated so a hard
-    /// hour of lifting (RPE 8) lands close to a moderate hour-long run.
-    public var rpeToTrimp: Double = 0.25
+    /// Converts sRPE units (CR-10 x minutes) into Banister TRIMP units, so equal
+    /// perceived effort counts the same whatever the mode. sRPE is meant to be
+    /// comparable across exercise types (Foster et al. 2001; Haddad et al.,
+    /// Front Neurosci 2017) and is valid for lifting (Day et al. 2004; Sweet et
+    /// al. 2004, J Strength Cond Res). Banister TRIMP per sRPE unit in steady
+    /// cardio is ≈ 0.28 at "moderate" (CR-10 3, ~50% of reserve), ≈ 0.34-0.40 at
+    /// "hard" (CR-10 5-6, ~75%) and ≈ 0.42 at "very hard" (CR-10 7, ~87%), using
+    /// ACSM's %HRR-to-RPE bands. 0.33 sits at the conservative end of "hard".
+    /// (Was 0.25, which counted a lifting session as ~70% of a run that felt
+    /// just as hard.)
+    public var rpeToTrimp: Double = 0.33
     /// Session RPE assumed when the workout wasn't rated.
     public var defaultRPE: Double = 6.5
     /// Gaps between heart-rate samples longer than this are not counted.
@@ -32,7 +45,8 @@ public struct StrainCalculator: Sendable {
     /// shouldn't fill a long gap after it.
     public var maxMinutesPerSample: Double = 2
     /// Heart rate below this fraction of reserve doesn't add strain. 30% is
-    /// the bottom of "light" intensity (ACSM); below it is everyday living
+    /// the bottom of "light" intensity (30-39% HRR; ACSM's Guidelines for
+    /// Exercise Testing and Prescription, 10th ed. 2018); below it is everyday living
     /// (sitting, standing, pottering), which Banister TRIMP wasn't designed
     /// to count and which would otherwise pile up over a whole day.
     public var minimumReserveFraction: Double = 0.3
@@ -91,7 +105,12 @@ public struct StrainCalculator: Sendable {
         )
     }
 
-    /// Banister TRIMP for a stretch of time at one heart rate.
+    /// Banister TRIMP for a stretch of time at one heart rate: minutes x ΔHR x
+    /// a·e^(b·ΔHR), with ΔHR the fraction of heart-rate reserve and a, b fitted
+    /// to the typical blood-lactate curve of men (0.64, 1.92) and women (0.86,
+    /// 1.67) (Banister 1991; Morton, Fitz-Clarke & Banister, J Appl Physiol 1990).
+    /// Summing short stretches, rather than using a session's average heart
+    /// rate, keeps intervals from being undercounted by the exponential.
     public func trimp(minutes: Double, bpm: Double, profile: HeartRateProfile) -> Double {
         let fraction = profile.reserveFraction(for: bpm)
         guard fraction >= minimumReserveFraction else { return 0 }

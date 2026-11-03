@@ -62,7 +62,7 @@ struct StrainPlannerTests {
 
     @Test func rankingPrefersOptionsThatLandInRange() {
         let options = [
-            StrainPlanner.Option(id: "short", kind: .strength, title: "Short", detail: "", minutes: 20, load: planner.liftingLoad(minutes: 20, rpe: 6)),
+            StrainPlanner.Option(id: "short", kind: .strength, title: "Short", detail: "", minutes: 15, load: planner.liftingLoad(minutes: 15, rpe: 6)),
             StrainPlanner.Option(id: "push45", kind: .strength, title: "Push", detail: "", minutes: 45, load: planner.liftingLoad(minutes: 45, rpe: 8)),
             StrainPlanner.Option(id: "huge", kind: .strength, title: "Huge", detail: "", minutes: 180, load: planner.liftingLoad(minutes: 180, rpe: 10))
         ]
@@ -133,6 +133,23 @@ struct TrainingLoadTests {
     @Test func easyWeekIsLighter() {
         let loads = Array(repeating: 80.0, count: 21) + Array(repeating: 20.0, count: 7)
         #expect(TrainingLoadCalculator().evaluate(dailyLoads: loads).status == .lighter)
+    }
+
+    @Test func usualLeavesOutThisWeek() {
+        // 40% more than the 3 weeks before. With this week inside the 4-week
+        // average (coupled), the ratio would read 1.27 and look "steady".
+        let loads = Array(repeating: 40.0, count: 21) + Array(repeating: 56.0, count: 7)
+        let result = TrainingLoadCalculator().evaluate(dailyLoads: loads)
+        #expect(abs((result.ratio ?? 0) - 1.4) < 1e-9)
+        #expect(result.status == .building)
+    }
+
+    @Test func uncoupledRatioIsNotCapped() {
+        // Coupled ratios can't pass 2 with 14 days of data; uncoupled ones can.
+        let loads = Array(repeating: 20.0, count: 7) + Array(repeating: 80.0, count: 7)
+        let result = TrainingLoadCalculator().evaluate(dailyLoads: loads)
+        #expect(abs((result.ratio ?? 0) - 4) < 1e-9)
+        #expect(result.status == .spike)
     }
 
     @Test func trendDirection() {
