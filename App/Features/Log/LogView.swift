@@ -81,25 +81,14 @@ struct LogView: View {
         }
     }
 
-    // Temporary until wave 2 moves them (docs/research/ux-audit.md 4.3): this
-    // week's plan → Fitness › This week, medications → Health › Records,
-    // gym equipment → Settings › Training, history → Fitness › Workouts.
-    // Saved workouts already has its button at the top of this screen.
+    // Gym equipment stays here until Settings gets its Training section
+    // (docs/research/ux-audit.md 4.3, wave 3). The plan, medications and
+    // history moved to Fitness › This week, Health › Records and Fitness ›
+    // Workouts.
     private var moreSection: some View {
-        Section("More") {
-            Button { router.showWeeklyPlan = true } label: {
-                LogRow(title: "This week's plan", detail: "Your training days", icon: "calendar.badge.clock")
-            }
-            Button { router.showMedications = true } label: {
-                LogRow(title: "Medications", detail: "Doses and reminders", icon: "pills.fill")
-            }
+        Section("Gym") {
             Button { showingGym = true } label: {
                 LogRow(title: "Gym equipment", detail: gym.isConfigured ? gym.profile.name : "Set up your equipment and weights", icon: "slider.horizontal.3")
-            }
-            NavigationLink {
-                WorkoutHistoryView()
-            } label: {
-                LogRow(title: "Workout history", detail: "Every session you've logged", icon: "calendar", opensForm: false)
             }
         }
     }

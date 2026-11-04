@@ -35,18 +35,24 @@ final class BreathingLog {
     var latest: BreathingSession? { sessions.max { $0.end < $1.end } }
 }
 
-// MARK: - Offer on the Home strain card
+// MARK: - Offer on Today (Up next and the Strain sheet)
 
 /// One row offering a 5-minute session on easy (HRV-below-normal) days and
 /// after a stressful day in the evening check-in (`PacedBreathing.isOffered`;
-/// competitors.md item 6).
+/// competitors.md item 6). Shown as an Up next row on Today and in the
+/// Strain sheet (docs/research/ux-audit.md 4.3).
 struct BreathingOfferRow: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(CheckInStore.self) private var checkIns
     @State private var showing = false
 
+    /// Whether the row shows today, so lists (Up next) can count it.
+    static func isOffered(metrics: DailyMetricsModel, checkIns: CheckInStore) -> Bool {
+        PacedBreathing.isOffered(easyDay: metrics.trainEasyToday, eveningStress: checkIns.evening()?.stress)
+    }
+
     var body: some View {
-        if PacedBreathing.isOffered(easyDay: metrics.trainEasyToday, eveningStress: checkIns.evening()?.stress) {
+        if Self.isOffered(metrics: metrics, checkIns: checkIns) {
             Button { showing = true } label: {
                 HStack(spacing: 10) {
                     IconBadge(systemName: "wind", color: Theme.oxygen, size: 36)
@@ -63,7 +69,9 @@ struct BreathingOfferRow: View {
                     Image(systemName: "chevron.right")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
                 }
+                .frame(minHeight: 44)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -89,6 +97,9 @@ struct BreathingView: View {
     @State private var heartRateBefore: Double?
     @State private var savedToHealth = false
     @State private var isFinishing = false
+    /// The countdown, 34 pt at the default text size, scaled with Dynamic Type
+    /// (ux-audit.md 4.5, P22).
+    @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 34
 
     var body: some View {
         NavigationStack {
@@ -166,7 +177,7 @@ struct BreathingView: View {
                 BreathingCircle(scale: reduceMotion ? 0.8 : PacedBreathing.scale(at: elapsed))
                     .frame(width: 260, height: 260)
                 Text(timeText(PacedBreathing.remaining(at: elapsed)))
-                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .font(.system(size: timerSize, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(Theme.primaryText)
                     .accessibilityLabel("\(Int(PacedBreathing.remaining(at: elapsed) / 60)) minutes left")

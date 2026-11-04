@@ -3,23 +3,42 @@ import HealthKit
 import AppCore
 
 /// Small daily habits with research behind them: when to stop caffeine,
-/// protein spread over meals, and whether weight is changing too fast.
-struct HabitsCard: View {
-    @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(CheckInStore.self) private var checkIns
-    @Environment(\.healthClient) private var health
-    @State private var caffeineToday: [DatedValue] = []
-    @State private var proteinToday: [DatedValue] = []
+/// protein spread over meals, movement breaks, and whether weight is changing
+/// too fast. They used to share one "Daily habits" card; in the redesign
+/// (docs/research/ux-audit.md 4.3, 4.6) each one shows where it's acted on:
+/// caffeine cut-off, movement nudge and weigh-in as Today › Up next rows
+/// (`UpNextCard`), protein per meal and "weight is changing fast" as lines
+/// on the Nutrition card, and cut × sleep and low energy availability in the
+/// Calorie details sheet (they were already there).
+///
+/// This model loads today's timed caffeine and protein entries and hourly
+/// steps from Apple Health and works out the rows' wording.
+@Observable
+final class TodayHabits {
+    private(set) var caffeineToday: [DatedValue] = []
+    private(set) var proteinToday: [DatedValue] = []
     // Movement breaks and the post-meal walk (`MovementBreaks`; Buffey 2022; Dunstan 2012).
-    @State private var movementNudge: MovementBreaks.Nudge?
-    /// The one nudge allowed per day: the day it was shown and which one.
-    @AppStorage("movementNudgeDay") private var movementNudgeDay = ""
-    @AppStorage("movementNudgeID") private var movementNudgeID = ""
+    private(set) var movementNudge: MovementBreaks.Nudge?
 
-    private var bedtime: Int { CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes) }
+    /// The one movement nudge allowed per day: the day it was shown and which
+    /// one (same keys the old Habits card kept in `@AppStorage`).
+    private static let nudgeDayKey = "movementNudgeDay"
+    private static let nudgeIDKey = "movementNudgeID"
+
+    // MARK: Caffeine
+
+    /// The caffeine row: a cut-off before bed, or a warning when today's last
+    /// caffeine was too late for the usual bedtime (`CaffeineTiming`).
+    struct Caffeine {
+        var isLate: Bool
+        var title: String
+        var detail: String
+        /// Last coffee (100 mg) by this time, minutes after midnight.
+        var cutoffMinutes: Int
+    }
 
     /// The latest caffeine today: from your food app if it sends times, else the evening check-in.
-    private var latestCaffeine: (minutes: Int, mg: Double)? {
+    private func latestCaffeine(checkIns: CheckInStore) -> (minutes: Int, mg: Double)? {
         if let last = caffeineToday.last(where: { $0.value > 0 }) {
             let parts = Calendar.current.dateComponents([.hour, .minute], from: last.date)
             return ((parts.hour ?? 0) * 60 + (parts.minute ?? 0), last.value)
@@ -30,53 +49,66 @@ struct HabitsCard: View {
         return nil
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CardLabel(text: "Daily habits", color: Theme.sleep)
-            caffeineRow
-            proteinRow
-            if let message = weightMessage {
-                row(icon: "scalemass.fill", color: Theme.recoveryModerateText, title: "Weight is changing fast", detail: message)
-            }
-            if weighInDue {
-                // Lose/gain goal with no weigh-in for 3+ days (`WeighInNudge`: Zheng 2015; Madigan 2015).
-                row(icon: "scalemass", color: Theme.nutrition, title: WeighInNudge.title,
-                    detail: WeighInNudge.detail(lastWeighIn: metrics.lastWeighIn))
-            }
-            // Cut × sleep debt: a lose goal with high 14-night sleep debt costs muscle
-            // (Nedeltcheva 2010; `CutAndSleep`). Advice only; the calorie loop is unchanged.
-            if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt) {
-                row(icon: "moon.zzz.fill", color: Theme.recoveryModerateText, title: CutAndSleep.title, detail: cut.message)
-            }
-            // Low energy availability over the last 7 logged days (`EnergyAvailability`: IOC REDs 2023; Loucks 2011).
-            if let availability = metrics.energyAvailability, let message = EnergyAvailability.message(availability, goals: metrics.goals) {
-                row(icon: "bolt.slash.fill", color: Theme.recoveryModerateText, title: "Energy availability is low", detail: message)
-            }
-            movementRow
+    func caffeine(metrics: DailyMetricsModel, checkIns: CheckInStore) -> Caffeine {
+        let bedtime = CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes)
+        let coffee = CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: 100)
+        let preWorkout = CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: 200)
+        let bed = CaffeineTiming.clockText(bedtime)
+        if let latest = latestCaffeine(checkIns: checkIns),
+           CaffeineTiming.isTooLate(minutes: latest.minutes, mg: latest.mg, bedtimeMinutes: bedtime) {
+            return Caffeine(
+                isLate: true,
+                title: "Caffeine at \(CaffeineTiming.clockText(latest.minutes)) is late for a \(bed) bedtime",
+                detail: "It can cut your sleep tonight. Next time, last coffee by \(CaffeineTiming.clockText(coffee)).",
+                cutoffMinutes: coffee
+            )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card(tint: Theme.sleep)
-        .task(id: "\(metrics.nutritionToday?.proteinGrams ?? 0)|\(metrics.steps ?? 0)") { await load() }
+        return Caffeine(
+            isLate: false,
+            title: "Last coffee by \(CaffeineTiming.clockText(coffee))",
+            detail: "Pre-workout by \(CaffeineTiming.clockText(preWorkout)), for your usual \(bed) bedtime. Caffeine closer to bed cut sleep by about 45 minutes in studies.",
+            cutoffMinutes: coffee
+        )
     }
 
-    // MARK: Movement breaks and the post-meal walk
+    // MARK: Protein per meal
 
-    /// At most one nudge a day (`MovementBreaks.assess`; the once-a-day rule is applied in `load`).
-    @ViewBuilder
-    private var movementRow: some View {
-        switch movementNudge {
-        case .postMealWalk:
-            row(icon: "figure.walk", color: Theme.nutrition, title: MovementBreaks.postMealTitle, detail: MovementBreaks.postMealDetail)
-        case .sedentary(let hours):
-            row(icon: "figure.walk.motion", color: Theme.strain, title: MovementBreaks.sedentaryTitle, detail: MovementBreaks.sedentaryDetail(hours: hours))
-        case nil:
-            EmptyView()
+    /// One line for the Nutrition card (`ProteinMeals`), or nil without a weight or entries.
+    func proteinLine(metrics: DailyMetricsModel) -> String? {
+        guard let weight = metrics.bodyMassKg,
+              let result = ProteinMeals.assess(proteinToday.map { (date: $0.date, grams: $0.value) }, bodyMassKg: weight) else { return nil }
+        switch result {
+        case .noMealTimes:
+            return "Your food app doesn't send meal times, so meals can't be told apart. Aim for about \(whole(weight * ProteinMeals.gramsPerKgPerMeal)) g at each of 4 meals."
+        case .meals(let meals, goodMeals: let good, perMealTarget: let target):
+            return "\(good) of \(ProteinMeals.targetMeals) meals with \(whole(target)) g+ protein. \(meals.count) meal\(meals.count == 1 ? "" : "s") logged today. Spreading protein over 4 meals of about \(whole(target)) g builds the most muscle."
         }
     }
 
-    /// Meal times from the food app's timed calorie entries (entries within
-    /// 90 minutes are one meal, as `ProteinMeals` groups them).
-    private func updateMovementNudge(hourlySteps: [MovementBreaks.HourSteps], energyEntries: [DatedValue]) {
+    // MARK: Weight pace
+
+    /// "Weight is changing fast" advice (`WeightPace`), for the Nutrition card.
+    static func weightMessage(metrics: DailyMetricsModel) -> String? {
+        guard let weekly = metrics.weightTrendWeekly, let weight = metrics.bodyMassKg else { return nil }
+        return WeightPace.message(WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: weight, goals: metrics.goals))
+    }
+
+    // MARK: Loading
+
+    func load(health: HealthKitClient, metrics: DailyMetricsModel) async {
+        let start = Calendar.current.startOfDay(for: .now)
+        caffeineToday = (try? await health.timedSamples(.dietaryCaffeine, unit: .gramUnit(with: .milli), from: start, to: .now)) ?? []
+        proteinToday = (try? await health.timedSamples(.dietaryProtein, unit: .gram(), from: start, to: .now)) ?? []
+        // Movement breaks: today's hourly steps and the times meals were logged.
+        let hourly = (try? await health.hourlySteps(for: .now)) ?? []
+        let energyEntries = (try? await health.timedSamples(.dietaryEnergyConsumed, unit: .kilocalorie(), from: start, to: .now)) ?? []
+        updateMovementNudge(hourlySteps: hourly, energyEntries: energyEntries, metrics: metrics)
+    }
+
+    /// At most one nudge a day (`MovementBreaks.assess`). Meal times come
+    /// from the food app's timed calorie entries (entries within 90 minutes
+    /// are one meal, as `ProteinMeals` groups them).
+    private func updateMovementNudge(hourlySteps: [MovementBreaks.HourSteps], energyEntries: [DatedValue], metrics: DailyMetricsModel) {
         let meals = ProteinMeals.meals(energyEntries.map { (date: $0.date, grams: $0.value) }).map(\.time)
         let nudge = MovementBreaks.assess(hourlySteps: hourlySteps, mealTimes: meals, wake: metrics.sleep?.wakeTime, goals: metrics.goals)
         let today = Dose.dayKey(Calendar.current.startOfDay(for: .now))
@@ -84,96 +116,14 @@ struct HabitsCard: View {
             movementNudge = nil
             return
         }
+        let defaults = UserDefaults.standard
         // One nudge a day: a second, different one waits for tomorrow.
-        if movementNudgeDay == today, movementNudgeID != nudge.id {
+        if defaults.string(forKey: Self.nudgeDayKey) == today, defaults.string(forKey: Self.nudgeIDKey) != nudge.id {
             movementNudge = nil
             return
         }
-        movementNudgeDay = today
-        movementNudgeID = nudge.id
+        defaults.set(today, forKey: Self.nudgeDayKey)
+        defaults.set(nudge.id, forKey: Self.nudgeIDKey)
         movementNudge = nudge
-    }
-
-    // MARK: Caffeine
-
-    @ViewBuilder
-    private var caffeineRow: some View {
-        let coffee = CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: 100)
-        let preWorkout = CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: 200)
-        let bed = CaffeineTiming.clockText(bedtime)
-        if let latest = latestCaffeine, CaffeineTiming.isTooLate(minutes: latest.minutes, mg: latest.mg, bedtimeMinutes: bedtime) {
-            row(icon: "cup.and.saucer.fill", color: Theme.recoveryModerateText,
-                title: "Caffeine at \(CaffeineTiming.clockText(latest.minutes)) is late for a \(bed) bedtime",
-                detail: "It can cut your sleep tonight. Next time, last coffee by \(CaffeineTiming.clockText(coffee)).")
-        } else {
-            row(icon: "cup.and.saucer.fill", color: Theme.sleep,
-                title: "Last coffee by \(CaffeineTiming.clockText(coffee))",
-                detail: "Pre-workout by \(CaffeineTiming.clockText(preWorkout)), for your usual \(bed) bedtime. Caffeine closer to bed cut sleep by about 45 minutes in studies.")
-        }
-    }
-
-    // MARK: Protein per meal
-
-    @ViewBuilder
-    private var proteinRow: some View {
-        if let weight = metrics.bodyMassKg,
-           let result = ProteinMeals.assess(proteinToday.map { (date: $0.date, grams: $0.value) }, bodyMassKg: weight) {
-            switch result {
-            case .noMealTimes:
-                row(icon: "fork.knife", color: Theme.nutrition, title: "Protein per meal",
-                    detail: "Your food app doesn't send meal times, so meals can't be told apart. Aim for about \(whole(weight * ProteinMeals.gramsPerKgPerMeal)) g at each of 4 meals.")
-            case .meals(let meals, goodMeals: let good, perMealTarget: let target):
-                row(icon: "fork.knife", color: Theme.nutrition,
-                    title: "\(good) of \(ProteinMeals.targetMeals) meals with \(whole(target)) g+ protein",
-                    detail: "\(meals.count) meal\(meals.count == 1 ? "" : "s") logged today. Spreading protein over 4 meals of about \(whole(target)) g builds the most muscle.")
-            }
-        }
-    }
-
-    // MARK: Weight pace
-
-    private var weightMessage: String? {
-        guard let weekly = metrics.weightTrendWeekly, let weight = metrics.bodyMassKg else { return nil }
-        return WeightPace.message(WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: weight, goals: metrics.goals))
-    }
-
-    // MARK: Weigh-in cadence
-
-    private var weighInDue: Bool {
-        WeighInNudge.isDue(goals: metrics.goals, lastWeighIn: metrics.lastWeighIn)
-    }
-
-    // MARK: Pieces
-
-    private func row(icon: String, color: Color, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(color)
-                .frame(width: 22)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private func load() async {
-        guard let health else { return }
-        let start = Calendar.current.startOfDay(for: .now)
-        caffeineToday = (try? await health.timedSamples(.dietaryCaffeine, unit: .gramUnit(with: .milli), from: start, to: .now)) ?? []
-        proteinToday = (try? await health.timedSamples(.dietaryProtein, unit: .gram(), from: start, to: .now)) ?? []
-        // Movement breaks: today's hourly steps and the times meals were logged.
-        let hourly = (try? await health.hourlySteps(for: .now)) ?? []
-        let energyEntries = (try? await health.timedSamples(.dietaryEnergyConsumed, unit: .kilocalorie(), from: start, to: .now)) ?? []
-        updateMovementNudge(hourlySteps: hourly, energyEntries: energyEntries)
     }
 }

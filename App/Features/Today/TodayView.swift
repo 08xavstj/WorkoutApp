@@ -2,46 +2,42 @@ import SwiftUI
 import SwiftData
 import AppCore
 
-/// Home: score rings and coaching, today's strain against its planned range
-/// with sessions that fit, nutrition and energy balance, and the health monitor.
+/// Today: how am I today, and what's the one thing to do next? Five blocks
+/// on a normal day (docs/research/ux-audit.md 4.6, with the Decisions):
+/// an alert slot (at most one), "Finish setting up" until it's done, the
+/// Scores card (primary), Up next, Nutrition, a Conditions row on days the
+/// weather matters, and the Health Monitor. Less, better-ordered information
+/// helped lay readers understand and choose (Peters et al., Med Care Res Rev
+/// 2007; ux-audit.md P7, P16, P20).
+///
+/// Moved off Today, still reachable: today's range and suggestions (Strain
+/// ring › Strain sheet), sleep debt (Sleep ring and the bed-by Up next row),
+/// this week's plan and consistency (Fitness › This week), the coach
+/// suggestions (Coach tab), the full medication list (Health › Records, the
+/// Log tab, Settings), and four more monitor tiles (Health › All measures).
 struct TodayView: View {
     let askCoach: (String) -> Void
 
     @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(UserSettings.self) private var settings
-    @Environment(WorkoutLauncher.self) private var launcher
     @Environment(AppRefresher.self) private var refresher
+    @Environment(\.healthClient) private var health
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
-    @State private var showingSettings = false
     @State private var showingHRVEntry = false
+    /// Caffeine, protein and movement from Apple Health, for Up next and Nutrition.
+    @State private var habits = TodayHabits()
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    header
-                    if let active = sessions.first(where: \.isActive) {
-                        ResumeWorkoutBanner(session: active) { launcher.activeSession = active }
-                    }
-                    if let error = metrics.errorMessage {
-                        HealthAccessCard(message: error)
-                    }
-                    IllnessAlertCard()
-                    ScoresCard()
-                    // This week: planned days, today's slot, the 4-week consistency score (never a streak).
-                    ConsistencyCard(sessions: sessions)
-                    SleepDebtCard()
-                    GoalsPromptCard()
-                    CheckInCard()
-                    ConditionsCard()
-                    StrainGoalCard(sessions: sessions)
-                    MedsTodayCard()
-                    EnergyCard()
-                    HydrationCard()
-                    HabitsCard()
+                    AlertSlot()
+                    TodaySetupCard()
+                    ScoresCard(sessions: sessions, askCoach: askCoach)
+                    UpNextCard(habits: habits)
+                    NutritionCard(habits: habits)
+                    ConditionsRow()
                     HealthMonitor(onEnterHRV: { showingHRVEntry = true })
-                    askCoachCard
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
@@ -53,722 +49,155 @@ struct TodayView: View {
                 TopGlow(colors: [Theme.Wash.peach, Theme.Wash.butter, Theme.Wash.sky])
             }
             .background(Theme.background)
-            .toolbarVisibility(.hidden, for: .navigationBar)
+            .navigationTitle("Today")
+            .navigationSubtitle(Text(subtitle))
+            .tabToolbar()
             .refreshable { await refresher.refresh() }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(isPresented: $showingHRVEntry) {
                 HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
                     .presentationDetents([.medium])
             }
+            .task(id: habitsKey) { await loadHabits() }
+            .modifier(WeeklyReviewReminderSync())
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                AppLogoHeader()
-                Spacer(minLength: 8)
-                SyncChip(isLoading: metrics.isLoading, lastUpdated: metrics.lastUpdated)
-                GlassIconButton(systemName: "gearshape.fill", label: "Settings") {
-                    showingSettings = true
-                }
+    /// The date and sync status under the large title. Pull down to refresh.
+    private var subtitle: String {
+        let date = Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        if metrics.isLoading {
+            return "\(date) · Syncing"
+        }
+        if let lastUpdated = metrics.lastUpdated {
+            return "\(date) · Updated \(lastUpdated.formatted(.relative(presentation: .named)))"
+        }
+        return "\(date) · Not synced yet"
+    }
+
+    /// Reloads caffeine, protein and steps when food or steps change.
+    private var habitsKey: String {
+        "\(metrics.nutritionToday?.proteinGrams ?? 0)|\(metrics.steps ?? 0)"
+    }
+
+    private func loadHabits() async {
+        guard let health else { return }
+        await habits.load(health: health, metrics: metrics)
+    }
+}
+
+/// Keeps the Monday review reminder ("review|weekly") in step with its
+/// settings. It ran on the This week card when that was on Home; kept here so
+/// it still follows Settings now that the card lives on Fitness.
+private struct WeeklyReviewReminderSync: ViewModifier {
+    @Environment(UserSettings.self) private var settings
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: "\(settings.weeklyReviewOn)|\(settings.weeklyReviewMinutes)") {
+                await Reminders.scheduleWeeklyReview(enabled: settings.weeklyReviewOn, minutes: settings.weeklyReviewMinutes)
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+    }
+}
+
+// MARK: - Finish setting up
+
+/// One "Finish setting up" checklist instead of separate prompts for goals,
+/// city, gym and plan, shown until everything is set up and hideable with
+/// "Not now" (ux-audit.md 4.6, H7; HIG Onboarding: postpone nonessential
+/// setup, P9). Goals, city and gym equipment are also in Settings; the plan
+/// is in Fitness › This week.
+private struct TodaySetupCard: View {
+    @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
+    @Environment(WeeklyPlanStore.self) private var plans
+    @Environment(AppRouter.self) private var router
+    @AppStorage("todaySetupDismissed") private var dismissed = false
+    @State private var step: SetupStep?
+
+    private enum SetupStep: String, Identifiable {
+        case goals, city, gym, plan
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        Group {
+            if !dismissed {
+                card
+            }
+        }
+        .sheet(item: $step) { step in
+            switch step {
+            case .goals: GoalsView()
+            case .city: LocationPicker()
+            case .gym: MyGymView()
+            case .plan: EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var card: some View {
+        let items = self.items
+        if let next = items.first(where: { !$0.isDone }).flatMap({ SetupStep(rawValue: $0.id) }) {
+            VStack(alignment: .trailing, spacing: 0) {
+                SetupChecklistCard(items: items, buttonTitle: Self.buttonTitle(next)) {
+                    open(next)
+                }
+                Button("Not now") { dismissed = true }
+                    .buttonStyle(.plain)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
-                Text(greeting)
-                    .font(.largeTitle.weight(.bold))
-                .foregroundStyle(Theme.primaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .accessibilityAddTraits(.isHeader)
+                    .frame(minHeight: 44)
+                    .contentShape(.rect)
+                    .accessibilityHint("Hides this card. Goals, city and gym equipment are also in Settings.")
             }
         }
-        .padding(.top, 8)
     }
 
-    private var greeting: String {
-        let hour = Calendar.current.component(.hour, from: .now)
-        let part = hour < 12 ? "Good morning" : (hour < 18 ? "Good afternoon" : "Good evening")
-        let name = settings.name.trimmingCharacters(in: .whitespaces)
-        return name.isEmpty ? part : "\(part), \(name)"
+    private var items: [SetupChecklistCard.Item] {
+        [
+            .init(id: SetupStep.goals.rawValue, title: "Set your goals",
+                  detail: "Sets your calories, protein and workouts.", systemImage: "target", isDone: settings.goalsSet),
+            .init(id: SetupStep.city.rawValue, title: "Add your city",
+                  detail: "Weather, air quality and daylight for smarter coaching.", systemImage: "location", isDone: settings.hasLocation),
+            .init(id: SetupStep.gym.rawValue, title: "Add your gym equipment",
+                  detail: "Workouts only use what your gym has.", systemImage: "dumbbell", isDone: gym.isConfigured),
+            .init(id: SetupStep.plan.rawValue, title: "Plan your training week",
+                  detail: "Pick your days and a time.", systemImage: "calendar", isDone: !plans.plans.isEmpty),
+        ]
     }
 
-    private var askCoachCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Ask your coach", systemImage: "sparkles")
-                .font(.headline)
-                .foregroundStyle(LinearGradient(colors: [Theme.sleep, Theme.lifting], startPoint: .leading, endPoint: .trailing))
-            ForEach(CoachModel.suggestions.prefix(3), id: \.self) { question in
-                Button {
-                    askCoach(question)
-                } label: {
-                    HStack {
-                        Text(question)
-                        Spacer()
-                        Image(systemName: "arrow.up.right")
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.primaryText)
-                    .padding(12)
-                    .background(Theme.cardRaised, in: .rect(cornerRadius: 14))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .card(tint: Theme.sleep)
-    }
-}
-
-// MARK: - Header pieces
-
-private struct SyncChip: View {
-    let isLoading: Bool
-    let lastUpdated: Date?
-
-    var body: some View {
-        // Plain status text (not a button): pull down to refresh.
-        HStack(spacing: 6) {
-            if isLoading {
-                ProgressView().controlSize(.mini)
-                Text("Syncing")
-            } else if let lastUpdated {
-                Circle().fill(Theme.recoveryHigh).frame(width: 8, height: 8)
-                Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
-            } else {
-                Circle().fill(Theme.secondaryText.opacity(0.5)).frame(width: 8, height: 8)
-                Text("Not synced yet")
-            }
-        }
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(Theme.secondaryText)
-        .lineLimit(1)
-        .minimumScaleFactor(0.8)
-    }
-}
-
-struct ResumeWorkoutBanner: View {
-    let session: WorkoutSession
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                IconBadge(systemName: "dumbbell.fill", color: Theme.lifting, size: 40)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(session.name) in progress")
-                        .font(.headline)
-                    TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
-                        Text(Duration.seconds(context.date.timeIntervalSince(session.startedAt)).formatted(.time(pattern: .hourMinuteSecond)))
-                            .font(.subheadline)
-                            .monospacedDigit()
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
-                Spacer()
-                Chip(text: "Resume", color: Theme.lifting, filled: true)
-            }
-            .foregroundStyle(Theme.primaryText)
-            .card()
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct HealthAccessCard: View {
-    let message: String
-    @Environment(\.healthClient) private var health
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Apple Health", systemImage: "heart.text.square")
-                .font(.headline)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
-            Text("If you already answered, open the Health app → your profile picture → Apps → Tensile, and tap Turn On All.")
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
-            HStack {
-                Button("Allow access") {
-                    Task { try? await health?.requestAuthorization() }
-                }
-                .buttonStyle(.borderedProminent)
-                if let url = URL(string: "x-apple-health://") {
-                    Link("Open Health app", destination: url)
-                        .buttonStyle(.bordered)
-                }
-            }
-        }
-        .card()
-    }
-}
-
-// MARK: - Scores
-
-private struct ScoresCard: View {
-    @Environment(DailyMetricsModel.self) private var metrics
-    @State private var showingRecovery = false
-    @State private var showingSleep = false
-
-    var body: some View {
-        let coaching = TrainerSuggestions.coachingLine(metrics: metrics)
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top) {
-                ScoreRing(
-                    title: "Strain",
-                    value: metrics.strain.map { "\(whole($0.strain))" } ?? "--",
-                    unit: metrics.strain == nil ? "" : "%",
-                    subtitle: metrics.targetStrain.map { "Range \(strainRangeText($0))" } ?? "Day strain",
-                    progress: (metrics.strain?.strain ?? 0) / StrainCalculator.maximum,
-                    colors: Theme.strainColors,
-                    size: 100
-                )
-                .frame(maxWidth: .infinity)
-                ScoreRing(
-                    title: "Recovery",
-                    value: metrics.recovery.map { "\($0.score)" } ?? "--",
-                    unit: metrics.recovery == nil ? "" : "%",
-                    subtitle: metrics.recovery.map { result in
-                        guard !result.isCalibrated else { return RecoveryWording.label(for: result.status) }
-                        let left = max(1, RecoveryCalculator().minimumBaselineDays - (metrics.baseline?.nights ?? 0))
-                        return "Learning · \(left) more night\(left == 1 ? "" : "s")"
-                    },
-                    progress: Double(metrics.recovery?.score ?? 0) / 100,
-                    colors: RecoveryWording.colors(for: metrics.recovery?.status),
-                    size: 100
-                )
-                .frame(maxWidth: .infinity)
-                .contentShape(.rect)
-                .onTapGesture { showingRecovery = true }
-                .accessibilityAddTraits(.isButton)
-                .accessibilityHint("Shows what moved your recovery")
-                ScoreRing(
-                    title: "Sleep",
-                    value: metrics.sleep.map { "\($0.score)" } ?? "--",
-                    unit: "",
-                    subtitle: metrics.sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
-                    progress: Double(metrics.sleep?.score ?? 0) / 100,
-                    colors: Theme.sleepColors,
-                    size: 100
-                )
-                .frame(maxWidth: .infinity)
-                .contentShape(.rect)
-                .onTapGesture { showingSleep = true }
-                .accessibilityAddTraits(.isButton)
-                .accessibilityHint("Shows last night's sleep")
-            }
-            Divider().overlay(Theme.separator)
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Coaching", systemImage: "sparkle")
-                    .font(.caption.weight(.semibold))
-                    .textCase(.uppercase)
-                    .tracking(1.2)
-                    .foregroundStyle(Theme.strainTextColor)
-                if let highlight = coaching.highlight {
-                    let lead = Text(coaching.text).foregroundStyle(Theme.primaryText)
-                    let accent = Text(highlight).foregroundStyle(Theme.strainTextColor).fontWeight(.semibold)
-                    Text("\(lead) \(accent)")
-                        .font(.body)
-                } else {
-                    Text(coaching.text)
-                        .font(.body)
-                        .foregroundStyle(Theme.primaryText)
-                }
-            }
-        }
-        .card()
-        .sheet(isPresented: $showingRecovery) {
-            RecoveryContributorsSheet()
-                .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showingSleep) {
-            LastNightSleepSheet()
-                .presentationDetents([.medium, .large])
+    private static func buttonTitle(_ step: SetupStep) -> String {
+        switch step {
+        case .goals: "Set your goals"
+        case .city: "Add your city"
+        case .gym: "Add your gym equipment"
+        case .plan: "Plan your week"
         }
     }
-}
 
-// MARK: - Strain range
-
-/// Today's strain against the planned range, shown as information rather
-/// than a target to chase. "x% to go" and "close the gap" are controlling,
-/// outcome-framed feedback that lowers autonomous motivation (Ntoumanis et
-/// al. 2021; Swann et al. 2021; docs/research/behaviour-change.md §5), and
-/// HRV-guided training supports "train as planned / go easy", not a daily
-/// load quota.
-private struct StrainGoalCard: View {
-    let sessions: [WorkoutSession]
-
-    @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(UserSettings.self) private var settings
-    /// Big number that still grows with Dynamic Type.
-    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 48
-
-    var body: some View {
-        if let target = metrics.targetStrain {
-            content(target: target)
+    private func open(_ next: SetupStep) {
+        if next == .plan {
+            // This week's plan is an app-level sheet (`AppRouter.showWeeklyPlan`).
+            router.showWeeklyPlan = true
         } else {
-            VStack(alignment: .leading, spacing: 10) {
-                CardLabel(text: "Strain range")
-                Text(metrics.restMode
-                     ? "Rest mode is on: no strain range until you feel better. Turn it off from the illness card or Settings."
-                     : "No range yet. Wear your watch to sleep so the app can set today's strain range from your recovery.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            .card(tint: Theme.strain)
-        }
-    }
-
-    private func content(target: ClosedRange<Double>) -> some View {
-        let current = metrics.strain?.strain ?? 0
-        let status = StrainPlanner().status(current: current, target: target)
-        let suggestions = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions)
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                CardLabel(text: "Strain range")
-                Spacer()
-                switch status {
-                case .below:
-                    Chip(text: "Below range", color: Theme.secondaryText)
-                case .inRange:
-                    Chip(text: "In range", color: Theme.recoveryHigh)
-                case .above:
-                    Chip(text: "Above range", color: Theme.recoveryModerate)
-                }
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(strainText(current))
-                    .font(.system(size: heroSize, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
-                Text("today · planned range \(strainRangeText(target))")
-                    .font(.title3)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            StrainGoalBar(current: current, target: target)
-            Text(rangeNote(target: target))
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
-            BreathingOfferRow() // easy days and stressful evenings (BreathingView.swift; Laborde 2022)
-
-            switch status {
-            case .below:
-                StrainOptions(
-                    suggestions: suggestions,
-                    trainedToday: !metrics.activities.isEmpty,
-                    easyDay: metrics.trainEasyToday
-                )
-            case .inRange:
-                Text("You're in today's range. Anything more is optional; recovery work and sleep do the rest.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            case .above:
-                Text("You're above today's range. The rest of the day suits going easy, and an early night helps you recover for tomorrow.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-        }
-        .card(tint: Theme.strain)
-    }
-
-    /// Where today's range comes from, in one line.
-    private func rangeNote(target: ClosedRange<Double>) -> String {
-        if metrics.trainEasyToday {
-            return "Easy day: your 7-day HRV is below your normal range, so anything in \(strainRangeText(target)) is fine."
-        }
-        return metrics.usualTrainingStrain.map { "Based on your usual training days (\(whole($0))%)." }
-            ?? "Adapts to you after 6 training days."
-    }
-}
-
-/// Sessions that fit today's range, offered as options to take or leave,
-/// never as what's needed to reach a number (autonomy support: Teixeira et
-/// al. 2020, cited from memory in docs/research/behaviour-change.md).
-private struct StrainOptions: View {
-    let suggestions: [TrainerSuggestions.Suggestion]
-    let trainedToday: Bool
-    let easyDay: Bool
-
-    @Environment(WorkoutLauncher.self) private var launcher
-
-    var body: some View {
-        Text(intro)
-            .font(.subheadline)
-            .foregroundStyle(Theme.secondaryText)
-        ForEach(suggestions) { suggestion in
-            if suggestion.option.kind == .strength {
-                Button {
-                    launcher.openBuilder(focus: suggestion.focus, minutes: suggestion.minutes)
-                } label: {
-                    SuggestionRow(suggestion: suggestion)
-                }
-                .buttonStyle(.plain)
-            } else {
-                // Cardio is done on the watch, so this row is information only.
-                SuggestionRow(suggestion: suggestion)
-            }
-        }
-        Button {
-            let strength = suggestions.first { $0.option.kind == .strength }
-            launcher.openBuilder(focus: strength?.focus, minutes: strength?.minutes)
-        } label: {
-            Label("Plan a workout", systemImage: "play.fill")
-                .font(.headline)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
-                .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
-                .shadow(color: Theme.strain.opacity(0.35), radius: 10, y: 5)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var intro: String {
-        if trainedToday {
-            return "You've trained today, so anything more is optional. If a second session is part of your plan, these fit:"
-        }
-        if easyDay {
-            return "If you want to move today, these fit an easy day:"
-        }
-        return "If you want to train today, these fit:"
-    }
-}
-
-private struct SuggestionRow: View {
-    let suggestion: TrainerSuggestions.Suggestion
-
-    var body: some View {
-        let isStrength = suggestion.option.kind == .strength
-        HStack(spacing: 12) {
-            IconBadge(
-                systemName: isStrength ? "dumbbell.fill" : "bicycle",
-                color: isStrength ? Theme.lifting : Theme.sleep,
-                size: 42
-            )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(isStrength ? suggestion.option.title : "Easy ride (you can still talk)")
-                    .font(.headline)
-                    .foregroundStyle(Theme.primaryText)
-                Text(isStrength ? suggestion.option.detail : "\(suggestion.minutes) min · track it on your watch")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            Spacer()
-            Text("+\(strainText(suggestion.option.gain))")
-                .font(.headline)
-                .monospacedDigit()
-                .foregroundStyle(Theme.strainTextColor)
-            if isStrength {
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
-            }
-        }
-        .padding(12)
-        .background(Theme.cardRaised, in: .rect(cornerRadius: 16))
-        .accessibilityElement(children: .combine)
-        .accessibilityHint(isStrength ? "Opens the workout builder" : "")
-    }
-}
-
-// MARK: - Goals
-
-private struct GoalsPromptCard: View {
-    @Environment(UserSettings.self) private var settings
-    @State private var showingGoals = false
-
-    var body: some View {
-        Group {
-            if !settings.goalsSet {
-                Button {
-                    showingGoals = true
-                } label: {
-                    HStack(spacing: 12) {
-                        IconBadge(systemName: "target", color: Theme.lifting, size: 40)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Set your goals")
-                                .font(.headline)
-                                .foregroundStyle(Theme.primaryText)
-                            Text("Lose, maintain or gain; build muscle, strength or stamina. Sets your calories, protein and workouts.")
-                                .font(.subheadline)
-                                .foregroundStyle(Theme.secondaryText)
-                                .multilineTextAlignment(.leading)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(Theme.secondaryText)
-                    }
-                    .card(tint: Theme.lifting)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .sheet(isPresented: $showingGoals) { GoalsView() }
-    }
-}
-
-// MARK: - Water
-
-private struct HydrationCard: View {
-    @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(ConditionsModel.self) private var conditions
-    @Environment(UserSettings.self) private var settings
-
-    var body: some View {
-        let drank = metrics.nutritionToday?.waterLiters ?? 0
-        let exerciseMinutes = Double(metrics.activities.map(\.minutes).reduce(0, +))
-        let target = Hydration.target(sex: settings.sex, exerciseMinutes: exerciseMinutes, feelsLikeC: conditions.current?.feelsLike)
-        let assessment = Hydration.assess(drank: drank, target: target, hour: Calendar.current.component(.hour, from: .now))
-        let color: Color = switch assessment.status {
-        case .low: Theme.recoveryModerate
-        case .onTrack: Theme.oxygen
-        case .high: Theme.recoveryModerate
-        }
-        let tracksWater = metrics.nutritionToday?.waterLiters != nil || metrics.nutritionYesterday?.waterLiters != nil
-        if !tracksWater {
-            HStack(spacing: 10) {
-                Image(systemName: "waterbottle.fill").foregroundStyle(Theme.oxygen)
-                Text("Log water in your food app to track it here. Today's target: \(target.liters.formatted(.number.precision(.fractionLength(1)))) L.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            .card(tint: Theme.oxygen)
-        } else {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                CardLabel(text: "Water", color: Theme.oxygen)
-                Spacer()
-                Chip(text: assessment.status.rawValue, color: color)
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(drank.formatted(.number.precision(.fractionLength(1))))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.primaryText)
-                Text("of \(target.liters.formatted(.number.precision(.fractionLength(1)))) L")
-                    .font(.headline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.track)
-                    Capsule()
-                        .fill(LinearGradient(colors: Theme.oxygenColors, startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(10, geo.size.width * min(1, drank / max(target.liters, 0.1))))
-                    // Where you'd be by now on an even pace.
-                    Rectangle()
-                        .fill(Theme.primaryText.opacity(0.35))
-                        .frame(width: 2, height: 16)
-                        .offset(x: geo.size.width * min(1, assessment.expectedByNow / max(target.liters, 0.1)) - 1)
-                }
-            }
-            .frame(height: 12)
-            ForEach(assessment.effects, id: \.self) { effect in
-                Text(effect)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            Text("Target \(target.base.formatted()) L\(target.exercise > 0 ? " + \(target.exercise.formatted(.number.precision(.fractionLength(1)))) L training" : "")\(target.heat > 0 ? " + \(target.heat.formatted()) L heat" : ""). The line shows an even pace for now.")
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
-        }
-        .card(tint: Theme.oxygen)
+            step = next
         }
     }
 }
 
-// MARK: - Weather
-
-private struct ConditionsCard: View {
-    @Environment(ConditionsModel.self) private var conditions
-    @Environment(UserSettings.self) private var settings
-    @State private var showingPicker = false
-
-    var body: some View {
-        Group {
-            if let c = conditions.current, settings.hasLocation {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .center, spacing: 14) {
-                        Image(systemName: c.symbol)
-                            .symbolRenderingMode(.multicolor)
-                            .font(.system(size: 38))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("\(Int(c.temperature.rounded()))° · \(c.summary)")
-                                .font(.title3.weight(.bold))
-                                .foregroundStyle(Theme.primaryText)
-                            Text("Feels \(Int(c.feelsLike.rounded()))°\(c.high.map { " · H \(Int($0.rounded()))°" } ?? "")\(c.low.map { " L \(Int($0.rounded()))°" } ?? "") · \(settings.placeName)")
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    // Wraps at large text sizes.
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 8) {
-                        if let uv = c.uvIndexMax { pill("sun.max", "UV \(Int(uv.rounded())) · \(uvWord(uv))") }
-                        if let aqi = c.usAQI { pill("aqi.medium", "Air \(Int(aqi)) · \(airWord(Double(aqi)))") }
-                        if let daylight = c.daylightHours { pill("sunrise", String(format: "%.1f h light", daylight)) }
-                    }
-                    if let sunrise = c.sunrise, let sunset = c.sunset {
-                        Text("Sunrise \(sunrise.formatted(date: .omitted, time: .shortened)) · Sunset \(sunset.formatted(date: .omitted, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    ForEach(conditions.tips.prefix(2)) { tip in
-                        Label {
-                            Text(tip.text).font(.subheadline).foregroundStyle(Theme.primaryText)
-                        } icon: {
-                            Image(systemName: tip.level == .info ? "lightbulb.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(tip.level == .info ? Theme.oxygen : Theme.recoveryModerate)
-                        }
-                    }
-                }
-                .card(tint: Theme.oxygen)
-            } else if !settings.hasLocation {
-                Button {
-                    showingPicker = true
-                } label: {
-                    HStack(spacing: 12) {
-                        IconBadge(systemName: "location.fill", color: Theme.oxygen, size: 40)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Add your city")
-                                .font(.headline)
-                                .foregroundStyle(Theme.primaryText)
-                            Text("Weather, air quality and daylight for smarter coaching.")
-                                .font(.subheadline)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(Theme.secondaryText)
-                    }
-                    .card()
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .sheet(isPresented: $showingPicker) { LocationPicker() }
-    }
-
-    /// WHO UV index categories.
-    private func uvWord(_ uv: Double) -> String {
-        switch uv {
-        case ..<3: "Low"
-        case ..<6: "Moderate"
-        case ..<8: "High"
-        case ..<11: "Very high"
-        default: "Extreme"
-        }
-    }
-
-    /// US EPA air quality index categories.
-    private func airWord(_ aqi: Double) -> String {
-        switch aqi {
-        case ...50: "Good"
-        case ...100: "Moderate"
-        case ...150: "Unhealthy for some"
-        case ...200: "Unhealthy"
-        default: "Very unhealthy"
-        }
-    }
-
-    private func pill(_ icon: String, _ text: String) -> some View {
-        Label(text, systemImage: icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Theme.oxygen)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Theme.oxygen.opacity(0.1), in: .capsule)
-    }
-}
-
-// MARK: - Check-in
-
-private struct CheckInCard: View {
-    @Environment(CheckInStore.self) private var store
-    @Environment(AppRouter.self) private var router
-
-    var body: some View {
-        let morningDone = store.morning() != nil
-        let eveningDone = store.evening() != nil
-        VStack(alignment: .leading, spacing: 12) {
-            CardLabel(text: "Daily check-in", color: Theme.sleep)
-            HStack(spacing: 10) {
-                button("Morning", icon: "sun.max.fill", done: morningDone, colors: Theme.strainButtonColors) {
-                    router.checkIn = .morning
-                }
-                button("Evening", icon: "moon.stars.fill", done: eveningDone, colors: Theme.sleepButtonColors) {
-                    router.checkIn = .evening
-                }
-            }
-            if let advice = store.advice {
-                Label {
-                    Text(advice).font(.subheadline).foregroundStyle(Theme.primaryText)
-                } icon: {
-                    Image(systemName: "sparkle").foregroundStyle(Theme.sleep)
-                }
-            }
-        }
-        .card(tint: Theme.sleep)
-    }
-
-    private func button(_ title: String, icon: String, done: Bool, colors: [Color], action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: done ? "checkmark.circle.fill" : icon)
-                Text(done ? "\(title) done" : title)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(done ? Theme.primaryText : .white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(done ? AnyShapeStyle(Theme.cardRaised) : AnyShapeStyle(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)), in: .capsule)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Medications
-
-/// Today's doses with tap-to-take, shown when the user has medications.
-private struct MedsTodayCard: View {
-    @Environment(MedicationsModel.self) private var meds
-    @Environment(AppRouter.self) private var router
-
-    var body: some View {
-        if !meds.todayDoses.isEmpty || !meds.notes.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    CardLabel(text: "Medications", color: Theme.lifting)
-                    Spacer()
-                    Button("See all") { router.showMedications = true }
-                        .font(.subheadline.weight(.semibold))
-                }
-                if !meds.todayDoses.isEmpty {
-                    TodayDosesList()
-                }
-                ForEach(meds.notes.prefix(2), id: \.self) { note in
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-            }
-            .card(tint: Theme.lifting)
-        }
-    }
-}
-
-// MARK: - Energy and nutrition
+// MARK: - Nutrition
 
 /// Calories as a flexible band, never a daily "over" in red: daily deficit
 /// judgement adds burden, and calorie counting correlates with eating-
 /// disorder symptoms in some users (Simpson & Mazzeo 2017; Levinson 2017,
 /// cited from memory in docs/research/behaviour-change.md). The weekly
 /// average is what moves weight. "Hide calories" in Settings leaves protein
-/// and fibre only.
-private struct EnergyCard: View {
+/// and fibre only. Water is a fourth bar only when water is logged; its
+/// target is in the water sheet (ux-audit.md 4.6, H7).
+private struct NutritionCard: View {
+    let habits: TodayHabits
+
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
     @State private var showingDetails = false
@@ -776,60 +205,131 @@ private struct EnergyCard: View {
     var body: some View {
         let food = metrics.nutritionToday
         VStack(alignment: .leading, spacing: 18) {
-            if settings.hideCalories {
-                CardLabel(text: "Nutrition")
-            } else {
-                HStack {
-                    CardLabel(text: "Calories today")
-                    Spacer()
-                    Button {
-                        showingDetails = true
-                    } label: {
-                        Image(systemName: "info.circle")
-                            .font(.title3)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    .accessibilityLabel("How calories are calculated")
-                }
+            header
+            if !settings.hideCalories {
                 CaloriesToday()
                 Divider().overlay(Theme.separator)
             }
             if let food, !food.isEmpty {
-                HStack(spacing: 14) {
-                    MacroColumn(label: "Protein", value: food.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
-                    if settings.hideCalories {
-                        // The app's fibre table (25/38 g Adequate Intake); 25-29 g/day
-                        // and above is where the benefit sits (Reynolds et al., Lancet 2019).
-                        MacroColumn(label: "Fibre", value: food.fiberGrams ?? 0,
-                                    goal: Micronutrients.Nutrient.fiber.target(settings.sex, age: settings.age), color: Theme.oxygen)
-                    } else {
-                        MacroColumn(label: "Carbs", value: food.carbsGrams ?? 0, goal: nil, color: Theme.strain)
-                        MacroColumn(label: "Fat", value: food.fatGrams ?? 0, goal: nil, color: Theme.sleep)
-                    }
+                MacroBars(food: food)
+                if let line = habits.proteinLine(metrics: metrics) {
+                    // Protein per meal (`ProteinMeals`), from the old Daily habits card.
+                    Text(line)
+                        .font(Theme.Typography.context)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                HStack(spacing: 10) {
-                    Image(systemName: "fork.knife.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(Theme.nutrition)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("No food logged yet")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.primaryText)
-                        Text("Meals you log in your food app (synced to Apple Health) show up here\(metrics.proteinTarget.map { ". Protein goal: \(whole($0)) g" } ?? "").")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
+                NoFoodRow(proteinTarget: metrics.proteinTarget)
+                if food?.waterLiters ?? 0 > 0 {
+                    WaterColumn()
                 }
             }
+            WeightPaceLine()
+            if settings.hideCalories {
+                HiddenCaloriesSafetyLines()
+            }
         }
-        .card(tint: Theme.nutrition)
+        .card()
         .sheet(isPresented: $showingDetails) {
             CalorieDetailsSheet()
                 .presentationDetents([.medium, .large])
         }
     }
 
+    @ViewBuilder
+    private var header: some View {
+        if settings.hideCalories {
+            CardLabel(text: "Nutrition")
+        } else {
+            HStack {
+                CardLabel(text: "Calories today")
+                Spacer()
+                Button {
+                    showingDetails = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.title3)
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("How calories are calculated")
+            }
+        }
+    }
+}
+
+/// Weight changing too fast for the goal (`WeightPace`), from the old Daily
+/// habits card; shown only when it applies.
+private struct WeightPaceLine: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        if let pace = TodayHabits.weightMessage(metrics: metrics) {
+            Label {
+                Text("Weight is changing fast. " + pace)
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "scalemass.fill")
+                    .foregroundStyle(Theme.recoveryModerateText)
+            }
+        }
+    }
+}
+
+/// Protein against its goal, then carbs and fat (or fibre when calories are
+/// hidden), and water when it's logged.
+private struct MacroBars: View {
+    let food: NutritionDay
+
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(UserSettings.self) private var settings
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            MacroColumn(label: "Protein", grams: food.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
+            if settings.hideCalories {
+                // The app's fibre table (25/38 g Adequate Intake); 25-29 g/day
+                // and above is where the benefit sits (Reynolds et al., Lancet 2019).
+                MacroColumn(label: "Fibre", grams: food.fiberGrams ?? 0,
+                            goal: Micronutrients.Nutrient.fiber.target(settings.sex, age: settings.age), color: Theme.oxygen)
+            } else {
+                MacroColumn(label: "Carbs", grams: food.carbsGrams ?? 0, goal: nil, color: Theme.strain)
+                MacroColumn(label: "Fat", grams: food.fatGrams ?? 0, goal: nil, color: Theme.sleep)
+            }
+            if food.waterLiters ?? 0 > 0 {
+                WaterColumn()
+            }
+        }
+    }
+}
+
+/// No food today: one row, no paragraph (ux-audit.md 4.6).
+private struct NoFoodRow: View {
+    let proteinTarget: Double?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "fork.knife.circle.fill")
+                .font(.title2)
+                .foregroundStyle(Theme.nutrition)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("No food logged yet" + (proteinTarget.map { " · Protein goal \(whole($0)) g" } ?? ""))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text("Meals from your food app show up here via Apple Health.")
+                    .font(Theme.Typography.context)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
 }
 
 /// Today's intake against the daily target and its flexible band. Only
@@ -837,6 +337,8 @@ private struct EnergyCard: View {
 /// the number is shown without a verdict and the weekly view is noted.
 private struct CaloriesToday: View {
     @Environment(DailyMetricsModel.self) private var metrics
+    /// The number inside the ring, 24 pt at the default size, scaled (ux-audit.md 4.5).
+    @ScaledMetric(relativeTo: .title2) private var eatenSize: CGFloat = 24
 
     var body: some View {
         if let summary = metrics.calories, let target = metrics.calorieTarget {
@@ -852,10 +354,11 @@ private struct CaloriesToday: View {
                 ) {
                     VStack(spacing: 0) {
                         Text(whole(eaten).formatted())
-                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .font(.system(size: eatenSize, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(Theme.primaryText)
                             .minimumScaleFactor(0.6)
+                            .lineLimit(1)
                         Text("kcal eaten")
                             .font(.caption2)
                             .foregroundStyle(Theme.secondaryText)
@@ -863,16 +366,18 @@ private struct CaloriesToday: View {
                     .padding(.horizontal, 14)
                 }
                 .frame(width: 124, height: 124)
+                .accessibilityElement(children: .combine)
                 VStack(alignment: .leading, spacing: 12) {
-                    CalorieLine(icon: "target", color: Theme.sleep, label: metrics.goals == nil ? "Maintenance" : "Daily target",
+                    CalorieLine(icon: "target", color: Theme.nutrition, label: metrics.goals == nil ? "Maintenance" : "Daily target",
                                 text: "\(whole(target).formatted()) kcal")
                     CalorieLine(icon: "arrow.left.and.right", color: Theme.nutrition, label: "Flexible band (±10%)",
                                 text: "\(whole(band.lowerBound).formatted())–\(whole(band.upperBound).formatted()) kcal")
                 }
             }
-            Text("One day over or under the band is fine; the weekly average is what moves weight. A weekly view is coming. Your burn is already in the target; tap ⓘ for details.")
-                .font(.caption)
+            Text("One day over or under the band is fine; the weekly average is what moves weight.")
+                .font(Theme.Typography.context)
                 .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text("Add your weight in Apple Health (or Settings) to see calories burned.")
                 .font(.subheadline)
@@ -894,6 +399,7 @@ private struct CalorieLine: View {
                 .foregroundStyle(.white)
                 .frame(width: 26, height: 26)
                 .background(color.gradient, in: .circle)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(label)
                     .font(.caption)
@@ -904,13 +410,16 @@ private struct CalorieLine: View {
                     .foregroundStyle(Theme.primaryText)
             }
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
+/// One bar: a label, the value (against a goal when there is one) and a fill.
 private struct MacroColumn: View {
     let label: String
-    let value: Double
-    let goal: Double?
+    let text: String
+    /// 0...1
+    let fraction: Double
     let color: Color
 
     var body: some View {
@@ -918,7 +427,7 @@ private struct MacroColumn: View {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
-            Text(goal.map { "\(whole(value))/\(whole($0)) g" } ?? "\(whole(value)) g")
+            Text(text)
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(Theme.primaryText)
@@ -929,14 +438,170 @@ private struct MacroColumn: View {
                     Capsule().fill(Theme.track)
                     Capsule()
                         .fill(color.gradient)
-                        .frame(width: max(6, geo.size.width * min(1, value / max(goal ?? max(value, 1) * 1.2, 1))))
+                        .frame(width: max(6, geo.size.width * min(1, max(0, fraction))))
                 }
             }
             .frame(height: 6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
+
+extension MacroColumn {
+    /// Grams against an optional goal; without one the bar is relative to the value.
+    init(label: String, grams value: Double, goal: Double?, color: Color) {
+        self.init(
+            label: label,
+            text: goal.map { "\(whole(value))/\(whole($0)) g" } ?? "\(whole(value)) g",
+            fraction: value / max(goal ?? max(value, 1) * 1.2, 1),
+            color: color
+        )
+    }
+}
+
+// MARK: - Water
+
+/// Today's water against the day's target (`Hydration`): sex-based base,
+/// plus training and heat.
+private struct HydrationNumbers {
+    let drank: Double
+    let target: Hydration.Target
+    let assessment: Hydration.Assessment
+
+    init(metrics: DailyMetricsModel, conditions: ConditionsModel, settings: UserSettings) {
+        drank = metrics.nutritionToday?.waterLiters ?? 0
+        let exerciseMinutes = Double(metrics.activities.map(\.minutes).reduce(0, +))
+        target = Hydration.target(sex: settings.sex, exerciseMinutes: exerciseMinutes, feelsLikeC: conditions.current?.feelsLike)
+        assessment = Hydration.assess(drank: drank, target: target, hour: Calendar.current.component(.hour, from: .now))
+    }
+
+    var color: Color {
+        switch assessment.status {
+        case .low: Theme.recoveryModerate
+        case .onTrack: Theme.oxygen
+        case .high: Theme.recoveryModerate
+        }
+    }
+}
+
+/// Water as the Nutrition card's fourth bar; tap for the target.
+private struct WaterColumn: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(ConditionsModel.self) private var conditions
+    @Environment(UserSettings.self) private var settings
+    @State private var showingWater = false
+
+    var body: some View {
+        let water = HydrationNumbers(metrics: metrics, conditions: conditions, settings: settings)
+        Button { showingWater = true } label: {
+            MacroColumn(
+                label: "Water",
+                text: "\(water.drank.formatted(.number.precision(.fractionLength(1))))/\(water.target.liters.formatted(.number.precision(.fractionLength(1)))) L",
+                fraction: water.drank / max(water.target.liters, 0.1),
+                color: Theme.oxygen
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Shows today's water target")
+        .sheet(isPresented: $showingWater) {
+            WaterDetailsSheet()
+                .presentationDetents([.medium, .large])
+        }
+    }
+}
+
+/// Today's water in detail: the even-pace line, what the amount means and
+/// where the target comes from (was Home's water card).
+private struct WaterDetailsSheet: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(ConditionsModel.self) private var conditions
+    @Environment(UserSettings.self) private var settings
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let water = HydrationNumbers(metrics: metrics, conditions: conditions, settings: settings)
+        NavigationStack {
+            ScrollView {
+                WaterDetailsCard(water: water)
+                    .padding()
+                    .lockedToScreenWidth()
+            }
+            .background(Theme.background)
+            .navigationTitle("Water")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct WaterDetailsCard: View {
+    let water: HydrationNumbers
+
+    var body: some View {
+        let target = water.target
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                CardLabel(text: "Water today")
+                Spacer()
+                Chip(text: water.assessment.status.rawValue, color: water.color)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(water.drank.formatted(.number.precision(.fractionLength(1))))
+                    .heroNumberFont()
+                    .foregroundStyle(Theme.primaryText)
+                Text("of \(target.liters.formatted(.number.precision(.fractionLength(1)))) L")
+                    .font(.headline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .accessibilityElement(children: .combine)
+            WaterPaceBar(drank: water.drank, target: target.liters, expectedByNow: water.assessment.expectedByNow)
+            ForEach(water.assessment.effects, id: \.self) { effect in
+                Text(effect)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Target \(target.base.formatted()) L\(target.exercise > 0 ? " + \(target.exercise.formatted(.number.precision(.fractionLength(1)))) L training" : "")\(target.heat > 0 ? " + \(target.heat.formatted()) L heat" : ""). The line shows an even pace for now.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .card()
+    }
+}
+
+/// The water bar with a mark where an even pace would be by now.
+private struct WaterPaceBar: View {
+    let drank: Double
+    let target: Double
+    let expectedByNow: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.track)
+                Capsule()
+                    .fill(LinearGradient(colors: Theme.oxygenColors, startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(10, geo.size.width * min(1, drank / max(target, 0.1))))
+                // Where you'd be by now on an even pace.
+                Rectangle()
+                    .fill(Theme.primaryText.opacity(0.35))
+                    .frame(width: 2, height: 16)
+                    .offset(x: geo.size.width * min(1, expectedByNow / max(target, 0.1)) - 1)
+            }
+        }
+        .frame(height: 12)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Calorie details
 
 /// Where each calorie number comes from.
 private struct CalorieDetailsSheet: View {
@@ -959,7 +624,7 @@ private struct CalorieDetailsSheet: View {
                         Text(metrics.maintenance.map { "Your maintenance is \(whole($0.maintenance).formatted()) kcal, worked out from \($0.loggedDays) fully logged days of food and your weight trend." }
                              ?? "Maintenance is estimated from your watch until there are 14 fully logged days of food and enough weigh-ins.")
                         Text(metrics.goals.map { "Goal: \($0.title.lowercased()). Your daily target is maintenance adjusted for that goal." }
-                             ?? "Set your goals on the Home tab to turn maintenance into a daily target.")
+                             ?? "Set your goals in Settings › Goals to turn maintenance into a daily target.")
                         if let low = metrics.implausibleMaintenance {
                             Text("Your food log points to a maintenance of \(whole(low).formatted()) kcal, which is less than a body your size burns on a quiet day (1.4× resting metabolism; FAO/WHO 2004). Some days were probably only partly logged, so your watch's estimate is used until the log looks complete.")
                                 .font(.footnote)
@@ -1086,31 +751,27 @@ private struct PersonalCalorieNotes: View {
 
 // MARK: - Health monitor
 
+/// Four signals that say whether something is off today: resting heart
+/// rate, HRV, breathing rate and sleep, each against your usual range
+/// (ux-audit.md 4.6, H10). Blood oxygen, heart-rate recovery, heart-rate
+/// stress and steps are long-term stats and live in Health ("All measures").
 private struct HealthMonitor: View {
     let onEnterHRV: () -> Void
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(VitalsModel.self) private var vitals
+    @Environment(AppRouter.self) private var router
     @State private var selected: VitalsModel.Stat?
 
     var body: some View {
-        VStack(spacing: 12) {
-            SectionTitle(text: "Health Monitor", trailing: summary.text, trailingColor: summary.color)
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
+            HealthMonitorHeader(verdict: summary)
+            TileGrid {
                 opens("rhr") { rhrTile }
                 hrvTile
-            }
-            HStack(spacing: 12) {
                 opens("respiration") { respiratoryTile }
                 opens("sleepAverage") { sleepTile }
             }
-            HStack(spacing: 12) {
-                opens("spo2") { vitalTile("spo2", title: "Blood oxygen", color: Theme.oxygen, light: Theme.oxygenLight) }
-                opens("hrr") { vitalTile("hrr", title: "Heart rate recovery", color: Theme.heart, light: Theme.heartLight) }
-            }
-            HStack(spacing: 12) {
-                opens("stress") { vitalTile("stress", title: "HR above resting", color: Theme.recoveryModerate, light: Theme.recoveryModerateLight) }
-                opens("steps") { vitalTile("steps", title: "Steps", color: Theme.strain, light: Theme.strainLight) }
-            }
+            AllMeasuresLink { router.selectedTab = .health }
         }
         .sheet(item: $selected) { stat in
             VitalDetailView(stat: stat, colors: VitalTile.colors(for: stat.category))
@@ -1118,7 +779,7 @@ private struct HealthMonitor: View {
         }
     }
 
-    /// Makes a tile open the same history view as on Biology, when that stat exists.
+    /// Makes a tile open the same history view as on Health, when that stat exists.
     @ViewBuilder
     private func opens<Content: View>(_ id: String, @ViewBuilder _ tile: () -> Content) -> some View {
         if let stat = vitals.stat(id) {
@@ -1130,29 +791,16 @@ private struct HealthMonitor: View {
         }
     }
 
-    private func vitalTile(_ id: String, title: String, color: Color, light: Color) -> some View {
-        let stat = vitals.stat(id)
-        return MonitorTile(
-            title: title,
-            value: stat?.value,
-            unit: stat?.unit ?? "",
-            status: stat?.status.map { TileStatus(text: $0, color: VitalTile.color(for: stat?.tone ?? .neutral)) },
-            gauge: stat?.gauge,
-            color: color,
-            lightColor: light
-        )
-    }
-
     /// Everything on this card that's outside your normal today.
-    private var summary: (text: String?, color: Color) {
-        guard let recovery = metrics.recovery, recovery.isCalibrated else { return (nil, Theme.secondaryText) }
+    private var summary: MetricVerdict? {
+        guard let recovery = metrics.recovery, recovery.isCalibrated else { return nil }
         let flags = [
             (recovery.hrvChangePercent ?? 0) < -15,
             (recovery.restingHeartRateChange ?? 0) > 5,
             metrics.respiratoryRate.map { !(12...20).contains($0) } ?? false,
             metrics.sleep.map { $0.asleep < $0.need * 0.9 } ?? false,
         ].filter { $0 }.count
-        return flags == 0 ? ("All normal", Theme.recoveryHighText) : ("\(flags) to watch", Theme.recoveryModerateText)
+        return flags == 0 ? MetricVerdict("All normal", color: Theme.recoveryHigh) : MetricVerdict("\(flags) to watch", color: Theme.recoveryModerate)
     }
 
     /// Position of a value within baseline ± 2 SD, as 0...1. Nil (no gauge)
@@ -1164,14 +812,15 @@ private struct HealthMonitor: View {
 
     private var rhrTile: some View {
         let change = metrics.recovery?.restingHeartRateChange
-        return MonitorTile(
+        return MetricTile(
             title: "Resting heart rate",
             value: metrics.restingHeartRate.map { "\(whole($0.rounded()))" },
             unit: "bpm",
-            status: change.map { delta in
+            spokenUnit: "beats per minute",
+            status: change.map { delta -> MetricTile.Status in
                 delta <= 0
-                    ? TileStatus(text: "Below normal", icon: "arrow.down", color: Theme.recoveryHighText)
-                    : TileStatus(text: "Above normal", icon: "arrow.up", color: delta > 5 ? Theme.recoveryModerateText : Theme.secondaryText)
+                    ? MetricTile.Status(text: "Below normal", icon: "arrow.down", color: Theme.recoveryHigh)
+                    : MetricTile.Status(text: "Above normal", icon: "arrow.up", color: delta > 5 ? Theme.recoveryModerate : Theme.secondaryText)
             },
             gauge: position(metrics.restingHeartRate, mean: metrics.baseline?.meanRHR, sd: metrics.baseline?.sdRHR),
             color: Theme.heart,
@@ -1182,14 +831,15 @@ private struct HealthMonitor: View {
     private var hrvTile: some View {
         let change = metrics.recovery?.hrvChangePercent
         let logValue = metrics.hrv.map { log($0) }
-        return MonitorTile(
+        return MetricTile(
             title: "HRV",
             value: metrics.hrv.map { "\(whole($0.rounded()))" },
             unit: "ms",
-            status: change.map { delta in
+            spokenUnit: "milliseconds",
+            status: change.map { delta -> MetricTile.Status in
                 delta >= 0
-                    ? TileStatus(text: "Above normal", icon: "arrow.up", color: Theme.recoveryHighText)
-                    : TileStatus(text: "Below normal", icon: "arrow.down", color: delta < -15 ? Theme.recoveryModerateText : Theme.secondaryText)
+                    ? MetricTile.Status(text: "Above normal", icon: "arrow.up", color: Theme.recoveryHigh)
+                    : MetricTile.Status(text: "Below normal", icon: "arrow.down", color: delta < -15 ? Theme.recoveryModerate : Theme.secondaryText)
             },
             gauge: position(logValue, mean: metrics.baseline?.meanLogHRV, sd: metrics.baseline?.sdLogHRV),
             color: Theme.recoveryHigh,
@@ -1202,12 +852,13 @@ private struct HealthMonitor: View {
     private var respiratoryTile: some View {
         let rate = metrics.respiratoryRate
         let normal = rate.map { (12...20).contains($0) } ?? true
-        return MonitorTile(
+        return MetricTile(
             title: "Breathing rate",
             value: rate.map { $0.formatted(.number.precision(.fractionLength(1))) },
             unit: "/min",
-            status: rate.map { _ in
-                normal ? TileStatus(text: "Normal", color: Theme.secondaryText) : TileStatus(text: "Unusual", color: Theme.recoveryModerateText)
+            spokenUnit: "breaths per minute",
+            status: rate.map { _ -> MetricTile.Status in
+                normal ? MetricTile.Status(text: "Normal") : MetricTile.Status(text: "Unusual", color: Theme.recoveryModerate)
             },
             gauge: rate.map { min(1, max(0, ($0 - 8) / 16)) },
             color: Theme.oxygen,
@@ -1217,14 +868,13 @@ private struct HealthMonitor: View {
 
     private var sleepTile: some View {
         let sleep = metrics.sleep
-        return MonitorTile(
+        return MetricTile(
             title: "Sleep",
             value: sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
-            unit: "",
-            status: sleep.map { night in
+            status: sleep.map { night -> MetricTile.Status in
                 night.asleep >= night.need * 0.9
-                    ? TileStatus(text: "Normal", color: Theme.secondaryText)
-                    : TileStatus(text: "Short", color: Theme.recoveryModerateText)
+                    ? MetricTile.Status(text: "Normal")
+                    : MetricTile.Status(text: "Short", color: Theme.recoveryModerate)
             },
             gauge: sleep.map { min(1, $0.asleep / max($0.need * 1.3, 1)) },
             color: Theme.sleep,
@@ -1233,83 +883,67 @@ private struct HealthMonitor: View {
     }
 }
 
-private struct TileStatus {
-    var text: String
-    var icon: String?
-    var color: Color
-}
-
-private struct MonitorTile: View {
-    let title: String
-    let value: String?
-    let unit: String
-    let status: TileStatus?
-    let gauge: Double?
-    let color: Color
-    var lightColor: Color?
-    var actionTitle: String?
-    var onAction: (() -> Void)?
+/// "Health Monitor" with its verdict ("All normal" / "2 to watch").
+private struct HealthMonitorHeader: View {
+    let verdict: MetricVerdict?
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let value {
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text(value)
-                            .font(.system(size: 30, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .minimumScaleFactor(0.6)
-                            .lineLimit(1)
-                        Text(unit)
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    .foregroundStyle(Theme.primaryText)
-                } else {
-                    Text("No data")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText.opacity(0.7))
-                }
-                if let actionTitle, let onAction {
-                    Button(actionTitle, action: onAction)
-                        .font(.subheadline.weight(.semibold))
-                        .buttonStyle(.bordered)
-                        .frame(minHeight: 44)
-                } else if let status {
-                    HStack(spacing: 3) {
-                        if let icon = status.icon {
-                            Image(systemName: icon)
-                        }
-                        Text(status.text)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(status.color)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(status.color.opacity(0.12), in: .capsule)
-                }
+        HStack(alignment: .firstTextBaseline) {
+            Text("Health Monitor")
+                .font(Theme.Typography.section)
+                .foregroundStyle(Theme.primaryText)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            if let verdict {
+                Chip(text: verdict.text, color: verdict.color)
             }
-            Spacer(minLength: 0)
-            VerticalRangeGauge(value: gauge, color: color, lightColor: lightColor)
-                .frame(height: 78)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 22)
-                .fill(Theme.card)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22)
-                        .fill(RadialGradient(colors: [color.opacity(0.13), color.opacity(0)], center: .bottomTrailing, startRadius: 0, endRadius: 160))
-                )
+        .padding(.top, 8)
+    }
+}
+
+/// "All measures ›": switches to the Health tab, where the other stats live.
+private struct AllMeasuresLink: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text("All measures")
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .accessibilityHidden(true)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.secondaryText)
+            .frame(minHeight: 44)
+            .contentShape(.rect)
         }
-        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 5)
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityHint("Opens the Health tab")
+    }
+}
+
+/// With calories hidden there's no details sheet, so the two safety notes it
+/// carries show on the Nutrition card instead (as on the old Habits card):
+/// cut × sleep debt (`CutAndSleep`, Nedeltcheva 2010) and low energy
+/// availability (`EnergyAvailability`: IOC REDs 2023; Loucks 2011).
+private struct HiddenCaloriesSafetyLines: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt) {
+            Label(CutAndSleep.title + ". " + cut.message, systemImage: "moon.zzz.fill")
+                .font(Theme.Typography.context)
+                .foregroundStyle(Theme.recoveryModerateText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let availability = metrics.energyAvailability, let message = EnergyAvailability.message(availability, goals: metrics.goals) {
+            Label("Energy availability is low. " + message, systemImage: "bolt.heart.fill")
+                .font(Theme.Typography.context)
+                .foregroundStyle(Theme.recoveryModerateText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

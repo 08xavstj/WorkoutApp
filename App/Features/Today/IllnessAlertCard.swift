@@ -1,9 +1,24 @@
 import SwiftUI
 import AppCore
 
-/// Illness watch on Home. Major signs (two or more together) get a full card
-/// with a rest-mode button; a single minor sign is one quiet line. While rest
-/// mode is on, a banner shows instead, with a button to end it.
+/// Today's illness alert from the vitals, the morning check-in and the cycle
+/// (`IllnessWatch`), shared by the alert slot and the Scores card's line.
+func todayIllnessAlert(vitals: VitalsModel, metrics: DailyMetricsModel, checkIns: CheckInStore) -> IllnessWatch.Alert? {
+    let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
+    return vitals.illnessAlert(
+        metrics: metrics,
+        drinksLastNight: checkIns.evening(on: yesterday)?.drinks,
+        reportedSymptoms: checkIns.morning()?.isSick ?? false,
+        daysSinceLastPeriod: checkIns.daysSinceLastPeriod()
+    )
+}
+
+/// Illness watch in Today's alert slot (`AlertSlot`). Major signs (two or
+/// more together) get a full card with a rest-mode button. While rest mode is
+/// on, a banner shows instead, with a button to end it (rest mode is the
+/// response to the alert, so it takes the slot once it's on). A single minor
+/// sign is one quiet line in the Scores card (`MinorIllnessLine`), not an
+/// alert (docs/research/ux-audit.md 4.6; calm defaults, P19).
 struct IllnessAlertCard: View {
     @Environment(VitalsModel.self) private var vitals
     @Environment(DailyMetricsModel.self) private var metrics
@@ -11,19 +26,10 @@ struct IllnessAlertCard: View {
     @Environment(UserSettings.self) private var settings
 
     var body: some View {
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
-        let alert = vitals.illnessAlert(
-            metrics: metrics,
-            drinksLastNight: checkIns.evening(on: yesterday)?.drinks,
-            reportedSymptoms: checkIns.morning()?.isSick ?? false,
-            daysSinceLastPeriod: checkIns.daysSinceLastPeriod()
-        )
         if settings.isRestMode {
             RestModeBanner()
-        } else if let alert, alert.level == .major {
+        } else if let alert = todayIllnessAlert(vitals: vitals, metrics: metrics, checkIns: checkIns), alert.level == .major {
             majorCard(alert)
-        } else if let alert {
-            minorRow(alert)
         }
     }
 
@@ -63,24 +69,40 @@ struct IllnessAlertCard: View {
         }
         .card(tint: color)
     }
+}
 
-    private func minorRow(_ alert: IllnessWatch.Alert) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "cross.case")
-                .foregroundStyle(Theme.recoveryModerateText)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Minor sign: \(alert.signals.joined(separator: ", "))")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.primaryText)
-                Text(alert.message)
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                ReportedSymptomsRow()
+/// A single minor sign, as one quiet line inside the Scores card (not an
+/// alert card): plain wording and no red, since most single-signal days are
+/// normal variation (docs/research/ux-audit.md 4.6, P17, P19). Hidden in rest
+/// mode, like before.
+struct MinorIllnessLine: View {
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(CheckInStore.self) private var checkIns
+    @Environment(UserSettings.self) private var settings
+
+    var body: some View {
+        if !settings.isRestMode,
+           let alert = todayIllnessAlert(vitals: vitals, metrics: metrics, checkIns: checkIns),
+           alert.level != .major {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "cross.case")
+                    .foregroundStyle(Theme.recoveryModerateText)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Minor sign: \(alert.signals.joined(separator: ", "))")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                    Text(alert.message)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                    ReportedSymptomsRow()
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card()
     }
 }
 

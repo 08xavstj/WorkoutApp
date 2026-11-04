@@ -1,73 +1,11 @@
 import SwiftUI
 import AppCore
 
-/// Home card for sleep debt, shown once there's at least an hour of it.
-struct SleepDebtCard: View {
-    @Environment(DailyMetricsModel.self) private var metrics
-    @State private var showingSleep = false
-
-    var body: some View {
-        if let debt = metrics.sleepDebt, debt.level != .none {
-            Button { showingSleep = true } label: {
-                HStack(alignment: .top, spacing: 12) {
-                    IconBadge(systemName: "hourglass", color: Theme.sleep, size: 40)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Sleep debt")
-                                .font(.headline)
-                                .foregroundStyle(Theme.primaryText)
-                            Spacer()
-                            Text(SleepText.hours(debt.hours))
-                                .font(.headline.monospacedDigit())
-                                .foregroundStyle(debt.level == .high ? Theme.recoveryLowText : Theme.primaryText)
-                        }
-                        Text(debt.plan ?? "You're close to caught up.")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                            .multilineTextAlignment(.leading)
-                        if let line = regularityLine {
-                            // Regularity next to duration: SRI predicted mortality better than
-                            // sleep length (Windred 2024); the weekend shift is social jet lag (Phillips 2017).
-                            Text(line)
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                                .multilineTextAlignment(.leading)
-                        }
-                        if let window = metrics.bedtimeWindow {
-                            // Tonight's bed-by window (`BedtimeWindow`): the wake time stays put
-                            // (Windred et al., Sleep 2024) and the repayment comes from going earlier.
-                            Text("In bed by \(window.windowText) tonight")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Theme.primaryText)
-                                .multilineTextAlignment(.leading)
-                        }
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                .card(tint: Theme.sleep)
-            }
-            .buttonStyle(.plain)
-            .sheet(isPresented: $showingSleep) {
-                LastNightSleepSheet()
-                    .presentationDetents([.medium, .large])
-            }
-        }
-    }
-
-    /// "Regularity 81/100 (85+ is where the benefit is) · weekend shift 1h 20m later, aim within 1 h"
-    private var regularityLine: String? {
-        var parts: [String] = []
-        if let sri = metrics.sleepConsistency {
-            parts.append("Regularity \(sri)/100 (\(SleepRegularity.benefitIndex)+ is where the benefit is)")
-        }
-        if let shift = SleepMidpointShift.current(metrics.sleepNights) {
-            parts.append("weekend shift \(shift.text.lowercased())" + (shift.isWithinTarget ? "" : ", aim within 1 h"))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-}
+// The Home sleep-debt card was removed in the redesign (docs/research/ux-audit.md
+// 4.3, H4: sleep showed three times on Home). Sleep debt, the bed-by window,
+// regularity and the weekend shift now live in `LastNightSleepSheet` below,
+// opened from the Sleep ring on Today; tonight's bed-by window is also an
+// Up next row (`UpNextCard`).
 
 /// The weekday/weekend sleep-midpoint shift from the last two weeks of nights
 /// (`SleepRegularity.midpointShift`; Phillips et al., Sci Rep 2017).
