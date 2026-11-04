@@ -22,7 +22,8 @@ struct CoachView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var draft = ""
-    @State private var showingGym = false
+    /// The send button grows with Dynamic Type and never drops below 44 pt (HIG Accessibility; ux-audit.md P23).
+    @ScaledMetric(relativeTo: .headline) private var sendButtonSize: CGFloat = 44
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -30,7 +31,7 @@ struct CoachView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
-                        header
+                        modeLine
                         contextChips
                         if coach.messages.isEmpty {
                             emptyState
@@ -72,9 +73,18 @@ struct CoachView: View {
                 TopGlow(colors: [Theme.Wash.lavender, Theme.Wash.rose, Theme.Wash.sky])
             }
             .background(Theme.background)
-            .toolbarVisibility(.hidden, for: .navigationBar)
+            // System navigation bar with a large title and a compose button
+            // (docs/research/ux-audit.md 4.1 rule 1, 4.6 Coach; HIG Toolbars).
+            .navigationTitle("Coach")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("New conversation", systemImage: "square.and.pencil") {
+                        coach.newConversation()
+                    }
+                }
+            }
+            .tabToolbar()
             .safeAreaInset(edge: .bottom) { inputBar }
-            .sheet(isPresented: $showingGym) { MyGymView() }
             .task(id: coach.pendingQuestion) {
                 if let question = coach.pendingQuestion {
                     coach.pendingQuestion = nil
@@ -84,32 +94,11 @@ struct CoachView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Label {
-                    Text("Coach")
-                } icon: {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.sleep], startPoint: .bottomLeading, endPoint: .topTrailing))
-                }
-                .font(.largeTitle.weight(.bold))
-                .foregroundStyle(Theme.primaryText)
-                .accessibilityAddTraits(.isHeader)
-                Spacer()
-                Menu {
-                    Button("New conversation", systemImage: "square.and.pencil") { coach.newConversation() }
-                    Button("My Gym", systemImage: "dumbbell") { showingGym = true }
-                } label: {
-                    GlassIcon(systemName: "line.3.horizontal")
-                }
-                .accessibilityLabel("Coach options")
-            }
-            Text("Knows today's data and your gym · \(settings.coachMode == .onDevice ? "on-device" : "Claude")")
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
-        }
-        .padding(.top, 8)
+    /// What the coach knows and where it runs; the title is in the navigation bar.
+    private var modeLine: some View {
+        Text("Knows today's data and your gym · \(settings.coachMode == .onDevice ? "on-device" : "Claude")")
+            .font(.subheadline)
+            .foregroundStyle(Theme.secondaryText)
     }
 
     private var contextChips: some View {
@@ -126,7 +115,7 @@ struct CoachView: View {
                 if let protein = metrics.nutritionToday?.proteinGrams {
                     ContextChip(color: Theme.nutrition, label: "Protein", value: "\(whole(protein)) g")
                 }
-                // Same numbers as Home's calorie card, eaten against the target with no
+                // Same numbers as Today's calorie card, eaten against the target with no
                 // "over" verdict; hidden with the Settings switch.
                 if !settings.hideCalories, let target = metrics.calorieTarget, let eaten = metrics.calories?.eaten {
                     ContextChip(color: Theme.lifting, label: "Calories", value: "\(whole(eaten)) / \(whole(target)) kcal")
@@ -143,7 +132,7 @@ struct CoachView: View {
                 .foregroundStyle(Theme.primaryText)
             Text(gym.isConfigured
                  ? "Workouts are built from \(gym.profile.name) and rounded to the weights you can load."
-                 : "Set up My Gym (menu, top right) so workouts use your equipment and weight jumps.")
+                 : "Set up your gym in Settings so workouts use your equipment.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
             ForEach(CoachModel.suggestions, id: \.self) { suggestion in
@@ -155,6 +144,7 @@ struct CoachView: View {
                         .foregroundStyle(Theme.primaryText)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 11)
+                        .frame(minHeight: 44)
                         .background(Theme.card, in: .capsule)
                         .shadow(color: Color.black.opacity(0.06), radius: 6, y: 2)
                 }
@@ -176,6 +166,7 @@ struct CoachView: View {
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
+                            .frame(minHeight: 44)
                             .background(Theme.card, in: .capsule)
                             .overlay(Capsule().strokeBorder(Theme.separator))
                     }
@@ -198,7 +189,7 @@ struct CoachView: View {
                 Image(systemName: "arrow.up")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
+                    .frame(width: sendButtonSize, height: sendButtonSize)
                     .background(LinearGradient(colors: [Theme.sleep, Theme.lifting], startPoint: .bottomLeading, endPoint: .topTrailing), in: .circle)
             }
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || coach.isThinking)
@@ -323,7 +314,7 @@ extension CoachView {
 
 extension CoachView {
     /// Caffeine, alcohol, heat, weight pace, body age, what moved recovery,
-    /// and every Biology stat, for the coach.
+    /// and every Health stat, for the coach.
     var habitLines: [String] {
         var lines: [String] = []
         let calendar = Calendar.current
@@ -369,13 +360,13 @@ extension CoachView {
             lines.append("What moved recovery: " + contributors.prefix(5).map { "\($0.name) \($0.effect.rawValue) it (\($0.detail))" }.joined(separator: "; ") + ".")
         }
 
-        // Every Biology stat with a value (steps vs goal, strength days, blood pressure, sleep, etc.).
+        // Every Health stat with a value (steps vs goal, strength days, blood pressure, sleep, etc.).
         let stats = vitals.stats.compactMap { stat -> String? in
             guard let value = stat.value else { return nil }
             let unit = stat.unit.isEmpty ? "" : " \(stat.unit)"
             return "\(stat.title) \(value)\(unit)" + (stat.status.map { " (\($0))" } ?? "")
         }
-        if !stats.isEmpty { lines.append("Biology stats: " + stats.joined(separator: "; ") + ".") }
+        if !stats.isEmpty { lines.append("Health stats: " + stats.joined(separator: "; ") + ".") }
         return lines
     }
 }
@@ -396,12 +387,15 @@ private struct ContextChip: View {
         .padding(.vertical, 9)
         .background(Theme.card, in: .capsule)
         .shadow(color: Color.black.opacity(0.06), radius: 6, y: 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
 private struct MessageView: View {
     let message: CoachModel.ChatMessage
     let onStart: (PlannedWorkout) -> Void
+    /// The coach avatar scales with Dynamic Type (HIG Typography; ux-audit.md P22).
+    @ScaledMetric(relativeTo: .subheadline) private var avatarSize: CGFloat = 32
 
     var body: some View {
         switch message.role {
@@ -419,7 +413,7 @@ private struct MessageView: View {
                 Image(systemName: "sparkle")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
+                    .frame(width: avatarSize, height: avatarSize)
                     .background(LinearGradient(colors: [Theme.strain, Theme.sleep], startPoint: .bottomLeading, endPoint: .topTrailing), in: .circle)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 12) {
@@ -445,6 +439,8 @@ private struct PlanCard: View {
     let onStart: (PlannedWorkout) -> Void
 
     @Environment(DailyMetricsModel.self) private var metrics
+    /// The exercise number badge scales with Dynamic Type so the number never clips (ux-audit.md P22).
+    @ScaledMetric(relativeTo: .headline) private var badgeSize: CGFloat = 32
 
     var body: some View {
         let minutes = WorkoutPlanner.estimatedMinutes(plan.exercises)
@@ -466,7 +462,7 @@ private struct PlanCard: View {
                     Text("\(index + 1)")
                         .font(.headline)
                         .foregroundStyle(Theme.lifting)
-                        .frame(width: 32, height: 32)
+                        .frame(width: badgeSize, height: badgeSize)
                         .background(Theme.lifting.opacity(0.12), in: .rect(cornerRadius: 9))
                     VStack(alignment: .leading, spacing: 1) {
                         Text(exercise.name)
