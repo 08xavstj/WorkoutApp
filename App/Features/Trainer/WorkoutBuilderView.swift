@@ -42,27 +42,6 @@ struct WorkoutBuilderView: View {
                             .foregroundStyle(Theme.primaryText)
                             .card(tint: Theme.recoveryModerate)
                     }
-                    NavigationLink {
-                        MyWorkoutsView(onStart: { dismiss() })
-                    } label: {
-                        HStack(spacing: 12) {
-                            IconBadge(systemName: "list.bullet.rectangle.portrait.fill", color: Theme.sleep, size: 40)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Rather do your own?")
-                                    .font(.headline)
-                                    .foregroundStyle(Theme.primaryText)
-                                Text("Start one of your workouts, build a new one, or start empty")
-                                    .font(.subheadline)
-                                    .foregroundStyle(Theme.secondaryText)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        .card()
-                    }
-                    .buttonStyle(.plain)
                     focusPicker
                     durationPicker
                     if let plan {
@@ -70,7 +49,7 @@ struct WorkoutBuilderView: View {
                             ContentUnavailableView(
                                 "Nothing fits this focus",
                                 systemImage: "dumbbell",
-                                description: Text("No exercises match this focus with your equipment. Pick another focus, or add equipment in My Gym.")
+                                description: Text("No exercises match this focus with your equipment. Pick another focus, or add equipment under Gym equipment (top right).")
                             )
                         } else {
                             summaryCard(plan)
@@ -83,13 +62,15 @@ struct WorkoutBuilderView: View {
                             }
                         }
                     }
+                    // The way out sits after the plan, so the plan comes first (ux-audit W1, 4.6).
+                    ownWorkoutLink
                 }
                 .padding()
                 .lockedToScreenWidth()
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .background(Theme.background)
-            .navigationTitle("Build a workout")
+            .navigationTitle("Start workout")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -99,7 +80,7 @@ struct WorkoutBuilderView: View {
                     Button {
                         showingGym = true
                     } label: {
-                        Label("My Gym", systemImage: "dumbbell")
+                        Label("Gym equipment", systemImage: "dumbbell")
                     }
                 }
             }
@@ -118,14 +99,19 @@ struct WorkoutBuilderView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(plan?.exercises.isEmpty ?? true)
+                .opacity((plan?.exercises.isEmpty ?? true) ? 0.5 : 1)
                 .padding(.horizontal)
                 .padding(.bottom, 8)
             }
-            .sheet(isPresented: $showingGym, onDismiss: rebuild) {
-                MyGymView()
+            // A push inside this sheet's stack, never a sheet on a sheet (ux-audit 4.1 rule 5).
+            .navigationDestination(isPresented: $showingGym) {
+                MyGymView(pushed: true)
+            }
+            .onChange(of: showingGym) { _, showing in
+                if !showing { rebuild() }
             }
             .onAppear {
-                // Only once, so coming back from My Gym doesn't reset your choices.
+                // Only once, so coming back from Gym equipment doesn't reset your choices.
                 guard !didSetUp else { return }
                 didSetUp = true
                 focus = initialFocus
@@ -183,6 +169,28 @@ struct WorkoutBuilderView: View {
         plan = current
     }
 
+    /// Saved workouts or an empty one, as a plain row after the plan (ux-audit 4.6, 4.7).
+    private var ownWorkoutLink: some View {
+        NavigationLink {
+            MyWorkoutsView(onStart: { dismiss() })
+        } label: {
+            HStack(spacing: 12) {
+                Text("Saved workouts or empty workout")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var gymPrompt: some View {
         Button {
             showingGym = true
@@ -190,7 +198,7 @@ struct WorkoutBuilderView: View {
             HStack(spacing: 12) {
                 IconBadge(systemName: "slider.horizontal.3", color: Theme.lifting, size: 42)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Set up My Gym")
+                    Text("Set up your gym equipment")
                         .font(.headline)
                         .foregroundStyle(Theme.primaryText)
                     Text("Tell the trainer your equipment, plates and dumbbells so every weight is one you can load.")
@@ -265,7 +273,10 @@ struct WorkoutBuilderView: View {
             }
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
-                Text("Lands you around \(strainText(landsAt)) strain (target \(strainRangeText(target)))\(inRange ? ", right on target." : ".")")
+                let line: String = inRange
+                    ? "Lands you around \(strainText(landsAt)) strain, inside today's range (\(strainRangeText(target)))."
+                    : "Lands you around \(strainText(landsAt)) strain. Today's range: \(strainRangeText(target))."
+                Text(line)
                     .font(.subheadline)
                     .foregroundStyle(inRange ? Theme.recoveryHighText : Theme.secondaryText)
             }
@@ -307,6 +318,8 @@ struct SelectChip: View {
                 .foregroundStyle(isSelected ? Theme.card : Theme.primaryText)
                 .background(isSelected ? Theme.ink : Theme.card, in: .capsule)
                 .shadow(color: Color.black.opacity(isSelected ? 0 : 0.06), radius: 6, y: 2)
+                .frame(minHeight: 44)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

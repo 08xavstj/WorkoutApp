@@ -23,6 +23,8 @@ struct ActiveWorkoutView: View {
     /// Exercise order → superset group for this session (`SupersetRegistry`).
     @State private var supersetGroups: [Int: Int] = [:]
     @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
+    /// Strain number inside the ring; scales with Dynamic Type (ux-audit W5).
+    @ScaledMetric(relativeTo: .title2) private var ringValueSize: CGFloat = 26
 
     var body: some View {
         NavigationStack {
@@ -130,10 +132,10 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text(WatchSync.shared.startProblem ?? "")
             }
-            .alert("Saved to My workouts", isPresented: $savedTemplate) {
+            .alert("Added to saved workouts", isPresented: $savedTemplate) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("Start it again any time from Add → My workouts. Weights will be suggested from what you lift.")
+                Text("Start it again any time from Fitness › Saved workouts. Weights will be suggested from what you lift.")
             }
             .confirmationDialog("Discard this workout?", isPresented: $showingDiscard, titleVisibility: .visible) {
                 Button("Discard", role: .destructive) {
@@ -163,7 +165,7 @@ struct ActiveWorkoutView: View {
                         Task { await WatchSync.shared.startOnWatch(session) }
                     }
                 }
-                Button("Save as my workout", systemImage: "square.and.arrow.down") {
+                Button("Add to saved workouts", systemImage: "square.and.arrow.down") {
                     _ = WorkoutTemplate.from(session, in: modelContext)
                     savedTemplate = true
                 }
@@ -194,6 +196,7 @@ struct ActiveWorkoutView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 22)
                     .padding(.vertical, 11)
+                    .frame(minHeight: 44)
                     .background(Theme.lifting, in: .capsule)
             }
             .buttonStyle(.plain)
@@ -230,8 +233,10 @@ struct ActiveWorkoutView: View {
                 GradientRing(progress: live / 40, colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
                     VStack(spacing: 0) {
                         Text("+\(strainText(live))")
-                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .font(.system(size: ringValueSize, weight: .bold, design: .rounded))
                             .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
                         Text("strain")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
@@ -239,7 +244,9 @@ struct ActiveWorkoutView: View {
                     .foregroundStyle(Theme.primaryText)
                 }
                 .frame(width: 112, height: 112)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Strain added so far")
+                .accessibilityValue("+\(strainText(live))")
             }
         }
     }
@@ -764,13 +771,15 @@ private struct NumberStepper<Field: View>: View {
     @ViewBuilder var field: Field
     let minus: () -> Void
     let plus: () -> Void
+    /// Scales with Dynamic Type (ux-audit W5).
+    @ScaledMetric(relativeTo: .title) private var valueSize: CGFloat = 28
 
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 0) {
                 stepButton("minus", action: minus)
                 field
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: valueSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
@@ -815,6 +824,8 @@ private struct RPEPicker: View {
                 Button(action: onShowGuide) {
                     Label("What's RPE?", systemImage: "questionmark.circle")
                         .font(.caption.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .contentShape(.rect)
                 }
             }
             HStack(spacing: 6) {
@@ -979,6 +990,8 @@ private struct RestTimerPill: View {
 private struct LiveHeartRateBar: View {
     let recorder: LiveWorkoutRecorder
     let profile: HeartRateProfile?
+    /// Scales with Dynamic Type (ux-audit W5).
+    @ScaledMetric(relativeTo: .title2) private var bpmSize: CGFloat = 26
 
     var body: some View {
         HStack(spacing: 12) {
@@ -990,7 +1003,7 @@ private struct LiveHeartRateBar: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text("\(whole(bpm))")
-                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .font(.system(size: bpmSize, weight: .bold, design: .rounded))
                             .monospacedDigit()
                         Text("bpm").font(.subheadline).foregroundStyle(Theme.secondaryText)
                     }

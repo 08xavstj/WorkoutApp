@@ -31,20 +31,20 @@ struct MyWorkoutsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    bigButton("Create a workout", icon: "plus", colors: [Theme.lifting, Theme.sleep]) {
+                    bigButton("New workout", icon: "plus", colors: [Theme.lifting, Theme.sleep]) {
                         editing = EditorRequest(template: nil)
                     }
-                    bigButton("Start empty", icon: "dumbbell.fill", colors: [Theme.strain, Theme.lifting]) {
+                    bigButton("Empty workout", icon: "dumbbell.fill", colors: [Theme.strain, Theme.lifting]) {
                         launcher.startEmpty(in: modelContext)
                         onStart?()
                     }
                 }
                 if sorted.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Build your own")
+                        Text("No saved workouts yet")
                             .font(.headline)
                             .foregroundStyle(Theme.primaryText)
-                        Text("Pick any exercises, sets, reps and effort. Weights you leave blank are suggested from what you've lifted before. You can also save any workout you've done from its menu.")
+                        Text("Tap New workout to pick any exercises, sets, reps and effort. Weights you leave blank are suggested from what you've lifted before. You can also save any workout you've done from its menu.")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -66,7 +66,7 @@ struct MyWorkoutsView: View {
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .background(Theme.background)
-        .navigationTitle("My workouts")
+        .navigationTitle("Saved workouts")
         .sheet(item: $editing) { request in
             TemplateEditorView(template: request.template)
         }

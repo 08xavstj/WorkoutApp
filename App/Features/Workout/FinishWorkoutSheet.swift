@@ -39,14 +39,16 @@ struct FinishWorkoutSheet: View {
                         Text("Rate the whole workout, not your last set. Lifting doesn't raise your heart rate much, so this rating is how your gym work counts toward strain.")
                         Button("What do the numbers mean?") { showingRPEGuide = true }
                             .font(.footnote.weight(.semibold))
+                            .frame(minHeight: 44)
+                            .contentShape(.rect)
                     }
                 }
                 Section {
                     Toggle("Save to Apple Health", isOn: $saveToHealth)
-                    Toggle("Save as one of my workouts", isOn: $saveAsTemplate)
+                    Toggle("Add to saved workouts", isOn: $saveAsTemplate)
                 } footer: {
                     if saveAsTemplate {
-                        Text("You can start it again from Add → My workouts, with weights suggested from today.")
+                        Text("You can start it again from Fitness › Saved workouts, with weights suggested from today.")
                     }
                 }
                 if let errorMessage {
@@ -63,7 +65,8 @@ struct FinishWorkoutSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Back") { dismiss() }
+                    // HIG: a sheet closes with Cancel, not Back (ux-audit W3).
+                    Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {

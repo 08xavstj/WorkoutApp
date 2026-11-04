@@ -12,11 +12,14 @@ struct MyGymView: View {
     @State private var rangeTo: Double = 50
     @State private var rangeStep: Double = 5
     @State private var pendingUnit: LoadUnit?
+    /// True when pushed inside another sheet's NavigationStack (the workout
+    /// builder), so it doesn't open a sheet on a sheet (ux-audit 4.1 rule 5).
+    var pushed = false
 
     private let toggleable = EquipmentKind.allCases.filter { $0 != .bodyweight }
 
     var body: some View {
-        NavigationStack {
+        OptionalNavigationStack(isNeeded: !pushed) {
             Form {
                 Section {
                     TextField("Name", text: $draft.name)
@@ -177,6 +180,8 @@ struct MyGymView: View {
                 Text("Plates and dumbbells come in different sizes in kg and lb.")
             }
             .navigationBarTitleDisplayMode(.inline)
+            // Pushed: Cancel and Save replace Back, so edits are never dropped by a swipe.
+            .navigationBarBackButtonHidden(pushed)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -282,5 +287,22 @@ struct MyGymView: View {
             }
         }
         .scrollIndicators(.hidden)
+    }
+}
+
+// MARK: - Presentation (ux-audit wave 1, builder 1C)
+
+/// Wraps the content in its own NavigationStack only when it's shown as a
+/// sheet; when pushed, it uses the stack it was pushed onto.
+private struct OptionalNavigationStack<Content: View>: View {
+    let isNeeded: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if isNeeded {
+            NavigationStack { content }
+        } else {
+            content
+        }
     }
 }

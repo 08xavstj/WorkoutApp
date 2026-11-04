@@ -159,10 +159,16 @@ struct CheckInView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(EveningCheckIn.caffeinePresets, id: \.name) { preset in
-                        Button("+ \(preset.name)") { evening.caffeineMg = (evening.caffeineMg ?? 0) + preset.mg }
-                            .font(.caption.weight(.semibold))
-                            .buttonStyle(.bordered)
-                            .tint(Theme.strain)
+                        Button {
+                            evening.caffeineMg = (evening.caffeineMg ?? 0) + preset.mg
+                        } label: {
+                            // With the bordered inset this makes a 44 pt target (ux-audit 4.8).
+                            Text("+ \(preset.name)")
+                                .frame(minHeight: 34)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .tint(Theme.strain)
                     }
                 }
             }
@@ -201,7 +207,7 @@ struct CheckInView: View {
         } header: {
             Text("Alcohol")
         } footer: {
-            Text("A quick count is fine. Logging the type and amount counts standard drinks for you. Forgot last night? Use Add → Alcohol.")
+            Text("A quick count is fine. Logging the type and amount counts standard drinks for you. Forgot last night? Tap Log › Drinks.")
         }
         Section("Stress today") {
             ScalePicker(value: $evening.stress, labels: ["Calm", "Low", "Some", "High", "Very high"], color: Theme.recoveryModerate)
@@ -258,6 +264,8 @@ struct CheckInView: View {
                     evening[keyPath: keyPath] = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.secondaryText)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Remove \(title.lowercased()) time")
@@ -385,7 +393,8 @@ struct ChipFlow<Option: Hashable>: View {
     }
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
+        // Row spacing 0: each chip's 44 pt hit area below keeps the same 8 pt visual gap.
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 0) {
             ForEach(options, id: \.self) { option in
                 let selected = selection.contains(option)
                 // A tap gesture, not a Button: in a Form row, a tap on one
@@ -398,7 +407,8 @@ struct ChipFlow<Option: Hashable>: View {
                     .frame(maxWidth: .infinity, minHeight: 36)
                     .foregroundStyle(selected ? .white : Theme.primaryText)
                     .background(selected ? color : Theme.cardRaised, in: .capsule)
-                    .contentShape(.capsule)
+                    .padding(.vertical, 4)
+                    .contentShape(.rect)
                     .onTapGesture { toggle(option) }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(label(option))

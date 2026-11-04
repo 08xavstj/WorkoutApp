@@ -77,14 +77,14 @@ struct WorkoutDetailView: View {
                     _ = WorkoutTemplate.from(session, in: modelContext)
                     savedTemplate = true
                 } label: {
-                    Label("Save as my workout", systemImage: "square.and.arrow.down")
+                    Label("Add to saved workouts", systemImage: "square.and.arrow.down")
                 }
             }
         }
-        .alert("Saved to My workouts", isPresented: $savedTemplate) {
+        .alert("Added to saved workouts", isPresented: $savedTemplate) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Start it again any time from Add → My workouts.")
+            Text("Start it again any time from Fitness › Saved workouts.")
         }
         // On the List itself: a Section's .refreshable is never used.
         .refreshable { reloadToken += 1 }
