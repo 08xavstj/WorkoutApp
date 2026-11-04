@@ -14,12 +14,10 @@ import SwiftData
 struct LogView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(WorkoutLauncher.self) private var launcher
-    @Environment(GymStore.self) private var gym
     @Environment(AppRouter.self) private var router
     @State private var showingSavedWorkouts = false
     @State private var showingFoodEstimate = false
     @State private var showingLabs = false
-    @State private var showingGym = false
 
     var body: some View {
         NavigationStack {
@@ -35,7 +33,6 @@ struct LogView: View {
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
 
                 logSection
-                moreSection
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -48,7 +45,6 @@ struct LogView: View {
             .navigationDestination(isPresented: $showingSavedWorkouts) { MyWorkoutsView() }
             .sheet(isPresented: $showingFoodEstimate) { FoodEstimateView() }
             .sheet(isPresented: $showingLabs) { LabsView() }
-            .sheet(isPresented: $showingGym) { MyGymView() }
         }
     }
 
@@ -77,18 +73,6 @@ struct LogView: View {
             }
             Button { showingLabs = true } label: {
                 LogRow(title: "Lab results", detail: "Enter by hand or import a PDF", icon: "testtube.2")
-            }
-        }
-    }
-
-    // Gym equipment stays here until Settings gets its Training section
-    // (docs/research/ux-audit.md 4.3, wave 3). The plan, medications and
-    // history moved to Fitness › This week, Health › Records and Fitness ›
-    // Workouts.
-    private var moreSection: some View {
-        Section("Gym") {
-            Button { showingGym = true } label: {
-                LogRow(title: "Gym equipment", detail: gym.isConfigured ? gym.profile.name : "Set up your equipment and weights", icon: "slider.horizontal.3")
             }
         }
     }

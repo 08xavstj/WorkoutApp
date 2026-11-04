@@ -1,6 +1,9 @@
 import SwiftUI
 
 /// Pick where you live: search for a city or use your current location once.
+///
+/// A sheet from Today's setup card; pushed (`pushed: true`) from Settings and
+/// onboarding, where Back replaces Cancel (ux-audit.md 4.1 rule 5).
 struct LocationPicker: View {
     @Environment(UserSettings.self) private var settings
     @Environment(ConditionsModel.self) private var conditions
@@ -9,9 +12,11 @@ struct LocationPicker: View {
     @State private var results: [Place] = []
     @State private var finder = LocationFinder()
     @State private var searchError: String?
+    /// True when pushed onto another NavigationStack.
+    var pushed = false
 
     var body: some View {
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             List {
                 Section {
                     Button {
@@ -73,11 +78,13 @@ struct LocationPicker: View {
                     searchError = "Search isn't available right now."
                 }
             }
-            .navigationTitle("Where you live")
+            .navigationTitle("Your city")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                if !pushed {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
                 }
             }
         }

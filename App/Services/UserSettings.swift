@@ -150,6 +150,15 @@ final class UserSettings {
     /// "Target adjusted −60 kcal this week: …", empty when nothing changed this week.
     var calorieAdjustmentNote: String { didSet { defaults.set(calorieAdjustmentNote, forKey: "calorieAdjustmentNote") } }
 
+    // MARK: Lifting experience (Settings › Training)
+
+    /// How long you've lifted, as you reported it; nil = not set. Stored as its
+    /// raw value. Combined with the lifting log by `TrainingStatus.resolve`
+    /// (docs/research/calories.md).
+    var liftingExperience: LiftingExperience? {
+        didSet { defaults.set(liftingExperience?.rawValue, forKey: "liftingExperience") }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         age = defaults.object(forKey: "age") as? Int ?? 30
@@ -192,6 +201,8 @@ final class UserSettings {
         calorieTargetOverrideDate = defaults.object(forKey: "calorieTargetOverrideDate") as? Date
         calorieTargetOverrideGoal = defaults.string(forKey: "calorieTargetOverrideGoal") ?? ""
         calorieAdjustmentNote = defaults.string(forKey: "calorieAdjustmentNote") ?? ""
+        // Lifting experience (Settings › Training).
+        liftingExperience = defaults.string(forKey: "liftingExperience").flatMap(LiftingExperience.init(rawValue:))
     }
 
     /// Fills the profile from Apple Health (only fields Health actually has).

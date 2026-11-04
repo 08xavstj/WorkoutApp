@@ -83,7 +83,7 @@ final class CloudCoach {
         let base = settings.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let anonKey = settings.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let baseURL = URL(string: base), !base.isEmpty, !anonKey.isEmpty else {
-            throw CoachError.unavailable("Add your Supabase project URL and anon key in Settings (AI coach → Claude) to use Claude.")
+            throw CoachError.unavailable("Add your Supabase project URL and anon key in Settings › Coach › Advanced to use Claude.")
         }
 
         do {

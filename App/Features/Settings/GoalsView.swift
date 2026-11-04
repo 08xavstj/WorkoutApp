@@ -2,6 +2,9 @@ import SwiftUI
 import AppCore
 
 /// Weight and training goals. Opens with a suggestion from body composition.
+///
+/// A sheet from Today's setup card; pushed (`pushed: true`) from Settings and
+/// onboarding, so a sheet never opens on a sheet (ux-audit.md 4.1 rule 5).
 struct GoalsView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(DailyMetricsModel.self) private var metrics
@@ -9,6 +12,8 @@ struct GoalsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var goals = Goals()
     @State private var targetText = ""
+    /// True when pushed onto another NavigationStack.
+    var pushed = false
 
     private var suggestion: Goals {
         let fat = vitals.stat("fat")?.series.last?.value
@@ -27,7 +32,7 @@ struct GoalsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             Form {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
@@ -109,6 +114,8 @@ struct GoalsView: View {
             }
             .navigationTitle("Your goals")
             .navigationBarTitleDisplayMode(.inline)
+            // Pushed: Cancel and Save replace Back, so edits are never dropped by a swipe.
+            .navigationBarBackButtonHidden(pushed)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

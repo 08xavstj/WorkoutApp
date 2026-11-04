@@ -2,8 +2,8 @@ import SwiftUI
 
 /// What a Garmin watch shares with Apple Health and what stays in Garmin
 /// Connect. Setup help, not content, so it belongs under Settings › Data
-/// sources (ux-audit.md 4.3, B5); until Settings links to it, Health ›
-/// Patterns does. Works pushed onto any NavigationStack.
+/// sources (ux-audit.md 4.3, B5), which pushes it. Works pushed onto any
+/// NavigationStack.
 struct GarminHelpView: View {
     var body: some View {
         HealthDetailPage(title: "Using a Garmin") {

@@ -12,8 +12,10 @@ import Foundation
 /// - Advanced lifters gain muscle slowly and should gain weight more
 ///   slowly (Iraki et al., Sports 2019); "advanced" here is 2+ years of
 ///   consistent training, an app choice.
-/// Only sessions logged in this app count, so someone who lifted for years
-/// before installing it reads as a novice until the history builds up.
+/// `estimate` counts only sessions logged in this app, so someone who lifted
+/// for years before installing it would read as a novice until the history
+/// builds up. `resolve` fixes that with the lifting experience they report in
+/// Settings › Training (`LiftingExperience`).
 public enum TrainingStatus: String, Codable, Sendable, CaseIterable, Comparable {
     case untrained, novice, intermediate, advanced
 
@@ -78,5 +80,58 @@ public enum TrainingStatus: String, Codable, Sendable, CaseIterable, Comparable 
         }
         if perWeek < trainedWeeklySessions || consistentMonths < intermediateMonths { return .novice }
         return consistentMonths < advancedMonths ? .intermediate : .advanced
+    }
+
+    /// Weeks between the first logged session and now before the log can
+    /// overrule the reported experience (app choice: the same 8-week window
+    /// `estimate` uses to tell regular training from none).
+    public static let weeksToJudgeLog = 8
+
+    /// The training status the app uses: the logged estimate combined with
+    /// the experience the user reported. The rule is the app's choice, not a
+    /// study's; it reuses the anchors above (Helms, Zinn, Rowlands & Brown,
+    /// IJSNEM 2014 for 6 months; Iraki et al., Sports 2019 for advanced).
+    /// - Nothing reported: the logged estimate, as before.
+    /// - Reported, and under 8 weeks of logged history (too short to judge):
+    ///   the reported level (2+ years advanced, 6 months-2 years
+    ///   intermediate, under 6 months novice).
+    /// - Reported, and 8+ weeks logged: the higher of the reported level and
+    ///   the estimate, unless the estimate is untrained (under one session a
+    ///   week lately: they have stopped training regularly), which wins.
+    public static func resolve(reported: LiftingExperience?, sessionDates: [Date], now: Date = .now) -> TrainingStatus {
+        let logged = Self.estimate(sessionDates: sessionDates, now: now)
+        guard let reported else { return logged }
+        let window = Double(weeksToJudgeLog) * 7 * 86_400
+        guard let first = sessionDates.filter({ $0 <= now }).min(),
+              now.timeIntervalSince(first) >= window else { return reported.status }
+        if logged == .untrained { return .untrained }
+        return max(reported.status, logged)
+    }
+}
+
+/// How long someone says they have lifted, set in Settings › Training, for
+/// people whose training started before the app's log did
+/// (docs/research/calories.md). The bands use `TrainingStatus`'s lines:
+/// 6 months (Helms, Zinn, Rowlands & Brown, IJSNEM 2014: "resistance-trained"
+/// means more than 6 months) and 2 years (app choice; advanced lifters should
+/// gain more slowly, Iraki et al., Sports 2019).
+public enum LiftingExperience: String, Codable, Sendable, CaseIterable {
+    case underSixMonths, sixMonthsToTwoYears, twoYearsPlus
+
+    public var label: String {
+        switch self {
+        case .underSixMonths: "Less than 6 months"
+        case .sixMonthsToTwoYears: "6 months to 2 years"
+        case .twoYearsPlus: "2+ years"
+        }
+    }
+
+    /// The training status this much experience stands for.
+    public var status: TrainingStatus {
+        switch self {
+        case .underSixMonths: .novice
+        case .sixMonthsToTwoYears: .intermediate
+        case .twoYearsPlus: .advanced
+        }
     }
 }

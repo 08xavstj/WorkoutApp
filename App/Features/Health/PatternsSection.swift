@@ -23,11 +23,7 @@ struct PatternsSection: View {
                 HealthNavigationRow(title: "Vitamins & minerals", detail: micronutrientsDetail, icon: "leaf.fill", color: Theme.nutrition) {
                     MicronutrientsPage()
                 }
-                Divider()
-                // Setup help; moves to Settings › Data sources (ux-audit.md 4.3, B5).
-                HealthNavigationRow(title: "Using a Garmin?", detail: "What it shares with Apple Health", icon: "questionmark.circle") {
-                    GarminHelpView()
-                }
+                // Garmin help is under Settings › Data sources (ux-audit.md 4.3, B5).
             }
             .card()
         }

@@ -51,8 +51,10 @@ Decisions:
   consistent months (30-day blocks with 4+ sessions); intermediate 6-23 months; advanced
   24+. Six months matches the "resistance-trained (> 6 months)" definition in Helms,
   Zinn, Rowlands & Brown, IJSNEM 2014 ✓. Only sessions logged in the app count, so a
-  long-time lifter who just installed it reads as a newer lifter at first. A manual
-  "years of lifting" setting would fix that (not built).
+  long-time lifter who just installed it would read as a newer lifter at first. Settings ›
+  Training › Lifting experience fixes that (`TrainingStatus.resolve`, app choice): with
+  under 8 weeks of logged history the reported level is used; after that, the higher of the
+  reported level and the log, unless the log shows training has stopped (untrained).
 - **The 1.4 × BMR plausibility check keeps Mifflin.** The athlete equation runs about
   200 kcal higher for a young male lifter; using it would push the "physically
   impossible maintenance" bar up and reject real low maintenances during a long cut.
