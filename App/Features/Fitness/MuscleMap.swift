@@ -106,6 +106,8 @@ struct BodyFigure: View {
 
 // MARK: - Card
 
+/// The body map, on Fitness › Progress › Muscles (`MusclesDetailView`). A
+/// plain card: heart red is for the heart only (ux-audit.md 4.5 colour rules).
 struct MuscleMapCard: View {
     @Environment(MuscleModel.self) private var model
     @State private var mode = Mode.recovery
@@ -140,7 +142,7 @@ struct MuscleMapCard: View {
             legend
             details(states)
         }
-        .card(tint: Theme.heart)
+        .card()
     }
 
     /// Colour for a drawn region; "upperBack" shows the more tired of lats and upper back.

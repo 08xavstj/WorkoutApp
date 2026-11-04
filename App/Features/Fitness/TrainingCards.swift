@@ -2,54 +2,6 @@ import SwiftUI
 import SwiftData
 import AppCore
 
-// MARK: - Your workouts
-
-/// Shortcut to your own workouts and an empty workout.
-struct YourWorkoutsCard: View {
-    @Environment(\.modelContext) private var modelContext
-    @Environment(WorkoutLauncher.self) private var launcher
-    @Query private var templates: [WorkoutTemplate]
-
-    var body: some View {
-        HStack(spacing: 12) {
-            NavigationLink {
-                MyWorkoutsView()
-            } label: {
-                HStack(spacing: 10) {
-                    IconBadge(systemName: "list.bullet.rectangle.portrait.fill", color: Theme.sleep, size: 40)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("My workouts")
-                            .font(.headline)
-                            .foregroundStyle(Theme.primaryText)
-                        Text(templates.isEmpty ? "Build your own" : "\(templates.count) saved")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            Button {
-                launcher.startEmpty(in: modelContext)
-            } label: {
-                Label("Empty", systemImage: "plus")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 44)
-                    .background(Theme.ink, in: .capsule)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Start an empty workout")
-        }
-        .card()
-    }
-}
-
 // MARK: - Weekly sets per muscle
 
 /// Hard sets per muscle this week against the 10-20 range, with helper
@@ -57,7 +9,8 @@ struct YourWorkoutsCard: View {
 struct WeeklySetsCard: View {
     @Environment(MuscleModel.self) private var muscles
 
-    private static let shown: [Muscle] = [.chest, .shoulders, .triceps, .lats, .middleBack, .biceps, .quadriceps, .hamstrings, .glutes, .calves, .abdominals]
+    /// Also counted by the Fitness › Progress › Muscles row.
+    static let shown: [Muscle] = [.chest, .shoulders, .triceps, .lats, .middleBack, .biceps, .quadriceps, .hamstrings, .glutes, .calves, .abdominals]
     /// The bar's right end, in sets.
     private static let scale = 25.0
 

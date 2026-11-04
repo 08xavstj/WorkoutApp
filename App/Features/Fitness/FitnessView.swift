@@ -2,58 +2,31 @@ import SwiftUI
 import SwiftData
 import AppCore
 
-/// Fitness: this week's strain, today's target gauge, training load,
-/// today's activities, heart-rate zones and workout history.
+/// Fitness: plan, start and track training (docs/research/ux-audit.md 4.6).
+/// Five sections under the week strip, most actionable first (HIG Layout:
+/// "Place the most important items near the top"; ux-audit.md P7): This week
+/// (the primary card), Today (day strain, activities, zones), Training load,
+/// Progress (rows that push the full cards and their research notes) and
+/// Workouts (saved workouts and history).
 struct FitnessView: View {
     @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(WorkoutLauncher.self) private var launcher
     @Environment(AppRefresher.self) private var refresher
+    @State private var showingHistory = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    HStack {
-                        Text("Fitness")
-                            .font(.largeTitle.weight(.bold))
-                            .foregroundStyle(Theme.primaryText)
-                            .accessibilityAddTraits(.isHeader)
-                        Spacer()
-                        NavigationLink {
-                            WorkoutHistoryView()
-                        } label: {
-                            GlassIcon(systemName: "calendar")
-                        }
-                        .accessibilityLabel("Workout history")
-                    }
-                    .padding(.top, 8)
                     WeekStrip(days: metrics.weekStrain)
-                    DayStrainCard()
-                    DeloadCard()
-                    // VO₂ max is the headline (health-metrics.md item 1); the
-                    // minutes band gets its own card for health, stamina and
-                    // weight-loss goals, else a line under the strength floor.
-                    SectionTitle(text: "Cardio fitness", trailing: "90-day trend")
-                    CardioFitnessCard()
-                    if WeeklyActivityBand.emphasis(for: metrics.goals) == .primary {
-                        WeeklyMinutesCard()
-                    }
-                    YourWorkoutsCard()
-                    SectionTitle(text: "Muscles")
-                    MuscleMapCard()
-                    WeeklySetsCard()
-                    SectionTitle(text: "Strength", trailing: "Health floor")
-                    StrengthDaysCard()
-                    StrengthForHealthCard()
-                    SectionTitle(text: "Training Load", trailing: "Last 7 days vs usual")
-                    HStack(spacing: 12) {
-                        LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.oxygenLight, Theme.oxygen, Theme.sleep])
-                        LoadCard(title: "Muscular", result: metrics.muscularLoad, colors: [Theme.strainLight, Theme.strain, Theme.lifting])
-                    }
-                    SectionTitle(text: "Today's Activity")
-                    ActivityCard()
-                    SectionTitle(text: "Heart Rate Zones")
-                    ZonesCard()
+                    ThisWeekCard()
+                    SectionHeader("Today")
+                    FitnessTodayCard()
+                    SectionHeader("Training load")
+                    FitnessLoadSection()
+                    SectionHeader("Progress")
+                    FitnessProgressCard()
+                    SectionHeader("Workouts")
+                    FitnessWorkoutsCard()
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
@@ -65,7 +38,18 @@ struct FitnessView: View {
                 TopGlow(colors: [Theme.Wash.peach, Theme.Wash.rose, Theme.Wash.butter])
             }
             .background(Theme.background)
-            .toolbarVisibility(.hidden, for: .navigationBar)
+            .navigationTitle("Fitness")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Workout history", systemImage: "calendar") {
+                        showingHistory = true
+                    }
+                }
+            }
+            .tabToolbar()
+            .navigationDestination(isPresented: $showingHistory) {
+                WorkoutHistoryView()
+            }
             .refreshable { await refresher.refresh() }
         }
     }
@@ -75,6 +59,8 @@ struct FitnessView: View {
 
 private struct WeekStrip: View {
     let days: [DailyMetricsModel.DayStrain]
+    /// Ring numbers at 11 pt or more, scaled with Dynamic Type (ux-audit.md 4.6, P22).
+    @ScaledMetric(relativeTo: .caption2) private var ringNumberSize: CGFloat = 11
 
     var body: some View {
         let calendar = Calendar.current
@@ -96,7 +82,9 @@ private struct WeekStrip: View {
                     } else {
                         GradientRing(progress: (strain ?? 0) / StrainCalculator.maximum, colors: Theme.strainColors, lineWidth: 4, showsDisk: false) {
                             Text(strain.map { "\(whole($0))" } ?? "–")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .font(.system(size: ringNumberSize, weight: .semibold, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
                                 .foregroundStyle(Theme.primaryText)
                         }
                         .frame(width: 36, height: 36)
@@ -116,106 +104,187 @@ private struct WeekStrip: View {
     }
 }
 
-// MARK: - Day strain gauge
+// MARK: - Today
 
-private struct DayStrainCard: View {
+/// Today: the day-strain gauge with today's range band, today's activities
+/// as rows, and a Heart-rate zones row that pushes the zones page. The range
+/// message and session suggestions live on the Today tab's Strain sheet, so
+/// they are not repeated here (ux-audit.md 4.6 Fitness, F2).
+private struct FitnessTodayCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            DayStrainGauge()
+            Divider().overlay(Theme.separator)
+            TodayActivityRows()
+            Divider().overlay(Theme.separator)
+            ZonesSummaryRow()
+        }
+        .card()
+    }
+}
+
+private struct DayStrainGauge: View {
     @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(WorkoutLauncher.self) private var launcher
     @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 60
 
     var body: some View {
         let current = metrics.strain?.strain ?? 0
         let target = metrics.targetStrain
-        VStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 CardLabel(text: "Day strain")
                 Spacer()
                 if let target {
-                    Text("Range \(strainRangeText(target))")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.recoveryHighText)
+                    rangeChip(current: current, target: target)
                 }
             }
-            ArcGauge(
-                value: current / StrainCalculator.maximum,
-                band: target.map { ($0.lowerBound / StrainCalculator.maximum)...($0.upperBound / StrainCalculator.maximum) },
-                colors: [Theme.strainLight, Theme.strain, Theme.lifting],
-                lineWidth: 24
-            ) {
-                VStack(spacing: 2) {
-                    Text(strainText(current))
-                        .font(.system(size: min(heroSize, 76), weight: .bold, design: .rounded))
-                        .minimumScaleFactor(0.6)
-                        .monospacedDigit()
-                        .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
-                    Text("day strain")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-            }
-            .frame(width: 250, height: 250)
-            .padding(.bottom, -40)
-
-            encouragement(current: current, target: target)
+            gauge(current: current, target: target)
+                .frame(maxWidth: .infinity)
+            rangeLine(target)
         }
-        .card(tint: Theme.strain)
     }
 
-    /// Where today sits against the planned range, as information: no "x% to
-    /// go" and no second session to close a gap (Ntoumanis et al. 2021; Swann
-    /// et al. 2021; docs/research/behaviour-change.md §5).
+    private func gauge(current: Double, target: ClosedRange<Double>?) -> some View {
+        ArcGauge(
+            value: current / StrainCalculator.maximum,
+            band: target.map { ($0.lowerBound / StrainCalculator.maximum)...($0.upperBound / StrainCalculator.maximum) },
+            colors: [Theme.strainLight, Theme.strain, Theme.lifting],
+            lineWidth: 24
+        ) {
+            VStack(spacing: 2) {
+                Text(strainText(current))
+                    .font(.system(size: min(heroSize, 76), weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.6)
+                    .monospacedDigit()
+                    .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
+                Text("day strain")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .frame(width: 250, height: 250)
+        .padding(.bottom, -40)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenGauge(current: current, target: target))
+    }
+
+    /// "In range" / "Below range" / "Above range" (ux-audit.md 4.7). Calm
+    /// colours: below is grey, never a warning (ux-audit.md P17, P19).
+    private func rangeChip(current: Double, target: ClosedRange<Double>) -> some View {
+        let status = StrainPlanner().status(current: current, target: target)
+        let chip: (text: String, color: Color) = switch status {
+        case .below: ("Below range", Theme.secondaryText)
+        case .inRange: ("In range", Theme.recoveryHigh)
+        case .above: ("Above range", Theme.strain)
+        }
+        return Chip(text: chip.text, color: chip.color)
+    }
+
     @ViewBuilder
-    private func encouragement(current: Double, target: ClosedRange<Double>?) -> some View {
+    private func rangeLine(_ target: ClosedRange<Double>?) -> some View {
         if let target {
-            let status = StrainPlanner().status(current: current, target: target)
-            let range = strainRangeText(target)
-            let (lead, rest): (String, String) = {
-                switch status {
-                case .below:
-                    if metrics.trainEasyToday {
-                        return ("Easy day:", "anything in \(range) is fine. Tap if you'd like a light session planned.")
-                    }
-                    return ("Today: \(strainText(current)),", "planned range \(range). Tap if you want a session that fits.")
-                case .inRange:
-                    return ("In range:", "anything more is optional. Sleep tonight does the rest.")
-                case .above:
-                    return ("Above range:", "an easy rest of the day helps you recover for tomorrow.")
-                }
-            }()
-            let isBelow: Bool = { if case .below = status { return true } else { return false } }()
-            let message = HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "sparkle")
-                    .foregroundStyle(Theme.recoveryHigh)
-                let bold = Text(lead).fontWeight(.semibold).foregroundStyle(Theme.recoveryHighText)
-                Text("\(bold) \(rest)")
-                    .foregroundStyle(Theme.primaryText)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
-                if isBelow {
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                }
-            }
-            .font(.subheadline)
-            .padding(14)
-            .background(Theme.recoveryHigh.opacity(0.1), in: .rect(cornerRadius: 16))
-            if isBelow {
-                Button { launcher.openBuilder() } label: { message }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Plan a workout")
-            } else {
-                message
-            }
+            Text("Today's range \(strainRangeText(target))")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.recoveryHighText)
+                .frame(maxWidth: .infinity)
+                .accessibilityHidden(true)
         } else {
             Text("Wear your watch to sleep so the app can set a daily strain range from your recovery.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func spokenGauge(current: Double, target: ClosedRange<Double>?) -> String {
+        guard let target else { return "Day strain \(strainText(current))" }
+        return "Day strain \(strainText(current)), today's range \(strainRangeText(target))"
+    }
+}
+
+/// Today's activities as rows with their strain; one line when there are
+/// none (no Start button here: the primary card above has it).
+private struct TodayActivityRows: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+    @ScaledMetric(relativeTo: .body) private var badgeSize: CGFloat = 40
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if metrics.activities.isEmpty {
+                Text("No workouts yet today. Log a gym session or record one on your watch.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(metrics.activities.enumerated()), id: \.element.id) { index, item in
+                if index > 0 {
+                    Divider().overlay(Theme.separator).padding(.vertical, 10)
+                }
+                HStack(spacing: 12) {
+                    IconBadge(
+                        systemName: item.isStrength ? "dumbbell.fill" : "figure.walk",
+                        color: item.isStrength ? Theme.lifting : Theme.oxygen,
+                        size: badgeSize
+                    )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .font(.headline)
+                            .foregroundStyle(Theme.primaryText)
+                        Text("\(item.detail) · \(item.start.formatted(date: .omitted, time: .shortened))")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    Spacer()
+                    Chip(text: "+\(strainText(item.strainAdded))")
+                }
+                .accessibilityElement(children: .combine)
+            }
         }
     }
 }
 
+/// Minutes in heart-rate zones today; pushes the zones page.
+private struct ZonesSummaryRow: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        let total = (metrics.strain?.zoneMinutes ?? []).reduce(0, +)
+        MetricRow(
+            title: "Heart-rate zones",
+            value: "\(whole(total))",
+            unit: "min today",
+            spokenUnit: "minutes in zones today",
+            hint: "Shows time in each zone",
+            destination: ZonesDetailView()
+        )
+    }
+}
+
 // MARK: - Training load
+
+/// The two dials, side by side (stacked at accessibility text sizes,
+/// ux-audit.md 4.8).
+private struct FitnessLoadSection: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        VStack(alignment: .leading, spacing: 8) {
+            layout {
+                LoadCard(title: "Cardio", result: metrics.cardioLoad, colors: [Theme.oxygenLight, Theme.oxygen, Theme.sleep])
+                LoadCard(title: "Muscular", result: metrics.muscularLoad, colors: [Theme.strainLight, Theme.strain, Theme.lifting])
+            }
+            // A description of this week vs your usual 4 weeks, not an injury prediction (`TrainingLoadCalculator`).
+            Text("Average daily strain over the last 7 days, against your usual. A description, not an injury forecast.")
+                .font(Theme.Typography.context)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
 
 private struct LoadCard: View {
     let title: String
@@ -238,22 +307,7 @@ private struct LoadCard: View {
                 tickCount: 36,
                 tickLength: 10
             ) {
-                VStack(spacing: 0) {
-                    Text(result.map { $0.value.formatted(.number.precision(.fractionLength(0))) } ?? "–")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.primaryText)
-                    Text("avg daily strain")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.secondaryText)
-                    if let result, result.status != .calibrating {
-                        Text("your usual \(whole(result.usual.lowerBound))–\(whole(result.usual.upperBound.rounded(.up)))")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.secondaryText)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    }
-                }
-                .padding(.horizontal, 18)
+                dialCentre
             }
             .aspectRatio(1, contentMode: .fit)
             .frame(maxWidth: 140)
@@ -267,7 +321,30 @@ private struct LoadCard: View {
             .font(.caption)
             .foregroundStyle(Theme.secondaryText)
         }
-        .card(tint: colors.last)
+        .card()
+    }
+
+    private var dialCentre: some View {
+        VStack(spacing: 0) {
+            Text(result.map { $0.value.formatted(.number.precision(.fractionLength(0))) } ?? "–")
+                .tileNumberFont()
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .foregroundStyle(Theme.primaryText)
+            Text("avg daily strain")
+                .font(.caption2)
+                .foregroundStyle(Theme.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if let result, result.status != .calibrating {
+                Text("your usual \(whole(result.usual.lowerBound))–\(whole(result.usual.upperBound.rounded(.up)))")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+        .padding(.horizontal, 18)
     }
 
     private func band(maximum: Double) -> ClosedRange<Double>? {
@@ -291,169 +368,190 @@ private struct LoadCard: View {
         case .steady: Theme.recoveryHighText
         case .building: Theme.strainTextColor
         case .spike: Theme.recoveryModerateText
-        case .lighter: Theme.oxygen
+        case .lighter: Theme.oxygenText
         default: Theme.secondaryText
         }
     }
 }
 
-// MARK: - Activity and zones
+// MARK: - Progress
 
-private struct ActivityCard: View {
-    @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(WorkoutLauncher.self) private var launcher
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if metrics.activities.isEmpty {
-                HStack(spacing: 12) {
-                    IconBadge(systemName: "figure.run", color: Theme.secondaryText, size: 44)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("No workouts yet today")
-                            .font(.headline)
-                            .foregroundStyle(Theme.primaryText)
-                        Text("Log a gym session or record one on your watch.")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    Spacer()
-                    Button("Start") { launcher.openBuilder() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                }
-            }
-            ForEach(Array(metrics.activities.enumerated()), id: \.element.id) { index, item in
-                if index > 0 {
-                    Divider().overlay(Theme.separator).padding(.vertical, 12)
-                }
-                HStack(spacing: 12) {
-                    IconBadge(
-                        systemName: item.isStrength ? "dumbbell.fill" : "figure.walk",
-                        color: item.isStrength ? Theme.lifting : Theme.oxygen,
-                        size: 48
-                    )
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name)
-                            .font(.headline)
-                            .foregroundStyle(Theme.primaryText)
-                        Text("\(item.detail) · \(item.start.formatted(date: .omitted, time: .shortened))")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    Spacer()
-                    Chip(text: "+\(strainText(item.strainAdded))")
-                }
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .card()
-    }
-}
-
-private struct ZonesCard: View {
-    @Environment(DailyMetricsModel.self) private var metrics
-
-    private let names = ["Easy", "Light", "Aerobic", "Threshold", "Max"]
-
-    /// Heart-rate range for zone 1-5 (50-60%, ... 90-100% of heart-rate reserve).
-    private func bpmRange(_ index: Int) -> String? {
-        guard let profile = metrics.heartRateProfile else { return nil }
-        let reserve = profile.maxHeartRate - profile.restingHeartRate
-        let low = profile.restingHeartRate + (0.5 + 0.1 * Double(index)) * reserve
-        let high = profile.restingHeartRate + (0.6 + 0.1 * Double(index)) * reserve
-        return "\(whole(low))–\(whole(high))"
-    }
-
-    var body: some View {
-        let minutes = metrics.strain?.zoneMinutes ?? [0, 0, 0, 0, 0]
-        let total = minutes.reduce(0, +)
-        let peak = max(minutes.max() ?? 1, 1)
-        VStack(alignment: .leading, spacing: 14) {
-            Text(total > 0 ? "\(whole(total)) min in zones today (numbers under each bar are bpm)" : "No time in heart-rate zones yet today")
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
-            HStack(alignment: .bottom, spacing: 12) {
-                ForEach(0..<5, id: \.self) { index in
-                    VStack(spacing: 6) {
-                        Text(minutes[index] > 0 ? "\(whole(minutes[index].rounded()))m" : "")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Theme.primaryText)
-                        ZStack(alignment: .bottom) {
-                            RoundedRectangle(cornerRadius: 10).fill(Theme.track)
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(LinearGradient(colors: [Theme.zoneColors[index], Theme.zoneColors[index].opacity(0.45)], startPoint: .top, endPoint: .bottom))
-                                .frame(height: max(6, 130 * minutes[index] / peak))
-                                .shadow(color: Theme.zoneColors[index].opacity(minutes[index] > 0 ? 0.45 : 0), radius: 6)
-                        }
-                        .frame(height: 130)
-                        Text("Z\(index + 1)")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(Theme.primaryText)
-                        Text(names[index])
-                            .font(.caption2)
-                            .foregroundStyle(Theme.secondaryText)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                        if let range = bpmRange(index) {
-                            Text(range)
-                                .font(.caption2)
-                                .monospacedDigit()
-                                .foregroundStyle(Theme.secondaryText)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.6)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
-        .card()
-    }
-}
-
-/// Suggests a lighter week when lifts stall (and HRV is down), and names the
-/// training block's planned deload when this is that week (`TrainingBlock`).
-private struct DeloadCard: View {
+/// Cardio fitness, Strength and Muscles as `MetricRow`s; each pushes a page
+/// with the full cards and their research notes (ux-audit.md 4.5, 4.6).
+private struct FitnessProgressCard: View {
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(UserSettings.self) private var settings
     @Environment(MuscleModel.self) private var muscles
-    @Environment(WeeklyPlanStore.self) private var plans
-    @Environment(DailyMetricsModel.self) private var metrics
+    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     var body: some View {
-        // Training block: the planned easier week (Bell et al. 2023 consensus; `TrainingBlock`).
-        if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.isDeload {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Planned deload this week", systemImage: "arrow.down.right.circle.fill")
-                    .font(.headline)
-                    .foregroundStyle(Theme.oxygen)
-                Text("\(week.label). The trainer plans about half the sets at the same weights; your lifts should feel easy. The next block starts next week.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.primaryText)
-                Text(StrengthHealthFloor.deloadNote)
-                    .font(.caption2)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            .card(tint: Theme.oxygen)
-        } else if let advice = muscles.deload {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(advice.strong ? "Time for a deload week" : "Consider a lighter week", systemImage: "arrow.down.right.circle.fill")
-                    .font(.headline)
-                    .foregroundStyle(advice.strong ? Theme.recoveryModerate : Theme.oxygen)
-                Text(advice.message)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.primaryText)
-                Text("Stalled: " + advice.stalledLifts.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                Text("Deloads are standard in strength training (Bell et al., Sports Med Open 2023 consensus): keep the weights, cut sets by about half, for about a week.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.secondaryText)
-                // 2+ days and 30+ min a week keep the mortality benefit (Momma 2022; `StrengthHealthFloor`).
-                Text(StrengthHealthFloor.deloadNote)
-                    .font(.caption2)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            .card(tint: advice.strong ? Theme.recoveryModerate : Theme.oxygen)
+        VStack(spacing: 0) {
+            cardioRow
+            Divider().overlay(Theme.separator)
+            strengthRow
+            Divider().overlay(Theme.separator)
+            musclesRow
         }
+        .card()
+    }
+
+    /// VO₂ max with its age-and-sex label and the 90-day trend, as on the
+    /// full card (`CardioFitness`; Kaminsky et al., Mayo Clin Proc 2015).
+    private var cardioRow: some View {
+        let history = vitals.vo2MaxHistory
+        let series = history.map { DayValue(date: $0.date, value: $0.value) }
+        let result = CardioFitness.assess(series, age: settings.age, sex: settings.sex)
+        let start = Date.now.addingTimeInterval(-Double(CardioFitness.trendDays) * 86_400)
+        let verdict = result.map { MetricVerdict($0.label, color: $0.label == "Poor" ? Theme.recoveryModerate : Theme.recoveryHigh) }
+        return MetricRow(
+            title: "Cardio fitness (VO₂ max)",
+            value: result.map { $0.latest.formatted(.number.precision(.fractionLength(1))) },
+            unit: "ml/kg/min",
+            spokenUnit: "millilitres per kilogram per minute",
+            verdict: verdict,
+            trend: history.filter { $0.date >= start },
+            trendColor: Theme.oxygen,
+            hint: "Shows your VO₂ max trend and weekly active minutes",
+            destination: CardioDetailView()
+        )
+    }
+
+    /// Strength days in the last 7 against the 2+ a week target (WHO 2020;
+    /// `StrengthDays`), with the same chip as the full card.
+    private var strengthRow: some View {
+        let finished = sessions.filter { !$0.isActive && !$0.workingSets.isEmpty }
+        let thisWeek = StrengthDays.lastSevenDays(finished.map(\.startedAt))
+        let target = StrengthDays.weeklyTarget
+        let met = thisWeek >= target
+        let verdict = MetricVerdict(met ? "Goal reached" : "\(target - thisWeek) more this week", color: met ? Theme.recoveryHigh : Theme.lifting)
+        return MetricRow(
+            title: "Strength",
+            value: "\(thisWeek)",
+            unit: "of \(target)+ days",
+            spokenUnit: "of \(target) or more days in the last 7",
+            verdict: verdict,
+            hint: "Shows strength days, the health minimum and strength for health",
+            destination: StrengthDetailView()
+        )
+    }
+
+    /// Muscles in the 10-20 hard sets a week range (Schoenfeld et al., J Sports
+    /// Sci 2017; Pelland et al., Sports Med 2026; `WeeklySetsCard`), with a
+    /// chip for overworked or recovering muscles (`MuscleRecovery`).
+    private var musclesRow: some View {
+        let states = WeeklySetsCard.shown.compactMap { muscles.states[$0] }
+        let all = Muscle.allCases.compactMap { muscles.states[$0] }
+        let inRange = states.filter { $0.volume == .productive }.count
+        let overworked = all.filter(\.isOverworked).count
+        let recovering = all.filter { $0.status != .fresh && !$0.isOverworked }.count
+        let verdict: MetricVerdict? = if overworked > 0 {
+            MetricVerdict("\(overworked) overworked", color: Theme.recoveryModerate)
+        } else if recovering > 0 {
+            MetricVerdict("\(recovering) recovering")
+        } else {
+            nil
+        }
+        return MetricRow(
+            title: "Muscles",
+            value: states.isEmpty ? nil : "\(inRange) of \(states.count)",
+            unit: "at 10–20 sets",
+            spokenUnit: "muscles at 10 to 20 hard sets this week",
+            verdict: verdict,
+            hint: "Shows the muscle map and hard sets per muscle",
+            destination: MusclesDetailView()
+        )
+    }
+}
+
+// MARK: - Workouts
+
+/// Saved workouts and History, both pushed (ux-audit.md 4.3; replaces the
+/// old "Your workouts" card).
+private struct FitnessWorkoutsCard: View {
+    @Query private var templates: [WorkoutTemplate]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                MyWorkoutsView()
+            } label: {
+                FitnessLinkRow(
+                    title: "Saved workouts",
+                    detail: templates.isEmpty ? "Build your own" : "\(templates.count) saved",
+                    systemImage: "list.bullet.rectangle.portrait"
+                )
+            }
+            .buttonStyle(.plain)
+            Divider().overlay(Theme.separator)
+            NavigationLink {
+                WorkoutHistoryView()
+            } label: {
+                FitnessLinkRow(title: "History", detail: "Every session you've logged", systemImage: "calendar")
+            }
+            .buttonStyle(.plain)
+        }
+        .card()
+    }
+}
+
+/// A row that pushes a page: neutral icon (ux-audit.md 4.5 colour rules),
+/// title, one line of detail and a chevron (HIG Lists and tables, P6).
+private struct FitnessLinkRow: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    @ScaledMetric(relativeTo: .body) private var badgeSize: CGFloat = 34
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconBadge(systemName: systemImage, color: Theme.secondaryText, size: badgeSize)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .accessibilityHidden(true)
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Detail page
+
+/// The page a Progress or Zones row pushes: the full cards, with their
+/// research notes, on the standard background.
+struct FitnessDetailPage<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                content
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+            .lockedToScreenWidth()
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .background(Theme.background)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
