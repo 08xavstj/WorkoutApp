@@ -131,7 +131,7 @@ final class AppRefresher {
 }
 
 enum AppTab: Hashable {
-    case today, fitness, coach, biology, add
+    case today, fitness, coach, health, log
 }
 
 struct RootView: View {
@@ -161,7 +161,7 @@ struct RootView: View {
         @Bindable var launcher = launcher
         @Bindable var router = router
         TabView(selection: $selection) {
-            Tab("Home", systemImage: "house", value: AppTab.today) {
+            Tab("Today", systemImage: "house", value: AppTab.today) {
                 TodayView(askCoach: { question in
                     coach.pendingQuestion = question
                     selection = .coach
@@ -173,13 +173,20 @@ struct RootView: View {
             Tab("Coach", systemImage: "sparkles", value: AppTab.coach) {
                 CoachView()
             }
-            Tab("Biology", systemImage: "heart", value: AppTab.biology) {
+            Tab("Health", systemImage: "heart.text.square", value: AppTab.health) {
                 BiologyView()
             }
-            Tab("Add", systemImage: "plus", value: AppTab.add, role: .search) {
-                QuickAddView()
+            // An ordinary tab, not `role: .search`: that trailing slot is for
+            // search (HIG *Tab bars*; docs/research/ux-audit.md, Decisions).
+            Tab("Log", systemImage: "plus.circle", value: AppTab.log) {
+                LogView()
             }
         }
+        // A workout in progress, above the tab bar on every tab (ux-audit 4.1 rule 4).
+        .modifier(ActiveWorkoutAccessory(
+            session: sessions.first(where: \.isActive),
+            resume: { if let active = sessions.first(where: \.isActive) { launcher.activeSession = active } }
+        ))
         .onOpenURL { url in
             router.open(url)
         }
@@ -198,6 +205,7 @@ struct RootView: View {
         }
         .modifier(WeeklySheets(router: router))
         .modifier(MeasurementSheets(router: router))
+        .modifier(SettingsSheet(router: router))
         .sheet(item: $launcher.builderRequest) { request in
             WorkoutBuilderView(initialFocus: request.focus, initialMinutes: request.minutes)
         }
@@ -467,7 +475,7 @@ private struct WeeklySheets: ViewModifier {
 }
 
 /// Body measurements (workoutapp://measurements) and the home blood pressure
-/// check (workoutapp://bp), opened from reminders, the "+" tab and Biology.
+/// check (workoutapp://bp), opened from reminders, the Log tab and Health.
 private struct MeasurementSheets: ViewModifier {
     let router: AppRouter
 
@@ -476,6 +484,85 @@ private struct MeasurementSheets: ViewModifier {
         content
             .sheet(isPresented: $router.showMeasurements) { BodyMeasurementsView() }
             .sheet(isPresented: $router.showBloodPressure) { BloodPressureView() }
+    }
+}
+
+/// Settings, opened from the profile button on any tab (`TabToolbar`).
+private struct SettingsSheet: ViewModifier {
+    let router: AppRouter
+
+    func body(content: Content) -> some View {
+        @Bindable var router = router
+        content
+            .sheet(isPresented: $router.showSettings) { SettingsView() }
+    }
+}
+
+/// The running workout as the tab bar's bottom accessory: name, elapsed time
+/// and Resume, on every tab while a session is active. HIG *Tab bars* / WWDC25
+/// session 356: the accessory is for persistent features like Music's
+/// mini-player (ux-audit P4, 4.1 rule 4).
+private struct ActiveWorkoutAccessory: ViewModifier {
+    let session: WorkoutSession?
+    let resume: () -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.1, *) {
+            content
+                .tabViewBottomAccessory(isEnabled: session != nil) {
+                    if let session {
+                        ActiveWorkoutBar(session: session, resume: resume)
+                    }
+                }
+        } else if let session {
+            // iOS 26.0 has no `isEnabled:`; an empty accessory would still show
+            // its glass capsule, so the modifier is only applied while active.
+            content
+                .tabViewBottomAccessory {
+                    ActiveWorkoutBar(session: session, resume: resume)
+                }
+        } else {
+            content
+        }
+    }
+}
+
+private struct ActiveWorkoutBar: View {
+    let session: WorkoutSession
+    let resume: () -> Void
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+
+    var body: some View {
+        Button(action: resume) {
+            HStack(spacing: 10) {
+                Image(systemName: "dumbbell.fill")
+                    .foregroundStyle(Theme.lifting)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    if placement != .inline {
+                        Text(session.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                    }
+                    TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
+                        Text(Duration.seconds(max(0, context.date.timeIntervalSince(session.startedAt))).formatted(.time(pattern: .hourMinuteSecond)))
+                            .font(placement == .inline ? Font.subheadline.weight(.semibold) : Font.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(placement == .inline ? Theme.primaryText : Theme.secondaryText)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text("Resume")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.liftingText)
+            }
+            .foregroundStyle(Theme.primaryText)
+            .padding(.horizontal)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(session.name) in progress")
+        .accessibilityHint("Resumes your workout.")
     }
 }
 

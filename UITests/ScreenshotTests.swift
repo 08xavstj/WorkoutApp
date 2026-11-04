@@ -18,7 +18,7 @@ final class ScreenshotTests: XCTestCase {
         capture(app, "1-home")
         openSettings(app)
 
-        for (index, tab) in ["Fitness", "Coach", "Biology", "Add"].enumerated() {
+        for (index, tab) in ["Fitness", "Coach", "Health", "Log"].enumerated() {
             let button = app.tabBars.buttons[tab]
             guard button.waitForExistence(timeout: 5) else {
                 XCTFail("No \(tab) tab")

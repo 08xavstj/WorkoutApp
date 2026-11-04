@@ -12,12 +12,15 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var showMedications = false
     var checkIn: CheckInKind?
     var showProgressPhotos = false
-    /// The weekly review and this week's plan (Monday notification, Home card, "+" tab).
+    /// The weekly review and this week's plan (Monday notification, Home card, Log tab).
     var showWeeklyReview = false
     var showWeeklyPlan = false
     /// Body measurements (workoutapp://measurements) and blood pressure (workoutapp://bp) sheets.
     var showMeasurements = false
     var showBloodPressure = false
+    /// Settings, presented once at the root so any tab's profile button
+    /// (`TabToolbar`) can open it.
+    var showSettings = false
     /// Bumped to bring the running workout back on screen (Live Activity tap).
     var openWorkout = 0
     /// Bumped when doses change outside the app (Live Activity, notification).
@@ -59,7 +62,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     /// screen first and open the check-in once it has gone.
     private func openCheckIn(_ kind: CheckInKind) {
         let otherOpen = showHRVEntry || showMedications || showProgressPhotos || showWeeklyReview || showWeeklyPlan
-            || showMeasurements || showBloodPressure || (checkIn != nil && checkIn != kind)
+            || showMeasurements || showBloodPressure || showSettings || (checkIn != nil && checkIn != kind)
         guard otherOpen else {
             checkIn = kind
             return
@@ -71,6 +74,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         showWeeklyPlan = false
         showMeasurements = false
         showBloodPressure = false
+        showSettings = false
         checkIn = nil
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(700))
