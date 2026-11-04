@@ -29,10 +29,18 @@ struct GradientRing<Content: View>: View {
             // Recessed track.
             Circle()
                 .stroke(Theme.track.shadow(.inner(color: Color.black.opacity(0.13), radius: lineWidth * 0.18, y: lineWidth * 0.1)), lineWidth: lineWidth)
-            if clamped > 0 {
+            if clamped >= 1 {
+                // A full ring is one clean loop: a rounded end cap and its
+                // glow would sit on top of the start and look like it laps itself.
+                Circle()
+                    .stroke(LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom), lineWidth: lineWidth)
+                    .shadow(color: end.opacity(0.35), radius: lineWidth * 0.45)
+            } else if clamped > 0 {
                 Circle()
                     .trim(from: 0, to: clamped)
-                    .stroke(gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    // Rounded ends would touch near the top; flat ends there
+                    // (the glowing cap still marks the end).
+                    .stroke(gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: clamped > 0.9 ? .butt : .round))
                     .rotationEffect(.degrees(-90))
                     .shadow(color: end.opacity(0.35), radius: lineWidth * 0.45)
                 // Glowing end cap.
