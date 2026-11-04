@@ -153,6 +153,27 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
     }
 
+    /// Start times of the minutes Apple Watch counted as exercise (the green
+    /// ring: about brisk-walk intensity or harder), one per minute.
+    @concurrent
+    func exerciseMinutes(from start: Date, to end: Date) async throws -> [Date] {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKStatisticsCollectionQueryDescriptor(
+            predicate: .quantitySample(type: HKQuantityType(.appleExerciseTime), predicate: predicate),
+            options: .cumulativeSum,
+            anchorDate: Calendar.current.startOfDay(for: start),
+            intervalComponents: DateComponents(minute: 1)
+        )
+        do {
+            return try await descriptor.result(for: store).statistics().compactMap { statistics in
+                guard let sum = statistics.sumQuantity(), sum.doubleValue(for: .minute()) >= 0.5 else { return nil }
+                return statistics.startDate
+            }
+        } catch let error as HKError where error.code == .errorNoData {
+            return []
+        }
+    }
+
     /// Raw heart rate in a window, grouped by where it came from
     /// (e.g. "AirPods Pro" via this app vs. "Garmin Connect").
     @concurrent

@@ -133,6 +133,55 @@ struct StrainCalculatorTests {
         let denseLoad = calculator.dailyStrain(heartRate: dense, strengthSessions: [], profile: profile).totalLoad
         #expect(sparseLoad < denseLoad * 1.05)
     }
+
+    /// Start times of consecutive one-minute Apple Watch exercise minutes.
+    func exerciseMinutes(_ count: Int, from start: Date) -> [Date] {
+        (0..<count).map { start.addingTimeInterval(Double($0) * 60) }
+    }
+
+    @Test func exerciseMinutesWithoutHeartRateAddLightStrain() {
+        // 12 brisk minutes with no heart-rate readings: credited at 40% of
+        // reserve, a few percent (a 60-minute brisk walk is about 20%).
+        let result = calculator.dailyStrain(heartRate: [], strengthSessions: [], profile: profile,
+                                            movementMinutes: exerciseMinutes(12, from: start))
+        #expect(result.movementMinutes == 12)
+        #expect((3...7).contains(result.strain))
+        #expect(result.cardioLoad == result.totalLoad)
+    }
+
+    @Test func exerciseMinutesCoveredByHeartRateAreNotCountedTwice() {
+        let heartRate = steady(bpm: bpm(atReserve: 0.6), minutes: 30, from: start)
+        let alone = calculator.dailyStrain(heartRate: heartRate, strengthSessions: [], profile: profile)
+        let both = calculator.dailyStrain(heartRate: heartRate, strengthSessions: [], profile: profile,
+                                          movementMinutes: exerciseMinutes(30, from: start))
+        #expect(both.movementMinutes == 0)
+        #expect(abs(both.totalLoad - alone.totalLoad) < 0.0001)
+    }
+
+    @Test func exerciseMinutesFillOnlyTheGapsHeartRateMissed() {
+        // Readings every 5 minutes (the watch outside workouts): each covers
+        // 2 minutes, so 3 of every 5 exercise minutes are credited.
+        let sparse = (0..<5).map { HeartRateSample(date: start.addingTimeInterval(Double($0) * 300), bpm: bpm(atReserve: 0.5)) }
+        let result = calculator.dailyStrain(heartRate: sparse, strengthSessions: [], profile: profile,
+                                            movementMinutes: exerciseMinutes(20, from: start))
+        #expect(result.movementMinutes == 12)
+    }
+
+    @Test func exerciseMinutesDuringAGymSessionAddNothing() {
+        let session = StrengthSessionSummary(start: start, end: start.addingTimeInterval(3600), sessionRPE: 7)
+        let withSession = calculator.dailyStrain(heartRate: [], strengthSessions: [session], profile: profile)
+        let withMinutes = calculator.dailyStrain(heartRate: [], strengthSessions: [session], profile: profile,
+                                                 movementMinutes: exerciseMinutes(40, from: start))
+        #expect(withMinutes.movementMinutes == 0)
+        #expect(withMinutes.totalLoad == withSession.totalLoad)
+    }
+
+    @Test func repeatedExerciseMinutesCountOnce() {
+        let minutes = exerciseMinutes(5, from: start)
+        let result = calculator.dailyStrain(heartRate: [], strengthSessions: [], profile: profile,
+                                            movementMinutes: minutes + minutes)
+        #expect(result.movementMinutes == 5)
+    }
 }
 
 struct RPEScaleTests {

@@ -103,7 +103,7 @@ final class DailyMetricsModel {
 
     // MARK: Personal calorie numbers (docs/research/calories.md)
 
-    /// From the lifting log (`TrainingStatus.estimate`), set by the app before a refresh.
+    /// From the lifting log and the reported experience (`TrainingStatus.resolve`), set by the app before a refresh.
     /// Picks the resting-energy equation and the fastest useful gain.
     var trainingStatus: TrainingStatus?
     /// Age used for the personal limits (from settings / Apple Health).
@@ -248,12 +248,17 @@ final class DailyMetricsModel {
         _ days: [Date],
         heartRate: [HeartRateSample],
         sessions: [StrengthSessionSummary],
-        profile: HeartRateProfile
+        profile: HeartRateProfile,
+        exerciseMinutes: [Date]
     ) async -> [Date: StrainCalculator.Result] {
         let calendar = Calendar.current
         var byDay: [Date: [HeartRateSample]] = [:]
         for sample in heartRate {
             byDay[calendar.startOfDay(for: sample.date), default: []].append(sample)
+        }
+        var minutesByDay: [Date: [Date]] = [:]
+        for minute in exerciseMinutes {
+            minutesByDay[calendar.startOfDay(for: minute), default: []].append(minute)
         }
         let calculator = StrainCalculator()
         var results: [Date: StrainCalculator.Result] = [:]
@@ -262,7 +267,8 @@ final class DailyMetricsModel {
             results[day] = calculator.dailyStrain(
                 heartRate: byDay[day] ?? [],
                 strengthSessions: sessions.filter { $0.start >= day && $0.start < next },
-                profile: profile
+                profile: profile,
+                movementMinutes: minutesByDay[day] ?? []
             )
         }
         return results
@@ -471,7 +477,11 @@ final class DailyMetricsModel {
                     + fetchedWorkouts.filter { !$0.isStrength }.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                 let peak = await Self.workoutPeak(merged, sources: mergeSources, windows: workoutWindows)
                 settings.noteHeartRatePeak(peak)
-                let computed = await Self.computeDays(needed, heartRate: heartRate, sessions: sessions, profile: profile)
+                // Apple Watch exercise minutes fill the gaps between its sparse
+                // all-day heart-rate readings (`StrainCalculator.movementReserveFraction`).
+                let exerciseMinutes = (try? await health.exerciseMinutes(from: firstNeeded, to: now)) ?? []
+                let computed = await Self.computeDays(needed, heartRate: heartRate, sessions: sessions, profile: profile,
+                                                      exerciseMinutes: exerciseMinutes)
                 for (date, result) in computed {
                     dayCache[date] = (key(for: date), result)
                 }

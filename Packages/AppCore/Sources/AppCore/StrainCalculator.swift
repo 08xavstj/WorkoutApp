@@ -50,6 +50,15 @@ public struct StrainCalculator: Sendable {
     /// (sitting, standing, pottering), which Banister TRIMP wasn't designed
     /// to count and which would otherwise pile up over a whole day.
     public var minimumReserveFraction: Double = 0.3
+    /// Intensity credited to an Apple Watch exercise minute that heart rate
+    /// didn't cover: 40% of reserve, the bottom of "moderate" (ACSM's
+    /// Guidelines, 10th ed. 2018). Apple counts an exercise minute at about
+    /// brisk-walk intensity; Abt et al. (JMIR Cardio 2018) tested it against
+    /// 40% of VO₂ reserve. Outside workouts the watch saves heart rate only
+    /// about every 5 minutes, so a short walk is mostly missed by the
+    /// heart-rate sum. Exercise minutes are imprecise (roughly 20-30% error in
+    /// validation studies), so this is a conservative floor, not a measurement.
+    public var movementReserveFraction: Double = 0.4
 
     public init() {}
 
@@ -60,19 +69,28 @@ public struct StrainCalculator: Sendable {
         public var liftingLoad: Double
         /// Minutes in zones 1-5 (index 0 = zone 1).
         public var zoneMinutes: [Double]
+        /// Exercise minutes credited at `movementReserveFraction` because no
+        /// heart-rate reading covered them (part of `cardioLoad`).
+        public var movementMinutes: Double = 0
 
         public static let empty = Result(strain: 0, totalLoad: 0, cardioLoad: 0, liftingLoad: 0, zoneMinutes: [0, 0, 0, 0, 0])
     }
 
+    /// - Parameter movementMinutes: start times of Apple Watch exercise minutes.
+    ///   Each one that no counted heart-rate reading covers, outside logged gym
+    ///   sessions, adds one minute at `movementReserveFraction`.
     public func dailyStrain(
         heartRate: [HeartRateSample],
         strengthSessions: [StrengthSessionSummary],
-        profile: HeartRateProfile
+        profile: HeartRateProfile,
+        movementMinutes: [Date] = []
     ) -> Result {
         let samples = heartRate.sorted { $0.date < $1.date }
         var cardioLoad = 0.0
         var sessionHeartRateLoad = Array(repeating: 0.0, count: strengthSessions.count)
         var zoneMinutes = [0.0, 0.0, 0.0, 0.0, 0.0]
+        // Minutes (since 1970) already counted from heart rate.
+        var covered = Set<Int>()
 
         for (current, next) in zip(samples, samples.dropFirst()) {
             let gap = next.date.timeIntervalSince(current.date)
@@ -85,10 +103,25 @@ public struct StrainCalculator: Sendable {
             } else {
                 cardioLoad += load
             }
+            if load > 0 {
+                let first = Self.minuteIndex(current.date)
+                let last = Self.minuteIndex(current.date.addingTimeInterval(minutes * 60 - 1))
+                covered.formUnion(first...max(first, last))
+            }
             if let zone = profile.zone(for: current.bpm) {
                 zoneMinutes[zone - 1] += minutes
             }
         }
+
+        var credited = Set<Int>()
+        for minute in movementMinutes {
+            let index = Self.minuteIndex(minute)
+            guard !covered.contains(index), !credited.contains(index),
+                  !strengthSessions.contains(where: { $0.contains(minute) }) else { continue }
+            credited.insert(index)
+        }
+        let movementMinuteCount = Double(credited.count)
+        cardioLoad += trimp(minutes: movementMinuteCount, reserveFraction: movementReserveFraction, sex: profile.sex)
 
         var liftingLoad = 0.0
         for (index, session) in strengthSessions.enumerated() {
@@ -101,8 +134,13 @@ public struct StrainCalculator: Sendable {
             totalLoad: total,
             cardioLoad: cardioLoad,
             liftingLoad: liftingLoad,
-            zoneMinutes: zoneMinutes
+            zoneMinutes: zoneMinutes,
+            movementMinutes: movementMinuteCount
         )
+    }
+
+    private static func minuteIndex(_ date: Date) -> Int {
+        Int((date.timeIntervalSince1970 / 60).rounded(.down))
     }
 
     /// Banister TRIMP for a stretch of time at one heart rate: minutes x ΔHR x
@@ -112,9 +150,13 @@ public struct StrainCalculator: Sendable {
     /// Summing short stretches, rather than using a session's average heart
     /// rate, keeps intervals from being undercounted by the exponential.
     public func trimp(minutes: Double, bpm: Double, profile: HeartRateProfile) -> Double {
-        let fraction = profile.reserveFraction(for: bpm)
-        guard fraction >= minimumReserveFraction else { return 0 }
-        let (a, b) = profile.sex == .female ? (0.86, 1.67) : (0.64, 1.92)
+        trimp(minutes: minutes, reserveFraction: profile.reserveFraction(for: bpm), sex: profile.sex)
+    }
+
+    /// Banister TRIMP for `minutes` at a fraction of heart-rate reserve.
+    public func trimp(minutes: Double, reserveFraction fraction: Double, sex: BiologicalSex) -> Double {
+        guard minutes > 0, fraction >= minimumReserveFraction else { return 0 }
+        let (a, b) = sex == .female ? (0.86, 1.67) : (0.64, 1.92)
         return minutes * fraction * a * exp(b * fraction)
     }
 

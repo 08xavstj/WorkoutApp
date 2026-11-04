@@ -90,6 +90,12 @@ private struct StrainGoalCard: View {
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
+            if let note = movementNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             BreathingOfferRow() // easy days and stressful evenings (BreathingView.swift; Laborde 2022)
             StrainStatusAdvice(
                 status: status,
@@ -100,6 +106,14 @@ private struct StrainGoalCard: View {
             )
         }
         .card()
+    }
+
+    /// Shown when Apple Watch exercise minutes filled gaps in heart rate
+    /// (`StrainCalculator.movementReserveFraction`).
+    private var movementNote: String? {
+        let minutes = whole(metrics.strain?.movementMinutes ?? 0)
+        guard minutes > 0 else { return nil }
+        return "Includes \(minutes) exercise \(minutes == 1 ? "minute" : "minutes") from your Apple Watch that heart rate missed, counted as moderate effort."
     }
 
     /// Where today's range comes from, in one line.
