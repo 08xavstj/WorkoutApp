@@ -797,3 +797,9 @@ Industry (vendor statements)
 - Oura, *The new Oura app experience* (October 2025). ouraring.com/blog/new-oura-app-experience/
 - WHOOP, *The all-new WHOOP home screen* (2025). whoop.com/thelocker/the-all-new-whoop-home-screen/
 - Gentler Streak, App Store release notes (iOS 26 update).
+
+
+## Decisions (user, November 2026)
+
+- **Log stays a bottom tab**, renamed "Log" (no search role): Start workout at the top, Empty and Saved workouts under it, then the log rows. The navigation-bar "+" is not used.
+- **Biology is renamed "Health".** Copy always says "Apple Health" when it means Apple's app.
