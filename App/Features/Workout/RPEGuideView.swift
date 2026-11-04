@@ -44,16 +44,17 @@ struct RPEGuideView: View {
                 }
 
                 Section {
-                    sessionRow("1-2", RPEScale.sessionLabel(2), "Barely felt it; like a walk.")
-                    sessionRow("3-4", RPEScale.sessionLabel(4), "Comfortable; could chat the whole time.")
-                    sessionRow("5-6", RPEScale.sessionLabel(6), "Working, but plenty left.")
-                    sessionRow("7-8", RPEScale.sessionLabel(8), "Tough session; you'd be glad to finish.")
-                    sessionRow("9", RPEScale.sessionLabel(9), "Close to your hardest workout.")
-                    sessionRow("10", RPEScale.sessionLabel(10), "As hard as you can train.")
+                    sessionRow("1", RPEScale.sessionLabel(1), "Barely felt it, like a gentle walk.")
+                    sessionRow("2", RPEScale.sessionLabel(2), "A light technique or recovery session.")
+                    sessionRow("3", RPEScale.sessionLabel(3), "Working, but comfortable the whole way.")
+                    sessionRow("4", RPEScale.sessionLabel(4), "You noticed the effort, with lots left.")
+                    sessionRow("5-6", RPEScale.sessionLabel(6), "A solid session; most sets were a real effort.")
+                    sessionRow("7-9", RPEScale.sessionLabel(8), "Tough throughout; you were glad to finish.")
+                    sessionRow("10", RPEScale.sessionLabel(10), "The hardest session you could do.")
                 } header: {
                     Text("Whole workout (finish screen)")
                 } footer: {
-                    Text("When you finish, you rate the whole session 1-10. That rating times the minutes you trained is how lifting counts toward strain, because heart rate undercounts gym work.")
+                    Text("Rate the whole session, not your last set: how hard was it overall? Most normal lifting sessions land around 4-7. That rating times the minutes you trained is how lifting counts toward strain, because heart rate undercounts gym work.")
                 }
 
                 Section {

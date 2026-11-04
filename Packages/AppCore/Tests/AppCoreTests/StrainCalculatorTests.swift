@@ -189,6 +189,11 @@ struct RPEScaleTests {
         #expect(RPEScale.summary(8) == "RPE 8 · 2 reps left")
         #expect(RPEScale.summary(9) == "RPE 9 · 1 rep left")
         #expect(RPEScale.level(for: 6.5)?.rpe == 6 || RPEScale.level(for: 6.5)?.rpe == 7)
-        #expect(RPEScale.sessionLabel(8) == "Hard")
+        // Foster's CR-10 anchors (Foster et al. 2001): 3 moderate, 5 hard, 7 very hard.
+        #expect(RPEScale.sessionLabel(3) == "Moderate")
+        #expect(RPEScale.sessionLabel(5) == "Hard")
+        #expect(RPEScale.sessionLabel(7) == "Very hard")
+        #expect(RPEScale.sessionLabel(8) == "Very hard")
+        #expect(RPEScale.sessionLabel(10) == "Maximal")
     }
 }

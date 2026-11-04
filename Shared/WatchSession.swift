@@ -184,13 +184,17 @@ nonisolated struct WatchRPEChoice: Sendable, Identifiable, Equatable {
     /// Whole-session effort, 1-10.
     static let session: [WatchRPEChoice] = (1...10).map { WatchRPEChoice(value: $0, label: WatchRPEChoice.sessionLabel($0)) }
 
+    /// Foster's CR-10 anchors, as `RPEScale.sessionLabel`, shortened to fit
+    /// five buttons a row on the wrist ("very, very easy" → "Very easy",
+    /// "somewhat hard" → "Fairly hard"; same meaning).
     static func sessionLabel(_ rpe: Int) -> String {
         switch rpe {
-        case ...2: "Very easy"
-        case 3...4: "Easy"
-        case 5...6: "Moderate"
-        case 7...8: "Hard"
-        case 9: "Very hard"
+        case ...1: "Very easy"
+        case 2: "Easy"
+        case 3: "Moderate"
+        case 4: "Fairly hard"
+        case 5...6: "Hard"
+        case 7...9: "Very hard"
         default: "Maximal"
         }
     }

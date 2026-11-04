@@ -39,14 +39,21 @@ public enum RPEScale {
         return "RPE \(rpe.formatted()) · \(reps)"
     }
 
-    /// Whole-workout difficulty for the finish screen.
+    /// Whole-workout difficulty for the finish screen: the verbal anchors of
+    /// Foster's session-RPE scale (CR-10; Foster et al., J Strength Cond Res
+    /// 2001): 1 very, very easy, 2 easy, 3 moderate, 4 somewhat hard, 5 hard,
+    /// 7 very hard, 10 maximal; the unlabelled 6, 8 and 9 take the anchor
+    /// below them. `StrainCalculator.rpeToTrimp` is calibrated on these anchors
+    /// (moderate ≈ 3, hard ≈ 5-6, very hard ≈ 7), so the words matter: the old
+    /// labels called 5-6 "moderate" and 7-8 "hard", nudging ratings up.
     public static func sessionLabel(_ rpe: Int) -> String {
         switch rpe {
-        case ...2: "Very easy"
-        case 3...4: "Easy"
-        case 5...6: "Moderate"
-        case 7...8: "Hard"
-        case 9: "Very hard"
+        case ...1: "Very, very easy"
+        case 2: "Easy"
+        case 3: "Moderate"
+        case 4: "Somewhat hard"
+        case 5...6: "Hard"
+        case 7...9: "Very hard"
         default: "Maximal"
         }
     }
