@@ -56,6 +56,11 @@ final class DailyMetricsModel {
     private(set) var watchRestingPerDay: Double?
     /// Maintenance calories from food log + weight trend, once there's enough data.
     private(set) var maintenance: AdaptiveTDEE.Result?
+    /// A food-log maintenance that was too low to be real (under 1.4× resting
+    /// metabolism), so it wasn't used; shown so the user knows why.
+    private(set) var implausibleMaintenance: Double?
+    /// The lowest daily target for this body and training (`CalorieSafety`).
+    private(set) var calorieMinimum: Double?
     /// How close the maintenance estimate is (fully logged days so far).
     private(set) var maintenanceProgress: AdaptiveTDEE.Progress?
     /// kg per week from the weight trend.
@@ -98,11 +103,23 @@ final class DailyMetricsModel {
 
     /// Daily calorie target from your goal (or maintenance when no goal is set).
     var calorieTarget: Double? {
-        // This week's target (Monday-updated) wins while there's measured maintenance behind it.
-        if let calorieTargetOverride, goals != nil, maintenance != nil { return calorieTargetOverride }
-        guard let base = maintenance?.maintenance ?? calories?.projected else { return nil }
-        guard let goals, let weight = bodyMassKg else { return base }
-        return GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: sex)
+        let target: Double
+        if let calorieTargetOverride, goals != nil, maintenance != nil {
+            // This week's target (Monday-updated) wins while there's measured maintenance behind it.
+            target = calorieTargetOverride
+        } else {
+            guard let base = maintenance?.maintenance ?? calories?.projected else { return nil }
+            guard let goals, let weight = bodyMassKg else { return base }
+            target = GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: sex)
+        }
+        // Never below what this body needs after training (`CalorieSafety`, IOC REDs 2023).
+        return max(target, calorieMinimum ?? 0)
+    }
+
+    /// True when the target is being held up by the safety minimum.
+    var targetHeldAtMinimum: Bool {
+        guard let minimum = calorieMinimum, let target = calorieTarget else { return false }
+        return abs(target - minimum) < 1
     }
 
     /// One consistent set of calorie numbers for the Home card.
@@ -515,15 +532,34 @@ final class DailyMetricsModel {
             }
             let loading = creatine.map { $0.dose.contains("20") } ?? false
             let expected = calories?.projected
-            maintenance = AdaptiveTDEE.estimate(intake: intake, weights: weights, now: now,
-                                                creatineStart: creatine?.startDate, creatineLoading: loading,
-                                                expectedExpenditure: expected)
+            let measured = AdaptiveTDEE.estimate(intake: intake, weights: weights, now: now,
+                                                 creatineStart: creatine?.startDate, creatineLoading: loading,
+                                                 expectedExpenditure: expected)
+            // A maintenance under 1.4× resting metabolism isn't physically believable
+            // (FAO/WHO/UNU 2004): the food log is incomplete, so it isn't used
+            // (`CalorieSafety`). The watch estimate stands in until it looks complete.
+            let restingKcal = bodyMassKg.map { weight in
+                EnergyCalculator().bmr(EnergyCalculator.Body(weightKg: weight, heightCm: heightCm, age: settings.age, sex: settings.sex)).kcal
+            }
+            if let measured, let restingKcal, !CalorieSafety.isPlausibleMaintenance(measured.maintenance, bmr: restingKcal) {
+                maintenance = nil
+                implausibleMaintenance = measured.maintenance
+            } else {
+                maintenance = measured
+                implausibleMaintenance = nil
+            }
             maintenanceProgress = AdaptiveTDEE.progress(intake: intake, weights: weights, now: now, expectedExpenditure: expected)
             weightTrendWeekly = WeightTrend.weeklyChange(weights.filter { $0.date >= today.addingTimeInterval(-28 * 86_400) })
             lastWeighIn = weights.map(\.date).max()
-            updateWeeklyCalorieTarget(settings: settings, now: now)
             // Energy availability: the last 7 logged days against workout calories (`EnergyAvailability`).
             let workoutEnergy = (try? await health.workoutEnergyPerDay(days: 8)) ?? []
+            // The lowest safe target for this body and training (`CalorieSafety`, IOC REDs 2023).
+            let exercisePerDay = workoutEnergy.map(\.value).reduce(0, +) / 7
+            calorieMinimum = bodyMassKg.map { weight in
+                CalorieSafety.minimumTarget(sex: settings.sex, weightKg: weight, heightCm: heightCm,
+                                            bodyFatPercent: bodyFatPercent, exerciseKcalPerDay: exercisePerDay)
+            }
+            updateWeeklyCalorieTarget(settings: settings, now: now)
             let weekAgo = today.addingTimeInterval(-7 * 86_400)
             energyAvailability = EnergyAvailability.assess(
                 days: intake.filter { $0.date >= weekAgo }.map { day in

@@ -959,6 +959,16 @@ private struct CalorieDetailsSheet: View {
                              ?? "Maintenance is estimated from your watch until there are 14 fully logged days of food and enough weigh-ins.")
                         Text(metrics.goals.map { "Goal: \($0.title.lowercased()). Your daily target is maintenance adjusted for that goal." }
                              ?? "Set your goals on the Home tab to turn maintenance into a daily target.")
+                        if let low = metrics.implausibleMaintenance {
+                            Text("Your food log points to a maintenance of \(whole(low).formatted()) kcal, which is less than a body your size burns on a quiet day (1.4× resting metabolism; FAO/WHO 2004). Some days were probably only partly logged, so your watch's estimate is used until the log looks complete.")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        if metrics.targetHeldAtMinimum, let minimum = metrics.calorieMinimum {
+                            Text("Your target is held at \(whole(minimum).formatted()) kcal: below that, the energy left after training drops under 30 kcal per kg of lean mass, which affects hormones, bone and muscle (IOC consensus, 2023). Choose a slower rate in Goals to stay above it.")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
                         if let note = metrics.calorieAdjustmentNote {
                             // Monday adjustment of at most ±100 kcal (`CalorieBand`).
                             Text(note)

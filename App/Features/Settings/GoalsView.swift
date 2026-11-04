@@ -142,7 +142,9 @@ struct GoalsView: View {
     private var calorieTarget: Double? {
         guard let base = metrics.maintenance?.maintenance ?? metrics.calories?.projected,
               let weight = metrics.bodyMassKg else { return nil }
-        return GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: settings.sex)
+        // The same safety minimum as Home (`CalorieSafety`, IOC REDs 2023).
+        return max(GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: settings.sex),
+                   metrics.calorieMinimum ?? 0)
     }
 
     private var weeksToTarget: Double? {

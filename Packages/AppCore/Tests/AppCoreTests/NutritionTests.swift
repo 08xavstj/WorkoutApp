@@ -67,3 +67,27 @@ struct NutritionTests {
         #expect(!NutritionDay(date: date, proteinGrams: 30).isEmpty)
     }
 }
+
+struct CalorieSafetyTests {
+    @Test func boerLeanMassForASixFootMan() {
+        // 74 kg, 183 cm man: Boer 1984 gives about 60 kg fat-free mass.
+        let ffm = CalorieSafety.fatFreeMassKg(weightKg: 74, heightCm: 183, sex: .male, bodyFatPercent: nil)
+        #expect(abs(ffm - 59.8) < 0.2)
+        // Measured body fat wins when it's there.
+        #expect(abs(CalorieSafety.fatFreeMassKg(weightKg: 74, heightCm: 183, sex: .male, bodyFatPercent: 15) - 62.9) < 0.01)
+    }
+
+    @Test func minimumTargetFollowsEnergyAvailability() {
+        // 30 kcal/kg × ~59.8 kg + 300 kcal of training a day ≈ 2,094 kcal, well above the 1,500 floor.
+        let minimum = CalorieSafety.minimumTarget(sex: .male, weightKg: 74, heightCm: 183, bodyFatPercent: nil, exerciseKcalPerDay: 300)
+        #expect(minimum > 2050 && minimum < 2150)
+        // A small, inactive person still never goes under the absolute floor.
+        #expect(CalorieSafety.minimumTarget(sex: .female, weightKg: 45, heightCm: 150, bodyFatPercent: nil, exerciseKcalPerDay: 0) >= 1200)
+    }
+
+    @Test func maintenanceBelowOnePointFourBMRIsRejected() {
+        // BMR ~1,764 kcal: maintenance must be at least ~2,470 kcal to be believable.
+        #expect(!CalorieSafety.isPlausibleMaintenance(1900, bmr: 1764))
+        #expect(CalorieSafety.isPlausibleMaintenance(2600, bmr: 1764))
+    }
+}
