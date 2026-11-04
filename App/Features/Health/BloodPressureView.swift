@@ -3,12 +3,18 @@ import AppCore
 
 /// Home blood pressure: log cuff readings, run the 7-day home check, and see
 /// your average against the ACC/AHA categories.
+///
+/// Pushed from Health › Records and from a blood pressure history
+/// (`pushed: true`); a root sheet from the Log tab, notifications and
+/// workoutapp://bp. Add is in the toolbar either way (ux-audit.md 4.6).
 struct BloodPressureView: View {
     @Environment(\.healthClient) private var health
     @Environment(\.dismiss) private var dismiss
     @State private var readings: [BloodPressureReading] = []
     @State private var isLoading = true
     @State private var showingEntry = false
+    /// True when pushed onto another NavigationStack.
+    var pushed = false
 
     private var check: HomeBloodPressure.WeekCheck {
         HomeBloodPressure.weekCheck(readings.map(\.asCore))
@@ -25,20 +31,10 @@ struct BloodPressureView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     weekCard
-                    Button {
-                        showingEntry = true
-                    } label: {
-                        Label("Add a reading", systemImage: "plus")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, minHeight: 50)
-                            .background(LinearGradient(colors: [Theme.heart, Theme.lifting], startPoint: .leading, endPoint: .trailing), in: .capsule)
-                    }
-                    .buttonStyle(.plain)
                     BloodPressureGuide()
                     readingsList
                     Text("Only cuff readings are used. Watch and ring blood pressure estimates aren't accurate enough to judge blood pressure, and guidelines advise against using them for that (AHA/ACC 2025). This is a log, not a diagnosis: talk to your doctor about your readings.")
@@ -52,8 +48,13 @@ struct BloodPressureView: View {
             .navigationTitle("Blood pressure")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                if !pushed {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Add a reading", systemImage: "plus") { showingEntry = true }
                 }
             }
             .sheet(isPresented: $showingEntry, onDismiss: { Task { await load() } }) {
@@ -114,6 +115,13 @@ struct BloodPressureView: View {
                 Text(isLoading ? "Loading…" : "No cuff readings in the last 7 days. Start a home check: two readings each morning and evening for a week.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
+                if !isLoading {
+                    // The empty state's next step; the same Add as the toolbar's (HIG Writing).
+                    Button("Add a reading", systemImage: "plus") { showingEntry = true }
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .tint(Theme.heartText)
+                }
             }
             nextCheckLine
         }
@@ -296,7 +304,7 @@ struct BloodPressureEntrySheet: View {
             try await health.saveBloodPressure(systolic: Double(systolic), diastolic: Double(diastolic),
                                                pulse: pulse.map(Double.init), date: date, arm: arm)
         } catch {
-            errorMessage = "Couldn't save to Apple Health. Allow Tensile to write blood pressure in the Health app (profile → Apps → Tensile)."
+            errorMessage = "Couldn't save to Apple Health. Allow Tensile to write blood pressure in Apple Health (profile → Apps → Tensile)."
             return
         }
         let category = HomeBloodPressure.category(systolic: Double(systolic), diastolic: Double(diastolic))

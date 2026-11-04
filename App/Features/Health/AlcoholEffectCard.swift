@@ -21,7 +21,7 @@ struct AlcoholEffectCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CardLabel(text: "How alcohol affects you", color: Theme.lifting)
+            CardLabel(text: "How alcohol affects you")
             weekRow
             if findings.isEmpty {
                 Text(nightsLogged == 0
@@ -52,7 +52,8 @@ struct AlcoholEffectCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(tint: Theme.lifting)
+        // Neutral: pink means lifting only (ux-audit.md 4.5 colour rules, X3).
+        .card()
     }
 
     /// This week's total against Canada's 2023 tiers (0–2 low, 3–6 moderate,

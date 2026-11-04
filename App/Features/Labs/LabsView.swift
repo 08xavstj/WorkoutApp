@@ -3,47 +3,10 @@ import Charts
 import UniformTypeIdentifiers
 import AppCore
 
-/// Biology card: latest out-of-range results, opens the full list.
-struct LabsCard: View {
-    @Environment(LabsModel.self) private var labs
-    @State private var showing = false
-
-    var body: some View {
-        Button {
-            showing = true
-        } label: {
-            HStack(spacing: 12) {
-                IconBadge(systemName: "testtube.2", color: Theme.sleep, size: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Lab results")
-                        .font(.headline)
-                        .foregroundStyle(Theme.primaryText)
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.secondaryText)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .card(tint: Theme.sleep)
-        .sheet(isPresented: $showing) { LabsView() }
-    }
-
-    private var subtitle: String {
-        if labs.results.isEmpty { return "Add blood tests by hand or from a PDF to track them over time." }
-        let flagged = labs.outOfRange
-        if flagged.isEmpty { return "\(labs.latest.count) tests, all in range on your latest results." }
-        return "\(flagged.count) outside the range: " + flagged.prefix(3).map(\.name).joined(separator: ", ")
-    }
-}
-
 /// Every test you've logged, grouped by panel, with trends.
+///
+/// Pushed from Health › Records (`pushed: true`); a sheet from the Log tab.
+/// Adding (by hand or from a PDF) is in the toolbar (ux-audit.md 4.6).
 struct LabsView: View {
     @Environment(LabsModel.self) private var labs
     @Environment(UserSettings.self) private var settings
@@ -54,6 +17,8 @@ struct LabsView: View {
     @State private var showingReview = false
     @State private var isImporting = false
     @State private var importError: String?
+    /// True when pushed onto another NavigationStack.
+    var pushed = false
 
     private struct Panel: Identifiable {
         var name: String
@@ -69,14 +34,9 @@ struct LabsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 10) {
-                        actionButton("Add a result", "plus") { showingEntry = true }
-                        actionButton(isImporting ? "Reading…" : "Import a PDF", "doc.text.viewfinder") { showingImporter = true }
-                            .disabled(isImporting)
-                    }
                     if isImporting {
                         ProgressView("Reading your report…")
                             .frame(maxWidth: .infinity)
@@ -88,10 +48,7 @@ struct LabsView: View {
                             .card(tint: Theme.recoveryModerate)
                     }
                     if labs.results.isEmpty {
-                        Text("Track blood tests over time: cholesterol, HbA1c, ferritin, vitamin D, thyroid, testosterone, kidney and liver markers. Import a lab PDF and check what was read before saving, or type results in.")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                            .card()
+                        emptyState
                     }
                     ForEach(panels) { panel in
                         SectionTitle(text: panel.name)
@@ -118,8 +75,16 @@ struct LabsView: View {
             .navigationTitle("Lab results")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                if !pushed {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu("Add results", systemImage: "plus") {
+                        addButtons
+                    }
+                    .disabled(isImporting)
                 }
             }
             .sheet(isPresented: $showingEntry) { LabEntrySheet() }
@@ -131,15 +96,29 @@ struct LabsView: View {
         }
     }
 
-    private func actionButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .background(LinearGradient(colors: [Theme.sleep, Theme.lifting], startPoint: .leading, endPoint: .trailing), in: .capsule)
+    /// Type a result in, or import a lab PDF (toolbar menu and empty state).
+    @ViewBuilder
+    private var addButtons: some View {
+        Button("Type in a result", systemImage: "square.and.pencil") { showingEntry = true }
+        Button("Import a PDF", systemImage: "doc.text.viewfinder") { showingImporter = true }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Track blood tests over time: cholesterol, HbA1c, ferritin, vitamin D, thyroid, testosterone, kidney and liver markers. Import a lab PDF and check what was read before saving, or type results in.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Menu {
+                addButtons
+            } label: {
+                Label("Add results", systemImage: "plus")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .disabled(isImporting)
         }
-        .buttonStyle(.plain)
+        .card()
     }
 
     private func importFile(_ url: URL) async {

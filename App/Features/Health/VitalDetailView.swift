@@ -5,30 +5,36 @@ import AppCore
 /// A stat's history: pick a range, see each day, the average for that range
 /// (dashed line), your personal normal band with a 7-day average line, the
 /// typical range or goal, and tap any day for its value.
+///
+/// Pushed from Health (`pushed: true`, ux-audit.md 4.1 rule 5); Today still
+/// shows it as a sheet, where it gets its own NavigationStack and a Done
+/// button. Blood pressure opens by push in both cases, never a sheet on a sheet.
 struct VitalDetailView: View {
     let stat: VitalsModel.Stat
     let colors: [Color]
+    /// True when pushed onto another NavigationStack (Health's).
+    let pushed: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var days: Int
     @State private var selectedDate: Date?
-    @State private var showingBloodPressure = false
 
-    init(stat: VitalsModel.Stat, colors: [Color]) {
+    init(stat: VitalsModel.Stat, colors: [Color], pushed: Bool = false) {
         self.stat = stat
         self.colors = colors
+        self.pushed = pushed
         _days = State(initialValue: stat.defaultDays)
     }
 
     private var main: Color { colors.last ?? Theme.strain }
 
     var body: some View {
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
                     if stat.id == "bp" {
-                        Button {
-                            showingBloodPressure = true
+                        NavigationLink {
+                            BloodPressureView(pushed: true)
                         } label: {
                             Label("Log a reading · 7-day home check", systemImage: "heart.text.square")
                                 .font(.headline)
@@ -72,7 +78,7 @@ struct VitalDetailView: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                     if stat.value == nil && !hasHistory {
-                        Text("Nothing in Apple Health yet. If your watch records this, check that its app shares with Apple Health and that Tensile can read it (Health app → profile → Apps → Tensile).")
+                        Text("Nothing in Apple Health yet. If your watch records this, check that its app shares with Apple Health and that Tensile can read it (Apple Health → profile → Apps → Tensile).")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -84,12 +90,13 @@ struct VitalDetailView: View {
             .navigationTitle(stat.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                if !pushed {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
             .onChange(of: days) { selectedDate = nil }
-            .sheet(isPresented: $showingBloodPressure) { BloodPressureView() }
         }
     }
 
@@ -99,7 +106,7 @@ struct VitalDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(stat.value ?? "No data")
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
+                    .heroNumberFont()
                     .foregroundStyle(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)

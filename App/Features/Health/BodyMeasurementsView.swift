@@ -3,6 +3,11 @@ import AppCore
 
 /// Waist (and waist-to-height ratio), grip strength and the STOP-Bang sleep
 /// apnoea screen: typed in by hand, on their own slow cadences.
+///
+/// Pushed from Health › Records (`pushed: true`); a root sheet from the Log
+/// tab, reminders and workoutapp://measurements. Histories and the STOP-Bang
+/// questions open by push, so there's never a sheet on a sheet
+/// (ux-audit.md 4.1 rule 5).
 struct BodyMeasurementsView: View {
     @Environment(BodyMeasurementsStore.self) private var store
     @Environment(DailyMetricsModel.self) private var metrics
@@ -10,13 +15,15 @@ struct BodyMeasurementsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingStopBang = false
     @State private var history: VitalsModel.Stat?
+    /// True when pushed onto another NavigationStack.
+    var pushed = false
 
     private var heightCm: Double? {
         metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil)
     }
 
     var body: some View {
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     WaistCard(heightCm: heightCm, goals: metrics.goals) { history = $0 }
@@ -33,16 +40,24 @@ struct BodyMeasurementsView: View {
             .navigationTitle("Body measurements")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                if !pushed {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
-            .sheet(isPresented: $showingStopBang) { StopBangView() }
-            .sheet(item: $history) { stat in
-                VitalDetailView(stat: stat, colors: VitalTile.colors(for: stat.category))
-                    .presentationDetents([.medium, .large])
+            .navigationDestination(isPresented: $showingStopBang) { StopBangView(pushed: true) }
+            .navigationDestination(isPresented: showingHistory) {
+                if let stat = history {
+                    VitalDetailView(stat: stat, colors: VitalTile.colors(for: stat.category), pushed: true)
+                }
             }
         }
+    }
+
+    /// `VitalsModel.Stat` isn't Hashable, so the history push is driven by a Bool.
+    private var showingHistory: Binding<Bool> {
+        Binding(get: { history != nil }, set: { if !$0 { history = nil } })
     }
 }
 
@@ -147,7 +162,8 @@ private struct WaistReading: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(unit.format(latest.centimeters))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .font(.largeTitle.weight(.bold))
+                    .fontDesign(.rounded)
                     .monospacedDigit()
                     .foregroundStyle(Theme.primaryText)
                 Text(latest.date.formatted(date: .abbreviated, time: .omitted))
@@ -292,7 +308,8 @@ private struct GripReading: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(unit.format(latest.kilograms)) \(unit.rawValue)")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .font(.largeTitle.weight(.bold))
+                    .fontDesign(.rounded)
                     .monospacedDigit()
                     .foregroundStyle(Theme.primaryText)
                 Text("\(latest.hand.label.lowercased()) hand · \(latest.date.formatted(date: .abbreviated, time: .omitted))")

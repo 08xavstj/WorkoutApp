@@ -3,84 +3,32 @@ import SwiftData
 import Charts
 import AppCore
 
-/// Long-term baselines: HRV trend and biomarkers.
-struct BiologyView: View {
+/// The Health tab: long-term trends and health records
+/// (docs/research/ux-audit.md 4.6 Health). One primary card (the HRV
+/// baseline), then Key measures, All measures by category, Records and
+/// Patterns, each row pushing its page. Less on the front page with details on
+/// demand: people understand the key numbers better when fewer are shown at
+/// once (Peters et al., Med Care Res Rev 2007;64:169; ux-audit.md P7, P8, P16).
+struct HealthView: View {
     @Environment(BiologyModel.self) private var biology
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
     @Environment(VitalsModel.self) private var vitals
     @Environment(CheckInStore.self) private var checkIns
-    @Environment(AppRouter.self) private var router
-    @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(BodyMeasurementsStore.self) private var measurements
     @Environment(\.healthClient) private var health
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
-    @State private var selected: VitalsModel.Stat?
-    @State private var showingStopBang = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Biology")
-                            .font(.largeTitle.weight(.bold))
-                            .foregroundStyle(Theme.primaryText)
-                            .accessibilityAddTraits(.isHeader)
-                        Text("Your long-term baselines")
-                            .font(.title3)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    .padding(.top, 8)
-                    BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
-                    ProgressPhotosCard { router.showProgressPhotos = true }
-                    LabsCard()
-                    InsightsCard(insights: checkIns.insights, daysLeft: checkIns.daysUntilInsights)
-                    AlcoholEffectCard(findings: checkIns.alcoholFindings, nightsLogged: checkIns.alcoholNightsLogged)
-                    hrvCard
-                    MicronutrientsCard(findings: metrics.micronutrients)
-                    ForEach(VitalsModel.Category.allCases) { category in
-                        SectionTitle(text: category.rawValue)
-                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                            ForEach(vitals.stats(in: category)) { stat in
-                                Button { selected = stat } label: {
-                                    VitalTile(stat: stat, colors: VitalTile.colors(for: category))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            if category == .body, let protein = biology.markers.first(where: { $0.id == "protein" }) {
-                                let stat = proteinStat(protein)
-                                Button { selected = stat } label: {
-                                    VitalTile(stat: stat, colors: VitalTile.colors(for: .body))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            if category == .body {
-                                measurementTiles
-                            }
-                        }
-                        if category == .breathing {
-                            // The yearly STOP-Bang screen sits next to overnight blood oxygen.
-                            StopBangSummaryCard { showingStopBang = true }
-                        }
-                    }
-                    if vitals.stats.isEmpty {
-                        Text(vitals.isLoading ? "Loading your health stats…" : "No health stats yet. Turn on Apple Health sharing in your watch's app (Garmin Connect: More → Settings → Connected Apps → Apple Health).")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                            .card()
-                    }
-                    DisclosureGroup("Using a Garmin?") {
-                        Text("Garmin Connect shares heart rate, resting heart rate, sleep, steps, distance, floors, energy, workouts, and (on supported watches) blood oxygen and respiration with Apple Health. Body Battery, Garmin stress and HRV stay in Garmin Connect, so stress here is estimated from heart rate and HRV can be added by hand.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .tint(Theme.secondaryText)
-                    .padding(.top, 4)
+                    HRVBaselineCard()
+                    KeyMeasuresSection()
+                    AllMeasuresSection()
+                    RecordsSection()
+                    PatternsSection()
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
@@ -91,96 +39,17 @@ struct BiologyView: View {
             .background(alignment: .top) {
                 TopGlow(colors: [Theme.Wash.butter, Theme.Wash.lime, Theme.Wash.sky])
             }
-            .sheet(item: $selected) { stat in
-                VitalDetailView(stat: stat, colors: VitalTile.colors(for: stat.category))
-                    .presentationDetents([.medium, .large])
-            }
-            .sheet(isPresented: $showingStopBang) { StopBangView() }
             .background(Theme.background)
-            .toolbarVisibility(.hidden, for: .navigationBar)
+            .navigationTitle("Health")
+            .navigationSubtitle("Trends and records")
+            .tabToolbar()
             .task { await load() }
             .refreshable { await load() }
         }
     }
 
-    private func proteinStat(_ protein: BiologyModel.Marker) -> VitalsModel.Stat {
-        var stat = VitalsModel.Stat(
-            id: "protein", category: .body, title: "Protein · 7 days", icon: "fork.knife",
-            value: protein.value, unit: protein.unit, status: protein.status,
-            tone: protein.tone == .caution ? .caution : .good, series: protein.series
-        )
-        stat.chart = .bars
-        stat.goal = metrics.proteinTarget
-        stat.about = "Protein logged in your food app each day. Your target comes from your goal and weight: about 1.6 g per kg helps build muscle with lifting, and more while losing weight (Morton et al., Br J Sports Med 2018)."
-        return stat
-    }
-
-    // MARK: Body measurements (waist-to-height, grip)
-
     private var heightCm: Double? {
         metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil)
-    }
-
-    /// Waist-to-height and grip tiles for the Body grid, from the hand-typed measurements.
-    @ViewBuilder
-    private var measurementTiles: some View {
-        let whtr = waistStat
-        Button { selected = whtr } label: {
-            VitalTile(stat: whtr, colors: VitalTile.colors(for: .body))
-        }
-        .buttonStyle(.plain)
-        let grip = gripStat
-        Button { selected = grip } label: {
-            VitalTile(stat: grip, colors: VitalTile.colors(for: .body))
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Waist-to-height ratio: under 0.5 is the target (Ashwell 2012); the history chart is the ratio per measurement.
-    private var waistStat: VitalsModel.Stat {
-        let ratio = measurements.waistToHeightRatio(heightCm: heightCm)
-        let category = ratio.map(WaistToHeightRatio.category)
-        let tone: VitalsModel.Tone = switch category {
-        case .healthy: .good
-        case .raised, .high: .caution
-        case .low, nil: .neutral
-        }
-        var stat = VitalsModel.Stat(
-            id: "whtr", category: .body, title: "Waist-to-height", icon: "ruler",
-            value: ratio.map { $0.formatted(.number.precision(.fractionLength(2))) },
-            unit: ratio == nil ? "" : "ratio",
-            status: category?.rawValue ?? (measurements.latestWaist == nil ? "Add a waist measurement" : "Add your height"),
-            tone: tone,
-            series: waistRatioSeries
-        )
-        stat.digits = 2
-        stat.defaultDays = 180
-        stat.goal = WaistToHeightRatio.target
-        stat.normalRange = 0.4...WaistToHeightRatio.target
-        stat.about = "Waist divided by height. Keep it under 0.5 (waist less than half your height): across 31 studies it picked out diabetes, high blood pressure and heart-disease risk better than BMI, and it isn't fooled by muscle (Ashwell, Gunn & Gibson, Obes Rev 2012; Browning 2010 for the 0.5 line). 0.5-0.6 is raised, over 0.6 high. Measure monthly from Add → Body measurements. When a reading is less than 90 days old, body age uses it instead of BMI."
-        stat.footnote = measurements.waistDue ? "A waist measurement is due (monthly)." : nil
-        return stat
-    }
-
-    /// One ratio per measurement day, for the history chart.
-    private var waistRatioSeries: [DatedValue] {
-        guard let heightCm else { return [] }
-        return measurements.waistSeries.compactMap { point in
-            WaistToHeightRatio.ratio(waistCm: point.value, heightCm: heightCm).map { DatedValue(date: point.date, value: $0) }
-        }
-    }
-
-    private var gripStat: VitalsModel.Stat {
-        var stat = GripCard.stat(series: measurements.gripSeries, unit: settings.weightUnit, age: settings.age, sex: settings.sex)
-        if let latest = measurements.latestGrip {
-            let reading = GripStrength.reading(kg: latest.kilograms, age: settings.age, sex: settings.sex)
-            stat.status = reading.rawValue
-            stat.tone = reading == .aboveAverage ? .good : (reading == .average ? .neutral : .caution)
-        } else {
-            stat.status = "Add a reading twice a year"
-        }
-        stat.footnote = measurements.gripDue && measurements.latestGrip != nil ? "A grip reading is due (every 6 months)." : nil
-        return stat
     }
 
     private func load() async {
@@ -198,8 +67,59 @@ struct BiologyView: View {
         await checkIns.refreshInsights(health: health, manualHRV: manual)
         await biology.refresh(health: health, settings: settings, manualHRV: manual, proteinTarget: metrics.proteinTarget)
     }
+}
 
-    private var hrvCard: some View {
+// MARK: - Shared page pieces
+
+/// Wraps a view in its own NavigationStack only when it's shown as a sheet;
+/// when pushed, it uses the stack it was pushed onto, so there is never a
+/// stack inside a stack (ux-audit.md 4.1 rule 5). The record views use it so
+/// they work both pushed from Health › Records and as the root sheets
+/// `AppRouter` opens from notifications and links. (Same idea as the private
+/// helper in `MyGymView`.)
+struct SheetNavigationStack<Content: View>: View {
+    let isSheet: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if isSheet {
+            NavigationStack { content }
+        } else {
+            content
+        }
+    }
+}
+
+/// A pushed page of cards with an inline title, for Health's detail pages
+/// (body age, patterns, Garmin help).
+struct HealthDetailPage<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                content
+            }
+            .padding()
+            .lockedToScreenWidth()
+        }
+        .scrollIndicators(.hidden)
+        .background(Theme.background)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - HRV baseline (primary card)
+
+/// The tab's primary card (mockup `04-biology.png`): 90-day HRV, the
+/// baseline, change against last month and the 7-day normal range.
+struct HRVBaselineCard: View {
+    @Environment(BiologyModel.self) private var biology
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 CardLabel(text: "HRV baseline")
@@ -209,71 +129,103 @@ struct BiologyView: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             if let baseline = biology.hrvBaseline {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(whole(baseline.rounded()))")
-                        .font(.system(size: 52, weight: .bold, design: .rounded))
-                        .foregroundStyle(LinearGradient(colors: [Theme.recoveryHigh, Theme.oxygen], startPoint: .leading, endPoint: .trailing))
-                    Text("ms")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                    Spacer()
-                    if let change = biology.hrvChangePercent {
-                        Chip(
-                            text: "\(change >= 0 ? "↑" : "↓") \(whole(abs(change).rounded()))% vs last month",
-                            color: change >= 0 ? Theme.recoveryHigh : Theme.recoveryModerate
-                        )
-                    }
-                }
-                .foregroundStyle(Theme.primaryText)
-                if let trend = metrics.recovery?.hrvTrend {
-                    let color: Color = trend.status == .below ? Theme.recoveryModerate : Theme.recoveryHigh
-                    Text("7-day average \(Int(trend.average.rounded())) ms · normal \(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms · \(trend.status == .below ? "below normal: train easy" : (trend.status == .above ? "above normal" : "in range"))")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(color)
-                }
-                Chart {
-                    if let trend = metrics.recovery?.hrvTrend {
-                        RectangleMark(
-                            yStart: .value("Normal low", trend.normalRange.lowerBound),
-                            yEnd: .value("Normal high", trend.normalRange.upperBound)
-                        )
-                        .foregroundStyle(Theme.recoveryHigh.opacity(0.10))
-                    }
-                    RuleMark(y: .value("Baseline", baseline))
-                        .foregroundStyle(Theme.secondaryText.opacity(0.5))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                        .annotation(position: .top, alignment: .leading) {
-                            Text("Baseline \(whole(baseline.rounded()))")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                    ForEach(biology.hrvSeries) { point in
-                        AreaMark(x: .value("Date", point.date), y: .value("HRV", point.value))
-                            .foregroundStyle(LinearGradient(colors: [Theme.recoveryHigh.opacity(0.3), Theme.oxygen.opacity(0.0)], startPoint: .top, endPoint: .bottom))
-                            .interpolationMethod(.catmullRom)
-                        LineMark(x: .value("Date", point.date), y: .value("HRV", point.value))
-                            .foregroundStyle(LinearGradient(colors: [Theme.oxygen, Theme.recoveryHigh], startPoint: .leading, endPoint: .trailing))
-                            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                            .interpolationMethod(.catmullRom)
-                    }
-                }
-                .chartYScale(domain: .automatic(includesZero: false))
-                .chartYAxis(.hidden)
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .month)) { _ in
-                        AxisValueLabel(format: .dateTime.month(.abbreviated))
-                    }
-                }
-                .frame(height: 170)
+                headline(baseline)
+                trendLine
+                HRVBaselineChart(baseline: baseline, series: biology.hrvSeries, trend: metrics.recovery?.hrvTrend)
+                    .frame(height: 170)
             } else {
-                Text("No HRV yet. If your watch doesn't share HRV with Apple Health (Garmin doesn't), add last night's value with Add HRV on the Home tab.")
+                Text("No HRV yet. If your watch doesn't share HRV with Apple Health (Garmin doesn't), add last night's value in the Log tab under Overnight HRV.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
         }
         .card(tint: Theme.recoveryHigh)
     }
+
+    private func headline(_ baseline: Double) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("\(whole(baseline.rounded()))")
+                .heroNumberFont()
+                .foregroundStyle(LinearGradient(colors: [Theme.recoveryHigh, Theme.oxygen], startPoint: .leading, endPoint: .trailing))
+            Text("ms")
+                .font(Theme.Typography.heroUnit)
+                .foregroundStyle(Theme.secondaryText)
+            Spacer()
+            if let change = biology.hrvChangePercent {
+                Chip(
+                    text: "\(change >= 0 ? "↑" : "↓") \(whole(abs(change).rounded()))% vs last month",
+                    color: change >= 0 ? Theme.recoveryHigh : Theme.recoveryModerate
+                )
+            }
+        }
+        .foregroundStyle(Theme.primaryText)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var trendLine: some View {
+        if let trend = metrics.recovery?.hrvTrend {
+            let color: Color = trend.status == .below ? Theme.recoveryModerateText : Theme.recoveryHighText
+            Text("7-day average \(Int(trend.average.rounded())) ms · normal \(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms · \(trend.status == .below ? "below normal: train easy" : (trend.status == .above ? "above normal" : "in range"))")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+        }
+    }
 }
+
+/// 90 days of HRV against the baseline (dashed) and the 7-day normal band.
+private struct HRVBaselineChart: View {
+    let baseline: Double
+    let series: [DatedValue]
+    let trend: RecoveryCalculator.HRVTrend?
+
+    var body: some View {
+        Chart {
+            if let trend {
+                RectangleMark(
+                    yStart: .value("Normal low", trend.normalRange.lowerBound),
+                    yEnd: .value("Normal high", trend.normalRange.upperBound)
+                )
+                .foregroundStyle(Theme.recoveryHigh.opacity(0.10))
+            }
+            RuleMark(y: .value("Baseline", baseline))
+                .foregroundStyle(Theme.secondaryText.opacity(0.5))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .annotation(position: .top, alignment: .leading) {
+                    Text("Baseline \(whole(baseline.rounded()))")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            ForEach(series) { point in
+                AreaMark(x: .value("Date", point.date), y: .value("HRV", point.value))
+                    .foregroundStyle(LinearGradient(colors: [Theme.recoveryHigh.opacity(0.3), Theme.oxygen.opacity(0.0)], startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.catmullRom)
+                LineMark(x: .value("Date", point.date), y: .value("HRV", point.value))
+                    .foregroundStyle(LinearGradient(colors: [Theme.oxygen, Theme.recoveryHigh], startPoint: .leading, endPoint: .trailing))
+                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.catmullRom)
+            }
+        }
+        .chartYScale(domain: .automatic(includesZero: false))
+        .chartYAxis(.hidden)
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .month)) { _ in
+                AxisValueLabel(format: .dateTime.month(.abbreviated))
+            }
+        }
+        // A chart states its message for VoiceOver too (HIG Charts; ux-audit.md P15).
+        .accessibilityLabel("HRV over the last 90 days")
+        .accessibilityValue(spokenSummary)
+    }
+
+    private var spokenSummary: String {
+        let base = "Baseline \(whole(baseline.rounded())) milliseconds"
+        guard let latest = series.last else { return base }
+        return base + ", latest \(whole(latest.value.rounded()))"
+    }
+}
+
+// MARK: - Tiles
 
 /// One health stat: icon, value, status and a little trend line.
 struct VitalTile: View {
@@ -307,67 +259,70 @@ struct VitalTile: View {
                     .foregroundStyle(.white)
                     .frame(width: 28, height: 28)
                     .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing), in: .circle)
-                    .shadow(color: main.opacity(0.35), radius: 4, y: 2)
+                    .accessibilityHidden(true)
                 Text(stat.title)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
             }
-            if let value = stat.value {
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(value)
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.primaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                    Text(stat.unit)
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                        .lineLimit(1)
-                }
-            } else {
-                Text("No data")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText.opacity(0.7))
-            }
+            valueLine
             if let status = stat.status {
                 Text(status)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Self.color(for: stat.tone))
+                    .foregroundStyle(Theme.textColor(for: Self.color(for: stat.tone)))
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            if stat.series.count > 1 {
-                Sparkline(values: Array(stat.series.suffix(30)), color: main)
-                    .frame(height: 34)
-            } else if let gauge = stat.gauge {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Theme.track)
-                        Capsule()
-                            .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
-                            .frame(width: max(8, geo.size.width * gauge))
-                    }
-                }
-                .frame(height: 8)
-            }
+            trendVisual(main: main)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
-        .background {
-            RoundedRectangle(cornerRadius: 22)
-                .fill(Theme.card)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22)
-                        .fill(RadialGradient(colors: [main.opacity(0.14), main.opacity(0)], center: .topLeading, startRadius: 0, endRadius: 170))
-                )
-        }
-        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 5)
+        .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
+        .card()
         .accessibilityElement(children: .combine)
     }
+
+    @ViewBuilder
+    private var valueLine: some View {
+        if let value = stat.value {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .tileNumberFont()
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(stat.unit)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+            }
+        } else {
+            Text("No data")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+        }
+    }
+
+    @ViewBuilder
+    private func trendVisual(main: Color) -> some View {
+        if stat.series.count > 1 {
+            Sparkline(values: Array(stat.series.suffix(30)), color: main)
+                .frame(height: 34)
+        } else if let gauge = stat.gauge {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.track)
+                    Capsule()
+                        .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(8, geo.size.width * gauge))
+                }
+            }
+            .frame(height: 8)
+            .accessibilityHidden(true)
+        }
+    }
 }
+
+// MARK: - Body age
 
 /// Body age: the headline number, how it compares with your age, and what moves it.
 struct BodyAgeCard: View {
@@ -384,46 +339,7 @@ struct BodyAgeCard: View {
                     .foregroundStyle(result?.confidence == .high ? Theme.recoveryHighText : Theme.secondaryText)
             }
             if let result {
-                let younger = result.difference <= 0
-                let tone = younger ? Theme.recoveryHighText : Theme.recoveryModerateText
-                HStack(alignment: .center, spacing: 18) {
-                    // A full ring in the result's color: green when younger, amber when older.
-                    GradientRing(
-                        progress: 1,
-                        colors: younger ? [Theme.recoveryHighLight, Theme.recoveryHigh] : [Theme.recoveryModerateLight, Theme.recoveryModerate],
-                        lineWidth: 12
-                    ) {
-                        VStack(spacing: 0) {
-                            Text("\(result.years)")
-                                .font(.system(size: 30, weight: .bold, design: .rounded))
-                                .foregroundStyle(Theme.primaryText)
-                                .minimumScaleFactor(0.7)
-                            Text("years")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        .padding(.horizontal, 14)
-                    }
-                    .frame(width: 118, height: 118)
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 4) {
-                            Image(systemName: younger ? "arrow.down" : "arrow.up")
-                            Text("\(abs(result.difference).formatted(.number.precision(.fractionLength(0)))) years \(younger ? "younger" : "older")")
-                        }
-                        .font(.headline)
-                        .foregroundStyle(tone)
-                        Text("than your age (\(result.age))")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                        // Whole years with a ±5-year range: no composite "age" is validated finer than that.
-                        Text("Likely \(result.rangeLabel)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Theme.secondaryText)
-                        Text(younger ? "Your habits are taking years off. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
+                summary(result)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("What's moving it")
                         .font(.caption.weight(.semibold))
@@ -442,6 +358,49 @@ struct BodyAgeCard: View {
             }
         }
         .card(tint: (result?.difference ?? 0) <= 0 ? Theme.recoveryHigh : Theme.recoveryModerate)
+    }
+
+    private func summary(_ result: BodyAge.Result) -> some View {
+        let younger = result.difference <= 0
+        let tone = younger ? Theme.recoveryHighText : Theme.recoveryModerateText
+        return HStack(alignment: .center, spacing: 18) {
+            // A full ring in the result's color: green when younger, amber when older.
+            GradientRing(
+                progress: 1,
+                colors: younger ? [Theme.recoveryHighLight, Theme.recoveryHigh] : [Theme.recoveryModerateLight, Theme.recoveryModerate],
+                lineWidth: 12
+            ) {
+                VStack(spacing: 0) {
+                    Text("\(result.years)")
+                        .tileNumberFont()
+                        .foregroundStyle(Theme.primaryText)
+                        .minimumScaleFactor(0.7)
+                    Text("years")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .padding(.horizontal, 14)
+            }
+            .frame(width: 118, height: 118)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: younger ? "arrow.down" : "arrow.up")
+                    Text("\(abs(result.difference).formatted(.number.precision(.fractionLength(0)))) years \(younger ? "younger" : "older")")
+                }
+                .font(.headline)
+                .foregroundStyle(tone)
+                Text("than your age (\(result.age))")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+                // Whole years with a ±5-year range: no composite "age" is validated finer than that.
+                Text("Likely \(result.rangeLabel)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                Text(younger ? "Your habits are taking years off. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
     }
 }
 
@@ -480,12 +439,27 @@ private struct FactorRow: View {
             Text("\(helps ? "−" : "+")\(abs(factor.years).formatted(.number.precision(.fractionLength(1)))) y")
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()
-                .foregroundStyle(color)
+                .foregroundStyle(Theme.textColor(for: color))
                 .frame(width: 56, alignment: .trailing)
         }
         .accessibilityElement(children: .combine)
     }
 }
+
+/// Body age as its own page, pushed from Key measures. The number is kept
+/// secondary to the factors that move it: an "effective age" older than your
+/// real age is a nocebo risk (docs/research/behaviour-change.md, "Body age").
+struct BodyAgePage: View {
+    @Environment(VitalsModel.self) private var vitals
+
+    var body: some View {
+        HealthDetailPage(title: "Body age") {
+            BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
+        }
+    }
+}
+
+// MARK: - Patterns cards
 
 /// "What affects you": patterns between check-in answers and next-morning data.
 struct InsightsCard: View {
@@ -494,7 +468,7 @@ struct InsightsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CardLabel(text: "What affects you", color: Theme.sleep)
+            CardLabel(text: "What affects you")
             if insights.isEmpty {
                 Text(daysLeft > 0
                      ? "Do the morning and evening check-ins for \(daysLeft) more day\(daysLeft == 1 ? "" : "s") and your personal patterns appear here: what lowers your HRV, raises your resting heart rate or hurts your sleep."
@@ -506,6 +480,7 @@ struct InsightsCard: View {
                 HStack(spacing: 10) {
                     Image(systemName: insight.isGood ? "arrow.up.heart.fill" : "exclamationmark.circle.fill")
                         .foregroundStyle(insight.isGood ? Theme.recoveryHigh : Theme.recoveryModerate)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(insight.sentence)
                             .font(.subheadline.weight(.semibold))
@@ -515,6 +490,7 @@ struct InsightsCard: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                 }
+                .accessibilityElement(children: .combine)
             }
             if !insights.isEmpty {
                 Text("Patterns, not proof: other things can change on the same days.")
@@ -522,7 +498,7 @@ struct InsightsCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
         }
-        .card(tint: Theme.sleep)
+        .card()
     }
 }
 
@@ -533,7 +509,7 @@ struct MicronutrientsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                CardLabel(text: "Vitamins & minerals", color: Theme.nutrition)
+                CardLabel(text: "Vitamins & minerals")
                 Spacer()
                 Text("7-day average")
                     .font(.caption)
@@ -545,32 +521,7 @@ struct MicronutrientsCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             ForEach(findings) { finding in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(finding.nutrient.name)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.primaryText)
-                        Spacer()
-                        Text("\(amount(finding.average)) / \(amount(finding.target)) \(finding.nutrient.unit)")
-                            .font(.caption.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(color(finding))
-                    }
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Theme.track)
-                            Capsule()
-                                .fill(color(finding).gradient)
-                                .frame(width: max(6, geo.size.width * min(1, finding.percentOfTarget / 100)))
-                        }
-                    }
-                    .frame(height: 6)
-                    if let effect = finding.effect {
-                        Text(effect)
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
+                row(finding)
             }
             if !findings.isEmpty {
                 Text("Targets: US Dietary Reference Intakes (NIH). Only nutrients your food app shares are shown. Food logs undercount supplements unless you log them too.")
@@ -578,7 +529,37 @@ struct MicronutrientsCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
         }
-        .card(tint: Theme.nutrition)
+        .card()
+    }
+
+    private func row(_ finding: Micronutrients.Finding) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(finding.nutrient.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Spacer()
+                Text("\(amount(finding.average)) / \(amount(finding.target)) \(finding.nutrient.unit)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textColor(for: color(finding)))
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.track)
+                    Capsule()
+                        .fill(color(finding).gradient)
+                        .frame(width: max(6, geo.size.width * min(1, finding.percentOfTarget / 100)))
+                }
+            }
+            .frame(height: 6)
+            .accessibilityHidden(true)
+            if let effect = finding.effect {
+                Text(effect)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
     }
 
     private func color(_ finding: Micronutrients.Finding) -> Color {
@@ -591,56 +572,5 @@ struct MicronutrientsCard: View {
 
     private func amount(_ value: Double) -> String {
         value >= 100 ? "\(Int(value.rounded()))" : value.formatted(.number.precision(.fractionLength(0...1)))
-    }
-}
-
-/// Latest front/side photos and the latest weekly analysis.
-struct ProgressPhotosCard: View {
-    @Environment(ProgressPhotosModel.self) private var photos
-    let open: () -> Void
-
-    var body: some View {
-        Button(action: open) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    CardLabel(text: "Progress photos", color: Theme.lifting)
-                    Spacer()
-                    Image(systemName: "chevron.right").foregroundStyle(Theme.secondaryText)
-                }
-                HStack(spacing: 10) {
-                    ForEach(ProgressPhotosModel.Pose.allCases) { pose in
-                        Group {
-                            if let entry = photos.latest(pose), let image = photos.thumbnail(entry) {
-                                Image(uiImage: image).resizable().scaledToFill()
-                            } else {
-                                ZStack {
-                                    Theme.cardRaised
-                                    Image(systemName: "camera.fill").foregroundStyle(Theme.lifting)
-                                }
-                            }
-                        }
-                        .frame(width: 72, height: 96)
-                        .clipShape(.rect(cornerRadius: 12))
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(photos.todayEntry(.front) == nil ? "Take today's photos" : "Today's photos done")
-                            .font(.headline)
-                            .foregroundStyle(Theme.primaryText)
-                        if let analysis = photos.latestAnalysis {
-                            Text(analysis.text)
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                                .lineLimit(4)
-                        } else {
-                            Text("Front and side, kept only in the app. Claude compares them weekly.")
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                    }
-                }
-            }
-            .card(tint: Theme.lifting)
-        }
-        .buttonStyle(.plain)
     }
 }

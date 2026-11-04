@@ -3,6 +3,9 @@ import UIKit
 
 /// Daily front and side photos, a before/after slider, a timeline and the
 /// weekly Claude analysis. Photos stay inside the app.
+///
+/// Pushed from Health › Records (`pushed: true`); a root sheet from the Log
+/// tab, reminders and workoutapp://photos.
 struct ProgressPhotosView: View {
     @Environment(ProgressPhotosModel.self) private var photos
     @Environment(UserSettings.self) private var settings
@@ -12,10 +15,12 @@ struct ProgressPhotosView: View {
     @State private var compareDay: String?
     @State private var viewing: ProgressPhotosModel.Entry?
     let runAnalysis: () async -> Void
+    /// True when pushed onto another NavigationStack.
+    var pushed = false
 
     var body: some View {
         @Bindable var settings = settings
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     todayCard
@@ -36,8 +41,10 @@ struct ProgressPhotosView: View {
             .navigationTitle("Progress photos")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                if !pushed {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
             .fullScreenCover(item: $capturing) { pose in

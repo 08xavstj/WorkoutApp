@@ -3,14 +3,20 @@ import AppCore
 
 /// Medications: today's doses (tick them off), your list, and what each one
 /// means for training and recovery.
+///
+/// Pushed from Health › Records (`pushed: true`); a root sheet from dose
+/// notifications, workoutapp://meds and Settings. Add is in the toolbar
+/// (ux-audit.md 4.6).
 struct MedicationsView: View {
     @Environment(MedicationsModel.self) private var meds
     @Environment(AppRouter.self) private var router
     @Environment(\.dismiss) private var dismiss
     @State private var editing: Medication?
+    /// True when pushed onto another NavigationStack.
+    var pushed = false
 
     var body: some View {
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if !meds.todayDoses.isEmpty {
@@ -33,6 +39,10 @@ struct MedicationsView: View {
                             Text("You'll get a reminder at each dose with a Taken button, a Lock Screen tracker for today's doses, and notes on how each medication affects heart rate, HRV, sleep and training.")
                                 .font(.subheadline)
                                 .foregroundStyle(Theme.secondaryText)
+                            // The empty state's next step; the same Add as the toolbar's (HIG Writing).
+                            Button("Add medication", systemImage: "plus", action: addMedication)
+                                .font(.subheadline.weight(.semibold))
+                                .buttonStyle(.bordered)
                         }
                         .card()
                     }
@@ -44,17 +54,6 @@ struct MedicationsView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Button {
-                        editing = Medication(name: "", times: [8 * 60])
-                    } label: {
-                        Label("Add medication", systemImage: "plus")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 15)
-                            .background(LinearGradient(colors: [Theme.lifting, Theme.sleep], startPoint: .leading, endPoint: .trailing), in: .capsule)
-                    }
-                    .buttonStyle(.plain)
                     Text("Health effects come from published research and FDA drug labels. They're for training decisions only; never change a medication without your doctor.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
@@ -69,8 +68,13 @@ struct MedicationsView: View {
             .navigationTitle("Medications")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                if !pushed {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Add medication", systemImage: "plus", action: addMedication)
                 }
             }
             .sheet(item: $editing) { medication in
@@ -79,6 +83,10 @@ struct MedicationsView: View {
             .onAppear { meds.reload() }
             .onChange(of: router.dosesVersion) { meds.reload() }
         }
+    }
+
+    private func addMedication() {
+        editing = Medication(name: "", times: [8 * 60])
     }
 }
 

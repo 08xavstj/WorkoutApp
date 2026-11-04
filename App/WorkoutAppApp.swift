@@ -173,7 +173,7 @@ struct RootView: View {
                 CoachView()
             }
             Tab("Health", systemImage: "heart.text.square", value: AppTab.health) {
-                BiologyView()
+                HealthView()
             }
             // An ordinary tab, not `role: .search`: that trailing slot is for
             // search (HIG *Tab bars*; docs/research/ux-audit.md, Decisions).

@@ -3,6 +3,10 @@ import AppCore
 
 /// The STOP-Bang sleep apnoea screen: eight yes/no questions, a score and a
 /// risk band (Chung et al., Chest 2016). A screen, never a diagnosis.
+///
+/// A sheet from the Breathing page; pushed (`pushed: true`) from Body
+/// measurements, which can itself be a sheet, so it's never a sheet on a
+/// sheet (ux-audit.md 4.1 rule 5).
 struct StopBangView: View {
     @Environment(BodyMeasurementsStore.self) private var store
     @Environment(DailyMetricsModel.self) private var metrics
@@ -10,12 +14,14 @@ struct StopBangView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var answers: [String: Bool] = [:]
     @State private var saved = false
+    /// True when pushed onto another NavigationStack.
+    var pushed = false
 
     private var score: Int { StopBang.score(answers) }
     private var risk: StopBang.Risk { StopBang.risk(score: score) }
 
     var body: some View {
-        NavigationStack {
+        SheetNavigationStack(isSheet: !pushed) {
             Form {
                 Section {
                     ForEach(StopBang.questions) { question in
@@ -58,6 +64,8 @@ struct StopBangView: View {
             }
             .navigationTitle("Sleep apnoea screen")
             .navigationBarTitleDisplayMode(.inline)
+            // Pushed: Cancel and Save replace Back, so answers are never dropped by a swipe.
+            .navigationBarBackButtonHidden(pushed)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
