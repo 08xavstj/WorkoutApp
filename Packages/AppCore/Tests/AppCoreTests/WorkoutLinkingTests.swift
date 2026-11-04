@@ -51,4 +51,21 @@ struct WorkoutLinkingTests {
         #expect(summary.linkedWorkoutUUID == id)
         #expect(StrengthSessionSummary(start: start, end: start).linkedWorkoutUUID == nil)
     }
+
+    @Test func watchLeftRunningStillMatchesItsPhoneSession() {
+        // Phone session 0-60 min; the Watch kept recording until 75.
+        let sessions = [interval(-1440, -1380), interval(0, 60)]
+        #expect(WorkoutLinking.sessionIndex(for: interval(1, 75), sessions: sessions) == 1)
+    }
+
+    @Test func watchOnlyWorkoutMatchesNoSession() {
+        let sessions = [interval(0, 60)]
+        #expect(WorkoutLinking.sessionIndex(for: interval(120, 150), sessions: sessions) == nil)
+        #expect(WorkoutLinking.sessionIndex(for: interval(45, 120), sessions: sessions) == nil)
+    }
+
+    @Test func recordingPicksTheSessionItSharesMostTimeWith() {
+        let sessions = [interval(0, 30), interval(30, 90)]
+        #expect(WorkoutLinking.sessionIndex(for: interval(20, 90), sessions: sessions) == 1)
+    }
 }

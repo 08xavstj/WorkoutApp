@@ -60,4 +60,19 @@ public enum WorkoutLinking {
         }
         return best?.candidate
     }
+
+    /// The phone session a watch recording belongs to when their ids don't
+    /// agree (or the watch sent none): the one sharing the most time with the
+    /// recording, covering at least half of the shorter of the two. A watch
+    /// left running after the phone finished still matches. Nil when none
+    /// overlaps enough, so a workout started on the watch alone stays its own.
+    public static func sessionIndex(for recording: DateInterval, sessions: [DateInterval]) -> Int? {
+        var best: (index: Int, overlap: TimeInterval)?
+        for (index, session) in sessions.enumerated() {
+            guard overlapFraction(recording, session) >= minimumOverlapFraction else { continue }
+            let overlap = recording.intersection(with: session)?.duration ?? 0
+            if overlap > (best?.overlap ?? -1) { best = (index, overlap) }
+        }
+        return best?.index
+    }
 }

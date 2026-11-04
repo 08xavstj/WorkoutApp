@@ -403,8 +403,22 @@ final class WatchSync: NSObject {
     private func matchingSession(for summary: WatchWorkoutSummary) -> WorkoutSession? {
         guard let context else { return nil }
         let all = (try? context.fetch(FetchDescriptor<WorkoutSession>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)]))) ?? []
-        if let id = summary.sessionID, let match = all.first(where: { WatchSession.id(for: $0.startedAt) == id }) {
+        let recording = DateInterval(start: summary.start, end: max(summary.start, summary.end))
+        func interval(_ session: WorkoutSession) -> DateInterval {
+            DateInterval(start: session.startedAt, end: max(session.startedAt, session.endedAt ?? .now))
+        }
+        // The id names the session, as long as it's open or shares time with the
+        // recording (a stale id from an older workout mustn't claim it).
+        if let id = summary.sessionID, let match = all.first(where: { WatchSession.id(for: $0.startedAt) == id }),
+           match.isActive || recording.intersects(interval(match)) {
             return match
+        }
+        // Ids that don't agree, or none: the session sharing the most time with the
+        // recording (`WorkoutLinking.sessionIndex`), so a Watch left running after
+        // the phone finished joins its session instead of becoming a second workout.
+        let nearby = all.filter { $0.startedAt > summary.start.addingTimeInterval(-86_400) && $0.startedAt < summary.end }
+        if let index = WorkoutLinking.sessionIndex(for: recording, sessions: nearby.map(interval)) {
+            return nearby[index]
         }
         // Started on the Watch while a phone session was open: it's that session's workout.
         return all.first { $0.isActive && $0.startedAt < summary.end }

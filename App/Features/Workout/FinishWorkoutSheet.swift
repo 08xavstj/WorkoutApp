@@ -132,6 +132,10 @@ struct FinishWorkoutSheet: View {
             errorMessage = "Couldn't save: \(error.localizedDescription)"
             return
         }
+        // Stop the Apple Watch now, not after the Health saves below, so its
+        // workout ends with the phone's and its summary can join this session.
+        // (`onFinished` sends it again; repeats are harmless.)
+        WatchSync.shared.sessionFinished(session)
         if saveAsTemplate {
             _ = WorkoutTemplate.from(session, in: modelContext)
         }

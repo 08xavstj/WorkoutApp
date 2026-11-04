@@ -330,7 +330,7 @@ final class WatchWorkoutModel: NSObject {
             selectedExercise = nil
             // Finished on the phone: the Watch's recording of it ends too (no
             // second effort question; the phone already asked).
-            if belongsToRecording(incoming.id) { Task { await end(sessionRPE: nil) } }
+            if stopApplies(to: incoming.id) { Task { await end(sessionRPE: nil) } }
             return
         }
         snapshot = incoming
@@ -362,7 +362,7 @@ final class WatchWorkoutModel: NSObject {
                 if recordingSessionID == nil || recordingSessionID == request.sessionID { adopt(request.sessionID) }
             }
         case .stopRecording:
-            guard belongsToRecording(request.sessionID) else {
+            guard stopApplies(to: request.sessionID) else {
                 // Already ended here: confirm, so the phone stops resending.
                 if !isRecording { send(.recordingStopped, sessionID: request.sessionID) }
                 return
@@ -372,6 +372,20 @@ final class WatchWorkoutModel: NSObject {
             guard belongsToRecording(request.sessionID) else { return }
             discard()
         }
+    }
+
+    /// Whether the phone finishing `sessionID` should end this recording. The
+    /// usual test (`belongsToRecording`), plus a recording that holds a different
+    /// id but started within 30 minutes of the phone session: the phone can only
+    /// run one workout at a time, so its stop means this one. The recording
+    /// takes the phone's id first, so its summary joins that session instead of
+    /// becoming a second workout.
+    private func stopApplies(to sessionID: String) -> Bool {
+        if belongsToRecording(sessionID) { return true }
+        guard isRecording, let phoneStart = WatchSession.startDate(for: sessionID), let startedAt,
+              abs(startedAt.timeIntervalSince(phoneStart)) < 30 * 60 else { return false }
+        recordingSessionID = sessionID
+        return true
     }
 
     /// Whether a phone session is the one being recorded: its id matches, or the
