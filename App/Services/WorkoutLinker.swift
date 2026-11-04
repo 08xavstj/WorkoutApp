@@ -46,4 +46,36 @@ enum WorkoutLinker {
         session.linkedWorkoutSource = match.source
         return true
     }
+
+    /// A session the app made from an Apple Watch recording alone ("Watch
+    /// workout, N min", no exercises) exists only because of that recording,
+    /// so when the recording is deleted from Apple Health (e.g. in Apple's
+    /// Fitness app) the session goes too. A logged session that pointed to a
+    /// deleted recording only loses the link. Acts only when other workouts
+    /// can be read (a denied read looks like a deletion), and only on sessions
+    /// that ended over an hour ago, so a recording still syncing from the
+    /// Watch isn't mistaken for a deleted one.
+    static func dropDeletedWatchWorkouts(_ sessions: [WorkoutSession], health: HealthKitClient, context: ModelContext) async {
+        let settled = Date.now.addingTimeInterval(-3600)
+        let window = Date.now.addingTimeInterval(-60 * 86_400)
+        let linked = sessions.filter { session in
+            guard let end = session.endedAt, session.watchWorkoutUUID != nil else { return false }
+            return end < settled && session.startedAt > window
+        }
+        let ids = Set(linked.compactMap(\.watchWorkoutUUID))
+        guard !ids.isEmpty,
+              let result = try? await health.workoutsStillPresent(ids, readableSince: Date.now.addingTimeInterval(-90 * 86_400)),
+              result.canRead else { return }
+        var changed = false
+        for session in linked {
+            guard let id = session.watchWorkoutUUID, !result.present.contains(id) else { continue }
+            if session.exercises.isEmpty {
+                context.delete(session)
+            } else {
+                session.watchWorkoutUUID = nil
+            }
+            changed = true
+        }
+        if changed { try? context.save() }
+    }
 }

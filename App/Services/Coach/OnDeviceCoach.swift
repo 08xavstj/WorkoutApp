@@ -1,12 +1,19 @@
 import Foundation
 import FoundationModels
+import AppCore
 
 /// Coach powered by Apple's on-device model (Apple Intelligence). Free, private,
-/// works offline. The model reads your data through tools instead of a long
-/// prompt, because its context window is small.
+/// works offline.
+///
+/// The model is small (about 4,000 tokens of context, and unreliable at
+/// deciding when to call tools), so each question gets a fresh session with
+/// the data that question needs written into the prompt (`CoachIntent`
+/// picks it), plus a short recap of the last exchange for follow-ups. Earlier
+/// versions let the model fetch data through tools and kept the whole chat,
+/// which left answers ungrounded and ran out of context after a few messages.
 final class OnDeviceCoach {
-    private var session: LanguageModelSession?
-    private var sessionSnapshot: CoachSnapshot?
+    /// The last question and answer, for follow-ups ("and for dinner?").
+    private var lastExchange: (question: String, answer: String)?
 
     static var availabilityMessage: String? {
         switch SystemLanguageModel.default.availability {
@@ -24,98 +31,97 @@ final class OnDeviceCoach {
     }
 
     func reset() {
-        session = nil
-        sessionSnapshot = nil
+        lastExchange = nil
     }
 
-    func reply(to message: String, snapshot: CoachSnapshot) async throws -> String {
+    /// - Parameter hasPlan: the app is showing a planned workout card with this reply.
+    func reply(to message: String, snapshot: CoachSnapshot, hasPlan: Bool) async throws -> String {
         if let unavailable = Self.availabilityMessage {
             throw CoachError.unavailable(unavailable)
         }
-        // When the data changes, rebuild the tools with fresh numbers but keep
-        // the conversation so follow-ups ("make it 30 min") still make sense.
-        // The snapshot's timestamp changes every message, so it's ignored here.
-        if let current = session, let previous = sessionSnapshot {
-            var comparable = snapshot
-            comparable.date = previous.date
-            if comparable != previous {
-                session = LanguageModelSession(tools: tools(for: snapshot), transcript: current.transcript)
-                sessionSnapshot = snapshot
-            }
-        } else {
-            session = makeSession(snapshot: snapshot)
-            sessionSnapshot = snapshot
-        }
-        guard let session else { throw CoachError.unavailable("Couldn't start the coach.") }
-
+        let topic = CoachIntent.topic(message)
         do {
-            return try await session.respond(to: message).content
+            let answer = try await generate(message, topic: topic, snapshot: snapshot, hasPlan: hasPlan, scale: 1)
+            lastExchange = (message, answer)
+            return answer
         } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
-            // The on-device context is small; start over and retry once.
-            let fresh = makeSession(snapshot: snapshot)
-            self.session = fresh
+            // Still too long: retry once with half the data and no recap.
+            lastExchange = nil
             do {
-                return try await fresh.respond(to: message).content
-            } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
-                self.session = nil
-                throw CoachError.unavailable("That was more than the on-device coach can handle at once. Try a shorter question, or switch the coach to Claude in Settings for detailed workout plans.")
+                let answer = try await generate(message, topic: topic, snapshot: snapshot, hasPlan: hasPlan, scale: 0.5)
+                lastExchange = (message, answer)
+                return answer
+            } catch {
+                throw Self.friendly(error)
             }
+        } catch {
+            throw Self.friendly(error)
         }
     }
 
-    private func tools(for snapshot: CoachSnapshot) -> [any Tool] {
-        [TodayMetricsTool(snapshot: snapshot), RecentWorkoutsTool(snapshot: snapshot), TrainerTool(snapshot: snapshot)]
+    private func generate(_ message: String, topic: CoachIntent.Topic, snapshot: CoachSnapshot,
+                        hasPlan: Bool, scale: Double) async throws -> String {
+        let session = LanguageModelSession(instructions: CoachPrompt.onDeviceInstructions)
+        let prompt = Self.prompt(message, topic: topic, snapshot: snapshot, hasPlan: hasPlan,
+                                 recap: scale < 1 ? nil : lastExchange, scale: scale)
+        // Low temperature: answers should stick to the data, not improvise.
+        let response = try await session.respond(to: prompt, options: GenerationOptions(temperature: 0.3))
+        return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func makeSession(snapshot: CoachSnapshot) -> LanguageModelSession {
-        LanguageModelSession(tools: tools(for: snapshot), instructions: CoachPrompt.onDeviceInstructions)
-    }
-}
-
-struct TodayMetricsTool: Tool {
-    let name = "getTodayMetrics"
-    let description = "Get today's strain, recovery, HRV, resting heart rate and last night's sleep."
-    let snapshot: CoachSnapshot
-
-    @Generable
-    struct Arguments {
-        @Guide(description: "What the user asked about, e.g. 'recovery' or 'sleep'")
-        var topic: String
-    }
-
-    func call(arguments: Arguments) async throws -> String {
-        snapshot.onDeviceTodaySummary
-    }
-}
-
-struct RecentWorkoutsTool: Tool {
-    let name = "getRecentWorkouts"
-    let description = "Get the gym sessions logged in the last 14 days, with exercises and best sets."
-    let snapshot: CoachSnapshot
-
-    @Generable
-    struct Arguments {
-        @Guide(description: "Muscle group or exercise the user asked about, or 'all'")
-        var focus: String
-    }
-
-    func call(arguments: Arguments) async throws -> String {
-        CoachSnapshot.capped(snapshot.workoutsSummary, CoachSnapshot.onDeviceWorkoutsBudget)
-    }
-}
-
-struct TrainerTool: Tool {
-    let name = "getGymAndPlannedWorkout"
-    let description = "Get the user's gym equipment, plates and weight increments, and the workout the trainer planned for today."
-    let snapshot: CoachSnapshot
-
-    @Generable
-    struct Arguments {
-        @Guide(description: "What the user asked for, e.g. 'leg day' or 'shorter workout'")
-        var request: String
+    /// The data block, the recap and the question. Budgets are characters
+    /// (about 3-4 per token) and keep the whole request well under the
+    /// model's 4,096 tokens, with room for the answer.
+    static func prompt(_ message: String, topic: CoachIntent.Topic, snapshot: CoachSnapshot, hasPlan: Bool,
+                       recap: (question: String, answer: String)?, scale: Double) -> String {
+        func budget(_ characters: Int) -> Int { Int(Double(characters) * scale) }
+        var sections: [String] = []
+        switch topic {
+        case .nutrition:
+            sections.append("YOUR DATA TODAY:\n" + snapshot.onDeviceSummary(budget: budget(2600), goalsFirst: true))
+        case .training:
+            sections.append("YOUR DATA TODAY:\n" + snapshot.onDeviceSummary(budget: budget(1500)))
+            sections.append("GYM AND PLANNED WORKOUT:\n" + CoachSnapshot.capped(snapshot.trainerSummary, budget(1300)))
+            sections.append("RECENT WORKOUTS:\n" + CoachSnapshot.capped(snapshot.workoutsSummary, budget(800)))
+        case .recovery:
+            sections.append("YOUR DATA TODAY:\n" + snapshot.onDeviceSummary(budget: budget(2400)))
+            sections.append("RECENT WORKOUTS:\n" + CoachSnapshot.capped(snapshot.workoutsSummary, budget(600)))
+        case .general:
+            sections.append("YOUR DATA TODAY:\n" + snapshot.onDeviceSummary(budget: budget(2200)))
+            sections.append("RECENT WORKOUTS:\n" + CoachSnapshot.capped(snapshot.workoutsSummary, budget(600)))
+        }
+        if let recap {
+            sections.append("EARLIER IN THIS CHAT:\nUser: \(recap.question.prefix(200))\nCoach: \(recap.answer.prefix(400))")
+        }
+        let focus: String = switch topic {
+        case .nutrition: "This is a food question: answer about food only, no exercises."
+        case .training: hasPlan
+            ? "The app is showing the planned workout as a card under your answer: say why it suits today, don't list the exercises."
+            : "Answer about training."
+        case .recovery: "This is about recovery or sleep: explain it from the numbers above."
+        case .general: "Answer the question directly."
+        }
+        sections.append("QUESTION: \(message)\n(\(focus))")
+        return sections.joined(separator: "\n\n")
     }
 
-    func call(arguments: Arguments) async throws -> String {
-        CoachSnapshot.capped(snapshot.trainerSummary, CoachSnapshot.onDeviceTrainerBudget)
+    /// Plain words for the model's errors, instead of an error code.
+    static func friendly(_ error: Error) -> Error {
+        guard let generation = error as? LanguageModelSession.GenerationError else {
+            if error is CoachError { return error }
+            return CoachError.unavailable("The on-device coach couldn't answer that. Try again, or switch the coach to Claude in Settings › Coach.")
+        }
+        switch generation {
+        case .guardrailViolation:
+            return CoachError.unavailable("Apple's on-device model declined that question; its safety filter is strict about health topics. Try wording it differently, or switch the coach to Claude in Settings › Coach.")
+        case .exceededContextWindowSize:
+            return CoachError.unavailable("That was more than the on-device coach can handle at once. Try a shorter question, or tap New conversation.")
+        case .assetsUnavailable:
+            return CoachError.unavailable("Apple Intelligence is still getting ready. Try again in a few minutes.")
+        case .rateLimited, .concurrentRequests:
+            return CoachError.unavailable("The on-device coach is busy. Try again in a moment.")
+        default:
+            return CoachError.unavailable("The on-device coach couldn't answer that. Try again, or switch the coach to Claude in Settings › Coach.")
+        }
     }
 }

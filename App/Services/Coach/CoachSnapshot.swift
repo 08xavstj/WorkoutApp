@@ -95,12 +95,22 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
 
     /// Today's data for Apple's on-device model, whose context window is
     /// only about 4,000 tokens: the core numbers, then extras while they fit.
-    var onDeviceTodaySummary: String {
+    var onDeviceTodaySummary: String { onDeviceSummary(budget: Self.onDeviceTodayBudget) }
+
+    /// Today's data within `budget` characters: the core numbers, then the
+    /// goals and targets line first when `goalsFirst` (food questions need it),
+    /// then the other extras while they fit.
+    func onDeviceSummary(budget: Int, goalsFirst: Bool = false) -> String {
         var lines = coreLines
         var used = lines.reduce(0) { $0 + $1.count }
-        for line in extraLines {
+        var extras = extraLines
+        if goalsFirst, let health, let index = extras.firstIndex(of: health) {
+            extras.remove(at: index)
+            extras.insert(health, at: 0)
+        }
+        for line in extras {
             let piece = line.count > 600 ? String(line.prefix(600)) + "…" : line
-            guard used + piece.count <= Self.onDeviceTodayBudget else { continue }
+            guard used + piece.count <= budget else { continue }
             lines.append(piece)
             used += piece.count
         }

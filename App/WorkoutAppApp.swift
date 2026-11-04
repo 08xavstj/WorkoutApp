@@ -154,6 +154,7 @@ struct RootView: View {
     @Environment(\.healthClient) private var health
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
 
     var body: some View {
@@ -340,6 +341,10 @@ struct RootView: View {
             let lastWorkoutEnd = sessions.lazy.compactMap(\.endedAt).max()
             WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd)
         }
+        // Last, after everything that reads `sessions`: a Watch-only session whose
+        // recording was deleted in Apple Health goes too. Removing one changes the
+        // finished count, which refreshes the scores again (`WorkoutLinker`).
+        await WorkoutLinker.dropDeletedWatchWorkouts(sessions, health: health, context: modelContext)
     }
 
     private func analyzeProgressPhotos() async {

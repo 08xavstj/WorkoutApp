@@ -697,6 +697,26 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// sleep data lands in Apple Health (e.g. after Garmin Connect syncs).
     /// Lets HealthKit wake the app when new data arrives (e.g. a Garmin sync),
     /// so scores and the widget update without opening the app.
+    /// Which of these workouts are still in Apple Health, and whether the app
+    /// can read workouts at all (any workout since `readableSince`): a read the
+    /// user hasn't allowed looks exactly like a deleted workout.
+    @concurrent
+    func workoutsStillPresent(_ ids: Set<UUID>, readableSince: Date) async throws -> (present: Set<UUID>, canRead: Bool) {
+        let byID = HKSampleQueryDescriptor(
+            predicates: [.workout(HKQuery.predicateForObjects(with: ids))],
+            sortDescriptors: []
+        )
+        let present = Set(try await byID.result(for: store).map(\.uuid))
+        if !present.isEmpty { return (present, true) }
+        let any = HKSampleQueryDescriptor(
+            predicates: [.workout(HKQuery.predicateForSamples(withStart: readableSince, end: nil))],
+            sortDescriptors: [],
+            limit: 1
+        )
+        let canRead = !(try await any.result(for: store)).isEmpty
+        return (present, canRead)
+    }
+
     func enableBackgroundDelivery() {
         let types: [HKObjectType] = [
             HKQuantityType(.heartRate), HKQuantityType(.restingHeartRate), HKCategoryType(.sleepAnalysis),
@@ -712,7 +732,9 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.stepCount), HKQuantityType(.activeEnergyBurned), HKQuantityType(.heartRate),
             HKQuantityType(.restingHeartRate), HKQuantityType(.respiratoryRate), HKQuantityType(.oxygenSaturation),
             HKQuantityType(.heartRateVariabilitySDNN), HKCategoryType(.sleepAnalysis),
-            HKQuantityType(.dietaryEnergyConsumed)
+            HKQuantityType(.dietaryEnergyConsumed),
+            // Workouts added or deleted (e.g. in Apple's Fitness app).
+            HKObjectType.workoutType()
         ]
         for type in types {
             let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
