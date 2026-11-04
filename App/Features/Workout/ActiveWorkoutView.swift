@@ -254,7 +254,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func strainRing(_ live: Double) -> some View {
-        GradientRing(progress: live / 40, colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
+        GradientRing(progress: ringProgress(live), colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
             VStack(spacing: 0) {
                 Text("+\(strainText(live))")
                     .font(.system(size: ringValueSize, weight: .bold, design: .rounded))
@@ -270,7 +270,18 @@ struct ActiveWorkoutView: View {
         .frame(width: 112, height: 112)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Strain added so far")
-        .accessibilityValue("+\(strainText(live))")
+        .accessibilityValue("+\(strainText(live)), \(whole(ringProgress(live) * 100)) percent of the way to the top of today's range")
+    }
+
+    /// The ring fills as the session uses up the room left to the top of
+    /// today's strain range (the whole 0-100 scale when there's no range
+    /// yet). It used to be full at +40%, which looked like a cap.
+    private func ringProgress(_ live: Double) -> Double {
+        let current = metrics.strain?.strain ?? 0
+        let top = metrics.targetStrain?.upperBound ?? StrainCalculator.maximum
+        let room = top - current
+        guard room > 1 else { return 1 }
+        return min(1, max(0, live / room))
     }
 
     private var finishedExercises: Int {
@@ -423,6 +434,7 @@ private struct ExerciseCard: View {
     @State private var showingRPEGuide = false
     @State private var confirmingRemove = false
     @State private var showingProgress = false
+    @State private var showingGuide = false
     /// This exercise's own rest time (nil = automatic).
     @State private var restSeconds: Int?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -467,10 +479,21 @@ private struct ExerciseCard: View {
             HStack(alignment: .top, spacing: 12) {
                 // At accessibility text sizes the badge goes and the PR label
                 // moves under the name, so the name keeps the width (ux-audit.md 4.8).
-                if !stacked {
-                    IconBadge(systemName: "dumbbell.fill", color: Theme.lifting, size: 46)
+                // Tap the exercise for how to do it, with form videos.
+                Button { showingGuide = true } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        if !stacked {
+                            IconBadge(systemName: "dumbbell.fill", color: Theme.lifting, size: 46)
+                        }
+                        titleColumn
+                    }
+                    .contentShape(.rect)
                 }
-                titleColumn
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows how to do it, with form videos")
+                .sheet(isPresented: $showingGuide) {
+                    ExerciseGuideSheet(exerciseID: exercise.exerciseID, name: exercise.name)
+                }
                 Spacer(minLength: 0)
                 if isNewPR && !stacked {
                     prLabel
@@ -479,6 +502,7 @@ private struct ExerciseCard: View {
                     if !isCurrent {
                         Button("Collapse", systemImage: "chevron.up", action: onCollapse)
                     }
+                    Button("How to do it", systemImage: "figure.strengthtraining.traditional") { showingGuide = true }
                     Button("Progress", systemImage: "chart.line.uptrend.xyaxis") { showingProgress = true }
                     Menu("Rest: \(restSeconds.map(RestPreferences.label) ?? "automatic")", systemImage: "timer") {
                         Button("Automatic (from your goal)") { setRest(nil) }
@@ -1140,8 +1164,18 @@ private struct RestTimerPill: View {
         }
     }
 
+    /// One line when it fits; otherwise the buttons go under the time
+    /// (large text, small phones), never wrapping inside a button.
     private func content(remaining: TimeInterval) -> some View {
-        let stacked = dynamicTypeSize.isAccessibilitySize
+        ViewThatFits(in: .horizontal) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                pill(remaining: remaining, stacked: false)
+            }
+            pill(remaining: remaining, stacked: true)
+        }
+    }
+
+    private func pill(remaining: TimeInterval, stacked: Bool) -> some View {
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
             : AnyLayout(HStackLayout(spacing: 10))
@@ -1173,6 +1207,8 @@ private struct RestTimerPill: View {
             Text("Rest \(Duration.seconds(remaining.rounded(.up)).formatted(.time(pattern: .minuteSecond)))")
                 .font(.title3.weight(.semibold))
                 .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
                 .accessibilityLabel("Rest")
                 .accessibilityValue(Duration.seconds(remaining.rounded(.up)).formatted(.units(allowed: [.minutes, .seconds], width: .wide)))
                 .accessibilityAddTraits(.updatesFrequently)
@@ -1186,6 +1222,8 @@ private struct RestTimerPill: View {
             pillButton("+15s", spoken: "15 seconds more") { onChange(15) }
             Button("Skip") { onChange(nil) }
                 .font(.headline)
+                .lineLimit(1)
+                .fixedSize()
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(.rect)
                 .buttonStyle(.plain)
@@ -1196,7 +1234,10 @@ private struct RestTimerPill: View {
     private func pillButton(_ title: String, spoken: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
             .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 10)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 8)
             .frame(minWidth: 44, minHeight: 44)
             .background(Color.white.opacity(0.2), in: .capsule)
             .contentShape(.capsule)

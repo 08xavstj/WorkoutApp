@@ -352,8 +352,37 @@ struct PlannedExerciseRow: View {
     private var badgeTextColor: Color { label == nil ? Theme.liftingText : Theme.sleepText }
     /// Fits "A1" or "12" at every text size.
     @ScaledMetric(relativeTo: .headline) private var badgeSize: CGFloat = 34
+    @State private var showingGuide = false
 
     var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Tap the exercise for how to do it, with form videos.
+            Button { showingGuide = true } label: {
+                details
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows how to do it, with form videos")
+            Spacer(minLength: 0)
+            if let onSwap {
+                Button(action: onSwap) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(width: 44, height: 44)
+                        .background(Theme.cardRaised, in: .circle)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Swap \(exercise.name)")
+            }
+        }
+        .card()
+        .sheet(isPresented: $showingGuide) {
+            ExerciseGuideSheet(exerciseID: exercise.exerciseID, name: exercise.name)
+        }
+    }
+
+    private var details: some View {
         HStack(alignment: .top, spacing: 12) {
             Text(label ?? "\(index)")
                 .font(.headline)
@@ -384,19 +413,6 @@ struct PlannedExerciseRow: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
             }
-            Spacer(minLength: 0)
-            if let onSwap {
-                Button(action: onSwap) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                        .frame(width: 44, height: 44)
-                        .background(Theme.cardRaised, in: .circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Swap \(exercise.name)")
-            }
         }
-        .card()
     }
 }

@@ -191,6 +191,8 @@ struct ExerciseDetailView: View {
                     }
                 }
                 .card()
+
+                FormVideoLink(name: exercise.name)
             }
             .padding()
             .lockedToScreenWidth()
