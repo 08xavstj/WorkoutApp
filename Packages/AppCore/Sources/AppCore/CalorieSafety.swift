@@ -16,6 +16,12 @@ import Foundation
 ///   on REDs, Mountjoy et al., Br J Sports Med 2023; Loucks et al., J Sports
 ///   Sci 2011). The floor is the higher of that and the absolute minimum
 ///   (1,500 kcal men / 1,200 kcal women).
+/// - **Same 30 for men and women.** The 30 kcal/kg line comes mostly from
+///   studies in women. In exercising men, 4 days at 15 kcal/kg lowered leptin
+///   and insulin but not the other metabolic hormones measured (Koehler et
+///   al., J Sports Sci 2016), and no separate male threshold has been established
+///   (Wasserfurth et al., Sports Med Open 2020). With no agreed lower number,
+///   the app keeps the conservative 30 for everyone (docs/research/calories.md).
 public enum CalorieSafety {
     /// Lowest believable maintenance, as a multiple of resting metabolism (FAO/WHO/UNU 2004).
     public static let minimumPhysicalActivityLevel = 1.4

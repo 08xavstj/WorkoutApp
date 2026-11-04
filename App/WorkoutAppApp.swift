@@ -295,6 +295,8 @@ struct RootView: View {
         metrics.medicationProteinPerKg = medications.proteinGramsPerKg
         gym.style = settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
         metrics.plannedSessionTomorrow = plannedSlots().first { Calendar.current.isDateInTomorrow($0.start) }?.start // bed-by window
+        // Personal calories (docs/research/calories.md): training status from the whole lifting log.
+        metrics.trainingStatus = TrainingStatus.estimate(sessionDates: sessions.filter { !$0.isActive }.map(\.startedAt))
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
         // Training block (`TrainingBlock`): the trainer's style from the goals, then this week's
         // state; a week that starts with 7-day HRV below normal holds the ramp instead of adding sets.

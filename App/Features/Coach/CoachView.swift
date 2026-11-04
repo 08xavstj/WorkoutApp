@@ -288,7 +288,7 @@ extension CoachView {
         if let water = metrics.nutritionToday?.waterLiters { lines.append("Water today \(water.formatted(.number.precision(.fractionLength(1)))) L.") }
         // Protein per meal and carbs by training day (`NutritionTargets`: Schoenfeld & Aragon 2018; Burke 2011),
         // low energy availability (`EnergyAvailability`: IOC REDs 2023) and the hand-typed body measurements.
-        if let spread = NutritionTargets.proteinPerMeal(bodyMassKg: metrics.bodyMassKg, goals: settings.goalsSet ? settings.goals : nil) {
+        if let spread = NutritionTargets.proteinPerMeal(bodyMassKg: metrics.bodyMassKg, goals: settings.goalsSet ? settings.goals : nil, age: settings.age) {
             let trainingDay = !metrics.activities.isEmpty || weeklyPlans.todayPlan() != nil
             var line = "Protein per meal: about \(whole(spread.grams)) g at each of \(spread.meals) meals."
             if let carbs = NutritionTargets.carbsText(bodyMassKg: metrics.bodyMassKg, trainingDay: trainingDay, goals: settings.goalsSet ? settings.goals : nil) { line += " " + carbs }

@@ -941,6 +941,7 @@ private struct MacroColumn: View {
 /// Where each calorie number comes from.
 private struct CalorieDetailsSheet: View {
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(CheckInStore.self) private var checkIns
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -973,6 +974,7 @@ private struct CalorieDetailsSheet: View {
                             // Monday adjustment of at most ±100 kcal (`CalorieBand`).
                             Text(note)
                         }
+                        PersonalCalorieNotes(cycleNote: CycleEnergy.note(sex: metrics.sex, daysSinceLastPeriod: checkIns.daysSinceLastPeriod()))
                         // Cut × sleep debt (`CutAndSleep`, Nedeltcheva 2010): advice to pick a
                         // slower rate; the weekly adjustment itself is unchanged.
                         if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt) {
@@ -1052,6 +1054,32 @@ private struct CalorieDetailsSheet: View {
             Text("\(whole(value).formatted()) kcal")
                 .monospacedDigit()
                 .fontWeight(bold ? .semibold : .regular)
+        }
+    }
+}
+
+/// Personal parts of the calorie numbers (docs/research/calories.md): the
+/// resting-energy equation used, a pace held at the personal maximum, and the
+/// luteal-phase note (`CycleEnergy`; a note only, the target doesn't change).
+private struct PersonalCalorieNotes: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+    let cycleNote: String?
+
+    var body: some View {
+        if let method = metrics.energy?.bmrMethod {
+            Text("Resting energy: \(method).")
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        if let goals = metrics.goals, let held = metrics.personalGoals, held.weeklyRatePercent < goals.weeklyRatePercent {
+            Text("Your pace is held at \(held.weeklyRatePercent.formatted())% a week. " + metrics.rateLimit(for: goals).message)
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        if let cycleNote {
+            Text(cycleNote)
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
         }
     }
 }

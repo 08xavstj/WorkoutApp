@@ -4,12 +4,29 @@ import Foundation
 /// compared with calories eaten.
 ///
 /// Total = resting + exercise (above resting) + everyday movement + digestion.
-/// - Resting (BMR): Mifflin-St Jeor (best general equation for adults;
-///   Frankenfield et al., J Am Diet Assoc 2005). Katch-McArdle (370 + 21.6 ×
-///   lean mass) does better in lean, muscular people, but only with a good
-///   body-fat measurement: smart-scale bioimpedance is off by about ±5-8
-///   points, so it is used only when the body-fat % comes from DXA or a clinic
-///   (`Body.bodyFatIsClinical`).
+/// - Resting (BMR), chosen per person (docs/research/calories.md):
+///   - Mifflin-St Jeor by default (best general equation for adults;
+///     Frankenfield et al., J Am Diet Assoc 2005). Sex, age, height and weight
+///     are its inputs.
+///   - People aged 18-35 who have lifted regularly for 6+ months
+///     (`TrainingStatus.isTrained`): the ten Haaf & Weijs weight-based
+///     equation (PLoS One 2014), built on recreational athletes aged 18-35
+///     (about 5 sessions a week), where Mifflin-St Jeor was accurate for
+///     fewer than half. A meta-analysis of 29 studies in athletes found it the
+///     most accurate and precise equation (80% of people within ±10%; O'Neill,
+///     Corish & Horner, Sports Med 2023). Outside 18-35 it hasn't been
+///     tested, so Mifflin-St Jeor stays. The Tinsley equations (Appl Physiol
+///     Nutr Metab 2019) were built on a small group of physique athletes and need
+///     outside validation, so they aren't used.
+///   - With body fat from DXA or a clinic (`Body.bodyFatIsClinical`) a
+///     lean-mass equation: Cunningham (500 + 22 × lean mass; Am J Clin Nutr
+///     1980) for trained people, which ten Haaf & Weijs 2014 confirmed in
+///     athletes, otherwise Katch-McArdle (370 + 21.6 × lean mass). Smart-scale
+///     bioimpedance is off by about ±5-8 points, so a scale reading never
+///     switches the equation.
+///   - Age: energy use per kg of lean mass is stable from 20 to 60 and falls
+///     after 60 (Pontzer et al., Science 2021); the equations' own age terms
+///     cover this, so nothing extra is subtracted.
 /// - Exercise: Keytel et al. (2005) heart-rate equation for minutes when heart
 ///   rate is clearly raised; for logged gym sessions, at least a MET-based floor
 ///   (2024 Adult Compendium, Herrmann et al., J Sport Health Sci 2024: vigorous
@@ -59,17 +76,21 @@ public struct EnergyCalculator: Sendable {
         public var sex: BiologicalSex
         public var bodyFatPercent: Double?
         /// True when the body-fat % came from DXA or a clinic (a 4-compartment
-        /// or similar method), not a smart scale. Only then is Katch-McArdle used.
+        /// or similar method), not a smart scale. Only then is a lean-mass equation used.
         public var bodyFatIsClinical: Bool
+        /// From the lifting log (`TrainingStatus.estimate`); nil when unknown,
+        /// which keeps Mifflin-St Jeor.
+        public var trainingStatus: TrainingStatus?
 
         public init(weightKg: Double, heightCm: Double?, age: Int, sex: BiologicalSex, bodyFatPercent: Double? = nil,
-                    bodyFatIsClinical: Bool = false) {
+                    bodyFatIsClinical: Bool = false, trainingStatus: TrainingStatus? = nil) {
             self.weightKg = weightKg
             self.heightCm = heightCm
             self.age = age
             self.sex = sex
             self.bodyFatPercent = bodyFatPercent
             self.bodyFatIsClinical = bodyFatIsClinical
+            self.trainingStatus = trainingStatus
         }
     }
 
@@ -119,11 +140,28 @@ public struct EnergyCalculator: Sendable {
         public var balance: Double? { intake.map { $0 - projectedTotal } }
     }
 
-    /// Basal metabolic rate, kcal/day.
+    /// Ages the ten Haaf & Weijs (2014) equation was built on.
+    public static let athleteEquationAges = 18...35
+
+    /// Method names shown in the app ("Resting energy: …").
+    public static let tenHaafMethod = "ten Haaf equation for people who train"
+    public static let cunninghamMethod = "Cunningham equation (lean mass)"
+
+    /// Basal metabolic rate, kcal/day, and the equation used (see the type's notes).
     public func bmr(_ body: Body) -> (kcal: Double, method: String) {
+        let trained = body.trainingStatus?.isTrained == true
         if body.bodyFatIsClinical, let fat = body.bodyFatPercent, fat > 2, fat < 60 {
             let leanMass = body.weightKg * (1 - fat / 100)
+            // Cunningham 1980, confirmed in recreational athletes (ten Haaf & Weijs 2014).
+            if trained { return (500 + 22 * leanMass, Self.cunninghamMethod) }
             return (370 + 21.6 * leanMass, "Katch-McArdle")
+        }
+        if trained, Self.athleteEquationAges.contains(body.age), let heightCm = body.heightCm {
+            // ten Haaf & Weijs, PLoS One 2014, in kJ/day: 49.940 × weight (kg)
+            // + 2459.053 × height (m) − 34.014 × age + 799.257 (men) + 122.502.
+            let kilojoules = 49.940 * body.weightKg + 2459.053 * heightCm / 100 - 34.014 * Double(body.age)
+                + (body.sex == .male ? 799.257 : 0) + 122.502
+            return (kilojoules / 4.184, Self.tenHaafMethod)
         }
         let height = body.heightCm ?? (body.sex == .male ? 176 : 163)
         let base = 10 * body.weightKg + 6.25 * height - 5 * Double(body.age)

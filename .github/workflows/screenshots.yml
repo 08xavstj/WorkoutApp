@@ -10,9 +10,11 @@ on:
     branches: ["claude/**"]
   workflow_dispatch:
 
+# One run per commit, never cancelled by a later push (each run is a record
+# of how that commit looked).
 concurrency:
-  group: screenshots-${{ github.ref }}
-  cancel-in-progress: true
+  group: screenshots-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   shots:

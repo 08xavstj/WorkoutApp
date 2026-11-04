@@ -60,14 +60,25 @@ public enum NutritionTargets {
     public static let proteinPerMealGramsPerKg = ProteinMeals.gramsPerKgPerMeal
     public static let proteinPerMealCeilingGramsPerKg = 0.55
 
+    /// Per-meal dose for people 65 and older, g/kg: older muscle needs about
+    /// 0.40 g/kg per meal to respond fully, against 0.24 g/kg in young men
+    /// (Moore et al., J Gerontol A 2015). Three such meals give 1.2 g/kg a day,
+    /// the PROT-AGE figure for active older adults (Bauer et al., J Am Med
+    /// Dir Assoc 2013: 1.0-1.2 g/kg, 1.2 or more when exercising).
+    public static let olderAdultPerMealGramsPerKg = 0.4
+
     /// Grams per meal and how many meals, or nil without a weight.
-    /// - Parameter loggedMeals: meals seen in today's food log (3 switches to the 3-meal spread).
-    public static func proteinPerMeal(bodyMassKg: Double?, goals: Goals?, loggedMeals: Int? = nil) -> (grams: Double, meals: Int)? {
+    /// - Parameters:
+    ///   - loggedMeals: meals seen in today's food log (3 switches to the 3-meal spread).
+    ///   - age: 65 and older raises the endurance/health dose to 0.4 g/kg
+    ///     (Moore 2015); lifters already get at least 0.4 g/kg.
+    public static func proteinPerMeal(bodyMassKg: Double?, goals: Goals?, loggedMeals: Int? = nil, age: Int? = nil) -> (grams: Double, meals: Int)? {
         guard let bodyMassKg, bodyMassKg > 0 else { return nil }
         let lifting = goals.map { $0.focuses.contains(.muscle) || $0.focuses.contains(.strength) || $0.weight == .lose } ?? true
         if !lifting {
-            // Endurance / health only: 3 meals of about 0.3 g/kg (nutrition.md).
-            return ((bodyMassKg * 0.3).rounded(), 3)
+            // Endurance / health only: 3 meals of about 0.3 g/kg (nutrition.md), 0.4 from 65 (Moore 2015).
+            let older = (age ?? 0) >= GoalPlanner.olderAdultAge
+            return ((bodyMassKg * (older ? olderAdultPerMealGramsPerKg : 0.3)).rounded(), 3)
         }
         let meals = loggedMeals == 3 ? 3 : ProteinMeals.targetMeals
         let perKg = min(proteinPerMealCeilingGramsPerKg, max(proteinPerMealGramsPerKg, 1.6 / Double(meals)))

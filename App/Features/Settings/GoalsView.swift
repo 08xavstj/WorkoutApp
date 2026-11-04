@@ -49,7 +49,7 @@ struct GoalsView: View {
                     .pickerStyle(.segmented)
                     if goals.weight != .maintain {
                         Picker("Pace", selection: $goals.weeklyRatePercent) {
-                            ForEach(GoalPlanner.rateOptions(for: goals.weight), id: \.self) { rate in
+                            ForEach(rateOptions, id: \.self) { rate in
                                 Text(paceLabel(rate)).tag(rate)
                             }
                         }
@@ -64,9 +64,8 @@ struct GoalsView: View {
                 } header: {
                     Text("Body weight")
                 } footer: {
-                    Text(goals.weight == .lose
-                         ? "0.5-1% of body weight a week keeps the most muscle; faster loss costs more muscle."
-                         : (goals.weight == .gain ? "0.25-0.5% a week; bigger surpluses mostly add fat." : "Calories match what you burn."))
+                    // The personal maximum and why (`GoalPlanner.maximumWeeklyRate`; docs/research/calories.md).
+                    Text(rateLimit.message)
                 }
 
                 Section {
@@ -97,6 +96,9 @@ struct GoalsView: View {
                         LabeledContent("Time to target", value: "~\(Int(weeks.rounded(.up))) weeks")
                     }
                     LabeledContent("Workouts", value: styleLabel)
+                    if let status = metrics.trainingStatus {
+                        LabeledContent("Lifting history", value: status.label)
+                    }
                     if let weekly = metrics.weightTrendWeekly, let weight = metrics.bodyMassKg,
                        let warning = WeightPace.message(WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: weight, goals: goals)) {
                         Label(warning, systemImage: "exclamationmark.triangle.fill")
@@ -118,13 +120,35 @@ struct GoalsView: View {
             }
             .onAppear {
                 goals = settings.goalsSet ? settings.goals : suggestion
+                holdRateAtMaximum()
                 targetText = goals.targetWeightKg.map { settings.weightUnit.display($0).formatted(.number.precision(.fractionLength(0...1))) } ?? ""
             }
-            .onChange(of: goals.weight) { _, weight in
-                let options = GoalPlanner.rateOptions(for: weight)
+            .onChange(of: goals.weight) { _, _ in
+                let options = rateOptions
                 if !options.contains(goals.weeklyRatePercent), let first = options.dropFirst().first ?? options.first {
                     goals.weeklyRatePercent = first
                 }
+            }
+        }
+    }
+
+    /// The fastest weekly rate for this person and the goal being edited.
+    private var rateLimit: GoalPlanner.RateLimit {
+        metrics.rateLimit(for: goals)
+    }
+
+    /// Picker rates, without the ones above the personal maximum.
+    private var rateOptions: [Double] {
+        GoalPlanner.rateOptions(for: goals.weight, maximum: rateLimit.percent)
+    }
+
+    /// A saved rate above the personal maximum drops to the fastest allowed one.
+    private func holdRateAtMaximum() {
+        let options = rateOptions
+        if goals.weight != .maintain, !options.contains(goals.weeklyRatePercent), let fastest = options.last {
+            goals.weeklyRatePercent = min(goals.weeklyRatePercent, fastest)
+            if !options.contains(goals.weeklyRatePercent), let slowest = options.first {
+                goals.weeklyRatePercent = slowest
             }
         }
     }
@@ -143,13 +167,14 @@ struct GoalsView: View {
         guard let base = metrics.maintenance?.maintenance ?? metrics.calories?.projected,
               let weight = metrics.bodyMassKg else { return nil }
         // The same safety minimum as Home (`CalorieSafety`, IOC REDs 2023).
-        return max(GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: settings.sex),
+        return max(GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight,
+                                             goals: GoalPlanner.cappedGoals(goals, limit: rateLimit), sex: settings.sex),
                    metrics.calorieMinimum ?? 0)
     }
 
     private var weeksToTarget: Double? {
         guard let weight = metrics.bodyMassKg else { return nil }
-        var withTarget = goals
+        var withTarget = GoalPlanner.cappedGoals(goals, limit: rateLimit)
         withTarget.targetWeightKg = parsedTarget
         return GoalPlanner.weeksToTarget(currentKg: weight, goals: withTarget)
     }

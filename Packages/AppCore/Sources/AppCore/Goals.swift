@@ -63,9 +63,16 @@ extension Goals.Focus {
 ///   mass when body fat is known, otherwise the goal weight or an adjusted
 ///   body weight when BMI is over 30.
 public enum GoalPlanner {
-    /// Daily calorie target from maintenance and the goal.
-    public static func calorieTarget(maintenance: Double, bodyMassKg: Double, goals: Goals, sex: BiologicalSex) -> Double {
-        let weeklyKg = bodyMassKg * goals.weeklyRatePercent / 100
+    /// Daily calorie target from maintenance and the goal. The weekly rate is
+    /// capped at the person's maximum (`maximumWeeklyRate`); without age, body
+    /// fat or training status that is the general 1%/week loss and 0.5%/week
+    /// gain limit.
+    public static func calorieTarget(maintenance: Double, bodyMassKg: Double, goals: Goals, sex: BiologicalSex,
+                                     age: Int? = nil, bodyFatPercent: Double? = nil,
+                                     trainingStatus: TrainingStatus? = nil) -> Double {
+        let limit = maximumWeeklyRate(goals: goals, sex: sex, age: age, bodyFatPercent: bodyFatPercent, trainingStatus: trainingStatus)
+        let rate = min(goals.weeklyRatePercent, limit.percent)
+        let weeklyKg = bodyMassKg * rate / 100
         let daily = weeklyKg * AdaptiveTDEE.kcalPerKg / 7
         let target: Double = switch goals.weight {
         case .maintain: maintenance
@@ -149,12 +156,163 @@ public enum GoalPlanner {
     }
 
     /// Allowed weekly rates (% body weight) for the picker.
-    public static func rateOptions(for weight: Goals.Weight) -> [Double] {
-        switch weight {
+    /// - Parameter maximum: the person's fastest rate (`maximumWeeklyRate`);
+    ///   faster options are left out, but the slowest one always stays.
+    public static func rateOptions(for weight: Goals.Weight, maximum: Double? = nil) -> [Double] {
+        let all: [Double] = switch weight {
         case .lose: [0.25, 0.5, 0.75, 1.0]
         case .gain: [0.25, 0.5]
         case .maintain: []
         }
+        guard let maximum else { return all }
+        let allowed = all.filter { $0 <= maximum + 0.001 }
+        return allowed.isEmpty ? Array(all.prefix(1)) : allowed
+    }
+
+    // MARK: Personal maximum rate
+
+    /// Age from which the older-adult limits apply (the trials and the
+    /// PROT-AGE protein guidance use 65+).
+    public static let olderAdultAge = 65
+
+    /// The fastest weekly rate for this person, and why.
+    public struct RateLimit: Sendable, Equatable {
+        public enum Reason: String, Sendable {
+            /// The general limits: 1%/week loss, 0.5%/week gain.
+            case general
+            /// Lean: men under 15% / women under 23% body fat.
+            case lean
+            /// Very lean: men under 10% / women under 18% body fat.
+            case veryLean
+            /// 65 or older.
+            case olderAdult
+            /// 2+ years of consistent lifting (gain only).
+            case advancedLifter
+        }
+
+        /// % of body weight a week (0 when maintaining).
+        public var percent: Double
+        public var reason: Reason
+        public var weight: Goals.Weight
+        /// True when the body fat behind the limit was estimated from BMI.
+        public var bodyFatIsEstimate: Bool
+
+        public init(percent: Double, reason: Reason, weight: Goals.Weight, bodyFatIsEstimate: Bool = false) {
+            self.percent = percent
+            self.reason = reason
+            self.weight = weight
+            self.bodyFatIsEstimate = bodyFatIsEstimate
+        }
+
+        /// Plain text for Goals, e.g. "For your body fat, losing faster than
+        /// 0.75% a week costs muscle (Forbes 2000; Garthe 2011)."
+        public var message: String {
+            let rate = "\(percent.formatted(.number.precision(.fractionLength(0...2))))% a week"
+            let rough = bodyFatIsEstimate ? " Your body fat is estimated from BMI, so this is rough; a smart-scale reading makes it personal." : ""
+            switch (weight, reason) {
+            case (.maintain, _):
+                return "Calories match what you burn."
+            case (.lose, .veryLean):
+                return "For your body fat, losing faster than \(rate) costs muscle: the leaner you are, the more of each kilo lost is lean tissue rather than fat (Forbes 2000; Helms 2014)." + rough
+            case (.lose, .lean):
+                return "For your body fat, losing faster than \(rate) costs muscle; athletes losing about 0.7% a week kept more muscle than those losing 1.4% (Garthe 2011; Forbes 2000)." + rough
+            case (.lose, .olderAdult):
+                return "At your age, losing faster than \(rate) costs muscle and bone; with lifting, trials in over-65s lost about 9% in 6 months and kept most of their muscle (Villareal 2017)."
+            case (.lose, _):
+                return "Losing faster than \(rate) costs muscle (Helms 2014; Garthe 2011)."
+            case (.gain, .advancedLifter):
+                return "After 2+ years of steady lifting, muscle comes slowly, so gaining faster than \(rate) mostly adds fat (Iraki 2019)."
+            case (.gain, _):
+                return "Gaining faster than \(rate) mostly adds fat (Iraki 2019)."
+            }
+        }
+    }
+
+    /// Body fat under these is "lean" (men / women). App choice: about the top
+    /// of the "athletes" band, with women about 8 points higher because of
+    /// essential fat (ACE body-fat categories). The evidence says only "the
+    /// leaner, the slower" (Forbes, Ann N Y Acad Sci 2000; Ruiz-Castellano et
+    /// al., Nutrients 2021); no study sets the cut-off.
+    public static func leanBodyFat(sex: BiologicalSex) -> Double { sex == .male ? 15 : 23 }
+    /// Body fat under these is "very lean" (men / women; app choice, as above).
+    public static func veryLeanBodyFat(sex: BiologicalSex) -> Double { sex == .male ? 10 : 18 }
+
+    /// The fastest weekly rate (% of body weight) for this person.
+    ///
+    /// Losing (general limit 1%/week: Helms et al., JISSN 2014; Garthe et
+    /// al., IJSNEM 2011):
+    /// - The leaner you are, the larger the share of weight lost that is lean
+    ///   tissue (Forbes 2000; Hall, Br J Nutr 2007), and resistance-trained
+    ///   reviews say the leaner the athlete, the smaller the deficit
+    ///   (Ruiz-Castellano et al., Nutrients 2021). Lean → 0.75%/week, about
+    ///   the rate at which elite athletes kept more lean mass than at
+    ///   1.4%/week (Garthe 2011: 0.7% vs 1.4%/week); very lean → 0.5%/week,
+    ///   the bottom of Helms 2014's range. Moderate evidence for the
+    ///   direction, none for the exact cut-offs.
+    /// - 65 and older → 0.5%/week. Weight loss costs older adults muscle and
+    ///   bone (ASN/TOS position statement, Villareal et al., Am J Clin Nutr
+    ///   2005); the trial that protected them best lost about 9% in 26 weeks
+    ///   (≈0.35%/week) with resistance plus aerobic training (Villareal et al.,
+    ///   N Engl J Med 2017). The 0.5 cap is the nearest picker option.
+    /// - Sex: no trial compares safe rates for men and women; the lean
+    ///   cut-offs differ by sex, the rate itself doesn't.
+    ///
+    /// Gaining (Iraki et al., Sports 2019: about 0.25-0.5%/week for novice and
+    /// intermediate lifters, more conservative for advanced ones):
+    /// - Advanced → 0.25%/week; everyone else 0.5%/week. Relative muscle growth
+    ///   is similar in men and women (Roberts, Nuckols & Krieger, J Strength
+    ///   Cond Res 2020; Refalo et al., PeerJ 2025), so the % limit is the same.
+    ///
+    /// - Parameters:
+    ///   - bodyFatPercent: a scale or clinical reading, or an estimate from
+    ///     `estimatedBodyFatPercent`; nil skips the lean limits.
+    ///   - bodyFatIsEstimate: true when it came from BMI (the message says so).
+    public static func maximumWeeklyRate(goals: Goals, sex: BiologicalSex, age: Int?, bodyFatPercent: Double?,
+                                         trainingStatus: TrainingStatus?, bodyFatIsEstimate: Bool = false) -> RateLimit {
+        switch goals.weight {
+        case .maintain:
+            return RateLimit(percent: 0, reason: .general, weight: .maintain)
+        case .gain:
+            if trainingStatus == .advanced {
+                return RateLimit(percent: 0.25, reason: .advancedLifter, weight: .gain)
+            }
+            return RateLimit(percent: CalorieBand.maxGainPercentPerWeek, reason: .general, weight: .gain)
+        case .lose:
+            var limit = RateLimit(percent: CalorieBand.maxLossPercentPerWeek, reason: .general, weight: .lose)
+            if let fat = bodyFatPercent, fat > 3, fat < 60 {
+                if fat < veryLeanBodyFat(sex: sex) {
+                    limit = RateLimit(percent: 0.5, reason: .veryLean, weight: .lose, bodyFatIsEstimate: bodyFatIsEstimate)
+                } else if fat < leanBodyFat(sex: sex) {
+                    limit = RateLimit(percent: 0.75, reason: .lean, weight: .lose, bodyFatIsEstimate: bodyFatIsEstimate)
+                }
+            }
+            if let age, age >= olderAdultAge, 0.5 < limit.percent {
+                limit = RateLimit(percent: 0.5, reason: .olderAdult, weight: .lose)
+            }
+            return limit
+        }
+    }
+
+    /// The goals with the weekly rate capped at the person's maximum.
+    public static func cappedGoals(_ goals: Goals, limit: RateLimit) -> Goals {
+        guard goals.weight != .maintain, goals.weeklyRatePercent > limit.percent else { return goals }
+        var capped = goals
+        capped.weeklyRatePercent = limit.percent
+        return capped
+    }
+
+    /// Rough body fat % from BMI, age and sex when there's no reading
+    /// (Deurenberg, Weststrate & Seidell, Br J Nutr 1991: 1.2 × BMI + 0.23 ×
+    /// age − 10.8 × (1 for men) − 5.4; standard error about 4 points). It
+    /// reads high for muscular people, whose BMI is muscle rather than fat,
+    /// and slightly high in obesity, so it is used only for the pace limit
+    /// and labelled as an estimate. Nil without height.
+    public static func estimatedBodyFatPercent(weightKg: Double, heightCm: Double?, age: Int, sex: BiologicalSex) -> Double? {
+        guard weightKg > 0, let heightCm, heightCm > 100 else { return nil }
+        let meters = heightCm / 100
+        let bmi = weightKg / (meters * meters)
+        let fat = 1.2 * bmi + 0.23 * Double(age) - (sex == .male ? 10.8 : 0) - 5.4
+        return min(60, max(3, fat))
     }
 
     /// The trainer's set and rep style for these goals.

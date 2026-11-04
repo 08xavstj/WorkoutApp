@@ -101,6 +101,35 @@ final class DailyMetricsModel {
     /// nil without body fat or 5 logged days (`EnergyAvailability`, IOC REDs 2023).
     private(set) var energyAvailability: EnergyAvailability.Result?
 
+    // MARK: Personal calorie numbers (docs/research/calories.md)
+
+    /// From the lifting log (`TrainingStatus.estimate`), set by the app before a refresh.
+    /// Picks the resting-energy equation and the fastest useful gain.
+    var trainingStatus: TrainingStatus?
+    /// Age used for the personal limits (from settings / Apple Health).
+    private(set) var age: Int = 30
+
+    /// Body fat for the pace limit: the Apple Health reading, else a rough
+    /// estimate from BMI (Deurenberg 1991), flagged as estimated.
+    var paceBodyFat: (percent: Double, estimated: Bool)? {
+        if let bodyFatPercent { return (bodyFatPercent, false) }
+        guard let weight = bodyMassKg,
+              let estimate = GoalPlanner.estimatedBodyFatPercent(weightKg: weight, heightCm: heightCm, age: age, sex: sex) else { return nil }
+        return (estimate, true)
+    }
+
+    /// The fastest weekly rate for these goals and this person (`GoalPlanner.maximumWeeklyRate`).
+    func rateLimit(for goals: Goals) -> GoalPlanner.RateLimit {
+        let fat = paceBodyFat
+        return GoalPlanner.maximumWeeklyRate(goals: goals, sex: sex, age: age, bodyFatPercent: fat?.percent,
+                                             trainingStatus: trainingStatus, bodyFatIsEstimate: fat?.estimated ?? false)
+    }
+
+    /// The goals with the weekly rate held at the personal maximum.
+    var personalGoals: Goals? {
+        goals.map { GoalPlanner.cappedGoals($0, limit: rateLimit(for: $0)) }
+    }
+
     /// Daily calorie target from your goal (or maintenance when no goal is set).
     var calorieTarget: Double? {
         let target: Double
@@ -109,7 +138,7 @@ final class DailyMetricsModel {
             target = calorieTargetOverride
         } else {
             guard let base = maintenance?.maintenance ?? calories?.projected else { return nil }
-            guard let goals, let weight = bodyMassKg else { return base }
+            guard let goals = personalGoals, let weight = bodyMassKg else { return base }
             target = GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: sex)
         }
         // Never below what this body needs after training (`CalorieSafety`, IOC REDs 2023).
@@ -514,6 +543,7 @@ final class DailyMetricsModel {
             watchRestingPerDay = watchResting
             goals = settings.goalsSet ? settings.goals : nil
             sex = settings.sex
+            age = settings.age
 
             // Real maintenance from the food log and weight trend.
             async let intakeSeries = health.dailySeries(.dietaryEnergyConsumed, unit: .kilocalorie(), days: 35, cumulative: true)
@@ -538,6 +568,8 @@ final class DailyMetricsModel {
             // A maintenance under 1.4× resting metabolism isn't physically believable
             // (FAO/WHO/UNU 2004): the food log is incomplete, so it isn't used
             // (`CalorieSafety`). The watch estimate stands in until it looks complete.
+            // Mifflin-St Jeor on purpose (no training status): the athlete equation runs
+            // ~200 kcal higher and would reject real but low maintenances in a long cut.
             let restingKcal = bodyMassKg.map { weight in
                 EnergyCalculator().bmr(EnergyCalculator.Body(weightKg: weight, heightCm: heightCm, age: settings.age, sex: settings.sex)).kcal
             }
@@ -577,7 +609,8 @@ final class DailyMetricsModel {
             if let bodyMassKg {
                 let body = EnergyCalculator.Body(
                     weightKg: bodyMassKg, heightCm: heightCm, age: settings.age,
-                    sex: settings.sex, bodyFatPercent: bodyFatPercent
+                    sex: settings.sex, bodyFatPercent: bodyFatPercent,
+                    trainingStatus: trainingStatus // ten Haaf for trained 18-35s (calories.md)
                 )
                 energy = EnergyCalculator().estimate(
                     body: body, profile: profile, heartRate: todaysHR,
@@ -607,7 +640,9 @@ final class DailyMetricsModel {
     /// limits). Cleared when there's no measured maintenance or goal, so the
     /// target floats with the watch estimate as before.
     private func updateWeeklyCalorieTarget(settings: UserSettings, now: Date) {
-        guard let maintenance, let goals, let weight = bodyMassKg else {
+        // The rate is held at the personal maximum (`GoalPlanner.maximumWeeklyRate`), so the
+        // key below changes, and the target is re-seeded, when that maximum changes.
+        guard let maintenance, let goals = personalGoals, let weight = bodyMassKg else {
             calorieTargetOverride = nil
             calorieAdjustmentNote = nil
             return
