@@ -21,6 +21,9 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     /// Settings, presented once at the root so any tab's profile button
     /// (`TabToolbar`) can open it.
     var showSettings = false
+    /// The selected bottom tab, so any screen can switch tabs (e.g. Today's
+    /// "All measures" opens Health).
+    var selectedTab: AppTab = .today
     /// Bumped to bring the running workout back on screen (Live Activity tap).
     var openWorkout = 0
     /// Bumped when doses change outside the app (Live Activity, notification).

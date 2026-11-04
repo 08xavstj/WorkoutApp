@@ -155,16 +155,15 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
-    @State private var selection: AppTab = .today
 
     var body: some View {
         @Bindable var launcher = launcher
         @Bindable var router = router
-        TabView(selection: $selection) {
+        TabView(selection: $router.selectedTab) {
             Tab("Today", systemImage: "house", value: AppTab.today) {
                 TodayView(askCoach: { question in
                     coach.pendingQuestion = question
-                    selection = .coach
+                    router.selectedTab = .coach
                 })
             }
             Tab("Fitness", systemImage: "waveform.path.ecg", value: AppTab.fitness) {
