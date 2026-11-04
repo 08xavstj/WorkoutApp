@@ -16,6 +16,12 @@ struct MyGymView: View {
     /// builder), so it doesn't open a sheet on a sheet (ux-audit 4.1 rule 5).
     var pushed = false
 
+    /// Number fields grow with the text, and rows stack at accessibility
+    /// text sizes instead of clipping (ux-audit.md 4.8, P22).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 80
+    @ScaledMetric(relativeTo: .body) private var plateFieldWidth: CGFloat = 70
+
     private let toggleable = EquipmentKind.allCases.filter { $0 != .bodyweight }
 
     var body: some View {
@@ -69,15 +75,7 @@ struct MyGymView: View {
 
                     Section {
                         ForEach(Array(draft.plates.indices), id: \.self) { index in
-                            HStack {
-                                TextField("Weight", value: $draft.plates[index].weight, format: .number)
-                                    .keyboardType(.decimalPad)
-                                    .frame(width: 70)
-                                Text(draft.unit.rawValue).foregroundStyle(Theme.secondaryText)
-                                Spacer()
-                                Stepper("\(draft.plates[index].pairs) pairs", value: $draft.plates[index].pairs, in: 0...20)
-                                    .fixedSize()
-                            }
+                            plateRow(index)
                         }
                         .onDelete { offsets in draft.plates.remove(atOffsets: offsets) }
                         Button {
@@ -110,18 +108,7 @@ struct MyGymView: View {
                             }
                             .buttonStyle(.borderless)
                         }
-                        HStack(alignment: .bottom) {
-                            labeledNumber("From", $rangeFrom)
-                            labeledNumber("To", $rangeTo)
-                            labeledNumber("Step", $rangeStep)
-                            Button("Add range") {
-                                guard rangeStep > 0, rangeTo >= rangeFrom else { return }
-                                // Adds to what's there (rounded so float steps don't make near-duplicates).
-                                let range = stride(from: rangeFrom, through: rangeTo + 0.001, by: rangeStep).map { ($0 * 100).rounded() / 100 }
-                                draft.dumbbells = Array(Set(draft.dumbbells + range)).sorted()
-                            }
-                            .buttonStyle(.borderless)
-                        }
+                        dumbbellRange
                     } header: {
                         Text("Dumbbells (\(draft.dumbbells.count) weights)")
                     } footer: {
@@ -165,7 +152,8 @@ struct MyGymView: View {
                     }
                 }
             }
-            .navigationTitle("My Gym")
+            // One term everywhere: "Gym equipment" (ux-audit.md 4.7).
+            .navigationTitle("Gym equipment")
             .confirmationDialog(
                 "Switch to \(pendingUnit == .kg ? "kilograms" : "pounds")?",
                 isPresented: Binding(get: { pendingUnit != nil }, set: { if !$0 { pendingUnit = nil } }),
@@ -238,13 +226,55 @@ struct MyGymView: View {
         if !name.isEmpty { draft.name = name }
     }
 
+    /// One plate size and how many pairs; the stepper goes under the weight
+    /// at accessibility text sizes.
+    private func plateRow(_ index: Int) -> some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout())
+        return layout {
+            HStack {
+                TextField("Weight", value: $draft.plates[index].weight, format: .number)
+                    .keyboardType(.decimalPad)
+                    .frame(width: plateFieldWidth)
+                    .accessibilityLabel("Plate weight in \(draft.unit.rawValue)")
+                Text(draft.unit.rawValue).foregroundStyle(Theme.secondaryText)
+            }
+            if !stacked { Spacer() }
+            Stepper("\(draft.plates[index].pairs) pairs", value: $draft.plates[index].pairs, in: 0...20)
+                .fixedSize(horizontal: !stacked, vertical: !stacked)
+        }
+    }
+
+    /// From / To / Step and Add range; two rows at accessibility text sizes.
+    private var dumbbellRange: some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .bottom))
+        return layout {
+            labeledNumber("From", $rangeFrom)
+            labeledNumber("To", $rangeTo)
+            labeledNumber("Step", $rangeStep)
+            Button("Add range") {
+                guard rangeStep > 0, rangeTo >= rangeFrom else { return }
+                // Adds to what's there (rounded so float steps don't make near-duplicates).
+                let range = stride(from: rangeFrom, through: rangeTo + 0.001, by: rangeStep).map { ($0 * 100).rounded() / 100 }
+                draft.dumbbells = Array(Set(draft.dumbbells + range)).sorted()
+            }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+        }
+    }
+
     private func weightField(_ title: String, value: Binding<Double>) -> some View {
         LabeledContent(title) {
             HStack(spacing: 4) {
                 TextField(title, value: value, format: .number)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
-                    .frame(width: 80)
+                    .frame(width: fieldWidth)
                 Text(draft.unit.rawValue).foregroundStyle(Theme.secondaryText)
             }
         }
@@ -252,7 +282,9 @@ struct MyGymView: View {
 
     private func labeledNumber(_ title: String, _ value: Binding<Double>) -> some View {
         VStack(alignment: .leading, spacing: 2) {
+            // The field already carries the title for VoiceOver.
             Text(title).font(.caption2).foregroundStyle(Theme.secondaryText)
+                .accessibilityHidden(true)
             TextField(title, value: value, format: .number).keyboardType(.decimalPad)
         }
     }
@@ -279,6 +311,9 @@ struct MyGymView: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Theme.cardRaised, in: .capsule)
+                        // 44 pt touch area around the small pill (ux-audit.md 4.8, P23).
+                        .frame(minHeight: 44)
+                        .contentShape(.rect)
                         .contextMenu {
                             Button("Remove \(weight.formatted())", systemImage: "trash", role: .destructive) { remove(weight) }
                         }

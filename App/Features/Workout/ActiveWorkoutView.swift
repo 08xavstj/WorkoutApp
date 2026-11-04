@@ -25,6 +25,9 @@ struct ActiveWorkoutView: View {
     @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
     /// Strain number inside the ring; scales with Dynamic Type (ux-audit W5).
     @ScaledMetric(relativeTo: .title2) private var ringValueSize: CGFloat = 26
+    /// At accessibility text sizes the strain ring goes under the timer
+    /// instead of beside it, so neither is squeezed (ux-audit.md 4.8, P22).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         NavigationStack {
@@ -135,7 +138,7 @@ struct ActiveWorkoutView: View {
             .alert("Added to saved workouts", isPresented: $savedTemplate) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("Start it again any time from Fitness › Saved workouts. Weights will be suggested from what you lift.")
+                Text("Start it again any time from Log › Saved workouts (also under Fitness › Workouts). Weights will be suggested from what you lift.")
             }
             .confirmationDialog("Discard this workout?", isPresented: $showingDiscard, titleVisibility: .visible) {
                 Button("Discard", role: .destructive) {
@@ -209,46 +212,65 @@ struct ActiveWorkoutView: View {
     private var titleBlock: some View {
         TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
             let elapsed = max(0, context.date.timeIntervalSince(session.startedAt))
-            let live = liveStrain(elapsed: elapsed)
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 2) {
-                    TextField("Workout name", text: $session.name)
-                        .font(.title.weight(.bold))
-                        .foregroundStyle(Theme.primaryText)
-                    Text(Duration.seconds(elapsed).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2))))
-                        .font(.system(size: timerSize, weight: .bold, design: .rounded))
-                        .minimumScaleFactor(0.6)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.primaryText)
-                    Text("Elapsed · \(finishedExercises) of \(session.exercises.count) exercises")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.secondaryText)
-                    if session.workingSets.isEmpty {
-                        Text("Tick off a set to finish.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
-                Spacer()
-                GradientRing(progress: live / 40, colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
-                    VStack(spacing: 0) {
-                        Text("+\(strainText(live))")
-                            .font(.system(size: ringValueSize, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                        Text("strain")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    .foregroundStyle(Theme.primaryText)
-                }
-                .frame(width: 112, height: 112)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Strain added so far")
-                .accessibilityValue("+\(strainText(live))")
+            titleContent(elapsed: elapsed, live: liveStrain(elapsed: elapsed))
+        }
+    }
+
+    /// Name, timer and progress beside the strain ring; stacked at
+    /// accessibility text sizes.
+    private func titleContent(elapsed: TimeInterval, live: Double) -> some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .center))
+        return layout {
+            titleText(elapsed: elapsed)
+            if !stacked { Spacer() }
+            strainRing(live)
+        }
+    }
+
+    private func titleText(elapsed: TimeInterval) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TextField("Workout name", text: $session.name)
+                .font(.title.weight(.bold))
+                .foregroundStyle(Theme.primaryText)
+            Text(Duration.seconds(elapsed).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2))))
+                .font(.system(size: timerSize, weight: .bold, design: .rounded))
+                .minimumScaleFactor(0.6)
+                .monospacedDigit()
+                .foregroundStyle(Theme.primaryText)
+                .accessibilityLabel("Elapsed time")
+                .accessibilityValue(Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide)))
+            Text("Elapsed · \(finishedExercises) of \(session.exercises.count) exercises")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+            if session.workingSets.isEmpty {
+                Text("Tick off a set to finish.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
             }
         }
+    }
+
+    private func strainRing(_ live: Double) -> some View {
+        GradientRing(progress: live / 40, colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
+            VStack(spacing: 0) {
+                Text("+\(strainText(live))")
+                    .font(.system(size: ringValueSize, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Text("strain")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .foregroundStyle(Theme.primaryText)
+        }
+        .frame(width: 112, height: 112)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Strain added so far")
+        .accessibilityValue("+\(strainText(live))")
     }
 
     private var finishedExercises: Int {
@@ -311,6 +333,7 @@ struct ActiveWorkoutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint("Shows its sets")
         }
     }
 
@@ -402,6 +425,39 @@ private struct ExerciseCard: View {
     @State private var showingProgress = false
     /// This exercise's own rest time (nil = automatic).
     @State private var restSeconds: Int?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
+
+    private var titleColumn: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(exercise.name)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.primaryText)
+            if let info = library.exercise(id: exercise.exerciseID) {
+                Text([info.equipment?.capitalized, info.primaryMuscleLabel].compactMap { $0 }.joined(separator: " · "))
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if let supersetLabel {
+                Chip(text: "\(supersetLabel) · superset", color: Theme.sleep)
+                    .padding(.top, 2)
+            }
+            if isNewPR && stacked {
+                prLabel
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    private var prLabel: some View {
+        Label("New PR", systemImage: "star.fill")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.liftingText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Theme.lifting.opacity(0.12), in: .capsule)
+    }
 
     var body: some View {
         let sets = exercise.orderedSets
@@ -409,29 +465,15 @@ private struct ExerciseCard: View {
         let editing = sets.first { $0.persistentModelID == focusedSetID } ?? currentSet
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                IconBadge(systemName: "dumbbell.fill", color: Theme.lifting, size: 46)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(exercise.name)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.primaryText)
-                    if let info = library.exercise(id: exercise.exerciseID) {
-                        Text([info.equipment?.capitalized, info.primaryMuscleLabel].compactMap { $0 }.joined(separator: " · "))
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    if let supersetLabel {
-                        Chip(text: "\(supersetLabel) · superset", color: Theme.sleep)
-                            .padding(.top, 2)
-                    }
+                // At accessibility text sizes the badge goes and the PR label
+                // moves under the name, so the name keeps the width (ux-audit.md 4.8).
+                if !stacked {
+                    IconBadge(systemName: "dumbbell.fill", color: Theme.lifting, size: 46)
                 }
-                Spacer()
-                if isNewPR {
-                    Label("New PR", systemImage: "star.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.liftingText)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Theme.lifting.opacity(0.12), in: .capsule)
+                titleColumn
+                Spacer(minLength: 0)
+                if isNewPR && !stacked {
+                    prLabel
                 }
                 Menu {
                     if !isCurrent {
@@ -482,7 +524,8 @@ private struct ExerciseCard: View {
                     unit: unit,
                     isEditing: set.persistentModelID == editing?.persistentModelID,
                     onTap: { focusedSetID = set.persistentModelID },
-                    onToggle: { toggle(set) }
+                    onToggle: { toggle(set) },
+                    previousSet: set.isWarmup ? nil : previousSet(index: workingNumber(set, in: sets) - 1)
                 )
                 .contextMenu {
                     Button(set.isWarmup ? "Make working set" : "Make warm-up set") { set.isWarmup.toggle() }
@@ -588,6 +631,13 @@ private struct ExerciseCard: View {
         return "\(unit.format(set.weightKg)) × \(set.reps)"
     }
 
+    /// The same set from last session, for VoiceOver.
+    private func previousSet(index: Int) -> SetLog? {
+        let working = previous.filter { !$0.isWarmup }
+        guard index >= 0, index < working.count else { return nil }
+        return working[index]
+    }
+
     /// "45 + 25 per side" for barbell lifts, using your gym's plates.
     private func plateHint(for set: SetLog) -> String? {
         let plateKinds: [EquipmentKind] = [.barbell, .ezBar, .smithMachine]
@@ -620,6 +670,10 @@ private struct ExerciseCard: View {
 }
 
 /// One set as a compact line; tap to edit it in the SetEditor.
+///
+/// VoiceOver reads the set as one element, e.g. "Set 2, 8 reps at 60
+/// kilograms, RPE 8, done", and the tick button stays its own element so
+/// VoiceOver and Voice Control can reach it (ux-audit.md 4.8, P27).
 private struct SetRow: View {
     @Bindable var set: SetLog
     let label: String
@@ -628,52 +682,22 @@ private struct SetRow: View {
     let isEditing: Bool
     let onTap: () -> Void
     let onToggle: () -> Void
+    /// Last session's matching set, for VoiceOver.
+    var previousSet: SetLog? = nil
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Fits "W" or "12" at every text size.
+    @ScaledMetric(relativeTo: .headline) private var labelWidth: CGFloat = 26
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(label)
-                .font(.headline)
-                .foregroundStyle(set.isWarmup ? Theme.recoveryModerate : Theme.primaryText)
-                .frame(width: 26, alignment: .leading)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(set.weightKg > 0 || set.reps > 0 ? "\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)" : "Not set")
-                    .font(.headline)
-                    .monospacedDigit()
-                    .foregroundStyle(set.weightKg > 0 || set.reps > 0 ? Theme.primaryText : Theme.secondaryText)
-                if !previous.isEmpty {
-                    Text("Last: \(previous)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 4)
-            if let rpe = set.rpe {
-                Text("RPE \(rpe.formatted())")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.liftingText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Theme.lifting.opacity(0.12), in: .capsule)
-            }
-            Button(action: onToggle) {
-                ZStack {
-                    Circle()
-                        .fill(set.isCompleted ? Theme.recoveryHigh : Color.clear)
-                    Circle()
-                        .strokeBorder(set.isCompleted ? Theme.recoveryHigh : Theme.secondaryText.opacity(0.4), lineWidth: 2)
-                    if set.isCompleted {
-                        Image(systemName: "checkmark")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.white)
-                    }
-                }
-                .frame(width: 44, height: 44)
-                .contentShape(.circle)
-            }
-            .buttonStyle(.plain)
-            .sensoryFeedback(.success, trigger: set.isCompleted) { _, completed in completed }
-            .accessibilityLabel(set.isCompleted ? "Completed, tap to undo" : "Mark set complete")
+            details
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spokenSummary)
+                .accessibilityAddTraits(isEditing ? [.isButton, .isSelected] : [.isButton])
+                .accessibilityHint("Edit this set")
+                .accessibilityAction { onTap() }
+            toggleButton
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -685,15 +709,109 @@ private struct SetRow: View {
         }
         .contentShape(.rect)
         .onTapGesture(perform: onTap)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Edit this set")
+    }
+
+    private var isFilled: Bool { set.weightKg > 0 || set.reps > 0 }
+
+    /// Number, weight × reps, last time and RPE. At accessibility text sizes
+    /// the RPE pill moves under the weight so nothing is cut off.
+    private var details: some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.headline)
+                // Text colour for the amber accent (ux-audit.md X4, P24).
+                .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.primaryText)
+                .frame(width: labelWidth, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(isFilled ? "\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)" : "Not set")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .foregroundStyle(isFilled ? Theme.primaryText : Theme.secondaryText)
+                if !previous.isEmpty {
+                    Text("Last: \(previous)")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                }
+                if dynamicTypeSize.isAccessibilitySize {
+                    rpePill
+                }
+            }
+            Spacer(minLength: 4)
+            if !dynamicTypeSize.isAccessibilitySize {
+                rpePill
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var rpePill: some View {
+        if let rpe = set.rpe {
+            Text("RPE \(rpe.formatted())")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.liftingText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Theme.lifting.opacity(0.12), in: .capsule)
+        }
+    }
+
+    private var toggleButton: some View {
+        Button(action: onToggle) {
+            ZStack {
+                Circle()
+                    .fill(set.isCompleted ? Theme.recoveryHigh : Color.clear)
+                Circle()
+                    .strokeBorder(set.isCompleted ? Theme.recoveryHigh : Theme.secondaryText.opacity(0.4), lineWidth: 2)
+                if set.isCompleted {
+                    Image(systemName: "checkmark")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.success, trigger: set.isCompleted) { _, completed in completed }
+        .accessibilityLabel(set.isCompleted ? "Undo \(spokenName.lowercased())" : "Mark \(spokenName.lowercased()) done")
+    }
+
+    /// "Set 2" or "Warm-up set".
+    private var spokenName: String {
+        set.isWarmup ? "Warm-up set" : "Set \(label)"
+    }
+
+    /// "Set 2, 8 reps at 60 kilograms, RPE 8, done".
+    private var spokenSummary: String {
+        var parts = [spokenName, spokenLoad(weightKg: set.weightKg, reps: set.reps) ?? "not set"]
+        if let rpe = set.rpe { parts.append("RPE \(rpe.formatted())") }
+        parts.append(set.isCompleted ? "done" : "not done")
+        if let previousSet, let last = spokenLoad(weightKg: previousSet.weightKg, reps: previousSet.reps) {
+            parts.append("last time \(last)")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    /// "8 reps at 60 kilograms"; nil when nothing is filled in.
+    private func spokenLoad(weightKg: Double, reps: Int) -> String? {
+        guard weightKg > 0 || reps > 0 else { return nil }
+        let repsText = reps == 1 ? "1 rep" : "\(reps) reps"
+        guard weightKg > 0 else { return repsText }
+        return "\(repsText) at \(unit.format(weightKg)) \(unit.spokenName)"
     }
 
     private var rowBackground: Color {
         if set.isCompleted { return Theme.recoveryHigh.opacity(0.1) }
         if isEditing { return Theme.lifting.opacity(0.07) }
         return Theme.cardRaised.opacity(0.5)
+    }
+}
+
+extension WeightUnit {
+    /// The unit as VoiceOver should say it ("kilograms", "pounds").
+    var spokenName: String {
+        self == .kilograms ? "kilograms" : "pounds"
     }
 }
 
@@ -710,6 +828,7 @@ private struct SetEditor: View {
 
     @FocusState private var typing: Field?
     private enum Field { case weight, reps }
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -717,18 +836,7 @@ private struct SetEditor: View {
                 .font(.caption.weight(.bold))
                 .tracking(1.2)
                 .foregroundStyle(Theme.liftingText)
-            HStack(spacing: 12) {
-                NumberStepper(label: unit.rawValue) {
-                    TextField("0", value: weightBinding, format: .number.precision(.fractionLength(0...2)))
-                        .keyboardType(.decimalPad)
-                        .focused($typing, equals: .weight)
-                } minus: { step(false) } plus: { step(true) }
-                NumberStepper(label: "reps") {
-                    TextField("0", value: $set.reps, format: .number)
-                        .keyboardType(.numberPad)
-                        .focused($typing, equals: .reps)
-                } minus: { set.reps = max(0, set.reps - 1) } plus: { set.reps += 1 }
-            }
+            steppers
             if let plateHint {
                 Label(plateHint, systemImage: "circle.grid.2x1")
                     .font(.footnote)
@@ -757,6 +865,28 @@ private struct SetEditor: View {
         .background(Theme.lifting.opacity(0.05), in: .rect(cornerRadius: 20))
     }
 
+    /// Weight and reps side by side; one above the other at accessibility
+    /// text sizes, so the numbers keep their size (ux-audit.md 4.8, P22).
+    private var steppers: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            NumberStepper(label: unit.rawValue, spokenLabel: "weight") {
+                TextField("0", value: weightBinding, format: .number.precision(.fractionLength(0...2)))
+                    .keyboardType(.decimalPad)
+                    .focused($typing, equals: .weight)
+                    .accessibilityLabel("Weight in \(unit.spokenName)")
+            } minus: { step(false) } plus: { step(true) }
+            NumberStepper(label: "reps") {
+                TextField("0", value: $set.reps, format: .number)
+                    .keyboardType(.numberPad)
+                    .focused($typing, equals: .reps)
+                    .accessibilityLabel("Reps")
+            } minus: { set.reps = max(0, set.reps - 1) } plus: { set.reps += 1 }
+        }
+    }
+
     private var weightBinding: Binding<Double> {
         Binding(
             get: { unit.display(set.weightKg) },
@@ -768,6 +898,8 @@ private struct SetEditor: View {
 /// [-]  value  [+] with large tap targets; tap the number to type.
 private struct NumberStepper<Field: View>: View {
     let label: String
+    /// What VoiceOver calls the value on the +/- buttons ("weight"); `label` if nil.
+    var spokenLabel: String? = nil
     @ViewBuilder var field: Field
     let minus: () -> Void
     let plus: () -> Void
@@ -805,7 +937,7 @@ private struct NumberStepper<Field: View>: View {
                 .background(Theme.lifting.opacity(0.12), in: .circle)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(icon == "plus" ? "Increase \(label)" : "Decrease \(label)")
+        .accessibilityLabel(icon == "plus" ? "Increase \(spokenLabel ?? label)" : "Decrease \(spokenLabel ?? label)")
     }
 }
 
@@ -814,55 +946,14 @@ private struct RPEPicker: View {
     @Binding var rpe: Double?
     let onShowGuide: () -> Void
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private static let values = [6, 7, 8, 9, 10]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Effort (RPE)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.primaryText)
-                Spacer()
-                Button(action: onShowGuide) {
-                    Label("What's RPE?", systemImage: "questionmark.circle")
-                        .font(.caption.weight(.semibold))
-                        .frame(minHeight: 44)
-                        .contentShape(.rect)
-                }
-            }
-            HStack(spacing: 6) {
-                ForEach([6, 7, 8, 9, 10], id: \.self) { value in
-                    let selected = rpe.map { Int($0.rounded(.down)) == value } ?? false
-                    Button {
-                        if selected && rpe == Double(value) { rpe = nil } else { rpe = Double(value) }
-                    } label: {
-                        Text("\(value)")
-                            .font(.title3.weight(.bold))
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                            .foregroundStyle(selected ? .white : Theme.primaryText)
-                            .background(selected
-                                        ? AnyShapeStyle(LinearGradient(colors: Theme.strainButtonColors, startPoint: .top, endPoint: .bottom))
-                                        : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Color.clear : Theme.separator))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("RPE \(value)")
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
-                Button {
-                    guard let current = rpe, current < 10 else { return }
-                    rpe = current.truncatingRemainder(dividingBy: 1) == 0 ? current + 0.5 : current - 0.5
-                } label: {
-                    Text("½")
-                        .font(.title3.weight(.bold))
-                        .frame(width: 44, height: 48)
-                        .foregroundStyle(isHalf ? .white : Theme.primaryText)
-                        .background(isHalf ? AnyShapeStyle(Theme.lifting) : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isHalf ? Color.clear : Theme.separator))
-                }
-                .buttonStyle(.plain)
-                .disabled(rpe == nil || rpe == 10)
-                .accessibilityLabel("Add a half point")
-            }
-            .sensoryFeedback(.selection, trigger: rpe)
+            header
+            buttons
+                .sensoryFeedback(.selection, trigger: rpe)
             Text(rpe.map { value in
                 let level = RPEScale.level(for: value)
                 return "\(RPEScale.summary(value)). \(level?.feel ?? "")"
@@ -870,6 +961,84 @@ private struct RPEPicker: View {
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
+    }
+
+    /// Title and the guide link; stacked at accessibility text sizes.
+    private var header: some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout())
+        return layout {
+            Text("Effort (RPE)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.primaryText)
+            if !stacked { Spacer() }
+            Button(action: onShowGuide) {
+                Label("What's RPE?", systemImage: "questionmark.circle")
+                    .font(.caption.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .contentShape(.rect)
+            }
+        }
+    }
+
+    /// One row of six; at accessibility text sizes two rows of three, so the
+    /// numbers aren't cut off (ux-audit.md 4.8, P22).
+    @ViewBuilder
+    private var buttons: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                ForEach(Self.values, id: \.self) { value in
+                    rpeButton(value)
+                }
+                halfButton(fillsWidth: true)
+            }
+        } else {
+            HStack(spacing: 6) {
+                ForEach(Self.values, id: \.self) { value in
+                    rpeButton(value)
+                }
+                halfButton(fillsWidth: false)
+            }
+        }
+    }
+
+    private func rpeButton(_ value: Int) -> some View {
+        let selected = rpe.map { Int($0.rounded(.down)) == value } ?? false
+        return Button {
+            if selected && rpe == Double(value) { rpe = nil } else { rpe = Double(value) }
+        } label: {
+            Text("\(value)")
+                .font(.title3.weight(.bold))
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .foregroundStyle(selected ? .white : Theme.primaryText)
+                .background(selected
+                            ? AnyShapeStyle(LinearGradient(colors: Theme.strainButtonColors, startPoint: .top, endPoint: .bottom))
+                            : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Color.clear : Theme.separator))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("RPE \(value)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func halfButton(fillsWidth: Bool) -> some View {
+        Button {
+            guard let current = rpe, current < 10 else { return }
+            rpe = current.truncatingRemainder(dividingBy: 1) == 0 ? current + 0.5 : current - 0.5
+        } label: {
+            Text("½")
+                .font(.title3.weight(.bold))
+                .frame(minWidth: 44, maxWidth: fillsWidth ? CGFloat.infinity : 44, minHeight: 48)
+                .foregroundStyle(isHalf ? .white : Theme.primaryText)
+                .background(isHalf ? AnyShapeStyle(Theme.lifting) : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isHalf ? Color.clear : Theme.separator))
+        }
+        .buttonStyle(.plain)
+        .disabled(rpe == nil || rpe == 10)
+        .accessibilityLabel("Add a half point")
+        .accessibilityAddTraits(isHalf ? .isSelected : [])
     }
 
     private var isHalf: Bool {
@@ -887,21 +1056,13 @@ private struct CollapsedExerciseRow: View {
     /// "A1" / "A2" when this exercise is half of a superset.
     var supersetLabel: String? = nil
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Fits "A1" or "12" at every text size.
+    @ScaledMetric(relativeTo: .headline) private var badgeSize: CGFloat = 40
+
     var body: some View {
         HStack(spacing: 14) {
-            if isDone {
-                Image(systemName: "checkmark")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(Theme.recoveryHigh, in: .circle)
-            } else {
-                Text(supersetLabel ?? "\(position)")
-                    .font(.headline)
-                    .foregroundStyle(supersetLabel == nil ? Theme.secondaryText : Theme.sleepDeep)
-                    .frame(width: 40, height: 40)
-                    .background(Theme.cardRaised, in: .circle)
-            }
+            badge
             VStack(alignment: .leading, spacing: 2) {
                 Text(exercise.name)
                     .font(.title3.weight(.semibold))
@@ -909,17 +1070,42 @@ private struct CollapsedExerciseRow: View {
                 Text(summary)
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
+                // At accessibility text sizes the chip goes under the name (ux-audit.md 4.8).
+                if isNext && dynamicTypeSize.isAccessibilitySize {
+                    Chip(text: "Up next")
+                        .padding(.top, 2)
+                }
             }
-            Spacer()
-            if isNext {
+            Spacer(minLength: 0)
+            if isNext && !dynamicTypeSize.isAccessibilitySize {
                 Chip(text: "Up next")
-            } else {
+            } else if !isNext {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
+                    .accessibilityHidden(true)
             }
         }
         .card()
+    }
+
+    @ViewBuilder
+    private var badge: some View {
+        if isDone {
+            Image(systemName: "checkmark")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: badgeSize, height: badgeSize)
+                .background(Theme.recoveryHigh, in: .circle)
+                .accessibilityLabel("Done")
+        } else {
+            Text(supersetLabel ?? "\(position)")
+                .font(.headline)
+                // Text colour for the superset accent (ux-audit.md X4, P24).
+                .foregroundStyle(supersetLabel == nil ? Theme.secondaryText : Theme.sleepText)
+                .frame(width: badgeSize, height: badgeSize)
+                .background(Theme.cardRaised, in: .circle)
+        }
     }
 
     private var summary: String {
@@ -939,43 +1125,75 @@ private struct RestTimerPill: View {
     /// +/- seconds, or nil to skip.
     let onChange: (TimeInterval?) -> Void
 
+    /// At accessibility text sizes the buttons go under the time, so the
+    /// pill doesn't clip (ux-audit.md 4.8, P22).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let remaining = max(0, endsAt.timeIntervalSince(context.date))
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle().stroke(Color.white.opacity(0.3), lineWidth: 4)
-                    Circle()
-                        .trim(from: 0, to: length > 0 ? remaining / length : 0)
-                        .stroke(Color.white, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
+            content(remaining: remaining)
+                .onChange(of: remaining == 0) { _, finished in
+                    if finished { onChange(nil) }
                 }
-                .frame(width: 32, height: 32)
-                Text("Rest \(Duration.seconds(remaining.rounded(.up)).formatted(.time(pattern: .minuteSecond)))")
-                    .font(.title3.weight(.semibold))
-                    .monospacedDigit()
-                Spacer()
-                pillButton("−15s") { onChange(-15) }
-                pillButton("+15s") { onChange(15) }
-                Button("Skip") { onChange(nil) }
-                    .font(.headline)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(.rect)
-                    .buttonStyle(.plain)
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
-            .shadow(color: Theme.strain.opacity(0.3), radius: 12, y: 6)
-            .onChange(of: remaining == 0) { _, finished in
-                if finished { onChange(nil) }
-            }
-            .sensoryFeedback(.warning, trigger: remaining == 0) { _, finished in finished }
+                .sensoryFeedback(.warning, trigger: remaining == 0) { _, finished in finished }
         }
     }
 
-    private func pillButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func content(remaining: TimeInterval) -> some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        let shape = stacked ? AnyShape(RoundedRectangle(cornerRadius: Theme.cornerRadius)) : AnyShape(Capsule())
+        return layout {
+            countdown(remaining: remaining)
+            if !stacked { Spacer() }
+            controls
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: shape)
+        .shadow(color: Theme.strain.opacity(0.3), radius: 12, y: 6)
+    }
+
+    private func countdown(remaining: TimeInterval) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle().stroke(Color.white.opacity(0.3), lineWidth: 4)
+                Circle()
+                    .trim(from: 0, to: length > 0 ? remaining / length : 0)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 32, height: 32)
+            .accessibilityHidden(true)
+            Text("Rest \(Duration.seconds(remaining.rounded(.up)).formatted(.time(pattern: .minuteSecond)))")
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .accessibilityLabel("Rest")
+                .accessibilityValue(Duration.seconds(remaining.rounded(.up)).formatted(.units(allowed: [.minutes, .seconds], width: .wide)))
+                .accessibilityAddTraits(.updatesFrequently)
+        }
+    }
+
+    /// −15s, +15s and Skip, each at least 44 × 44 pt (HIG; ux-audit.md 4.8, P23).
+    private var controls: some View {
+        HStack(spacing: 8) {
+            pillButton("−15s", spoken: "15 seconds less") { onChange(-15) }
+            pillButton("+15s", spoken: "15 seconds more") { onChange(15) }
+            Button("Skip") { onChange(nil) }
+                .font(.headline)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(.rect)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Skip rest")
+        }
+    }
+
+    private func pillButton(_ title: String, spoken: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
             .font(.subheadline.weight(.semibold))
             .padding(.horizontal, 10)
@@ -983,6 +1201,7 @@ private struct RestTimerPill: View {
             .background(Color.white.opacity(0.2), in: .capsule)
             .contentShape(.capsule)
             .buttonStyle(.plain)
+            .accessibilityLabel(spoken)
     }
 }
 
@@ -992,6 +1211,9 @@ private struct LiveHeartRateBar: View {
     let profile: HeartRateProfile?
     /// Scales with Dynamic Type (ux-audit W5).
     @ScaledMetric(relativeTo: .title2) private var bpmSize: CGFloat = 26
+    /// Avg and Max columns widen with the text instead of clipping.
+    @ScaledMetric(relativeTo: .title3) private var statWidth: CGFloat = 56
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         HStack(spacing: 12) {
@@ -999,24 +1221,9 @@ private struct LiveHeartRateBar: View {
                 .font(.title3)
                 .foregroundStyle(Theme.recoveryLow)
                 .symbolEffect(.pulse, isActive: recorder.heartRate != nil)
+                .accessibilityHidden(true)
             if let bpm = recorder.heartRate {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text("\(whole(bpm))")
-                            .font(.system(size: bpmSize, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                        Text("bpm").font(.subheadline).foregroundStyle(Theme.secondaryText)
-                    }
-                    .foregroundStyle(Theme.primaryText)
-                    Text(zoneText(bpm))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                Spacer()
-                StatView(label: "Avg", value: recorder.averageHeartRate.map { "\(whole($0))" } ?? "–")
-                    .frame(width: 56)
-                StatView(label: "Max", value: recorder.maximumHeartRate.map { "\(whole($0))" } ?? "–")
-                    .frame(width: 56)
+                live(bpm)
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(recorder.isRecording ? "Waiting for heart rate…" : "Live heart rate off")
@@ -1031,6 +1238,36 @@ private struct LiveHeartRateBar: View {
         }
         .card()
         .accessibilityElement(children: .combine)
+    }
+
+    /// Current bpm and zone beside Avg and Max; Avg and Max go underneath at
+    /// accessibility text sizes (ux-audit.md 4.8, P22).
+    private func live(_ bpm: Double) -> some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text("\(whole(bpm))")
+                        .font(.system(size: bpmSize, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text("bpm").font(.subheadline).foregroundStyle(Theme.secondaryText)
+                }
+                .foregroundStyle(Theme.primaryText)
+                Text(zoneText(bpm))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if !stacked { Spacer() }
+            HStack(spacing: 12) {
+                StatView(label: "Avg", value: recorder.averageHeartRate.map { "\(whole($0))" } ?? "–")
+                    .frame(width: statWidth)
+                StatView(label: "Max", value: recorder.maximumHeartRate.map { "\(whole($0))" } ?? "–")
+                    .frame(width: statWidth)
+            }
+        }
     }
 
     private func zoneText(_ bpm: Double) -> String {

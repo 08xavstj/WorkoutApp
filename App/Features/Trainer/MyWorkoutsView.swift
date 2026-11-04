@@ -16,6 +16,7 @@ struct MyWorkoutsView: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var editing: EditorRequest?
     @State private var pendingDelete: WorkoutTemplate?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     struct EditorRequest: Identifiable {
         let id = UUID()
@@ -30,15 +31,7 @@ struct MyWorkoutsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    bigButton("New workout", icon: "plus", colors: [Theme.lifting, Theme.sleep]) {
-                        editing = EditorRequest(template: nil)
-                    }
-                    bigButton("Empty workout", icon: "dumbbell.fill", colors: [Theme.strain, Theme.lifting]) {
-                        launcher.startEmpty(in: modelContext)
-                        onStart?()
-                    }
-                }
+                actionButtons
                 if sorted.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("No saved workouts yet")
@@ -87,6 +80,25 @@ struct MyWorkoutsView: View {
         }
     }
 
+    /// New workout and Empty workout side by side; one above the other at
+    /// accessibility text sizes so the labels aren't cut off (ux-audit.md 4.8).
+    private var actionButtons: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            bigButton("New workout", icon: "plus", colors: [Theme.lifting, Theme.sleep]) {
+                editing = EditorRequest(template: nil)
+            }
+            // The deep strain gradient keeps white text readable (raw strain
+            // orange was 2.6:1; Theme "Deep gradients for buttons with white text").
+            bigButton("Empty workout", icon: "dumbbell.fill", colors: Theme.strainButtonColors) {
+                launcher.startEmpty(in: modelContext)
+                onStart?()
+            }
+        }
+    }
+
     private func start(_ template: WorkoutTemplate) {
         launcher.start(template, gym: gym, sessions: sessions, library: library, in: modelContext)
         onStart?()
@@ -112,6 +124,8 @@ struct MyWorkoutsView: View {
             Label(title, systemImage: icon)
                 .font(.headline)
                 .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .background(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing), in: .capsule)
         }
@@ -125,6 +139,8 @@ private struct TemplateRow: View {
     let onEdit: () -> Void
     let onDuplicate: () -> Void
     let onDelete: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         let exercises = template.orderedExercises
@@ -157,26 +173,38 @@ private struct TemplateRow: View {
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .lineLimit(2)
-            HStack {
-                if let used = template.lastUsedAt {
-                    Text("Last done \(used.formatted(.relative(presentation: .named)))")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                Spacer()
-                Button(action: onStart) {
-                    Label("Start", systemImage: "play.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 18)
-                        .frame(minHeight: 44)
-                        .background(Theme.ink, in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .disabled(exercises.isEmpty)
-            }
+            footer
         }
         .card()
+    }
+
+    /// When it was last done, and Start; stacked at accessibility text sizes.
+    private var footer: some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout())
+        return layout {
+            if let used = template.lastUsedAt {
+                Text("Last done \(used.formatted(.relative(presentation: .named)))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if !stacked { Spacer() }
+            Button(action: onStart) {
+                // `card` on `ink`, so it reads in dark mode too (white on the
+                // light dark-mode ink was unreadable; ux-audit.md P24).
+                Label("Start", systemImage: "play.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.card)
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: 44)
+                    .background(Theme.ink, in: .capsule)
+            }
+            .buttonStyle(.plain)
+            .disabled(template.orderedExercises.isEmpty)
+            .accessibilityLabel("Start \(template.name)")
+        }
     }
 }
 

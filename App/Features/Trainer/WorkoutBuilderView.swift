@@ -24,6 +24,7 @@ struct WorkoutBuilderView: View {
     @State private var plan: PlannedWorkout?
     @State private var showingGym = false
     @State private var didSetUp = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Session length. Short sessions are fitted with fewer sets, then paired
     /// exercises (`Supersets`).
@@ -262,15 +263,11 @@ struct WorkoutBuilderView: View {
         let current = metrics.strain?.strain ?? 0
         let landsAt = current + gain
         return VStack(alignment: .leading, spacing: 12) {
-            CardLabel(text: "Suggested", color: Theme.lifting)
+            CardLabel(text: "Suggested", color: Theme.liftingText)
             Text(plan.title)
                 .font(.title.weight(.bold))
                 .foregroundStyle(Theme.primaryText)
-            HStack(spacing: 18) {
-                StatView(label: "Time", value: "~\(estimated) min")
-                StatView(label: "Effort", value: "\(plan.targetRPE.formatted())/10")
-                StatView(label: "Strain", value: "≈+\(strainText(gain))", color: Theme.strainTextColor)
-            }
+            planStats(minutes: estimated, rpe: plan.targetRPE, gain: gain)
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
                 let line: String = inRange
@@ -283,6 +280,19 @@ struct WorkoutBuilderView: View {
             blockLine(plan)
         }
         .card()
+    }
+
+    /// Time, effort and strain side by side; stacked at accessibility text
+    /// sizes so none is cut off (ux-audit.md 4.8, P22).
+    private func planStats(minutes: Int, rpe: Double, gain: Double) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 18))
+        return layout {
+            StatView(label: "Time", value: "~\(minutes) min")
+            StatView(label: "Effort", value: "\(rpe.formatted())/10")
+            StatView(label: "Strain", value: "≈+\(strainText(gain))", color: Theme.strainTextColor)
+        }
     }
 
     /// "Block week 3 of 5 · RIR 1" and what it means, plus the superset note.
@@ -337,14 +347,18 @@ struct PlannedExerciseRow: View {
 
     /// Supersets are shown in the sleep colour so the pair stands out from the numbering.
     private var badgeColor: Color { label == nil ? Theme.lifting : Theme.sleep }
-    private var badgeTextColor: Color { label == nil ? Theme.liftingText : Theme.sleepDeep }
+    /// Text colours that pass 4.5:1 on the tinted badge in light and dark
+    /// (`sleepDeep` was too dark in dark mode; ux-audit.md X4, P24).
+    private var badgeTextColor: Color { label == nil ? Theme.liftingText : Theme.sleepText }
+    /// Fits "A1" or "12" at every text size.
+    @ScaledMetric(relativeTo: .headline) private var badgeSize: CGFloat = 34
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Text(label ?? "\(index)")
                 .font(.headline)
                 .foregroundStyle(badgeTextColor)
-                .frame(width: 34, height: 34)
+                .frame(width: badgeSize, height: badgeSize)
                 .background(badgeColor.opacity(0.12), in: .rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 4) {
                 Text(exercise.name)

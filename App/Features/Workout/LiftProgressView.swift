@@ -13,6 +13,7 @@ struct LiftProgressView: View {
     @Query(sort: \WorkoutSession.startedAt) private var sessions: [WorkoutSession]
     @State private var showVolume = false
     @State private var selectedDate: Date?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var unit: WeightUnit { settings.weightUnit }
 
@@ -65,16 +66,37 @@ struct LiftProgressView: View {
         let first = points.first?.estimatedOneRepMax ?? 0
         let last = points.last?.estimatedOneRepMax ?? 0
         let change = first > 0 ? (last / first - 1) * 100 : 0
-        return HStack(spacing: 0) {
-            item("Best e1RM", best.map { "\(number($0.estimatedOneRepMax)) \(unit.rawValue)" } ?? "–")
-            item("Sessions", "\(points.count)")
-            item("Since first", points.count > 1 ? "\(change >= 0 ? "+" : "")\(Int(change.rounded()))%" : "–")
-            item("PRs", "\(points.filter(\.isPR).count)")
+        let bestItem = item("Best e1RM", best.map { "\(number($0.estimatedOneRepMax)) \(unit.rawValue)" } ?? "–", spoken: "Best estimated one-rep max")
+        let sessionsItem = item("Sessions", "\(points.count)")
+        let changeItem = item("Since first", points.count > 1 ? "\(change >= 0 ? "+" : "")\(Int(change.rounded()))%" : "–")
+        let prItem = item("PRs", "\(points.filter(\.isPR).count)", spoken: "Personal records")
+        // Four across; two rows of two at accessibility text sizes (ux-audit.md 4.8, P22).
+        return Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                Grid(horizontalSpacing: 8, verticalSpacing: 12) {
+                    GridRow {
+                        bestItem
+                        sessionsItem
+                    }
+                    GridRow {
+                        changeItem
+                        prItem
+                    }
+                }
+            } else {
+                HStack(spacing: 0) {
+                    bestItem
+                    sessionsItem
+                    changeItem
+                    prItem
+                }
+            }
         }
         .card()
     }
 
-    private func item(_ title: String, _ value: String) -> some View {
+    /// One summary number; VoiceOver reads "title, value".
+    private func item(_ title: String, _ value: String, spoken: String? = nil) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.headline)
@@ -87,6 +109,9 @@ struct LiftProgressView: View {
                 .foregroundStyle(Theme.secondaryText)
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken ?? title)
+        .accessibilityValue(value)
     }
 
     private func chartCard(_ points: [LiftProgress.Point]) -> some View {
@@ -141,7 +166,7 @@ struct LiftProgressView: View {
 
     private func sessionList(_ points: [LiftProgress.Point]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            CardLabel(text: "Sessions", color: Theme.lifting)
+            CardLabel(text: "Sessions", color: Theme.liftingText)
                 .padding(.bottom, 8)
             ForEach(points.reversed()) { point in
                 HStack {

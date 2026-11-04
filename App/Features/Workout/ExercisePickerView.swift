@@ -88,8 +88,11 @@ struct ExercisePickerView: View {
                         Button {
                             detailExercise = exercise
                         } label: {
+                            // 44 pt target (HIG; ux-audit.md 4.8, P23).
                             Image(systemName: "info.circle")
                                 .foregroundStyle(Theme.secondaryText)
+                                .frame(width: 44, height: 44)
+                                .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("About \(exercise.name)")
@@ -130,6 +133,9 @@ extension ExercisePickerView {
 
 struct ExerciseDetailView: View {
     let exercise: Exercise
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Step numbers grow with the text instead of clipping.
+    @ScaledMetric(relativeTo: .caption) private var stepSize: CGFloat = 22
 
     var body: some View {
         ScrollView {
@@ -151,11 +157,8 @@ struct ExerciseDetailView: View {
                 }
                 .scrollIndicators(.hidden)
 
-                HStack {
-                    StatView(label: "Primary", value: exercise.primaryMuscles.map(\.capitalized).joined(separator: ", "))
-                    StatView(label: "Equipment", value: exercise.equipment?.capitalized ?? "None")
-                }
-                .card()
+                stats
+                    .card()
 
                 NavigationLink {
                     LiftProgressView(exerciseID: exercise.id, name: exercise.name)
@@ -180,10 +183,11 @@ struct ExerciseDetailView: View {
                         HStack(alignment: .top, spacing: 10) {
                             Text("\(index + 1)")
                                 .font(.caption.weight(.bold))
-                                .frame(width: 22, height: 22)
+                                .frame(width: stepSize, height: stepSize)
                                 .background(Theme.strain.opacity(0.2), in: .circle)
                             Text(step).font(.subheadline)
                         }
+                        .accessibilityElement(children: .combine)
                     }
                 }
                 .card()
@@ -194,6 +198,18 @@ struct ExerciseDetailView: View {
         .background(Theme.background)
         .navigationTitle(exercise.name)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Muscles and equipment side by side; stacked at accessibility text
+    /// sizes (ux-audit.md 4.8, P22).
+    private var stats: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout())
+        return layout {
+            StatView(label: "Primary", value: exercise.primaryMuscles.map(\.capitalized).joined(separator: ", "))
+            StatView(label: "Equipment", value: exercise.equipment?.capitalized ?? "None")
+        }
     }
 }
 
@@ -257,8 +273,10 @@ private struct RegionChips: View {
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
-                .foregroundStyle(selected ? .white : Theme.primaryText)
-                .background(selected ? AnyShapeStyle(Theme.lifting) : AnyShapeStyle(Theme.cardRaised), in: .capsule)
+                // Selected like the builder's `SelectChip`: white on the pink
+                // accent was 3.6:1, under 4.5:1 for this size (ux-audit.md X4, P24).
+                .foregroundStyle(selected ? Theme.card : Theme.primaryText)
+                .background(selected ? Theme.ink : Theme.cardRaised, in: .capsule)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])

@@ -1,21 +1,23 @@
 import SwiftUI
 import AppCore
 
-/// One compact weather row on Today, shown only on days when the weather
-/// changes the advice; tapping it opens the full weather card. Weather used
-/// to be a daily card, though it matters for training only on hot, high-UV or
-/// poor-air days (docs/research/ux-audit.md 4.6, H9). "Add your city" moved to
-/// the Finish setting up card and Settings.
+/// One compact weather row on Today; tapping it opens the full weather card.
+/// Weather used to be a daily card, though it matters for training only on
+/// hot, high-UV or poor-air days (docs/research/ux-audit.md 4.6, H9). On those
+/// days the row is a standard card leading with that tip. On days with only
+/// info-level tips (morning light, rain, short days) it stays, so the weather
+/// sheet can always be reached, but as a quieter flat row. "Add your city"
+/// moved to the Finish setting up card and Settings.
 struct ConditionsRow: View {
     @Environment(ConditionsModel.self) private var conditions
     @Environment(UserSettings.self) private var settings
     @State private var showingDetails = false
 
     var body: some View {
-        if settings.hasLocation, let current = conditions.current,
-           let tip = Self.todayTip(conditions.tips, uvIndex: current.uvIndexMax) {
+        if settings.hasLocation, let current = conditions.current, let first = conditions.tips.first {
+            let notable = Self.todayTip(conditions.tips, uvIndex: current.uvIndexMax)
             Button { showingDetails = true } label: {
-                ConditionsRowLabel(conditions: current, tip: tip)
+                ConditionsRowLabel(conditions: current, tip: notable ?? first, isNotable: notable != nil)
             }
             .buttonStyle(.plain)
             .accessibilityHint("Shows today's weather")
@@ -30,7 +32,7 @@ struct ConditionsRow: View {
     /// ACSM WBGT bands, Roberts et al. 2021, via `HeatAdvice`), poor air (US
     /// EPA AQI over 100), UV 6 or more (WHO "High" and above), and any other
     /// caution or warning (e.g. very cold). Info-only tips (morning light,
-    /// rain, short days) stay in the weather sheet. Tips come most important
+    /// rain, short days) get the calm row instead. Tips come most important
     /// first.
     static func todayTip(_ tips: [WeatherAdvice.Tip], uvIndex: Double?) -> WeatherAdvice.Tip? {
         tips.first { tip in
@@ -46,11 +48,33 @@ struct ConditionsRow: View {
     }
 }
 
+/// The row itself. A notable tip (heat, UV, air, cold) gets the standard card;
+/// an info-only day gets a flat, quieter row so it doesn't compete with the
+/// cards above it (ux-audit.md P7: one primary element per screen).
 private struct ConditionsRowLabel: View {
     let conditions: Conditions
     let tip: WeatherAdvice.Tip
+    let isNotable: Bool
 
     var body: some View {
+        styled
+            .contentShape(.rect(cornerRadius: Theme.cornerRadius))
+            .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var styled: some View {
+        if isNotable {
+            content.card()
+        } else {
+            content
+                .padding(Theme.padding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card.opacity(0.6), in: .rect(cornerRadius: Theme.cornerRadius))
+        }
+    }
+
+    private var content: some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: conditions.symbol)
                 .symbolRenderingMode(.multicolor)
@@ -59,7 +83,7 @@ private struct ConditionsRowLabel: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(Int(conditions.temperature.rounded()))° · \(conditions.summary)")
-                    .font(.subheadline.weight(.semibold))
+                    .font(isNotable ? Font.subheadline.weight(.semibold) : Font.subheadline)
                     .foregroundStyle(Theme.primaryText)
                 Text(tip.text)
                     .font(Theme.Typography.context)
@@ -72,9 +96,6 @@ private struct ConditionsRowLabel: View {
                 .foregroundStyle(Theme.secondaryText)
                 .accessibilityHidden(true)
         }
-        .card()
-        .contentShape(.rect(cornerRadius: Theme.cornerRadius))
-        .accessibilityElement(children: .combine)
     }
 }
 

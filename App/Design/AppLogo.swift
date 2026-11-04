@@ -76,17 +76,3 @@ nonisolated struct TensileMark: Shape {
         return path
     }
 }
-
-/// Logo mark plus the app name, for the top of the Home screen.
-struct AppLogoHeader: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            AppLogoMark(size: 30)
-            Text("Tensile")
-                .font(.system(.title3, design: .rounded).weight(.heavy))
-                .foregroundStyle(LinearGradient(colors: Array(AppLogoMark.gradient.dropFirst()), startPoint: .leading, endPoint: .trailing))
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Tensile")
-    }
-}

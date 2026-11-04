@@ -5,6 +5,15 @@ import AppCore
 /// the whole-workout rating on the finish screen differs.
 struct RPEGuideView: View {
     @Environment(\.dismiss) private var dismiss
+    /// At accessibility text sizes the rows stack instead of squeezing the
+    /// text beside the number (ux-audit.md 4.8, P22).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// The number badge and the range column grow with the text.
+    @ScaledMetric(relativeTo: .title3) private var badgeWidth: CGFloat = 48
+    @ScaledMetric(relativeTo: .title3) private var badgeHeight: CGFloat = 40
+    @ScaledMetric(relativeTo: .subheadline) private var rangeWidth: CGFloat = 40
+
+    private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
 
     var body: some View {
         NavigationStack {
@@ -18,27 +27,7 @@ struct RPEGuideView: View {
 
                 Section {
                     ForEach(RPEScale.levels) { level in
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(level.rpe.formatted())
-                                .font(.title3.weight(.bold))
-                                .monospacedDigit()
-                                .foregroundStyle(.white)
-                                .frame(width: 48, height: 40)
-                                .background(color(for: level.rpe).gradient, in: .rect(cornerRadius: 10))
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(level.title).font(.subheadline.weight(.semibold))
-                                    Spacer()
-                                    Text(repsLeftText(level.repsLeft))
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Text(level.feel)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 2)
+                        levelRow(level)
                     }
                 } header: {
                     Text("Each set")
@@ -85,6 +74,38 @@ struct RPEGuideView: View {
         }
     }
 
+    /// One RPE level: number badge, title, reps left and how it feels.
+    private func levelRow(_ level: RPEScale.Level) -> some View {
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        let titleLayout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout())
+        return layout {
+            Text(level.rpe.formatted())
+                .font(.title3.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .frame(minWidth: badgeWidth, minHeight: badgeHeight)
+                .background(color(for: level.rpe).gradient, in: .rect(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 2) {
+                titleLayout {
+                    Text(level.title).font(.subheadline.weight(.semibold))
+                    if !stacked { Spacer() }
+                    Text(repsLeftText(level.repsLeft))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Text(level.feel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+
     private func repsLeftText(_ reps: String) -> String {
         switch reps {
         case "0": "0 left"
@@ -109,15 +130,19 @@ struct RPEGuideView: View {
     }
 
     private func sessionRow(_ range: String, _ label: String, _ detail: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return layout {
             Text(range)
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()
-                .frame(width: 40, alignment: .leading)
+                .frame(minWidth: rangeWidth, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 Text(label).font(.subheadline.weight(.semibold))
                 Text(detail).font(.caption).foregroundStyle(.secondary)
             }
         }
+        .accessibilityElement(children: .combine)
     }
 }

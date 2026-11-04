@@ -155,9 +155,8 @@ private struct ProgressPhotosPage: View {
     }
 }
 
-/// Goal and data the weekly photo analysis relates the pictures to. The same
-/// lines as `RootView.progressContext()` (WorkoutAppApp.swift), which can call
-/// this instead.
+/// Goal and data the weekly photo analysis relates the pictures to. Used here
+/// and by `RootView.progressContext()` (WorkoutAppApp.swift) for the weekly run.
 enum ProgressPhotosContext {
     static func text(settings: UserSettings, metrics: DailyMetricsModel, sessions: [WorkoutSession],
                      muscles: MuscleModel, vitals: VitalsModel) -> String {

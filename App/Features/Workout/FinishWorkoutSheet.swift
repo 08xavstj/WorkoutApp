@@ -18,21 +18,18 @@ struct FinishWorkoutSheet: View {
     @State private var showingRPEGuide = false
     @State private var confirmingUnticked = false
     @State private var saveAsTemplate = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Workout effort (1–10)")
-                            Spacer()
-                            Text("\(Int(rpe)) / 10 · \(RPEScale.sessionLabel(Int(rpe)))")
-                                .monospacedDigit()
-                                .foregroundStyle(Theme.liftingText)
-                        }
+                        effortHeader
                         Slider(value: $rpe, in: 1...10, step: 1)
                             .tint(Theme.lifting)
+                            .accessibilityLabel("Workout effort")
+                            .accessibilityValue("\(Int(rpe)) of 10, \(RPEScale.sessionLabel(Int(rpe)))")
                     }
                 } footer: {
                     VStack(alignment: .leading, spacing: 6) {
@@ -48,7 +45,7 @@ struct FinishWorkoutSheet: View {
                     Toggle("Add to saved workouts", isOn: $saveAsTemplate)
                 } footer: {
                     if saveAsTemplate {
-                        Text("You can start it again from Fitness › Saved workouts, with weights suggested from today.")
+                        Text("You can start it again from Log › Saved workouts, with weights suggested from today.")
                     }
                 }
                 if let errorMessage {
@@ -94,6 +91,23 @@ struct FinishWorkoutSheet: View {
                 Button("Cancel", role: .cancel) {}
             }
         }
+    }
+
+    /// "Workout effort (1–10)" and the rating; stacked at accessibility text
+    /// sizes so the rating isn't squeezed (ux-audit.md 4.8, P22).
+    private var effortHeader: some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout())
+        return layout {
+            Text("Workout effort (1–10)")
+            if !stacked { Spacer() }
+            Text("\(Int(rpe)) / 10 · \(RPEScale.sessionLabel(Int(rpe)))")
+                .monospacedDigit()
+                .foregroundStyle(Theme.liftingText)
+        }
+        .accessibilityHidden(true)
     }
 
     /// Sets the user filled in but didn't tick.

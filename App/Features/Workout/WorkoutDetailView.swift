@@ -10,21 +10,13 @@ struct WorkoutDetailView: View {
     @State private var reloadToken = 0
     @State private var savedTemplate = false
     @State private var supersetGroups: [Int: Int] = [:]
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Fits the set number ("W", "12") at every text size.
+    @ScaledMetric(relativeTo: .body) private var numberWidth: CGFloat = 28
 
     var body: some View {
-        let unit = settings.weightUnit
         List {
-            Section {
-                Text(session.startedAt.formatted(date: .complete, time: .shortened))
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-                HStack {
-                    StatView(label: "Duration", value: Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
-                    StatView(label: "Total lifted", value: "\(unit.format(session.totalVolumeKg)) \(unit.rawValue)")
-                    StatView(label: "Effort", value: session.sessionRPE.map { "\($0)/10" } ?? "--", color: Theme.liftingText)
-                }
-            }
-            .listRowBackground(Theme.card)
+            summarySection
 
             HeartRateSourcesSection(
                 start: session.startedAt, end: session.endedAt ?? session.startedAt,
@@ -33,39 +25,7 @@ struct WorkoutDetailView: View {
             )
 
             ForEach(session.orderedExercises) { exercise in
-                Section {
-                    let working = exercise.orderedSets.filter { !$0.isWarmup }
-                    ForEach(exercise.orderedSets) { set in
-                        HStack {
-                            Text(set.isWarmup ? "W" : "\((working.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) ?? 0) + 1)")
-                                .foregroundStyle(set.isWarmup ? Theme.recoveryModerate : Theme.secondaryText)
-                                .frame(width: 28, alignment: .leading)
-                            Text("\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)")
-                                .monospacedDigit()
-                            Spacer()
-                            if let rpe = set.rpe {
-                                Text("RPE \(rpe.formatted())")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondaryText)
-                            }
-                        }
-                    }
-                    NavigationLink {
-                        LiftProgressView(exerciseID: exercise.exerciseID, name: exercise.name)
-                    } label: {
-                        Label("Progress", systemImage: "chart.line.uptrend.xyaxis")
-                            .font(.subheadline)
-                    }
-                } header: {
-                    HStack(spacing: 8) {
-                        Text(exercise.name)
-                        // Superset pairing from the plan, kept for recent sessions (`SupersetRegistry`).
-                        if let label = SupersetRegistry.label(order: exercise.order, groups: supersetGroups) {
-                            Chip(text: label, color: Theme.sleep)
-                        }
-                    }
-                }
-                .listRowBackground(Theme.card)
+                exerciseSection(exercise)
             }
         }
         .scrollContentBackground(.hidden)
@@ -84,11 +44,89 @@ struct WorkoutDetailView: View {
         .alert("Added to saved workouts", isPresented: $savedTemplate) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Start it again any time from Fitness › Saved workouts.")
+            Text("Start it again any time from Log › Saved workouts (also under Fitness › Workouts).")
         }
         // On the List itself: a Section's .refreshable is never used.
         .refreshable { reloadToken += 1 }
         .task { supersetGroups = SupersetRegistry.groups(for: session.startedAt) }
+    }
+
+    private var unit: WeightUnit { settings.weightUnit }
+
+    /// Date, then duration, total lifted and effort; the three stats stack at
+    /// accessibility text sizes so none is cut off (ux-audit.md 4.8, P22).
+    private var summarySection: some View {
+        Section {
+            Text(session.startedAt.formatted(date: .complete, time: .shortened))
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+            summaryStats
+        }
+        .listRowBackground(Theme.card)
+    }
+
+    private var summaryStats: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout())
+        return layout {
+            StatView(label: "Duration", value: Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
+            StatView(label: "Total lifted", value: "\(unit.format(session.totalVolumeKg)) \(unit.rawValue)")
+            StatView(label: "Effort", value: session.sessionRPE.map { "\($0)/10" } ?? "--", color: Theme.liftingText)
+        }
+    }
+
+    private func exerciseSection(_ exercise: ExerciseLog) -> some View {
+        let working = exercise.orderedSets.filter { !$0.isWarmup }
+        return Section {
+            ForEach(exercise.orderedSets) { set in
+                setRow(set, number: (working.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) ?? 0) + 1)
+            }
+            NavigationLink {
+                LiftProgressView(exerciseID: exercise.exerciseID, name: exercise.name)
+            } label: {
+                Label("Progress", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.subheadline)
+            }
+        } header: {
+            HStack(spacing: 8) {
+                Text(exercise.name)
+                // Superset pairing from the plan, kept for recent sessions (`SupersetRegistry`).
+                if let label = SupersetRegistry.label(order: exercise.order, groups: supersetGroups) {
+                    Chip(text: label, color: Theme.sleep)
+                }
+            }
+        }
+        .listRowBackground(Theme.card)
+    }
+
+    /// One set; VoiceOver hears "Set 2, 8 reps at 60 kilograms, RPE 8"
+    /// (ux-audit.md 4.8, P27).
+    private func setRow(_ set: SetLog, number: Int) -> some View {
+        HStack {
+            Text(set.isWarmup ? "W" : "\(number)")
+                // Text colour for the amber accent (ux-audit.md X4, P24).
+                .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.secondaryText)
+                .frame(width: numberWidth, alignment: .leading)
+            Text("\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)")
+                .monospacedDigit()
+            Spacer()
+            if let rpe = set.rpe {
+                Text("RPE \(rpe.formatted())")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenSet(set, number: number))
+    }
+
+    private func spokenSet(_ set: SetLog, number: Int) -> String {
+        var parts = [set.isWarmup ? "Warm-up set" : "Set \(number)"]
+        let reps = set.reps == 1 ? "1 rep" : "\(set.reps) reps"
+        parts.append(set.weightKg > 0 ? "\(reps) at \(unit.format(set.weightKg)) \(unit.spokenName)" : reps)
+        if let rpe = set.rpe { parts.append("RPE \(rpe.formatted())") }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -106,6 +144,8 @@ private struct HeartRateSourcesSection: View {
     @State private var merged: HeartRateMerge.Result = .empty
     @State private var linkedWorkout: ExternalWorkout?
     @State private var loaded = false
+    /// Avg and Max columns widen with the text instead of clipping.
+    @ScaledMetric(relativeTo: .title3) private var statWidth: CGFloat = 50
 
     var body: some View {
         Section {
@@ -127,8 +167,8 @@ private struct HeartRateSourcesSection: View {
                                     .foregroundStyle(Theme.secondaryText)
                             }
                             Spacer()
-                            StatView(label: "Avg", value: "\(whole(summary.average))").frame(width: 50)
-                            StatView(label: "Max", value: "\(whole(summary.maximum))").frame(width: 50)
+                            StatView(label: "Avg", value: "\(whole(summary.average))").frame(width: statWidth)
+                            StatView(label: "Max", value: "\(whole(summary.maximum))").frame(width: statWidth)
                         }
                     }
                 }

@@ -262,42 +262,6 @@ struct TopGlow: View {
     }
 }
 
-/// Round Liquid Glass button for screen headers.
-///
-/// Deprecated (UX redesign, wave 1): glass belongs to the controls layer, not
-/// the content layer (HIG Materials; ux-audit.md P21, X1). Use toolbar items
-/// in the system navigation bar instead. Kept until wave 2 moves every screen
-/// off it; don't use it in new code.
-struct GlassIconButton: View {
-    let systemName: String
-    let label: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            GlassIcon(systemName: systemName)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-    }
-}
-
-/// The glass circle itself, for use inside a NavigationLink.
-///
-/// Deprecated (UX redesign, wave 1), like `GlassIconButton`: use toolbar
-/// items instead. Kept until wave 2; don't use it in new code.
-struct GlassIcon: View {
-    let systemName: String
-
-    var body: some View {
-        Image(systemName: systemName)
-            .font(.title3.weight(.semibold))
-            .foregroundStyle(Theme.primaryText)
-            .frame(width: 46, height: 46)
-            .glassEffect(.regular.interactive(), in: .circle)
-    }
-}
-
 // MARK: - Bars and gauges
 
 /// Strain progress on 0-100% with the target band shaded (Today's strain goal card).
@@ -660,10 +624,10 @@ extension SectionHeader where Destination == EmptyView {
 }
 
 /// One measure as a small card: title, value with unit, a status pill and a
-/// vertical gauge of where today sits in the usual range. Shared version of
-/// Today's `MonitorTile`, on the standard card (radius 26, padding 16, no
-/// tint glow; ux-audit.md 4.5). Put tiles in a `TileGrid` so they drop to one
-/// column at accessibility text sizes (ux-audit.md 4.8).
+/// vertical gauge of where today sits in the usual range, on the standard
+/// card (radius 26, padding 16, no tint glow; ux-audit.md 4.5). Put tiles in
+/// a `TileGrid` so they drop to one column at accessibility text sizes
+/// (ux-audit.md 4.8).
 ///
 /// VoiceOver reads the tile as one element, "title, value unit, status"
 /// (ux-audit.md P27); wrap it in a Button or NavigationLink and add a hint
