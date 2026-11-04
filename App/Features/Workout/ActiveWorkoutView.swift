@@ -711,7 +711,7 @@ private struct SetRow: View {
         .onTapGesture(perform: onTap)
     }
 
-    private var isFilled: Bool { set.weightKg > 0 || set.reps > 0 }
+    private var isFilled: Bool { self.set.weightKg > 0 || set.reps > 0 }
 
     /// Number, weight × reps, last time and RPE. At accessibility text sizes
     /// the RPE pill moves under the weight so nothing is cut off.
@@ -779,7 +779,7 @@ private struct SetRow: View {
 
     /// "Set 2" or "Warm-up set".
     private var spokenName: String {
-        set.isWarmup ? "Warm-up set" : "Set \(label)"
+        self.set.isWarmup ? "Warm-up set" : "Set \(label)"
     }
 
     /// "Set 2, 8 reps at 60 kilograms, RPE 8, done".
