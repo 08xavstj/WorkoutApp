@@ -263,6 +263,11 @@ struct TopGlow: View {
 }
 
 /// Round Liquid Glass button for screen headers.
+///
+/// Deprecated (UX redesign, wave 1): glass belongs to the controls layer, not
+/// the content layer (HIG Materials; ux-audit.md P21, X1). Use toolbar items
+/// in the system navigation bar instead. Kept until wave 2 moves every screen
+/// off it; don't use it in new code.
 struct GlassIconButton: View {
     let systemName: String
     let label: String
@@ -278,6 +283,9 @@ struct GlassIconButton: View {
 }
 
 /// The glass circle itself, for use inside a NavigationLink.
+///
+/// Deprecated (UX redesign, wave 1), like `GlassIconButton`: use toolbar
+/// items instead. Kept until wave 2; don't use it in new code.
 struct GlassIcon: View {
     let systemName: String
 
@@ -503,18 +511,26 @@ struct StatView: View {
 }
 
 /// Rounded pill label, e.g. "In range" or "Optimal".
+///
+/// Text always uses `Theme.textColor(for:)`, which passes 4.5:1 on the 13%
+/// pill in light and dark for every accent (ratios next to the text colours
+/// in Theme.swift; WCAG 2.2 1.4.3). A filled chip draws the text colour as
+/// the pill with `Theme.card` text: light >= 5.7:1, dark >= 6.3:1. (It used
+/// white on the raw accent, e.g. 3.6:1 on `lifting`.) Chips always carry a
+/// word, so colour is never the only signal (HIG Color; ux-audit.md P25).
 struct Chip: View {
     let text: String
     var color: Color = Theme.strain
     var filled = false
 
     var body: some View {
+        let textColor = Theme.textColor(for: color)
         Text(text)
             .font(.caption.weight(.semibold))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .foregroundStyle(filled ? Color.white : Theme.textColor(for: color))
-            .background(filled ? color : color.opacity(0.13), in: .capsule)
+            .foregroundStyle(filled ? Theme.card : textColor)
+            .background(filled ? textColor : color.opacity(0.13), in: .capsule)
     }
 }
 
@@ -541,8 +557,8 @@ struct CardLabel: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.caption.weight(.semibold))
-            .tracking(1.2)
+            .font(Theme.Typography.cardLabel)
+            .tracking(Theme.Typography.cardLabelTracking)
             .foregroundStyle(color)
     }
 }
@@ -566,6 +582,265 @@ struct SectionTitle: View {
             }
         }
         .padding(.top, 8)
+    }
+}
+
+/// Section header between cards, with an optional trailing "See all" link
+/// (the redesign's variant of `SectionTitle`; ux-audit.md 4.5). The title is
+/// `.title3` bold and marked as a header for VoiceOver; the link has a 44 pt
+/// hit target (HIG Accessibility; ux-audit.md P23).
+///
+/// - `SectionHeader("Workouts")`: title only.
+/// - `SectionHeader("Workouts", action: { showAll() })`: "See all" runs an
+///   action.
+/// - `SectionHeader("Workouts", destination: HistoryView())`: "See all"
+///   pushes a page (use this to read more, ux-audit.md 4.1 rule 5).
+struct SectionHeader<Destination: View>: View {
+    let title: String
+    let linkTitle: String
+    private let destination: Destination?
+    private let action: (() -> Void)?
+
+    /// "See all" pushes `destination` in the enclosing `NavigationStack`.
+    init(_ title: String, linkTitle: String = "See all", destination: Destination) {
+        self.title = title
+        self.linkTitle = linkTitle
+        self.destination = destination
+        self.action = nil
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(Theme.Typography.section)
+                .foregroundStyle(Theme.primaryText)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            if let destination {
+                NavigationLink {
+                    destination
+                } label: {
+                    linkLabel
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(linkTitle), \(title)")
+            } else if let action {
+                Button(action: action) {
+                    linkLabel
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(linkTitle), \(title)")
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var linkLabel: some View {
+        HStack(spacing: 3) {
+            Text(linkTitle)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .accessibilityHidden(true)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Theme.secondaryText)
+        .frame(minHeight: 44)
+        .contentShape(.rect)
+    }
+}
+
+extension SectionHeader where Destination == EmptyView {
+    /// Title only, or with a "See all" link that runs `action`.
+    init(_ title: String, linkTitle: String = "See all", action: (() -> Void)? = nil) {
+        self.title = title
+        self.linkTitle = linkTitle
+        self.destination = nil
+        self.action = action
+    }
+}
+
+/// One measure as a small card: title, value with unit, a status pill and a
+/// vertical gauge of where today sits in the usual range. Shared version of
+/// Today's `MonitorTile`, on the standard card (radius 26, padding 16, no
+/// tint glow; ux-audit.md 4.5). Put tiles in a `TileGrid` so they drop to one
+/// column at accessibility text sizes (ux-audit.md 4.8).
+///
+/// VoiceOver reads the tile as one element, "title, value unit, status"
+/// (ux-audit.md P27); wrap it in a Button or NavigationLink and add a hint
+/// ("Shows history") when it opens something. With an action button the
+/// children stay separate so the button can be reached.
+struct MetricTile: View {
+    struct Status {
+        var text: String
+        /// SF Symbol shown before the text, e.g. "arrow.up" (arrows go with
+        /// up/down changes so colour isn't the only signal).
+        var icon: String?
+        /// Any accent; the text is drawn in `Theme.textColor(for:)`.
+        var color: Color
+
+        init(text: String, icon: String? = nil, color: Color = Theme.secondaryText) {
+            self.text = text
+            self.icon = icon
+            self.color = color
+        }
+    }
+
+    let title: String
+    let value: String?
+    let unit: String
+    /// The unit as VoiceOver should say it, e.g. "beats per minute" for "bpm".
+    let spokenUnit: String?
+    let status: Status?
+    /// 0 (bottom) ... 1 (top); nil hides the knob.
+    let gauge: Double?
+    let color: Color
+    let lightColor: Color?
+    let actionTitle: String?
+    let onAction: (() -> Void)?
+
+    init(
+        title: String,
+        value: String?,
+        unit: String = "",
+        spokenUnit: String? = nil,
+        status: Status? = nil,
+        gauge: Double? = nil,
+        color: Color,
+        lightColor: Color? = nil,
+        actionTitle: String? = nil,
+        onAction: (() -> Void)? = nil
+    ) {
+        self.title = title
+        self.value = value
+        self.unit = unit
+        self.spokenUnit = spokenUnit
+        self.status = status
+        self.gauge = gauge
+        self.color = color
+        self.lightColor = lightColor
+        self.actionTitle = actionTitle
+        self.onAction = onAction
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                valueLine
+                footer
+            }
+            Spacer(minLength: 0)
+            VerticalRangeGauge(value: gauge, color: color, lightColor: lightColor)
+                .frame(height: 78)
+        }
+        .card()
+        .modifier(TileAccessibility(isCombined: actionTitle == nil || onAction == nil, label: spokenLabel))
+    }
+
+    @ViewBuilder
+    private var valueLine: some View {
+        if let value {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .tileNumberFont()
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                if !unit.isEmpty {
+                    Text(unit)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            .foregroundStyle(Theme.primaryText)
+        } else {
+            Text("No data")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+        }
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if let actionTitle, let onAction {
+            Button(actionTitle, action: onAction)
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.bordered)
+                .frame(minHeight: 44)
+        } else if let status {
+            StatusPill(status: status)
+        }
+    }
+
+    private var spokenLabel: String {
+        var parts = [title]
+        if let value {
+            let unitWords = spokenUnit ?? unit
+            parts.append(unitWords.isEmpty ? value : "\(value) \(unitWords)")
+        } else {
+            parts.append("No data")
+        }
+        if let status { parts.append(status.text) }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// The small status pill on a `MetricTile` (icon + word, accent text colour).
+private struct StatusPill: View {
+    let status: MetricTile.Status
+
+    var body: some View {
+        let textColor = Theme.textColor(for: status.color)
+        HStack(spacing: 3) {
+            if let icon = status.icon {
+                Image(systemName: icon)
+            }
+            Text(status.text)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(textColor)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(status.color.opacity(0.13), in: .capsule)
+    }
+}
+
+/// One element with a spoken label, or separate children when the tile holds
+/// a button.
+private struct TileAccessibility: ViewModifier {
+    let isCombined: Bool
+    let label: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isCombined {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(label)
+        } else {
+            content
+                .accessibilityElement(children: .contain)
+        }
+    }
+}
+
+/// Two columns of tiles that drop to one column at accessibility text sizes
+/// (ux-audit.md 4.8; HIG Typography: keep the layout readable at large sizes).
+struct TileGrid<Content: View>: View {
+    var spacing: CGFloat = 12
+    @ViewBuilder var content: Content
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        let count = dynamicTypeSize.isAccessibilitySize ? 1 : 2
+        let columns = Array(repeating: GridItem(.flexible(), spacing: spacing, alignment: .top), count: count)
+        LazyVGrid(columns: columns, alignment: .leading, spacing: spacing) {
+            content
+        }
     }
 }
 

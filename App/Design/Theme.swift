@@ -17,7 +17,12 @@ enum Theme {
 
     // Text
     static let primaryText = adaptive(light: 0x111827, dark: 0xF5F5F7)
-    static let secondaryText = adaptive(light: 0x6B7280, dark: 0x9A9AA5)
+    /// Darkened in the 2026 redesign so small text also passes on the page
+    /// background, not only on cards (was 0x6B7280: 4.39:1 on `background`).
+    /// WCAG 2.2 1.4.3 asks 4.5:1 for normal text (ux-audit.md P24, X4).
+    /// Light: 6.1:1 on `card`, 5.6:1 on `background`, 5.1:1 on a neutral
+    /// `Chip`. Dark: 6.6:1 on `card`, 7.3:1 on `background`, 5.5:1 on a chip.
+    static let secondaryText = adaptive(light: 0x5C626E, dark: 0x9D9DA8)
 
     // Score accents. Each score has a two-stop gradient (light -> deep),
     // bright like the reference app: orange strain, lime-green recovery,
@@ -41,13 +46,35 @@ enum Theme {
     static let oxygen = adaptive(light: 0x2F80FF, dark: 0x5C9DFF)
     static let oxygenLight = adaptive(light: 0x5FE3F0, dark: 0x7DEAF4)
 
-    // Darker versions of the accents for text on light cards (4.5:1+ contrast
-    // on white). In dark mode the normal accents are already bright enough.
-    static let recoveryHighText = adaptive(light: 0x15803D, dark: 0x3EDB84)
-    static let recoveryModerateText = adaptive(light: 0xB45309, dark: 0xFFC53D)
-    static let recoveryLowText = adaptive(light: 0xC81E3A, dark: 0xFF5C77)
-    static let strainTextColor = adaptive(light: 0xC2410C, dark: 0xFF8E3C)
-    static let liftingText = adaptive(light: 0xBE185D, dark: 0xFF6B97)
+    // Text versions of the accents. Use these (or `textColor(for:)`) for any
+    // text drawn in an accent; the bright accents are for rings, bars and
+    // icons only. Target: WCAG 2.2 1.4.3, 4.5:1 for normal text (ux-audit.md
+    // P24). Ratios computed with the WCAG relative-luminance formula, as
+    // "on card / on page background / on its 13% `Chip` pill over a card".
+    // Every value also stays >= 4.6:1 on `cardRaised` and on a chip pill over
+    // the page background or `cardRaised` (the worst case for each is noted).
+    // Light values were darkened slightly in the 2026 redesign so chip pills
+    // pass too; dark values are the accent unless the accent fell short.
+    /// Light 5.9 / 5.3 / 5.2 (worst 4.7). Dark 9.9 / 10.9 / 7.8.
+    static let recoveryHighText = adaptive(light: 0x137438, dark: 0x3EDB84)
+    /// Light 5.7 / 5.2 / 5.2 (worst 4.6). Dark 11.3 / 12.4 / 8.5.
+    static let recoveryModerateText = adaptive(light: 0xA64C08, dark: 0xFFC53D)
+    /// Light 6.2 / 5.6 / 5.2 (worst 4.6). Dark 6.3 / 7.0 / 5.4 (worst 4.7).
+    static let recoveryLowText = adaptive(light: 0xBE1C37, dark: 0xFF6680)
+    /// Light 5.8 / 5.3 / 5.2 (worst 4.6). Dark 7.8 / 8.6 / 6.3.
+    static let strainTextColor = adaptive(light: 0xB43C0B, dark: 0xFF8E3C)
+    /// Light 6.3 / 5.8 / 5.4 (worst 4.8). Dark 6.6 / 7.3 / 5.5 (worst 4.8).
+    static let liftingText = adaptive(light: 0xB8175A, dark: 0xFF6B97)
+    /// Light 6.7 / 6.1 / 5.7 (worst 5.1). Dark 7.2 / 8.0 / 6.0 (worst 5.2).
+    /// (Raw `oxygen` is 3.7:1 on white and 3.3:1 on its chip.)
+    static let oxygenText = adaptive(light: 0x1D4ED8, dark: 0x6BA6FF)
+    /// Light 5.9 / 5.4 / 5.2 (worst 4.7). Dark 9.5 / 10.5 / 7.5.
+    /// (Raw `nutrition` is 2.6:1 on white.)
+    static let nutritionText = adaptive(light: 0x0E7068, dark: 0x2ED3C4)
+    /// Light 6.3 / 5.7 / 5.4 (worst 4.8). Dark 7.2 / 7.9 / 6.0 (worst 5.2).
+    static let heartText = adaptive(light: 0xBE123C, dark: 0xFF7A90)
+    /// Light 7.9 / 7.2 / 6.7 (worst 5.9). Dark 6.7 / 7.3 / 5.6 (worst 4.8).
+    static let sleepText = adaptive(light: 0x4338CA, dark: 0x9692FF)
 
     // Deep gradients for buttons with white text (both stops dark enough).
     static let recoveryDeep = adaptive(light: 0x15803D, dark: 0x16A34A)
@@ -56,13 +83,19 @@ enum Theme {
     static var recoveryButtonColors: [Color] { [recoveryHigh, recoveryDeep] }
     static var sleepButtonColors: [Color] { [sleep, sleepDeep] }
 
-    /// Accent color to use for text of a given tone.
+    /// Accent color to use for text of a given tone. Every accent maps to its
+    /// text variant above (4.5:1+ in light and dark, also on a `Chip` pill);
+    /// text variants, `primaryText` and `secondaryText` come back unchanged.
     static func textColor(for accent: Color) -> Color {
         if accent == recoveryHigh { return recoveryHighText }
         if accent == recoveryModerate { return recoveryModerateText }
         if accent == recoveryLow { return recoveryLowText }
         if accent == strain { return strainTextColor }
         if accent == lifting { return liftingText }
+        if accent == oxygen { return oxygenText }
+        if accent == nutrition { return nutritionText }
+        if accent == heart { return heartText }
+        if accent == sleep { return sleepText }
         return accent
     }
 
@@ -92,8 +125,39 @@ enum Theme {
         adaptive(light: 0xFF2D55, dark: 0xFF5C7A)
     ]
 
+    /// The one corner radius and padding for every card and tile (ux-audit.md
+    /// 4.5: "One corner radius (26) and one padding (16) everywhere").
     static let cornerRadius: CGFloat = 26
     static let padding: CGFloat = 16
+
+    /// Type tokens (ux-audit.md 4.5). All are built-in text styles, or sizes
+    /// scaled with `@ScaledMetric`, so Dynamic Type works (HIG Typography;
+    /// WCAG 2.2 1.4.4, ux-audit.md P22). Never use `.system(size:)` for text
+    /// without scaling it.
+    enum Typography {
+        /// Screen title. Prefer the system navigation bar's large title
+        /// (`.navigationTitle`); use this only where there is no bar.
+        static let screenTitle: Font = .largeTitle.weight(.bold)
+        /// Section header between cards (`SectionHeader`).
+        static let section: Font = .title3.weight(.bold)
+        /// Card label (`CardLabel`): small caps-style caption, tracked.
+        static let cardLabel: Font = .caption.weight(.semibold)
+        static let cardLabelTracking: CGFloat = 1.2
+        /// Value in a list row (`MetricRow`); add `.fontDesign(.rounded)`.
+        static let rowNumber: Font = .title2.weight(.semibold)
+        /// Unit next to a hero number.
+        static let heroUnit: Font = .title3.weight(.semibold)
+        /// Body text in cards.
+        static let body: Font = .subheadline
+        /// Context and footnotes; pair with `Theme.secondaryText`.
+        static let context: Font = .footnote
+        /// Hero number base size, scaled relative to `.largeTitle`
+        /// (use `.heroNumberFont()`).
+        static let heroNumberSize: CGFloat = 44
+        /// Tile number base size, scaled relative to `.title`
+        /// (use `.tileNumberFont()`).
+        static let tileNumberSize: CGFloat = 30
+    }
 
     static func recoveryColors(for score: Int?) -> [Color] {
         guard let score else { return [track, secondaryText] }
@@ -135,7 +199,9 @@ private extension UIColor {
 
 extension View {
     /// Standard rounded card with a soft shadow. Pass `tint` for a card that
-    /// glows faintly in a score's color from the top corner.
+    /// glows faintly in a score's color from the top corner: only for the one
+    /// primary card of a tab (ux-audit.md 4.5, P21: hierarchy through layout,
+    /// not decoration).
     func card(tint: Color? = nil) -> some View {
         padding(Theme.padding)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -157,19 +223,41 @@ extension View {
     func lockedToScreenWidth() -> some View {
         containerRelativeFrame(.horizontal, alignment: .top)
     }
+
+    /// Hero number: rounded bold, 44 pt at the default text size, scaled with
+    /// Dynamic Type relative to `.largeTitle` (ux-audit.md 4.5).
+    func heroNumberFont() -> some View {
+        modifier(ScaledNumberFont(style: .hero))
+    }
+
+    /// Tile number: rounded semibold, 30 pt at the default text size, scaled
+    /// relative to `.title` (ux-audit.md 4.5).
+    func tileNumberFont() -> some View {
+        modifier(ScaledNumberFont(style: .tile))
+    }
 }
 
-/// Strain as shown everywhere: a whole percentage, e.g. "62%".
-func strainText(_ value: Double) -> String {
-    "\(whole(value))%"
-}
+/// Scaled number fonts behind `heroNumberFont()` and `tileNumberFont()`.
+/// The base sizes match `Theme.Typography.heroNumberSize` / `tileNumberSize`.
+private struct ScaledNumberFont: ViewModifier {
+    enum Style {
+        case hero, tile
+    }
 
-/// A strain range as shown everywhere, e.g. "45–65%".
-func strainRangeText(_ range: ClosedRange<Double>) -> String {
-    "\(whole(range.lowerBound))–\(whole(range.upperBound))%"
-}
+    let style: Style
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 44
+    @ScaledMetric(relativeTo: .title) private var tileSize: CGFloat = 30
 
-/// Rounds for display. Unlike `Int(_:)`, never crashes on NaN or infinity.
-func whole(_ value: Double) -> Int {
-    value.isFinite ? Int(value.rounded()) : 0
+    private var font: Font {
+        switch style {
+        case .hero: .system(size: heroSize, weight: .bold, design: .rounded)
+        case .tile: .system(size: tileSize, weight: .semibold, design: .rounded)
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .font(font)
+            .monospacedDigit()
+    }
 }
