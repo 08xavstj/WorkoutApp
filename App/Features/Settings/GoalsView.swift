@@ -59,11 +59,13 @@ struct GoalsView: View {
                             }
                         }
                         LabeledContent("Target weight") {
-                            TextField(settings.weightUnit.rawValue, text: $targetText)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 90)
-                            Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
+                            HStack(spacing: 4) {
+                                TextField(settings.weightUnit.rawValue, text: $targetText)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 90)
+                                Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
+                            }
                         }
                     }
                 } header: {

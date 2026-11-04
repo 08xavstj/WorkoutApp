@@ -132,26 +132,30 @@ private struct ProfileSettingsSection: View {
     private var heightRow: some View {
         @Bindable var settings = settings
         return LabeledContent("Height\(source("height"))") {
-            TextField("cm", value: $settings.heightCm, format: .number)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 80)
-                .disabled(locked("height"))
-            Text("cm").foregroundStyle(Theme.secondaryText)
+            HStack(spacing: 4) {
+                TextField("cm", value: $settings.heightCm, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
+                    .disabled(locked("height"))
+                Text("cm").foregroundStyle(Theme.secondaryText)
+            }
         }
     }
 
     private var weightRow: some View {
         LabeledContent("Weight\(source("weight"))") {
-            TextField(settings.weightUnit.rawValue, value: Binding(
-                get: { (settings.weightUnit.display(settings.weightKg) * 10).rounded() / 10 },
-                set: { settings.weightKg = settings.weightUnit.toKilograms($0) }
-            ), format: .number)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 80)
-                .disabled(locked("weight"))
-            Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
+            HStack(spacing: 4) {
+                TextField(settings.weightUnit.rawValue, value: Binding(
+                    get: { (settings.weightUnit.display(settings.weightKg) * 10).rounded() / 10 },
+                    set: { settings.weightKg = settings.weightUnit.toKilograms($0) }
+                ), format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
+                    .disabled(locked("weight"))
+                Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
+            }
         }
     }
 }
