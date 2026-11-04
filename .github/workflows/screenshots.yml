@@ -1,0 +1,84 @@
+name: Screenshots
+
+# Captures every main screen in the simulator for design review. Runs only
+# for commits whose message contains "[screens]", or by hand. The images are
+# printed into the log as base64 JPEGs between "=== SHOT <name> ===" and
+# "=== END ===" markers, so they can be read without downloading artifacts.
+
+on:
+  push:
+    branches: ["claude/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screens]')
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Boot a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          for runtime, devices in sorted(data.items(), reverse=True):
+              if "iOS" not in runtime:
+                  continue
+              for d in devices:
+                  if d["name"].startswith("iPhone 17 Pro") or d["name"].startswith("iPhone 16 Pro"):
+                      print(d["udid"]); sys.exit()
+          ')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          # Light mode, like the default app look.
+          xcrun simctl ui "$UDID" appearance light
+
+      - name: Capture screens
+        run: |
+          set +e
+          xcodebuild test \
+            -project WorkoutApp.xcodeproj \
+            -scheme WorkoutApp \
+            -destination "id=$UDID" \
+            -configuration Debug \
+            -only-testing:WorkoutAppUITests/ScreenshotTests \
+            -resultBundlePath shots.xcresult \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            > test.log 2>&1
+          echo "xcodebuild exit: $?"
+          grep -E "error:|Test Case|passed|failed" test.log | tail -20
+
+      - name: Print screenshots
+        run: |
+          mkdir -p shots
+          xcrun xcresulttool export attachments --path shots.xcresult --output-path shots
+          cd shots
+          python3 - <<'PY'
+          import json, os, subprocess, base64
+          manifest = json.load(open("manifest.json"))
+          items = []
+          for test in manifest:
+              for a in test.get("attachments", []):
+                  items.append((a.get("suggestedHumanReadableName") or a["exportedFileName"], a["exportedFileName"]))
+          for name, file in sorted(items):
+              out = file + ".jpg"
+              subprocess.run(["sips", "-Z", "900", "-s", "format", "jpeg", "-s", "formatOptions", "55", file, "--out", out],
+                             check=True, capture_output=True)
+              data = base64.b64encode(open(out, "rb").read()).decode()
+              print(f"=== SHOT {name} ===")
+              for i in range(0, len(data), 4000):
+                  print(data[i:i+4000])
+              print("=== END ===")
+          PY
