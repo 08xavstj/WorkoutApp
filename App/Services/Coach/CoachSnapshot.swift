@@ -247,7 +247,10 @@ extension CoachSnapshot {
             date: now,
             weightUnit: unit.rawValue,
             strain: metrics.strain?.strain,
-            targetStrain: metrics.targetStrain.map { "\(Int($0.lowerBound))-\(Int($0.upperBound))" },
+            targetStrain: metrics.targetStrain.map { range in
+                // The plan's kind of day (`TrainingDayPlanner`), so the coach doesn't push a hard session on a rest day.
+                "\(Int(range.lowerBound))-\(Int(range.upperBound))" + (metrics.dayGuidance.map { "; \($0.title): \($0.reason)" } ?? "")
+            },
             cardioLoad: metrics.strain?.cardioLoad,
             liftingLoad: metrics.strain?.liftingLoad,
             zoneMinutes: metrics.strain?.zoneMinutes.map { Int($0.rounded()) },

@@ -94,6 +94,11 @@ final class DailyMetricsModel {
     private(set) var bedtimeWindow: BedtimeWindow.Result?
     /// Tomorrow's planned session start from the weekly plan, if any (set by the app before a refresh).
     var plannedSessionTomorrow: Date?
+    /// What the weekly plan had on each of the last 8 days and today (start of
+    /// day → focus; rest days are absent), and whether there's a plan this
+    /// week at all. Set by the app before a refresh (`TrainingDayPlanner`).
+    var plannedFocusByDay: [Date: WorkoutFocus] = [:]
+    var hasWeeklyPlan = false
 
     // MARK: Energy availability (body & nutrition measures)
 
@@ -279,6 +284,10 @@ final class DailyMetricsModel {
     /// easy day (HRV-guided training).
     var targetStrain: ClosedRange<Double>? {
         guard !restMode, let recovery else { return nil }
+        // With a weekly plan, the plan decides the kind of day (rest days aim low).
+        if let guidance = dayGuidance {
+            return HeatAdvice.adjustTarget(guidance.strainRange, by: heatAdjustment)
+        }
         let target = StrainCalculator.targetStrain(forRecovery: recovery.score, usualTrainingStrain: usualTrainingStrain)
         let base = trainEasyToday ? min(target.lowerBound, 20)...min(target.upperBound, 45) : target
         return HeatAdvice.adjustTarget(base, by: heatAdjustment)
@@ -286,6 +295,32 @@ final class DailyMetricsModel {
 
     /// HRV-guided training: the 7-day HRV average is below your normal range.
     var trainEasyToday: Bool { recovery?.hrvTrend?.status == .below }
+
+    /// Today's kind of day from the weekly plan, recovery and the last few days
+    /// (`TrainingDayPlanner`): a rest day aims low, a missed session moves to
+    /// the next free day, and a rest day that turned hard is followed by an
+    /// easy one. Nil without a plan this week, in rest mode, or before recovery.
+    var dayGuidance: TrainingDayPlanner.Guidance? {
+        guard hasWeeklyPlan, !restMode, let recovery else { return nil }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let past = weekStrain
+            .filter { calendar.startOfDay(for: $0.date) < today }
+            .map { day in
+                TrainingDayPlanner.PastDay(
+                    date: day.date,
+                    plannedFocus: plannedFocusByDay[calendar.startOfDay(for: day.date)],
+                    strain: day.strain
+                )
+            }
+        return TrainingDayPlanner.guidance(
+            plannedToday: plannedFocusByDay[today],
+            past: past,
+            lowRecovery: recovery.score < 34 || trainEasyToday,
+            usualTrainingStrain: usualTrainingStrain,
+            calendar: calendar
+        )
+    }
 
     /// Recovery to plan workouts with (lowered on HRV-guided easy days).
     var recoveryForTraining: Int? {

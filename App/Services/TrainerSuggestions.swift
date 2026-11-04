@@ -60,6 +60,20 @@ enum TrainerSuggestions {
         }
         guard let target = metrics.targetStrain else { return ("", nil) }
         let range = "\(Int(target.lowerBound))–\(Int(target.upperBound))%"
+        // The weekly plan's rest, recovery and make-up days speak for themselves
+        // (`TrainingDayPlanner`); planned training days keep the lines below.
+        if let guidance = metrics.dayGuidance {
+            switch guidance.kind {
+            case .rest, .recovery:
+                return (guidance.reason, "Anything up to \(Int(target.upperBound))% strain is fine today.")
+            case .makeUp:
+                return (guidance.reason, "Your range is \(range).")
+            case .easyTraining where !metrics.trainEasyToday:
+                return (guidance.reason, "Anything under \(Int(target.upperBound))% strain is fine.")
+            case .training, .easyTraining:
+                break
+            }
+        }
         if metrics.trainEasyToday, let trend = recovery.hrvTrend {
             return ("Your 7-day HRV (\(Int(trend.average.rounded())) ms) is below your normal range (\(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms), so today suits an easy session: technique work, mobility or a Zone 2 ride, whichever you prefer,",
                     "anything under \(Int(target.upperBound))% strain is fine.")

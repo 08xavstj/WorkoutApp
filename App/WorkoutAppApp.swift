@@ -303,6 +303,19 @@ struct RootView: View {
         metrics.medicationProteinPerKg = medications.proteinGramsPerKg
         gym.style = settings.goalsSet ? GoalPlanner.trainingStyle(settings.goals) : .balanced
         metrics.plannedSessionTomorrow = plannedSlots().first { Calendar.current.isDateInTomorrow($0.start) }?.start // bed-by window
+        // The plan's last 8 days and today, so rest days aim low and missed sessions move (`TrainingDayPlanner`).
+        do {
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: .now)
+            var byDay: [Date: WorkoutFocus] = [:]
+            for offset in -8...0 {
+                guard let day = calendar.date(byAdding: .day, value: offset, to: today),
+                      let planned = weeklyPlans.todayPlan(now: day) else { continue }
+                byDay[day] = planned.focus
+            }
+            metrics.plannedFocusByDay = byDay
+            metrics.hasWeeklyPlan = !(weeklyPlans.current?.plannedDays.isEmpty ?? true)
+        }
         // Personal calories (docs/research/calories.md): training status from the whole lifting log.
         metrics.trainingStatus = TrainingStatus.resolve(reported: settings.liftingExperience, sessionDates: sessions.filter { !$0.isActive }.map(\.startedAt))
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)

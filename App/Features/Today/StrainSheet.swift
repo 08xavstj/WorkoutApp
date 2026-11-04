@@ -118,6 +118,10 @@ private struct StrainGoalCard: View {
 
     /// Where today's range comes from, in one line.
     private func rangeNote(target: ClosedRange<Double>) -> String {
+        // With a weekly plan, the plan says what kind of day it is (`TrainingDayPlanner`).
+        if let guidance = metrics.dayGuidance, guidance.kind != .training {
+            return guidance.reason
+        }
         if metrics.trainEasyToday {
             return "Easy day: your 7-day HRV is below your normal range, so anything in \(strainRangeText(target)) is fine."
         }

@@ -102,11 +102,20 @@ private struct ScoreRings: View {
             title: "Strain",
             value: metrics.strain.map { "\(whole($0.strain))" } ?? "--",
             unit: metrics.strain == nil ? "" : "%",
-            subtitle: metrics.targetStrain.map { "Range \(strainRangeText($0))" } ?? "Day strain",
+            subtitle: strainSubtitle,
             progress: (metrics.strain?.strain ?? 0) / StrainCalculator.maximum,
             colors: Theme.strainColors,
             size: size
         )
+    }
+
+    /// "Rest day · up to 25%" on the plan's rest days, else "Range 50–70%".
+    private var strainSubtitle: String {
+        guard let target = metrics.targetStrain else { return "Day strain" }
+        if metrics.dayGuidance?.isRestDay == true {
+            return "Rest day · up to \(whole(target.upperBound))%"
+        }
+        return "Range \(strainRangeText(target))"
     }
 
     private func recoveryRing(size: CGFloat) -> some View {
@@ -246,6 +255,13 @@ private struct ScoresPrimaryButton: View {
         if let planned = plannedToday {
             return Choice(title: "Start \(planned.focus.shortTitle) · \(planned.minutes) min", focus: planned.focus, minutes: planned.minutes)
         }
+        // A session missed in the last two days moved to today (`TrainingDayPlanner`).
+        if let guidance = metrics.dayGuidance, guidance.kind == .makeUp, let focus = guidance.focus,
+           metrics.activities.isEmpty {
+            return Choice(title: "Start \(focus.shortTitle) (moved)", focus: focus, minutes: nil)
+        }
+        // Rest days in the plan offer no workout button.
+        if metrics.dayGuidance?.isRestDay == true { return nil }
         guard metrics.activities.isEmpty, let target = metrics.targetStrain else { return nil }
         let status = StrainPlanner().status(current: metrics.strain?.strain ?? 0, target: target)
         guard case .below = status else { return nil }
