@@ -406,7 +406,14 @@ final class DailyMetricsModel {
                 // Per-minute heart rate from every source, merged so each minute is counted
                 // once from the better sensor (`HeartRateMerge`): ear over wrist during logged
                 // lifts and external strength workouts, the steadier series during cardio.
-                let sourceSeries = try await health.heartRatePerMinuteBySource(from: firstNeeded, to: now)
+                // If the per-source query fails or comes back empty, fall back to the plain
+                // per-minute average, so heart rate can never stop the rest of the refresh
+                // (strain, recovery, sleep and calories all come after this).
+                var sourceSeries = (try? await health.heartRatePerMinuteBySource(from: firstNeeded, to: now)) ?? []
+                if sourceSeries.allSatisfy({ $0.samples.isEmpty }) {
+                    let combined = (try? await health.heartRatePerMinute(from: firstNeeded, to: now)) ?? []
+                    sourceSeries = combined.isEmpty ? [] : [HeartRateSource(name: "Apple Health", samples: combined)]
+                }
                 let mergeSources = sourceSeries.map(\.mergeSource)
                 let fetchedWorkouts = (try? await health.externalWorkouts(from: firstNeeded, to: now)) ?? []
                 let liftingWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
@@ -574,8 +581,14 @@ final class DailyMetricsModel {
         let today = calendar.startOfDay(for: now)
         let weekday = calendar.component(.weekday, from: today)
         let thisMonday = calendar.date(byAdding: .day, value: -((weekday + 5) % 7), to: today) ?? today
-        if settings.calorieTargetOverride == nil || settings.calorieTargetOverrideGoal != goalKey {
-            settings.calorieTargetOverride = GoalPlanner.calorieTarget(maintenance: maintenance.maintenance, bodyMassKg: weight, goals: goals, sex: sex)
+        // The goal's target from today's measured maintenance. When the stored weekly
+        // target has drifted far from it (maintenance was re-measured, e.g. once
+        // partly logged days were left out), start again from it: the weekly
+        // ±100 kcal nudges are for small drift, not for catching up on a new estimate.
+        let fromMaintenance = GoalPlanner.calorieTarget(maintenance: maintenance.maintenance, bodyMassKg: weight, goals: goals, sex: sex)
+        let drifted = settings.calorieTargetOverride.map { abs($0 - fromMaintenance) > 250 } ?? false
+        if settings.calorieTargetOverride == nil || settings.calorieTargetOverrideGoal != goalKey || drifted {
+            settings.calorieTargetOverride = fromMaintenance
             settings.calorieTargetOverrideGoal = goalKey
             settings.calorieTargetOverrideDate = today
             settings.calorieAdjustmentNote = ""
