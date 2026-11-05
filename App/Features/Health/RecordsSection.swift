@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 import AppCore
 
 /// A list row that pushes a page: icon, title, one line of detail and a
@@ -135,49 +134,9 @@ struct RecordsSection: View {
 
 // MARK: - Progress photos, pushed
 
-/// Progress photos pushed from Records, with the same weekly analysis the
-/// root sheet runs from `RootView`.
+/// Progress photos pushed from Records (the Log tab opens the same view as a sheet).
 private struct ProgressPhotosPage: View {
-    @Environment(ProgressPhotosModel.self) private var photos
-    @Environment(UserSettings.self) private var settings
-    @Environment(DailyMetricsModel.self) private var metrics
-    @Environment(MuscleModel.self) private var muscles
-    @Environment(VitalsModel.self) private var vitals
-    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
-
     var body: some View {
-        ProgressPhotosView(runAnalysis: analyze, pushed: true)
-    }
-
-    private func analyze() async {
-        let context = ProgressPhotosContext.text(settings: settings, metrics: metrics, sessions: sessions, muscles: muscles, vitals: vitals)
-        await photos.analyze(context: context, settings: settings)
-    }
-}
-
-/// Goal and data the weekly photo analysis relates the pictures to. Used here
-/// and by `RootView.progressContext()` (WorkoutAppApp.swift) for the weekly run.
-enum ProgressPhotosContext {
-    static func text(settings: UserSettings, metrics: DailyMetricsModel, sessions: [WorkoutSession],
-                     muscles: MuscleModel, vitals: VitalsModel) -> String {
-        var lines: [String] = []
-        lines.append("Sex: \(settings.sex.rawValue), age \(settings.age).")
-        lines.append(settings.goalsSet ? "Goal: \(settings.goals.title)." : "No goal set.")
-        if let weight = metrics.bodyMassKg { lines.append("Weight: \(weight.formatted(.number.precision(.fractionLength(1)))) kg.") }
-        if let weekly = metrics.weightTrendWeekly { lines.append("Weight trend: \(weekly.formatted(.number.precision(.fractionLength(2)))) kg/week (last 4 weeks).") }
-        if let maintenance = metrics.maintenance {
-            lines.append("Average intake \(whole(maintenance.averageIntake)) kcal vs measured maintenance \(whole(maintenance.maintenance)) kcal.")
-        }
-        if let target = metrics.calorieTarget { lines.append("Calorie target \(whole(target)) kcal/day.") }
-        if let protein = metrics.proteinTarget { lines.append("Protein target \(whole(protein)) g/day.") }
-        let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now
-        let recentSessions = sessions.filter { !$0.isActive && $0.startedAt >= cutoff }.count
-        lines.append("Gym sessions in the last 2 weeks: \(recentSessions).")
-        let weekly = muscles.states.values.filter { $0.weeklySets > 0 }
-            .sorted { $0.weeklySets > $1.weeklySets }
-            .map { "\($0.muscle.name) \($0.weeklySets.formatted(.number.precision(.fractionLength(0...1))))" }
-        if !weekly.isEmpty { lines.append("Hard sets per muscle this week: " + weekly.joined(separator: ", ") + ".") }
-        if let fat = vitals.stat("fat")?.value { lines.append("Smart-scale body fat: \(fat)%.") }
-        return lines.joined(separator: "\n")
+        ProgressPhotosView(pushed: true)
     }
 }

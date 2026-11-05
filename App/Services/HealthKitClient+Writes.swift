@@ -4,12 +4,11 @@ import AppCore
 
 /// Samples the app writes to Apple Health beyond workouts and blood pressure:
 /// paced-breathing sessions (mindful minutes), the morning mood (state of
-/// mind), the session RPE as a workout effort score, and quick-estimate
-/// meals flagged as estimates (docs/research/competitors.md item 7;
-/// nutrition.md option C).
+/// mind) and the session RPE as a workout effort score (docs/research/competitors.md item 7).
 nonisolated extension HealthKitClient {
-    /// Metadata key on dietary samples the app wrote from a Claude estimate,
-    /// so `estimateOnlyDays` can down-weight those days (`EstimatedIntake`).
+    /// Metadata key on dietary samples an earlier version of the app wrote as
+    /// AI meal estimates. The app no longer writes them, but `estimateOnlyDays`
+    /// still finds the old ones so `EstimatedIntake` can down-weight those days.
     static let estimateMetadataKey = "TensileEstimate"
 
     // MARK: Mindful minutes
@@ -80,35 +79,10 @@ nonisolated extension HealthKitClient {
             .min { abs($0.startDate.timeIntervalSince(start)) < abs($1.startDate.timeIntervalSince(start)) }
     }
 
-    // MARK: Quick-estimate meals
-
-    /// Saves a Claude meal estimate as dietary samples in a food correlation
-    /// under this app's source, with `estimate = true` in the metadata.
-    @concurrent
-    func saveDietaryEstimate(_ estimate: EstimatedIntake.Estimate, at date: Date) async throws {
-        let end = date.addingTimeInterval(1)
-        let metadata: [String: Any] = [
-            Self.estimateMetadataKey: true,
-            HKMetadataKeyFoodType: String(estimate.summary.prefix(80)),
-            "TensileEstimateConfidence": estimate.confidence,
-        ]
-        func sample(_ identifier: HKQuantityTypeIdentifier, _ value: Double, _ unit: HKUnit) -> HKQuantitySample {
-            HKQuantitySample(type: HKQuantityType(identifier), quantity: HKQuantity(unit: unit, doubleValue: max(0, value)),
-                             start: date, end: end, metadata: metadata)
-        }
-        let samples: Set<HKSample> = [
-            sample(.dietaryEnergyConsumed, estimate.calories, .kilocalorie()),
-            sample(.dietaryProtein, estimate.proteinGrams, .gram()),
-            sample(.dietaryCarbohydrates, estimate.carbsGrams, .gram()),
-            sample(.dietaryFatTotal, estimate.fatGrams, .gram()),
-            sample(.dietaryFiber, estimate.fibreGrams, .gram()),
-        ]
-        let correlation = HKCorrelation(type: HKCorrelationType(.food), start: date, end: end, objects: samples, metadata: metadata)
-        try await store.save(correlation)
-    }
+    // MARK: Estimated meals from earlier versions
 
     /// Days in the last `days` (today included) whose calorie entries were
-    /// all this app's estimates: no Cronometer or other source logged anything.
+    /// all this app's old AI estimates: no Cronometer or other source logged anything.
     @concurrent
     func estimateOnlyDays(days: Int) async throws -> Set<Date> {
         let calendar = Calendar.current

@@ -1,8 +1,8 @@
 import Foundation
 import AppCore
 
-/// Chat state for the Coach tab. Routes each message to the on-device model
-/// or to Claude, depending on Settings.
+/// Chat state for the Coach tab. Every message goes to Apple's on-device
+/// model (`OnDeviceCoach`); nothing leaves the iPhone.
 @Observable
 final class CoachModel {
     struct ChatMessage: Identifiable, Equatable {
@@ -20,11 +20,8 @@ final class CoachModel {
     var pendingQuestion: String?
 
     @ObservationIgnored private let onDevice = OnDeviceCoach()
-    @ObservationIgnored private let cloud: CloudCoach
 
-    init(cloud: CloudCoach) {
-        self.cloud = cloud
-    }
+    init() {}
 
     static let suggestions = [
         "How should I train today?",
@@ -79,7 +76,7 @@ final class CoachModel {
         return (focus, minutes)
     }
 
-    func send(_ text: String, snapshot: CoachSnapshot, settings: UserSettings, plan: PlannedWorkout? = nil) async {
+    func send(_ text: String, snapshot: CoachSnapshot, plan: PlannedWorkout? = nil) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isThinking else { return }
         messages.append(ChatMessage(role: .user, text: trimmed))
@@ -87,21 +84,7 @@ final class CoachModel {
         defer { isThinking = false }
 
         do {
-            let reply: String
-            switch settings.coachMode {
-            case .onDevice:
-                reply = try await onDevice.reply(to: trimmed, snapshot: snapshot, hasPlan: plan != nil)
-            case .cloud:
-                // Send the visible conversation (minus errors) so Claude keeps context.
-                let history = messages.compactMap { message -> CloudCoach.Message? in
-                    switch message.role {
-                    case .user: CloudCoach.Message(role: "user", content: message.text)
-                    case .coach: CloudCoach.Message(role: "assistant", content: message.text)
-                    case .error: nil
-                    }
-                }
-                reply = try await cloud.reply(history: history, snapshot: snapshot, settings: settings)
-            }
+            let reply = try await onDevice.reply(to: trimmed, snapshot: snapshot, hasPlan: plan != nil)
             messages.append(ChatMessage(role: .coach, text: reply, plan: plan))
         } catch {
             messages.append(ChatMessage(role: .error, text: error.localizedDescription))

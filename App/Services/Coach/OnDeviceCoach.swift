@@ -3,7 +3,7 @@ import FoundationModels
 import AppCore
 
 /// Coach powered by Apple's on-device model (Apple Intelligence). Free, private,
-/// works offline.
+/// works offline; the app has no cloud AI.
 ///
 /// The model is small (about 4,000 tokens of context, and unreliable at
 /// deciding when to call tools), so each question gets a fresh session with
@@ -20,7 +20,7 @@ final class OnDeviceCoach {
         case .available:
             return nil
         case .unavailable(.deviceNotEligible):
-            return "This iPhone doesn't support Apple Intelligence. Switch the coach to Claude in Settings."
+            return "The coach needs Apple Intelligence, which this iPhone doesn't support."
         case .unavailable(.appleIntelligenceNotEnabled):
             return "Turn on Apple Intelligence in the Settings app to use the on-device coach."
         case .unavailable(.modelNotReady):
@@ -109,11 +109,11 @@ final class OnDeviceCoach {
     static func friendly(_ error: Error) -> Error {
         guard let generation = error as? LanguageModelSession.GenerationError else {
             if error is CoachError { return error }
-            return CoachError.unavailable("The on-device coach couldn't answer that. Try again, or switch the coach to Claude in Settings › Coach.")
+            return CoachError.unavailable("The coach couldn't answer that. Try again, or word it differently.")
         }
         switch generation {
         case .guardrailViolation:
-            return CoachError.unavailable("Apple's on-device model declined that question; its safety filter is strict about health topics. Try wording it differently, or switch the coach to Claude in Settings › Coach.")
+            return CoachError.unavailable("Apple's on-device model declined that question; its safety filter is strict about health topics. Try wording it differently.")
         case .exceededContextWindowSize:
             return CoachError.unavailable("That was more than the on-device coach can handle at once. Try a shorter question, or tap New conversation.")
         case .assetsUnavailable:
@@ -121,7 +121,42 @@ final class OnDeviceCoach {
         case .rateLimited, .concurrentRequests:
             return CoachError.unavailable("The on-device coach is busy. Try again in a moment.")
         default:
-            return CoachError.unavailable("The on-device coach couldn't answer that. Try again, or switch the coach to Claude in Settings › Coach.")
+            return CoachError.unavailable("The coach couldn't answer that. Try again, or word it differently.")
         }
     }
+}
+
+/// Errors the coach shows in the chat, in plain words.
+enum CoachError: LocalizedError {
+    case unavailable(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable(let message): message
+        }
+    }
+}
+
+enum CoachPrompt {
+    // Autonomy-supportive coaching (self-determination theory: Teixeira et al.
+    // 2012; Ntoumanis et al. 2021; docs/research/behaviour-change.md rec. 5).
+    /// Instructions for Apple's on-device model. Each prompt brings its own
+    /// data block (`OnDeviceCoach.prompt`), so the model is told to answer
+    /// from that data and to stay on the question's topic.
+    /// Food guidance: about 20-40 g of protein (roughly 0.25-0.4 g/kg) in a
+    /// meal after training, with total daily protein mattering most (ISSN
+    /// position stands: Jäger et al., JISSN 2017; Kerksick et al., JISSN 2017
+    /// on nutrient timing; Morton et al., Br J Sports Med 2018 meta-analysis).
+    /// Quoted from memory; the wording stays cautious ("about", "helps").
+    static let onDeviceInstructions = """
+    You are a friendly, direct coach in a fitness app. Each message gives the user's data, then their QUESTION.
+    Answer that QUESTION, using the data given. If the data doesn't cover it, say so in one sentence and give general advice.
+    Never change the subject. A food question gets a food answer, never exercises.
+    Food: after training, a meal or snack with about 20-40 g of protein within a couple of hours helps muscles recover, \
+    with some carbs to refuel; the day's total protein matters more than exact timing. Use their protein target and what they've logged.
+    Recovery is 0-100% (under 34 an easy day, 34-66 normal, 67+ recovered). Strain is 0-100%.
+    If a planned workout is shown as a card, say in one or two sentences why it suits today; don't list exercises. Only mention equipment they have.
+    Keep answers under 100 words. Say "you could", never "you should", "you're behind" or "you missed". Low recovery is an easy day, not a failure.
+    You are not a doctor; for pain, illness or injury suggest seeing one.
+    """
 }

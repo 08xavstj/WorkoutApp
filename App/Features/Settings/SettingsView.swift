@@ -337,34 +337,18 @@ private struct NutritionSettingsSection: View {
 }
 
 private struct CoachSettingsSection: View {
-    @Environment(UserSettings.self) private var settings
-
     var body: some View {
-        @Bindable var settings = settings
         Section {
-            Picker("Coach", selection: $settings.coachMode) {
-                ForEach(CoachMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            if settings.coachMode == .onDevice, let message = OnDeviceCoach.availabilityMessage {
+            LabeledContent("Runs on", value: "This iPhone")
+            if let message = OnDeviceCoach.availabilityMessage {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(Theme.recoveryModerateText)
             }
-            if settings.coachMode == .cloud {
-                DisclosureGroup("Advanced") {
-                    TextField("Supabase URL (https://xyz.supabase.co)", text: $settings.supabaseURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    SecureField("Supabase anon key", text: $settings.supabaseAnonKey)
-                }
-            }
         } header: {
             Text("Coach")
         } footer: {
-            Text("On-device is free and private. Claude gives deeper answers and runs through the app's secure server.")
+            Text("The coach runs on your iPhone with Apple Intelligence; your data never leaves the device.")
         }
     }
 }

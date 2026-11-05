@@ -16,7 +16,6 @@ struct CoachView: View {
     @Environment(ConditionsModel.self) private var conditions
     @Environment(VitalsModel.self) private var vitals
     @Environment(MuscleModel.self) private var muscles
-    @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(WeeklyPlanStore.self) private var weeklyPlans
     @Environment(BodyMeasurementsStore.self) private var measurements
     @Environment(\.modelContext) private var modelContext
@@ -96,7 +95,7 @@ struct CoachView: View {
 
     /// What the coach knows and where it runs; the title is in the navigation bar.
     private var modeLine: some View {
-        Text("Knows today's data and your gym · \(settings.coachMode == .onDevice ? "on-device" : "Claude")")
+        Text("Knows today's data and your gym · on-device")
             .font(.subheadline)
             .foregroundStyle(Theme.secondaryText)
     }
@@ -235,7 +234,7 @@ struct CoachView: View {
         snapshot.weather = conditions.coachSummary(place: settings.placeName)
         snapshot.weeklyPlan = weeklyPlans.coachSummary(sessions: sessions, extra: metrics.recentTrainingDays)
         snapshot.health = healthSummary
-        await coach.send(text, snapshot: snapshot, settings: settings, plan: plan)
+        await coach.send(text, snapshot: snapshot, plan: plan)
     }
 }
 
@@ -305,9 +304,6 @@ extension CoachView {
         let tired = muscles.states.values.filter { $0.status == .fatigued }.map(\.muscle.name)
         if !tired.isEmpty { lines.append("Fatigued muscles: " + tired.sorted().joined(separator: ", ") + ".") }
         lines.append(contentsOf: habitLines)
-        if let analysis = progressPhotos.latestAnalysis {
-            lines.append("Latest progress-photo analysis (\(analysis.date.formatted(date: .abbreviated, time: .omitted))): " + String(analysis.text.prefix(700)))
-        }
         return lines.joined(separator: "\n")
     }
 }

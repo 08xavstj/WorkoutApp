@@ -35,22 +35,13 @@ nonisolated struct LabResult: Codable, Sendable, Identifiable, Equatable, Hashab
     }
 }
 
-/// A result read from a PDF, waiting for the user to check it.
-nonisolated struct LabDraft: Sendable, Identifiable, Equatable {
-    var id = UUID()
-    var result: LabResult
-    var include = true
-}
-
-/// Your lab results, stored as a file inside the app (not in iCloud Drive or
-/// Photos). PDFs are only sent to the server for reading and aren't stored there.
+/// Your lab results, typed in by hand and stored as a file inside the app
+/// (not in iCloud Drive or Photos). Nothing is sent anywhere.
 @Observable
 final class LabsModel {
     private(set) var results: [LabResult] = []
-    @ObservationIgnored private let cloud: CloudCoach
 
-    init(cloud: CloudCoach) {
-        self.cloud = cloud
+    init() {
         results = Self.load()
     }
 
@@ -76,7 +67,7 @@ final class LabsModel {
         save()
     }
 
-    /// Lines for the AI coach: the latest of each test, flagged when out of range.
+    /// Lines for the coach: the latest of each test, flagged when out of range.
     var coachSummary: [String]? {
         guard !results.isEmpty else { return nil }
         return latest.prefix(25).map { result in
@@ -85,70 +76,6 @@ final class LabsModel {
             if let status = result.status, status != .inRange { line += " — \(status.rawValue.lowercased())" }
             return line
         }
-    }
-
-    // MARK: Import
-
-    nonisolated private struct ImportReply: Decodable {
-        nonisolated struct Marker: Decodable {
-            let name: String
-            let value: Double
-            let unit: String?
-            let referenceLow: Double?
-            let referenceHigh: Double?
-            let date: String?
-            let panel: String?
-        }
-        let markers: [Marker]
-        let collectionDate: String?
-    }
-
-    enum ImportError: LocalizedError {
-        case tooLarge, unreadable, nothingFound
-
-        var errorDescription: String? {
-            switch self {
-            case .tooLarge: "That PDF is too large (over 8 MB). Try exporting just the results pages."
-            case .unreadable: "Couldn't read results from that file."
-            case .nothingFound: "No test results were found in that PDF."
-            }
-        }
-    }
-
-    /// Sends the PDF to the `labs` function, which reads the results with
-    /// Claude. Nothing is saved until you review the drafts.
-    func importPDF(_ data: Data, filename: String, sex: BiologicalSex, settings: UserSettings) async throws -> [LabDraft] {
-        guard data.count <= 8_000_000 else { throw ImportError.tooLarge }
-        let reply = try await cloud.extractLabs(pdfBase64: data.base64EncodedString(), filename: filename, settings: settings)
-        guard let json = reply.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode(ImportReply.self, from: json) else { throw ImportError.unreadable }
-        let fallbackDate = decoded.collectionDate.flatMap(Self.parseDate) ?? .now
-        let drafts = decoded.markers.map { marker -> LabDraft in
-            let catalog = LabMarkers.match(marker.name)
-            let unit = marker.unit ?? catalog?.units.first?.unit ?? ""
-            // Use the lab's range; fall back to the typical range for that unit.
-            var low = marker.referenceLow
-            var high = marker.referenceHigh
-            if low == nil && high == nil, let option = catalog?.units.first(where: { $0.unit.lowercased() == unit.lowercased() }) {
-                (low, high) = option.range(for: sex)
-            }
-            return LabDraft(result: LabResult(
-                name: marker.name, markerID: catalog?.id, value: marker.value, unit: unit,
-                referenceLow: low, referenceHigh: high,
-                date: marker.date.flatMap(Self.parseDate) ?? fallbackDate,
-                panel: marker.panel ?? catalog?.panel
-            ))
-        }
-        guard !drafts.isEmpty else { throw ImportError.nothingFound }
-        return drafts
-    }
-
-    nonisolated private static func parseDate(_ text: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: String(text.prefix(10)))
     }
 
     // MARK: Storage

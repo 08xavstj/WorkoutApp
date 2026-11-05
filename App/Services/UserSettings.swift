@@ -47,22 +47,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
-enum CoachMode: String, CaseIterable, Identifiable {
-    /// Apple's on-device model: free and private, needs Apple Intelligence.
-    case onDevice
-    /// Claude through your Supabase Edge Function.
-    case cloud
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .onDevice: "On-device (Apple Intelligence)"
-        case .cloud: "Claude (cloud)"
-        }
-    }
-}
-
 /// Settings saved in UserDefaults. Read and write through this object so views update.
 @Observable
 final class UserSettings {
@@ -84,10 +68,7 @@ final class UserSettings {
         }
     }
     var weightUnit: WeightUnit { didSet { defaults.set(weightUnit.rawValue, forKey: "weightUnit") } }
-    var coachMode: CoachMode { didSet { defaults.set(coachMode.rawValue, forKey: "coachMode") } }
     var appearance: AppAppearance { didSet { defaults.set(appearance.rawValue, forKey: "appearance") } }
-    var supabaseURL: String { didSet { defaults.set(supabaseURL, forKey: "supabaseURL") } }
-    var supabaseAnonKey: String { didSet { defaults.set(supabaseAnonKey, forKey: "supabaseAnonKey") } }
     var hasOnboarded: Bool { didSet { defaults.set(hasOnboarded, forKey: "hasOnboarded") } }
     /// Used when Apple Health has no height. 0 = not set.
     var heightCm: Double { didSet { defaults.set(heightCm, forKey: "heightCm") } }
@@ -109,8 +90,6 @@ final class UserSettings {
     /// Weight and training goals (see GoalsView).
     var goals: Goals { didSet { if let data = try? JSONEncoder().encode(goals) { defaults.set(data, forKey: "goals") } } }
     var goalsSet: Bool { didSet { defaults.set(goalsSet, forKey: "goalsSet") } }
-    /// Claude compares progress photos once a week.
-    var weeklyPhotoAnalysis: Bool { didSet { defaults.set(weeklyPhotoAnalysis, forKey: "weeklyPhotoAnalysis") } }
     /// Hours of sleep you need a night (for the sleep score and sleep debt). Adults: 7+.
     var sleepNeedHours: Double { didSet { defaults.set(sleepNeedHours, forKey: "sleepNeedHours") } }
     /// Rest mode (sick or resting) is on until this time.
@@ -167,10 +146,7 @@ final class UserSettings {
         learnedMaxHeartRate = defaults.data(forKey: "learnedMaxHeartRate")
             .flatMap { try? JSONDecoder().decode(ObservedMaxHeartRate.Learned.self, from: $0) }
         weightUnit = WeightUnit(rawValue: defaults.string(forKey: "weightUnit") ?? "") ?? .pounds
-        coachMode = CoachMode(rawValue: defaults.string(forKey: "coachMode") ?? "") ?? .onDevice
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .light
-        supabaseURL = defaults.string(forKey: "supabaseURL") ?? ""
-        supabaseAnonKey = defaults.string(forKey: "supabaseAnonKey") ?? ""
         hasOnboarded = defaults.bool(forKey: "hasOnboarded")
         heightCm = defaults.double(forKey: "heightCm")
         weightKg = defaults.double(forKey: "weightKg")
@@ -184,7 +160,6 @@ final class UserSettings {
         longitude = defaults.double(forKey: "longitude")
         goals = defaults.data(forKey: "goals").flatMap { try? JSONDecoder().decode(Goals.self, from: $0) } ?? Goals()
         goalsSet = defaults.bool(forKey: "goalsSet")
-        weeklyPhotoAnalysis = defaults.object(forKey: "weeklyPhotoAnalysis") as? Bool ?? false
         let need = defaults.double(forKey: "sleepNeedHours")
         sleepNeedHours = need >= 6 && need <= 11 ? need : 8
         restModeUntil = defaults.object(forKey: "restModeUntil") as? Date

@@ -234,13 +234,4 @@ struct EstimatedIntakeTests {
         #expect(weighted.allSatisfy { $0.value == 2000 })
         #expect(EstimatedIntake.downWeight(intake, estimatedOnlyDays: []) == intake)
     }
-
-    @Test func plausibilityAndRangeText() {
-        let estimate = EstimatedIntake.Estimate(summary: "Chicken and rice", calories: 650, proteinGrams: 45, carbsGrams: 70, fatGrams: 15, fibreGrams: 4, confidence: "medium")
-        #expect(estimate.isPlausible)
-        #expect(estimate.calorieRangeText == "about 650 kcal (455-845)")
-        let silly = EstimatedIntake.Estimate(summary: "", calories: 9000, proteinGrams: 10, carbsGrams: 10, fatGrams: 10, fibreGrams: 0, confidence: "low")
-        #expect(!silly.isPlausible)
-        #expect(EstimatedIntake.caveat.contains("±30%"))
-    }
 }

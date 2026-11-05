@@ -16,10 +16,10 @@ Five tabs: **Today**, **Fitness**, **Coach**, **Health** and **Log**. Settings o
 | **Fitness** | A week strip of daily strain, then **This week**: the weekly plan with today's session and Start, consistency and the weekly Review. Below it, today's strain gauge with today's range, activities (logged lifts plus Garmin/other workouts) and heart-rate zones; cardio and muscular **training load** (7-day vs 28-day); Progress (muscles and hard sets, cardio fitness, strength); and Workouts (**Saved workouts** and **History**) |
 | **Trainer** | **Start workout** (Log tab, or Start on Fitness › This week) builds a session from your **gym equipment** (bar weights, plate pairs, dumbbell/kettlebell sets and machine/cable increments; set up in Settings, or from the builder's toolbar). It picks exercises you can do there, sets reps and effort from your recovery, and suggests weights from your lift history **rounded to what you can actually load**, progressing by your gym's smallest jump. Swap any exercise; see plate loading per side. **Empty workout** and **Saved workouts** sit under Start workout on the Log tab |
 | **Live workout** | Timer, live strain added, rest pill (−15s/+15s/Skip), previous sets, "New PR" badges, plate-loading hints, finished and upcoming exercises collapsed. While it runs, a bar above the tabs shows it so you can go back in |
-| **Coach** | Chat that knows your scores, food, calories, gym and lifts; training questions come back with a ready-to-start workout card. On-device (Apple Intelligence) or Claude |
+| **Coach** | Chat that knows your scores, food, calories, gym and lifts; training questions come back with a ready-to-start workout card. Runs on the iPhone with Apple Intelligence; nothing leaves the device |
 | **Health** | 90-day HRV baseline chart, key measures (including body age) and every stat Apple Health has, grouped by category under All measures: resting, sleeping and walking heart rate, heart-rate recovery (measured after workouts), a heart-rate stress estimate, VO₂ max, blood oxygen, respiration, temperature, mindful minutes, steps, distance, floors, intensity minutes, active/resting energy, weight, body fat, BMI, lean mass, blood pressure, water and protein. **Records** (lab results, blood pressure, body measurements, progress photos, medications) and **Patterns** (what affects you, alcohol and your sleep, vitamins and minerals) |
-| **Log** | Start workout at the top, with Empty workout and Saved workouts under it; then overnight HRV, meals (estimated from a description or photo), drinks, blood pressure, progress photos, waist and grip, and lab results |
-| **Progress photos** | Front and side photos (Log › Progress photo; history in Health › Records) kept only inside the app (encrypted, never in the Photos library), a before/after slider and timeline, and a weekly Claude analysis (`supabase/functions/progress`) that relates visible changes to your goal, weight trend, calories, protein and training |
+| **Log** | Start workout at the top, with Empty workout and Saved workouts under it; then overnight HRV, drinks, blood pressure, progress photos, waist and grip, and lab results (typed in) |
+| **Progress photos** | Front and side photos (Log › Progress photo; history in Health › Records) kept only inside the app (encrypted, never in the Photos library), a before/after slider and timeline. They never leave the iPhone |
 
 ### Calories burned (`EnergyCalculator`)
 
@@ -96,21 +96,9 @@ Cronometer has no public API (it only gives API access to selected partners), bu
 
 Food you log shows up in the Nutrition card on Today and the coach uses it. For example, it can tell you that you ate too little protein after a high-strain day. If Cronometer doesn't send a nutrient (some users report carbs or fiber dropping out), that field shows "--".
 
-## Turn on the Claude coach (optional)
+## The coach
 
-The on-device coach works with no setup on iPhones that support Apple Intelligence. For Claude:
-
-1. Create a Supabase project (or use an existing one). In **Authentication → Sign In / Providers**, turn on **Allow anonymous sign-ins**.
-2. Install the Supabase CLI (`brew install supabase/tap/supabase`), then from this repo:
-   ```bash
-   supabase link --project-ref <your-project-ref>
-   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-   supabase functions deploy coach
-   supabase functions deploy progress   # weekly progress-photo analysis
-   ```
-3. In the app: profile button (top right) → **Settings** → **AI coach** → **Claude**, paste your project URL and anon key.
-
-The function uses `claude-opus-5-5` at low effort (change `MODEL` and `effort` in `supabase/functions/coach/index.ts`). Every user signs in anonymously, so before you share the app widely, add rate limiting or Sign in with Apple. Anyone with the anon key could otherwise run up your Anthropic bill.
+The coach runs on Apple's on-device model (Apple Intelligence) and needs no setup or account. It works on iPhones that support Apple Intelligence, with it turned on in the Settings app; the app has no cloud AI, and nothing you type leaves the phone.
 
 ## Project layout
 
@@ -120,14 +108,13 @@ App/                        iPhone app (SwiftUI + SwiftData)
   Design/                   Theme colors, score rings, cards
   Models/                   SwiftData models: WorkoutSession, ExerciseLog, SetLog
   Services/                 HealthKit, daily scores, exercise library, settings
-  Services/Coach/           On-device (Foundation Models) and Claude coaches
+  Services/Coach/           On-device coach (Foundation Models)
   Features/                 Today, Fitness, Coach, Health, Log, Workout, Trainer, Settings screens
   Resources/exercises.json  Exercise library (free-exercise-db, public domain)
 Watch/                      Apple Watch app (SwiftUI + HealthKit + WatchConnectivity)
 WatchWidgets/               Apple Watch complications (WidgetKit)
 Shared/                     Code the app, widget and Watch share (WatchSession is the wrist's session model)
 Packages/AppCore/           Strain/recovery/sleep math + tests (no UI, no HealthKit)
-supabase/functions/coach/   Claude proxy (Deno/TypeScript)
 .claude/skills/             Claude Code skills for this project
 .github/workflows/ios.yml   CI: runs tests and builds the app on macOS
 ```

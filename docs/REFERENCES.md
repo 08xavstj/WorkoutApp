@@ -5,7 +5,6 @@
 | Project | License | How it's used |
 |---|---|---|
 | [yuhonas/free-exercise-db](https://github.com/yuhonas/free-exercise-db) | Unlicense (public domain) | `App/Resources/exercises.json` (stretches removed). Images load from its GitHub repo at runtime. |
-| [@anthropic-ai/sdk](https://www.npmjs.com/package/@anthropic-ai/sdk) | MIT | Claude calls in `supabase/functions/coach` |
 
 Apple frameworks: SwiftUI, SwiftData, HealthKit, Foundation Models.
 
@@ -18,7 +17,7 @@ Run `scripts/fetch-references.sh` to clone these into `references/` (git-ignored
 | [xtool-org/xtool](https://github.com/xtool-org/xtool) | MIT | Build/install iOS apps without Xcode (Linux/Windows). Optional now that you have a Mac. |
 | [StanfordSpezi/SpeziHealthKit](https://github.com/StanfordSpezi/SpeziHealthKit) | MIT | Robust HealthKit querying patterns. Not a dependency: it requires the whole Spezi framework, and plain HealthKit covers this app. |
 | [rudrankriyam/Foundation-Models-Framework-Example](https://github.com/rudrankriyam/Foundation-Models-Framework-Example) | MIT | Current Foundation Models API usage (tools, sessions, errors), including a Health tool |
-| [jamesrochabrun/SwiftAnthropic](https://github.com/jamesrochabrun/SwiftAnthropic) | MIT | Swift Claude client. Not used: the app talks to its own server so the API key stays off the phone. |
+| [jamesrochabrun/SwiftAnthropic](https://github.com/jamesrochabrun/SwiftAnthropic) | MIT | Swift Claude client. Not used: the coach is on-device only, with no cloud AI. |
 | [madebysan/aura-health](https://github.com/madebysan/aura-health) | MIT | HealthKit + AI insights app, chart ideas |
 | [karimknaebel/Iron](https://github.com/karimknaebel/Iron) | **GPL-3.0** | Polished SwiftUI lifting tracker. Don't copy code, since GPL would apply to the whole app. |
 | [RyanCwynar/gym](https://github.com/RyanCwynar/gym) | **No license** | SwiftUI + SwiftData gym logger. All rights reserved; ideas only. |

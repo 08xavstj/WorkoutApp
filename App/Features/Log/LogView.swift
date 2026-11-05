@@ -16,7 +16,6 @@ struct LogView: View {
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(AppRouter.self) private var router
     @State private var showingSavedWorkouts = false
-    @State private var showingFoodEstimate = false
     @State private var showingLabs = false
 
     var body: some View {
@@ -43,19 +42,15 @@ struct LogView: View {
             .navigationTitle("Log")
             .tabToolbar()
             .navigationDestination(isPresented: $showingSavedWorkouts) { MyWorkoutsView() }
-            .sheet(isPresented: $showingFoodEstimate) { FoodEstimateView() }
             .sheet(isPresented: $showingLabs) { LabsView() }
         }
     }
 
-    /// Daily logs first (HRV, meal, drinks), then weekly, monthly, yearly.
+    /// Daily logs first (HRV, drinks), then weekly, monthly, yearly.
     private var logSection: some View {
         Section("Log") {
             Button { router.showHRVEntry = true } label: {
                 LogRow(title: "Overnight HRV", detail: "Type it or measure with the camera", icon: "waveform.path.ecg")
-            }
-            Button { showingFoodEstimate = true } label: {
-                LogRow(title: "Meal", detail: "Estimate from a description or photo", icon: "fork.knife", color: Theme.nutrition)
             }
             NavigationLink {
                 AlcoholLogView()
@@ -72,7 +67,7 @@ struct LogView: View {
                 LogRow(title: "Waist & grip", detail: "Monthly waist, grip twice a year", icon: "ruler")
             }
             Button { showingLabs = true } label: {
-                LogRow(title: "Lab results", detail: "Enter by hand or import a PDF", icon: "testtube.2")
+                LogRow(title: "Lab results", detail: "Type in results from your report", icon: "testtube.2")
             }
         }
     }

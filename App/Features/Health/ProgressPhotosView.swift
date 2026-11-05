@@ -1,33 +1,29 @@
 import SwiftUI
 import UIKit
 
-/// Daily front and side photos, a before/after slider, a timeline and the
-/// weekly Claude analysis. Photos stay inside the app.
+/// Daily front and side photos, a before/after slider and a timeline.
+/// Photos stay inside the app and never leave the iPhone.
 ///
 /// Pushed from Health › Records (`pushed: true`); a root sheet from the Log
 /// tab, reminders and workoutapp://photos.
 struct ProgressPhotosView: View {
     @Environment(ProgressPhotosModel.self) private var photos
-    @Environment(UserSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @State private var capturing: ProgressPhotosModel.Pose?
     @State private var comparePose: ProgressPhotosModel.Pose = .front
     @State private var compareDay: String?
     @State private var viewing: ProgressPhotosModel.Entry?
-    let runAnalysis: () async -> Void
     /// True when pushed onto another NavigationStack.
     var pushed = false
 
     var body: some View {
-        @Bindable var settings = settings
         SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     todayCard
                     if photos.days.count >= 2 { compareCard }
-                    analysisCard(weekly: $settings.weeklyPhotoAnalysis)
                     if !photos.days.isEmpty { timeline }
-                    Text("Photos are saved only inside Tensile, encrypted on your iPhone, and never added to your Photos library. For the weekly analysis, the photos being compared are sent to Claude through the app's secure server for that one request and aren't stored there.")
+                    Text("Photos are saved only inside Tensile, encrypted on your iPhone. They're never added to your Photos library or sent anywhere.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -146,58 +142,6 @@ struct ProgressPhotosView: View {
             }
         }
         .card(tint: Theme.sleep)
-    }
-
-    // MARK: Analysis
-
-    private func analysisCard(weekly: Binding<Bool>) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                CardLabel(text: "Weekly analysis", color: Theme.oxygen)
-                Spacer()
-                if photos.isAnalyzing { ProgressView() }
-            }
-            if let analysis = photos.latestAnalysis {
-                Text(analysis.date.formatted(date: .abbreviated, time: .omitted) + " · compared " + analysis.comparedDays.map(label).joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                Text(analysis.text)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.primaryText)
-            } else {
-                Text("Once you have photos at least 5 days apart, Claude compares them each week with your goal, weight trend, calories, protein and training, and suggests what to adjust.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            if let error = photos.analysisError {
-                Text(error).font(.caption).foregroundStyle(Theme.recoveryModerateText)
-            }
-            Toggle("Analyze automatically each week", isOn: weekly)
-                .font(.subheadline)
-            Button {
-                Task { await runAnalysis() }
-            } label: {
-                Label("Analyze now", systemImage: "sparkles")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.oxygen)
-            .disabled(photos.isAnalyzing || photos.comparisonDays() == nil)
-            if photos.analyses.count > 1 {
-                DisclosureGroup("Earlier analyses") {
-                    ForEach(photos.analyses.sorted { $0.date > $1.date }.dropFirst()) { analysis in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(analysis.date.formatted(date: .abbreviated, time: .omitted))
-                                .font(.caption.weight(.semibold))
-                            Text(analysis.text).font(.caption)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .font(.subheadline)
-            }
-        }
-        .card(tint: Theme.oxygen)
     }
 
     // MARK: Timeline

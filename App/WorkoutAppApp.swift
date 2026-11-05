@@ -42,11 +42,9 @@ struct WorkoutAppApp: App {
             }
         }
         _recorder = State(initialValue: LiveWorkoutRecorder(store: health.store))
-        // One Claude client (and one signed-in Supabase user) for the coach and photo analysis.
-        let cloud = CloudCoach()
-        _coach = State(initialValue: CoachModel(cloud: cloud))
-        _progressPhotos = State(initialValue: ProgressPhotosModel(cloud: cloud))
-        _labs = State(initialValue: LabsModel(cloud: cloud))
+        _coach = State(initialValue: CoachModel())
+        _progressPhotos = State(initialValue: ProgressPhotosModel())
+        _labs = State(initialValue: LabsModel())
         // Notification taps and "Taken" buttons arrive through the router.
         let router = AppRouter()
         _router = State(initialValue: router)
@@ -144,7 +142,6 @@ struct RootView: View {
     @Environment(CheckInStore.self) private var checkIns
     @Environment(MuscleModel.self) private var muscles
     @Environment(ConditionsModel.self) private var conditions
-    @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(WeeklyPlanStore.self) private var weeklyPlans
     @Environment(BodyMeasurementsStore.self) private var measurements
     @Environment(ExerciseLibrary.self) private var library
@@ -198,7 +195,7 @@ struct RootView: View {
             MedicationsView()
         }
         .sheet(isPresented: $router.showProgressPhotos) {
-            ProgressPhotosView(runAnalysis: analyzeProgressPhotos)
+            ProgressPhotosView()
         }
         .sheet(item: $router.checkIn, onDismiss: scheduleCheckInReminders) { kind in
             CheckInView(kind: kind)
@@ -333,13 +330,6 @@ struct RootView: View {
         conditions.heatAcclimation = HeatAdvice.acclimation(hotDays: conditions.hotDays, trainingDays: metrics.recentTrainingDays)
         conditions.heatTrainingDays = conditions.heatAcclimation.heatTrainingDays
         metrics.heatAdjustment = HeatAdvice.targetAdjustment(wbgtC: conditions.forecastWBGT, acclimation: conditions.heatAcclimation)
-        // Weekly photo analysis, only if turned on, Claude is set up and it's due.
-        // Runs on its own so a slow upload doesn't hold up the rest of the refresh.
-        if settings.weeklyPhotoAnalysis, !settings.supabaseURL.isEmpty, !settings.supabaseAnonKey.isEmpty,
-           progressPhotos.isAnalysisDue, !progressPhotos.isAnalyzing {
-            let context = progressContext()
-            Task { await progressPhotos.analyze(context: context, settings: settings) }
-        }
         await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
         let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
         Reminders.updateWidget(WidgetSnapshot(
@@ -358,16 +348,6 @@ struct RootView: View {
         // recording was deleted in Apple Health goes too. Removing one changes the
         // finished count, which refreshes the scores again (`WorkoutLinker`).
         await WorkoutLinker.dropDeletedWatchWorkouts(sessions, health: health, context: modelContext)
-    }
-
-    private func analyzeProgressPhotos() async {
-        await progressPhotos.analyze(context: progressContext(), settings: settings)
-    }
-
-    /// Goal and data the photo analysis relates the pictures to. One helper,
-    /// shared with Health › Records › Progress photos (`ProgressPhotosContext`).
-    private func progressContext() -> String {
-        ProgressPhotosContext.text(settings: settings, metrics: metrics, sessions: sessions, muscles: muscles, vitals: vitals)
     }
 
     // MARK: - Reminders: one morning, one evening, workouts before planned slots only

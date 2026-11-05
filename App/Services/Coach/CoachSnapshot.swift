@@ -2,7 +2,7 @@ import Foundation
 import AppCore
 
 /// Everything the AI coach is allowed to know, as plain values. Built on the
-/// main actor, then handed to the model (on-device tools or the cloud function).
+/// main actor, then written into the on-device model's prompt.
 nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     nonisolated struct Workout: Codable, Sendable, Equatable {
         var date: Date

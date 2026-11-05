@@ -20,6 +20,6 @@ iPhone app (iOS 26+, Swift 6.2, SwiftUI, SwiftData, HealthKit, Foundation Models
 - Scroll content gets `.lockedToScreenWidth()` so pages never pan sideways.
 - The trainer (`WorkoutPlanner`, `GymProfile` in AppCore) must only plan exercises the user's gym supports and loads they can make with their plates/dumbbells/stacks.
 - Use the installed skills: `swiftui-pro`, `swiftdata-pro`, `swift-concurrency-pro`, `swift-testing-pro`, `foundation-models-on-device` (its `ToolOutput` example is outdated; return `String` from `Tool.call`).
-- The Anthropic API key lives only in Supabase secrets. The app never calls api.anthropic.com directly.
+- The app has no cloud AI. The coach runs only on Apple's on-device model (FoundationModels); nothing the user types or photographs leaves the iPhone.
 - Don't copy code from GPL or unlicensed reference repos (see docs/REFERENCES.md).
 - Don't use Bevel's or Whoop's names, logos or assets.
