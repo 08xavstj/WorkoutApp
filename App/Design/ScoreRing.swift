@@ -102,11 +102,15 @@ struct ScoreRing: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
                 if let subtitle {
+                    // Centred when it wraps under a narrow ring ("Rest day · up to 25%").
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .frame(maxWidth: .infinity)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title): \(value)\(unit)")
