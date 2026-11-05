@@ -101,7 +101,9 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     /// goals and targets line first when `goalsFirst` (food questions need it),
     /// then the other extras while they fit.
     func onDeviceSummary(budget: Int, goalsFirst: Bool = false) -> String {
-        var lines = coreLines
+        // The core numbers always go in, each cut to `lineLimit` (the check-in
+        // notes can run long); extras fill what's left of the budget.
+        var lines = coreLines.map(Self.shortened)
         var used = lines.reduce(0) { $0 + $1.count }
         var extras = extraLines
         if goalsFirst, let health, let index = extras.firstIndex(of: health) {
@@ -109,12 +111,19 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
             extras.insert(health, at: 0)
         }
         for line in extras {
-            let piece = line.count > 600 ? String(line.prefix(600)) + "…" : line
+            let piece = Self.shortened(line)
             guard used + piece.count <= budget else { continue }
             lines.append(piece)
             used += piece.count
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// Longest single line in the on-device prompt, in characters.
+    static let lineLimit = 600
+
+    static func shortened(_ line: String) -> String {
+        line.count > lineLimit ? String(line.prefix(lineLimit)) + "…" : line
     }
 
     /// Characters, roughly 3-4 per token.
@@ -194,8 +203,9 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
 
     var trainerSummary: String {
         var parts: [String] = []
-        if let gym { parts.append(gym) }
-        if let suggestedWorkout { parts.append("Suggested session (weights already rounded to the user's plates/dumbbells):\n\(suggestedWorkout)") }
+        // Both capped so a big gym or a long session can't crowd out the question.
+        if let gym { parts.append(Self.capped(gym, 600)) }
+        if let suggestedWorkout { parts.append("Suggested session (weights already rounded to the user's plates/dumbbells):\n\(Self.capped(suggestedWorkout, 1000))") }
         return parts.isEmpty ? "No gym set up yet." : parts.joined(separator: "\n")
     }
 

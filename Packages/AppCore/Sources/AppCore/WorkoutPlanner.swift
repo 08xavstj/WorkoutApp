@@ -80,6 +80,20 @@ public enum WorkoutFocus: String, Codable, Sendable, CaseIterable, Identifiable 
         }
     }
 
+    /// The seventh movement for a long session (`WorkoutPlanner.longSessionMinutes`):
+    /// a pattern the focus hasn't covered, else a second exercise for its
+    /// biggest muscle (the planner then picks a different exercise for it).
+    public var extraSlot: MovementSlot {
+        switch self {
+        case .push: .horizontalPress   // second chest exercise
+        case .pull: .horizontalRow     // second back exercise
+        case .legs: .squat             // second quad/glute exercise
+        case .upper: .lateralRaise     // side delts aren't in the six
+        case .lower: .legExtension
+        case .fullBody: .verticalPull
+        }
+    }
+
     var groups: Set<MuscleGroup> {
         Set(slots.map(\.muscleGroup)).subtracting([.core])
     }
@@ -205,6 +219,37 @@ public enum ExerciseCatalog {
         ]
     ]
 
+    /// Muscles a movement pattern trains, primary first, in plain words for
+    /// the plan. The app's exercise library (free-exercise-db) has the
+    /// per-exercise list and overlays this where it knows the exercise.
+    public static func muscles(for slot: MovementSlot) -> [String] {
+        switch slot {
+        case .horizontalPress: ["Chest", "Shoulders", "Triceps"]
+        case .inclinePress: ["Upper chest", "Shoulders", "Triceps"]
+        case .verticalPress: ["Shoulders", "Triceps", "Upper chest"]
+        case .chestFly: ["Chest"]
+        case .lateralRaise: ["Side delts"]
+        case .triceps: ["Triceps"]
+        case .verticalPull: ["Lats", "Biceps", "Upper back"]
+        case .horizontalRow: ["Lats", "Upper back", "Biceps"]
+        case .rearDelt: ["Rear delts", "Upper back"]
+        case .biceps: ["Biceps"]
+        case .hammerCurl: ["Biceps", "Forearms"]
+        case .squat: ["Quads", "Glutes", "Core"]
+        case .hinge: ["Hamstrings", "Glutes", "Lower back"]
+        case .singleLeg: ["Quads", "Glutes"]
+        case .legCurl: ["Hamstrings"]
+        case .legExtension: ["Quads"]
+        case .calves: ["Calves"]
+        case .core: ["Core"]
+        }
+    }
+
+    /// Muscles for a catalog exercise (primary first); empty for an unknown one.
+    public static func muscles(forExerciseID exerciseID: String) -> [String] {
+        slot(for: exerciseID).map(muscles(for:)) ?? []
+    }
+
     /// The slot an exercise belongs to, if it's in the catalog.
     public static func slot(for exerciseID: String) -> MovementSlot? {
         for (slot, list) in options where list.contains(where: { $0.id == exerciseID }) {
@@ -256,6 +301,10 @@ public struct PlannedExercise: Codable, Sendable, Equatable, Identifiable {
 }
 
 extension PlannedExercise {
+    /// Muscles this exercise trains, primary first (`ExerciseCatalog.muscles`);
+    /// empty for an exercise outside the catalog.
+    public var muscles: [String] { ExerciseCatalog.muscles(forExerciseID: exerciseID) }
+
     /// "2-3 reps in reserve": how many more reps you could do at the end of each set.
     public var repsInReserve: String {
         let reserve = max(0, 10 - rpe)
@@ -276,9 +325,23 @@ public struct PlannedWorkout: Codable, Sendable, Equatable {
     public var unit: LoadUnit
     /// The training-block week this session was planned in, if any.
     public var blockWeek: TrainingBlock.WeekState? = nil
+    /// Why this session today, in one or two short sentences (`WorkoutPlanner.rationale`).
+    public var rationale: String = ""
 
     /// True when at least one superset was made to fit the time.
     public var hasSupersets: Bool { exercises.contains { $0.supersetGroup != nil } }
+
+    /// Every muscle the session trains, in the order it first appears, no repeats.
+    public var musclesCovered: [String] {
+        var seen: [String] = []
+        for muscle in exercises.flatMap(\.muscles) where !seen.contains(muscle) {
+            seen.append(muscle)
+        }
+        return seen
+    }
+
+    /// Working sets across the session.
+    public var totalSets: Int { exercises.reduce(0) { $0 + $1.sets } }
 }
 
 public struct WorkoutPlanner: Sendable {
@@ -359,7 +422,7 @@ public struct WorkoutPlanner: Sendable {
         history: [String: ExerciseHistory]
     ) -> PlannedExercise {
         let compound = slot.isCompound
-        let sets = compound ? (minutes <= 30 ? 3 : 4) : 3
+        let sets = Self.baseSets(compound: compound, minutes: minutes)
         // Effort: big lifts stop 2-3 reps short of failure; small lifts go
         // closer, since muscle growth benefits from proximity to failure while
         // strength barely does and failure adds fatigue (Robinson et al., Sports Med 2024).
@@ -400,19 +463,27 @@ public struct WorkoutPlanner: Sendable {
     /// multiplier (`TrainingBlock.scaledSets`) and the effort comes from its
     /// RIR target, still lowered on a low-recovery day. Sessions that overrun
     /// the time are trimmed, paired into supersets, then shortened (`fit`),
-    /// and compound lifts get warm-up ramp sets (`WarmUp`).
+    /// and compound lifts get warm-up ramp sets (`WarmUp`). Long sessions
+    /// (`longSessionMinutes`) add the focus's `extraSlot` and a fourth set on
+    /// isolation work. `focusReason` ("because of the soreness you reported")
+    /// goes into the plan's `rationale`.
     public func plan(
         focus: WorkoutFocus,
         minutes: Int,
         recovery: Int?,
         history: [String: ExerciseHistory],
-        block: TrainingBlock.WeekState? = nil
+        block: TrainingBlock.WeekState? = nil,
+        focusReason: String? = nil
     ) -> PlannedWorkout {
         let rpe = Self.targetRPE(recovery: recovery, block: block)
-        let exerciseCount = minutes <= 30 ? 4 : (minutes <= 45 ? 5 : 6)
+        let exerciseCount = Self.exerciseCount(minutes: minutes)
+        let slots = minutes >= Self.longSessionMinutes ? focus.slots + [focus.extraSlot] : focus.slots
         var exercises: [PlannedExercise] = []
-        for slot in focus.slots {
-            guard exercises.count < exerciseCount, let choice = choose(slot) else { continue }
+        for slot in slots {
+            // A repeated slot (the long session's extra) gets a different exercise.
+            let used = Set(exercises.map(\.exerciseID))
+            guard exercises.count < exerciseCount,
+                  let choice = alternatives(for: slot).first(where: { !used.contains($0.id) }) else { continue }
             var planned = prescribe(choice, slot: slot, minutes: minutes, sessionRPE: rpe, history: history)
             if let block {
                 planned.sets = TrainingBlock.scaledSets(planned.sets, multiplier: block.setMultiplier)
@@ -423,7 +494,58 @@ public struct WorkoutPlanner: Sendable {
         addWarmUps(&exercises)
         var workout = PlannedWorkout(focus: focus, title: focus.title, minutes: minutes, targetRPE: rpe, exercises: exercises, unit: gym.unit)
         workout.blockWeek = block
+        workout.rationale = Self.rationale(focus: focus, focusReason: focusReason, minutes: minutes, recovery: recovery,
+                                           rpe: rpe, block: block, exercises: exercises)
         return workout
+    }
+
+    /// From here up a session is "long": a seventh exercise and four sets on
+    /// isolation work too, so 75 minutes buys more than 60 does.
+    public static let longSessionMinutes = 75
+
+    /// Exercises per session by the time picked: 4 up to 30 min, 5 to 45, 6
+    /// to 60, 7 from `longSessionMinutes`. `fit` trims whatever overruns.
+    public static func exerciseCount(minutes: Int) -> Int {
+        if minutes >= longSessionMinutes { return 7 }
+        return minutes <= 30 ? 4 : (minutes <= 45 ? 5 : 6)
+    }
+
+    /// Working sets per exercise before a block week scales them and `fit`
+    /// trims them. More weekly hard sets per muscle grow more muscle (dose-
+    /// response, about 10+ sets/muscle/week: Schoenfeld, Ogborn & Krieger, J
+    /// Sports Sci 2017; still rising with diminishing returns past about 20:
+    /// Pelland et al., Sports Med 2026), so a longer session adds sets rather
+    /// than only rest. The cap of four per exercise, and so about 6-8 sets per
+    /// muscle in one session, is the app's choice: the meta-analyses are about
+    /// weekly totals, and spreading sets over the week is as good or better
+    /// than piling them into one session (Schoenfeld, Grgic & Krieger, J Sports
+    /// Sci 2019, frequency meta-analysis; see `TrainingDayPlanner`). Short
+    /// sessions give the big lifts 3 sets.
+    public static func baseSets(compound: Bool, minutes: Int) -> Int {
+        if minutes >= longSessionMinutes { return 4 }
+        return compound ? (minutes <= 30 ? 3 : 4) : 3
+    }
+
+    /// Why this session today: the focus and its muscles, the effort from
+    /// recovery (and the block week), then what the time bought.
+    static func rationale(focus: WorkoutFocus, focusReason: String?, minutes: Int, recovery: Int?,
+                          rpe: Double, block: TrainingBlock.WeekState?, exercises: [PlannedExercise]) -> String {
+        var parts: [String] = []
+        let why = focusReason.map { " \($0)" } ?? ""
+        parts.append("\(focus.title)\(why): \(focus.muscles.lowercased()).")
+        let effort = "effort \(rpe.formatted())/10"
+        if let block {
+            parts.append("\(block.label): \(effort)" + (recovery.map { $0 < 67 ? ", eased for \($0)% recovery." : "." } ?? "."))
+        } else if let recovery {
+            let mood = recovery < 34 ? "an easy day" : (recovery < 67 ? "a normal day" : "a day to push")
+            parts.append("Recovery \(recovery)%, \(mood): \(effort).")
+        } else {
+            parts.append("No recovery score yet, so a moderate \(effort).")
+        }
+        // Counts after `fit`, so the line never promises sets the time didn't allow.
+        let sets = exercises.reduce(0) { $0 + $1.sets }
+        parts.append("\(minutes) min: \(exercises.count) exercises, \(sets) working sets.")
+        return parts.joined(separator: " ")
     }
 
     /// Ramp sets for the loaded compound lifts: a full ramp on the first,

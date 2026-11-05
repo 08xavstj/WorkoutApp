@@ -54,6 +54,8 @@ struct WorkoutBuilderView: View {
                             )
                         } else {
                             summaryCard(plan)
+                            // Optional movement warm-up before the first lift (`WarmUpRoutine`).
+                            WarmUpToggleRow(routine: WarmUpRoutine.make(for: plan, gym: gym.profile))
                             ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { index, exercise in
                                 PlannedExerciseRow(
                                     index: index + 1, exercise: exercise, unit: plan.unit,
@@ -142,7 +144,8 @@ struct WorkoutBuilderView: View {
         // recovery still lowers the effort on a low day (`TrainingBlock`, `WorkoutPlanner.targetRPE`).
         plans.trainingStyle = gym.style
         let block = plans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
-        plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history, block: block)
+        plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history, block: block,
+                                focusReason: focus == nil ? autoReason : nil)
     }
 
     /// True when there's another exercise for the same movement to swap to.
@@ -278,8 +281,44 @@ struct WorkoutBuilderView: View {
                     .foregroundStyle(inRange ? Theme.recoveryHighText : Theme.secondaryText)
             }
             blockLine(plan)
+            whyLine(plan)
+            musclesRow(plan)
         }
         .card()
+    }
+
+    /// Why this session today (`PlannedWorkout.rationale`).
+    @ViewBuilder
+    private func whyLine(_ plan: PlannedWorkout) -> some View {
+        if !plan.rationale.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Why this session")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                Text(plan.rationale)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// The muscles the session covers, as chips ("Chest · Shoulders · Triceps").
+    @ViewBuilder
+    private func musclesRow(_ plan: PlannedWorkout) -> some View {
+        let muscles = plan.musclesCovered
+        if !muscles.isEmpty {
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(muscles, id: \.self) { muscle in
+                        Chip(text: muscle, color: Theme.lifting)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Muscles: \(muscles.joined(separator: ", "))")
+        }
     }
 
     /// Time, effort and strain side by side; stacked at accessibility text
@@ -353,6 +392,19 @@ struct PlannedExerciseRow: View {
     /// Fits "A1" or "12" at every text size.
     @ScaledMetric(relativeTo: .headline) private var badgeSize: CGFloat = 34
     @State private var showingGuide = false
+    @Environment(ExerciseLibrary.self) private var library
+
+    /// "Lats, biceps": the exercise library's primary then secondary muscles
+    /// when it knows the exercise, else the catalog's (`PlannedExercise.muscles`).
+    private var muscleLine: String? {
+        var names = exercise.muscles
+        if let entry = library.exercise(id: exercise.exerciseID) {
+            names = entry.primaryMuscles + entry.secondaryMuscles
+        }
+        guard !names.isEmpty else { return nil }
+        let line = names.prefix(4).map { $0.lowercased() }.joined(separator: ", ")
+        return line.prefix(1).uppercased() + line.dropFirst()
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -393,6 +445,11 @@ struct PlannedExerciseRow: View {
                 Text(exercise.name)
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
+                if let muscleLine {
+                    Text(muscleLine)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
                 Text("\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · stop with \(exercise.repsInReserve.replacingOccurrences(of: " in reserve", with: " left"))")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)

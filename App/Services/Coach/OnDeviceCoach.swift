@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import os
 import AppCore
 
 /// Coach powered by Apple's on-device model (Apple Intelligence). Free, private,
@@ -15,6 +16,15 @@ final class OnDeviceCoach {
     /// The last question and answer, for follow-ups ("and for dinner?").
     private var lastExchange: (question: String, answer: String)?
 
+    private static let log = Logger(subsystem: "com.lontraindustries.workoutapp", category: "coach")
+
+    /// Whole request (instructions, data, recap and question) in characters: a
+    /// safety net under the model's 4,096 tokens, since numbers tokenise at
+    /// closer to 2-3 characters each. 6,000 chars leaves room for the answer.
+    static let promptLimit = 6000
+    /// Longest answer, in tokens; the instructions ask for under 100 words.
+    static let maximumResponseTokens = 300
+
     static var availabilityMessage: String? {
         switch SystemLanguageModel.default.availability {
         case .available:
@@ -28,6 +38,18 @@ final class OnDeviceCoach {
         case .unavailable:
             return "The on-device model isn't available right now."
         }
+    }
+
+    private static var didPrewarm = false
+
+    /// Loads the model's assets before the first question (`LanguageModelSession.prewarm`),
+    /// so the first answer comes faster and an asset problem shows up early
+    /// in the log. Once per launch; a no-op when the model isn't available.
+    static func prewarm() {
+        guard !didPrewarm, availabilityMessage == nil else { return }
+        didPrewarm = true
+        LanguageModelSession(instructions: CoachPrompt.onDeviceInstructions).prewarm()
+        log.info("Prewarmed the on-device coach session.")
     }
 
     func reset() {
@@ -61,17 +83,26 @@ final class OnDeviceCoach {
 
     private func generate(_ message: String, topic: CoachIntent.Topic, snapshot: CoachSnapshot,
                         hasPlan: Bool, scale: Double) async throws -> String {
+        // The default model (general use case, default guardrails). If health
+        // questions keep being refused, `SystemLanguageModel(useCase: .general,
+        // guardrails: .default)` is the same model; there is no looser setting
+        // for health content, only `.permissiveContentTransformations` for
+        // rewriting text the user supplied.
         let session = LanguageModelSession(instructions: CoachPrompt.onDeviceInstructions)
         let prompt = Self.prompt(message, topic: topic, snapshot: snapshot, hasPlan: hasPlan,
                                  recap: scale < 1 ? nil : lastExchange, scale: scale)
+        Self.log.debug("Coach prompt: \(prompt.count) characters, topic \(String(describing: topic), privacy: .public)")
         // Low temperature: answers should stick to the data, not improvise.
-        let response = try await session.respond(to: prompt, options: GenerationOptions(temperature: 0.3))
+        // A token cap so a long answer can't run the session out of context.
+        let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: Self.maximumResponseTokens)
+        let response = try await session.respond(to: prompt, options: options)
         return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The data block, the recap and the question. Budgets are characters
     /// (about 3-4 per token) and keep the whole request well under the
-    /// model's 4,096 tokens, with room for the answer.
+    /// model's 4,096 tokens, with room for the answer; `promptLimit` caps the
+    /// data as a whole so the question is never the part that gets cut.
     static func prompt(_ message: String, topic: CoachIntent.Topic, snapshot: CoachSnapshot, hasPlan: Bool,
                        recap: (question: String, answer: String)?, scale: Double) -> String {
         func budget(_ characters: Int) -> Int { Int(Double(characters) * scale) }
@@ -101,27 +132,51 @@ final class OnDeviceCoach {
         case .recovery: "This is about recovery or sleep: explain it from the numbers above."
         case .general: "Answer the question directly."
         }
-        sections.append("QUESTION: \(message)\n(\(focus))")
-        return sections.joined(separator: "\n\n")
+        let question = "QUESTION: \(message.prefix(600))\n(\(focus))"
+        let room = max(800, promptLimit - CoachPrompt.onDeviceInstructions.count - question.count - 2)
+        let data = CoachSnapshot.capped(sections.joined(separator: "\n\n"), room)
+        return data + "\n\n" + question
     }
 
-    /// Plain words for the model's errors, instead of an error code.
+    /// Plain words for the model's errors, instead of an error code. The
+    /// underlying description rides along in brackets for the less common
+    /// cases, so the user can report what actually happened; every failure
+    /// is logged in full.
+    ///
+    /// Apple's docs: an app built with Xcode 26 receives `GenerationError`; one
+    /// built with Xcode 27 or later receives `LanguageModelError`,
+    /// `SystemLanguageModel.Error` or `LanguageModelSession.Error` instead
+    /// (iOS 27 SDK types), which the cast below misses, so they fall through to
+    /// the generic message with the real reason in brackets. Once the project
+    /// builds with Xcode 27, match those types here as well.
     static func friendly(_ error: Error) -> Error {
+        if error is CoachError { return error }
+        let detail = error.localizedDescription
+        log.error("Coach generation failed: \(String(describing: error), privacy: .public)")
+        let generic = "The coach couldn't answer that. Try again, or word it differently. (\(detail))"
         guard let generation = error as? LanguageModelSession.GenerationError else {
-            if error is CoachError { return error }
-            return CoachError.unavailable("The coach couldn't answer that. Try again, or word it differently.")
+            return CoachError.unavailable(generic)
         }
         switch generation {
         case .guardrailViolation:
             return CoachError.unavailable("Apple's on-device model declined that question; its safety filter is strict about health topics. Try wording it differently.")
+        case .refusal:
+            // The model itself (not the guardrail) chose not to answer; common with health advice.
+            return CoachError.unavailable("The on-device model declined to answer that one; it is cautious with health topics. Try asking in a different way, or about one thing at a time. (\(detail))")
         case .exceededContextWindowSize:
             return CoachError.unavailable("That was more than the on-device coach can handle at once. Try a shorter question, or tap New conversation.")
         case .assetsUnavailable:
             return CoachError.unavailable("Apple Intelligence is still getting ready. Try again in a few minutes.")
         case .rateLimited, .concurrentRequests:
             return CoachError.unavailable("The on-device coach is busy. Try again in a moment.")
-        default:
-            return CoachError.unavailable("The coach couldn't answer that. Try again, or word it differently.")
+        case .unsupportedLanguageOrLocale:
+            return CoachError.unavailable("The on-device model doesn't support your iPhone's language yet. (\(detail))")
+        case .decodingFailure:
+            return CoachError.unavailable("The model's answer was cut off before it finished. Try again. (\(detail))")
+        case .unsupportedGuide:
+            return CoachError.unavailable("The coach asked the model for a format it can't produce. Try again. (\(detail))")
+        @unknown default:
+            return CoachError.unavailable(generic)
         }
     }
 }

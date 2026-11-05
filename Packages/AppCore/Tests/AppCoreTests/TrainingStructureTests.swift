@@ -133,17 +133,18 @@ struct BlockPlannerTests {
     }
 
     @Test func blockScalesSetsAndTheDeloadHalvesThem() {
+        // 120 minutes is a long session: seven exercises, four sets each (`WorkoutPlanner.baseSets`).
         let base = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:])
-        #expect(base.exercises.map(\.sets) == [4, 4, 4, 3, 3, 3])
+        #expect(base.exercises.map(\.sets) == [4, 4, 4, 4, 4, 4, 4])
         #expect(base.blockWeek == nil)
         let week4 = TrainingBlock.weekState(4, style: .balanced, length: 5) // ×1.25, RIR 1
         let ramped = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:], block: week4)
-        #expect(ramped.exercises.map(\.sets) == [5, 5, 5, 4, 4, 4])
+        #expect(ramped.exercises.map(\.sets) == [5, 5, 5, 5, 5, 5, 5])
         #expect(ramped.targetRPE == 9)
         #expect(ramped.blockWeek == week4)
         let deload = TrainingBlock.weekState(5, style: .balanced, length: 5)
         let easy = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:], block: deload)
-        #expect(easy.exercises.map(\.sets) == [2, 2, 2, 2, 2, 2])
+        #expect(easy.exercises.map(\.sets) == [2, 2, 2, 2, 2, 2, 2])
         #expect(easy.targetRPE == 7)
     }
 }

@@ -36,9 +36,11 @@ struct CoachView: View {
                             emptyState
                         }
                         ForEach(coach.messages) { message in
-                            MessageView(message: message) { plan in
-                                launcher.start(plan, in: modelContext)
-                            }
+                            MessageView(
+                                message: message,
+                                onStart: { plan in launcher.start(plan, in: modelContext) },
+                                onRetry: retryAction(for: message)
+                            )
                             .id(message.id)
                         }
                         if coach.isThinking {
@@ -84,6 +86,8 @@ struct CoachView: View {
             }
             .tabToolbar()
             .safeAreaInset(edge: .bottom) { inputBar }
+            // Load the model's assets while the user reads, so the first answer is quicker.
+            .onAppear { OnDeviceCoach.prewarm() }
             .task(id: coach.pendingQuestion) {
                 if let question = coach.pendingQuestion {
                     coach.pendingQuestion = nil
@@ -206,6 +210,15 @@ struct CoachView: View {
         let text = draft
         draft = ""
         await send(text)
+    }
+
+    /// For an error bubble: resends the user message that got the error.
+    private func retryAction(for message: CoachModel.ChatMessage) -> (() -> Void)? {
+        guard message.role == .error,
+              let index = coach.messages.firstIndex(where: { $0.id == message.id }),
+              let question = coach.messages[..<index].last(where: { $0.role == .user }) else { return nil }
+        let text = question.text
+        return { Task { await send(text) } }
     }
 
     private func send(_ text: String) async {
@@ -390,6 +403,8 @@ private struct ContextChip: View {
 private struct MessageView: View {
     let message: CoachModel.ChatMessage
     let onStart: (PlannedWorkout) -> Void
+    /// Resends the question behind an error bubble; nil when there is none.
+    var onRetry: (() -> Void)? = nil
     /// The coach avatar scales with Dynamic Type (HIG Typography; ux-audit.md P22).
     @ScaledMetric(relativeTo: .subheadline) private var avatarSize: CGFloat = 32
 
@@ -421,11 +436,20 @@ private struct MessageView: View {
                 }
             }
         case .error:
-            Text(message.text)
-                .font(.subheadline)
-                .foregroundStyle(Theme.recoveryLow)
-                .padding(12)
-                .background(Theme.recoveryLow.opacity(0.1), in: .rect(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 8) {
+                Text(message.text)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.recoveryLow)
+                    .textSelection(.enabled)
+                if let onRetry {
+                    Button("Try again", systemImage: "arrow.clockwise", action: onRetry)
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .tint(Theme.recoveryLow)
+                }
+            }
+            .padding(12)
+            .background(Theme.recoveryLow.opacity(0.1), in: .rect(cornerRadius: 14))
         }
     }
 }
