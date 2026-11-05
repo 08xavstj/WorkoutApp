@@ -753,14 +753,19 @@ private struct PersonalCalorieNotes: View {
 
 /// Four signals that say whether something is off today: resting heart
 /// rate, HRV, breathing rate and sleep, each against your usual range
-/// (ux-audit.md 4.6, H10). Blood oxygen, heart-rate recovery, heart-rate
-/// stress and steps are long-term stats and live in Health ("All measures").
+/// (ux-audit.md 4.6, H10), plus up to four more with data today from
+/// `HealthMonitorTiles` (temperature, blood oxygen, steps, heart rate
+/// recovery, daylight, breathing disturbances, headphone sound) when the
+/// card is expanded. "Show less" keeps the audit's four; the choice is
+/// remembered. Everything else lives in Health ("All measures").
 private struct HealthMonitor: View {
     let onEnterHRV: () -> Void
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(VitalsModel.self) private var vitals
     @Environment(AppRouter.self) private var router
     @State private var selected: VitalsModel.Stat?
+    /// Expanded by default: the user asked for more than four measures.
+    @AppStorage("healthMonitorExpanded") private var expanded = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -770,8 +775,14 @@ private struct HealthMonitor: View {
                 hrvTile
                 opens("respiration") { respiratoryTile }
                 opens("sleepAverage") { sleepTile }
+                ForEach(extras) { stat in
+                    opens(stat.id) { HealthMonitorStatTile(stat: stat) }
+                }
             }
-            AllMeasuresLink { router.selectedTab = .health }
+            HStack(spacing: 12) {
+                HealthMonitorToggle(expanded: $expanded)
+                AllMeasuresLink { router.selectedTab = .health }
+            }
         }
         .sheet(item: $selected) { stat in
             VitalDetailView(stat: stat, colors: VitalTile.colors(for: stat.category))
@@ -791,7 +802,16 @@ private struct HealthMonitor: View {
         }
     }
 
-    /// Everything on this card that's outside your normal today.
+    /// The extra tiles with data today, in `HealthMonitorTiles.priority`
+    /// order; none when collapsed.
+    private var extras: [VitalsModel.Stat] {
+        let limit = expanded ? HealthMonitorTiles.expandedCount - HealthMonitorTiles.collapsedCount : 0
+        return HealthMonitorTiles.extras(from: vitals, limit: limit)
+    }
+
+    /// Everything on this card that's outside your normal today, the extra
+    /// tiles included (`HealthMonitorTiles.flaggedIDs`; steps and the other
+    /// goals never count).
     private var summary: MetricVerdict? {
         guard let recovery = metrics.recovery, recovery.isCalibrated else { return nil }
         let flags = [
@@ -799,7 +819,7 @@ private struct HealthMonitor: View {
             (recovery.restingHeartRateChange ?? 0) > 5,
             metrics.respiratoryRate.map { !(12...20).contains($0) } ?? false,
             metrics.sleep.map { $0.asleep < $0.need * 0.9 } ?? false,
-        ].filter { $0 }.count
+        ].filter { $0 }.count + HealthMonitorTiles.flagCount(extras)
         return flags == 0 ? MetricVerdict("All normal", color: Theme.recoveryHigh) : MetricVerdict("\(flags) to watch", color: Theme.recoveryModerate)
     }
 
