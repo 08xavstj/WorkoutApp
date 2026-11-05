@@ -242,7 +242,10 @@ final class CheckInStore {
             var line = "This morning:"
             if let rested = morning.rested { line += " rested \(rested)/5," }
             if let soreness = morning.soreness { line += " soreness \(soreness)/10" + (morning.soreAreas.isEmpty ? "," : " (\(morning.soreAreas.map(\.rawValue).joined(separator: ", "))),") }
-            if let mood = morning.mood { line += " mood \(mood)/5" + ((morning.feelings?.isEmpty ?? true) ? "," : " (\((morning.feelings ?? []).map(MoodScale.readable).joined(separator: ", ").lowercased()))," }
+            if let mood = morning.mood {
+                let feelings = (morning.feelings ?? []).map(MoodScale.readable).joined(separator: ", ").lowercased()
+                line += " mood \(mood)/5" + (feelings.isEmpty ? "," : " (\(feelings)),")
+            }
             if let associations = morning.associations, !associations.isEmpty { line += " on their mind: \(associations.map(MoodScale.readable).joined(separator: ", ").lowercased())," }
             if morning.isSick { line += " symptoms: \(morning.symptoms.map(\.rawValue).joined(separator: ", "))," }
             parts.append(String(line.dropLast()))
