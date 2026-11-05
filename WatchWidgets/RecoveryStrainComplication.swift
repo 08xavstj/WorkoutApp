@@ -7,7 +7,7 @@ import WidgetKit
 /// slots get the same numbers.
 struct RecoveryStrainComplication: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "RecoveryStrain", provider: FaceProvider()) { entry in
+        StaticConfiguration(kind: "RecoveryStrain", provider: FaceProvider(kind: .recoveryStrain)) { entry in
             RecoveryStrainView(entry: entry)
                 .containerBackground(for: .widget) { }
                 .widgetURL(URL(string: "tensile://start"))

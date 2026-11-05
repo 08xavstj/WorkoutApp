@@ -27,22 +27,49 @@ nonisolated extension HealthKitClient {
 
     // MARK: State of mind (iOS 18)
 
-    /// Writes the 1-5 check-in mood as a daily-mood state of mind, so the
-    /// Health app's mental-wellbeing view sees it (competitors.md §1g).
-    /// Valence runs −1...1; 1 → −0.8, 3 → 0, 5 → +0.8 (app mapping).
+    /// Writes a check-in mood as a state of mind, so the Health app's
+    /// mental-wellbeing view sees it (competitors.md §1g; watch-features.md 4.2).
+    ///
+    /// - Parameters:
+    ///   - mood: the 1-5 scale; valence 1 → −0.8, 3 → 0, 5 → +0.8 (`MoodScale`).
+    ///   - valence: overrides the mood's valence (e.g. the evening's stress-derived one).
+    ///   - kind: `.daily` (Health's daily mood) for the morning's "how the day
+    ///     feels", `.momentary` (momentary emotion) for the evening.
+    ///   - feelings: the check-in's chosen words (`MoodFeeling` raw values). When
+    ///     empty, one label is picked from the scale so Health always shows a word.
+    ///   - associations: `MoodAssociation` raw values, plus whatever the app knows
+    ///     (`.fitness` on a training day, `.health` with symptoms).
     @concurrent
-    func saveStateOfMind(mood: Int, date: Date) async throws {
+    func saveStateOfMind(
+        mood: Int,
+        date: Date,
+        valence: Double? = nil,
+        kind: MoodSample.Kind = .daily,
+        feelings: [String] = [],
+        associations: [String] = []
+    ) async throws {
         let clamped = max(1, min(5, mood))
-        let valence = Double(clamped - 3) * 0.4
-        let label: HKStateOfMind.Label = switch clamped {
-        case 1: .sad
-        case 2: .discouraged
-        case 3: .indifferent
-        case 4: .content
+        let value = valence ?? MoodScale.valence(mood: clamped)
+        var labels = feelings.compactMap(Self.stateOfMindLabel(named:))
+        if labels.isEmpty {
+            labels = [Self.scaleLabel(for: value)]
+        }
+        let sample = HKStateOfMind(
+            date: date, kind: kind == .daily ? .dailyMood : .momentaryEmotion, valence: value,
+            labels: labels, associations: associations.compactMap(Self.stateOfMindAssociation(named:))
+        )
+        try await store.save(sample)
+    }
+
+    /// One label for a valence, matching the scale's words (Low/Meh/OK/Good/Great).
+    private static func scaleLabel(for valence: Double) -> HKStateOfMind.Label {
+        switch valence {
+        case ..<(-0.6): .sad
+        case ..<(-0.2): .discouraged
+        case ..<0.2: .indifferent
+        case ..<0.6: .content
         default: .happy
         }
-        let sample = HKStateOfMind(date: date, kind: .dailyMood, valence: valence, labels: [label], associations: [])
-        try await store.save(sample)
     }
 
     // MARK: Workout effort score (iOS 18)

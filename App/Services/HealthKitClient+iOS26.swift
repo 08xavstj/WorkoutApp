@@ -4,9 +4,8 @@ import AppCore
 
 /// Reads of the newer HealthKit types from docs/research/competitors.md §1g:
 /// time in daylight (iOS 17), sleep-apnoea events (iOS 18) and the iOS 26
-/// Medications API. The deployment target is iOS 26, so the iOS 17/18 types
-/// are always present; the Medications API is behind a build flag until its
-/// names have been checked against the SDK in Xcode (see below).
+/// Medications API (names checked against Apple's reference; see below). The
+/// deployment target is iOS 26, so all of them are always present.
 nonisolated extension HealthKitClient {
     /// Minutes outdoors in daylight per day (Apple Watch only; Garmin doesn't
     /// write it). Empty without a watch.
@@ -41,24 +40,47 @@ nonisolated extension HealthKitClient {
 
 /// A medication from the Health app's Medications list (iOS 26 Medications API).
 nonisolated struct HealthMedication: Sendable, Equatable, Identifiable {
-    /// Apple's stable concept identifier, used to avoid importing twice.
+    /// Apple's concept identifier (`HKHealthConceptIdentifier`, as text), used
+    /// to avoid importing twice and to join dose events to their medication.
     var id: String
     var name: String
     var nickname: String?
     var isArchived: Bool
+
+    /// What the user calls it: the nickname when set, else Apple's display name.
+    var shownName: String {
+        let nick = nickname?.trimmingCharacters(in: .whitespaces) ?? ""
+        return nick.isEmpty ? name.trimmingCharacters(in: .whitespaces) : nick
+    }
+}
+
+/// One dose logged in the Health app (iOS 26 Medications API), joined with
+/// the medication it belongs to.
+nonisolated struct HealthDoseEvent: Sendable, Equatable {
+    /// `HealthMedication.id` of the medication.
+    var medicationID: String
+    /// `HealthMedication.shownName`.
+    var name: String
+    /// When the dose was logged (the sample's start).
+    var loggedAt: Date
+    /// The reminder time it answered, if it was a scheduled dose.
+    var scheduledDate: Date?
+    /// True for a dose logged as taken, false for one logged as skipped.
+    var taken: Bool
 }
 
 // MARK: - Medications API (iOS 26)
 //
-// The HKUserAnnotatedMedication / HKMedicationConcept / HKMedicationDoseEvent
-// names below follow WWDC25 session 321 ("Meet the HealthKit Medications
-// API") but could not be checked against the SDK here (no Xcode in this
-// sandbox). They compile only with the TENSILE_HEALTHKIT_MEDICATIONS flag
-// (add `-DTENSILE_HEALTHKIT_MEDICATIONS` to OTHER_SWIFT_FLAGS after confirming
-// the names in Xcode). Without the flag, `importedMedications()` returns []
-// and the rest of the app behaves as before. TODO(lead): verify and enable.
+// Names checked against Apple's HealthKit reference (HKUserAnnotatedMedication,
+// HKMedicationConcept, HKHealthConceptIdentifier, HKMedicationDoseEvent and its
+// LogStatus, HKUserAnnotatedMedicationQueryDescriptor, HKObjectType
+// .userAnnotatedMedicationType() / .medicationDoseEventType(); all iOS 26.0+).
+// `HKHealthConceptIdentifier` has no string property, so its description is
+// the app's text id (stable within a run; the name match covers the rest). The medications
+// list uses per-object authorization (its own picker); dose events are read
+// with the usual Health sheet (`HKObjectType.medicationDoseEventType()` is in
+// `readTypes`). Read-only: the app never writes dose events.
 nonisolated extension HealthKitClient {
-    #if TENSILE_HEALTHKIT_MEDICATIONS
     /// Asks for per-object read access to the Medications list (the API uses
     /// object-level authorization, not the usual type-level sheet).
     @concurrent
@@ -71,23 +93,58 @@ nonisolated extension HealthKitClient {
     @concurrent
     func importedMedications() async throws -> [HealthMedication] {
         guard isAvailable else { return [] }
-        let descriptor = HKUserAnnotatedMedicationQueryDescriptor()
-        return try await descriptor.result(for: store).map { entry in
-            HealthMedication(
-                id: entry.medication.identifier.identifier,
-                name: entry.medication.displayText,
-                nickname: entry.nickname,
-                isArchived: entry.isArchived
-            )
+        return try await annotatedMedications().map(Self.healthMedication)
+    }
+
+    /// Doses logged in the Health app in the last `days` days (taken or
+    /// skipped; reminders nobody answered are left out), oldest first.
+    @concurrent
+    func healthDoseEvents(days: Int) async throws -> [HealthDoseEvent] {
+        guard isAvailable else { return [] }
+        let entries = try await annotatedMedications()
+        guard !entries.isEmpty else { return [] }
+        let byConcept = Dictionary(entries.map { ($0.medication.identifier, Self.healthMedication($0)) },
+                                   uniquingKeysWith: { first, _ in first })
+        let start = Calendar.current.date(byAdding: .day, value: -days, to: .now) ?? .now
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.sample(type: HKObjectType.medicationDoseEventType(), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        do {
+            return try await descriptor.result(for: store).compactMap { sample -> HealthDoseEvent? in
+                guard let event = sample as? HKMedicationDoseEvent,
+                      let medication = byConcept[event.medicationConceptIdentifier] else { return nil }
+                let taken: Bool
+                switch event.logStatus {
+                case .taken: taken = true
+                case .skipped: taken = false
+                default: return nil
+                }
+                return HealthDoseEvent(
+                    medicationID: medication.id,
+                    name: medication.shownName,
+                    loggedAt: event.startDate,
+                    scheduledDate: event.scheduledDate,
+                    taken: taken
+                )
+            }
+        } catch let error as HKError where error.code == .errorNoData {
+            return []
         }
     }
-    #else
-    /// Medications API not enabled in this build (see the note above).
-    @concurrent
-    func requestMedicationsAccess() async throws {}
 
-    /// Medications API not enabled in this build: nothing to import.
-    @concurrent
-    func importedMedications() async throws -> [HealthMedication] { [] }
-    #endif
+    private func annotatedMedications() async throws -> [HKUserAnnotatedMedication] {
+        let descriptor = HKUserAnnotatedMedicationQueryDescriptor(predicate: nil, limit: nil)
+        return try await descriptor.result(for: store)
+    }
+
+    private static func healthMedication(_ entry: HKUserAnnotatedMedication) -> HealthMedication {
+        HealthMedication(
+            id: String(describing: entry.medication.identifier),
+            name: entry.medication.displayText,
+            nickname: entry.nickname,
+            isArchived: entry.isArchived
+        )
+    }
 }

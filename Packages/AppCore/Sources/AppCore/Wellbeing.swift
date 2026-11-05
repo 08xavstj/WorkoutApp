@@ -102,19 +102,72 @@ public enum Hydration {
 /// once. The rise starts after ovulation, about two weeks after a period
 /// begins, and lasts until the next period (Baker & Driver, Sleep Med 2007),
 /// so when the morning check-in last logged "On my period" `lutealWindowDays`
-/// ago, the temperature bar rises to +0.8 °C and resting heart rate gets 3
+/// ago, the temperature bar rises by 0.3 °C and resting heart rate gets 3
 /// bpm of extra room.
 public enum IllnessWatch {
     /// Days since the last logged period day during which the cycle
     /// allowances apply: the luteal phase of a typical 24-35 day cycle. The
     /// app's choice of window; the phase itself is well documented.
     public static let lutealWindowDays: ClosedRange<Int> = 10...32
-    /// Temperature rise vs your 14-night mean that counts (Smarr et al., Sci Rep 2020).
+    /// Temperature rise vs your baseline mean that counts when the baseline's
+    /// spread isn't known yet (Smarr et al., Sci Rep 2020: fever onset shows as
+    /// a rise against your own baseline; the 0.5 °C figure isn't confirmed).
     public static let temperatureThreshold = 0.5
-    /// The same bar in the luteal phase (audit: luteal rise ≈ 0.3-0.5 °C).
-    public static let lutealTemperatureThreshold = 0.8
+    /// With a baseline SD the bar is a z-score instead, as for heart and
+    /// breathing rate: +1.5 SD above the 30-night mean. Per-person deviation
+    /// from a wearable temperature baseline is what the TemPredict ring study
+    /// used (Mason et al., Sci Rep 2022: 82% sensitivity, 63% specificity with
+    /// temperature, heart and breathing rate) and the per-person residual
+    /// approach is Mishra et al., Nat Biomed Eng 2020. The 1.5 figure is the
+    /// app's choice between those studies' settings (docs/research/watch-features.md §1 note).
+    public static let temperatureZThreshold = 1.5
+    /// Smallest rise that counts whatever the SD, so a very steady baseline
+    /// can't trip on sensor noise. App's choice, not from a study.
+    public static let minimumTemperatureRise = 0.2
+    /// Added to the temperature bar in the luteal phase (audit: luteal rise ≈ 0.3-0.5 °C).
+    public static let lutealTemperatureAllowance = 0.3
+    /// The fixed bar in the luteal phase when the SD isn't known.
+    public static let lutealTemperatureThreshold = temperatureThreshold + lutealTemperatureAllowance
     /// Extra resting heart rate allowed in the luteal phase (audit: luteal rise ≈ 2-4 bpm).
     public static let lutealRestingHeartRateAllowance = 3.0
+
+    /// The temperature rise that counts today: a z-score bar when the
+    /// baseline SD is known, the fixed bar otherwise, plus the luteal allowance.
+    public static func temperatureBar(baselineSD: Double?, luteal: Bool) -> Double {
+        let base = baselineSD.map { max(temperatureZThreshold * $0, minimumTemperatureRise) } ?? temperatureThreshold
+        return base + (luteal ? lutealTemperatureAllowance : 0)
+    }
+
+    // MARK: Nightly breathing disturbances (Apple Watch, iOS 18 type)
+
+    /// Nights of baseline needed before the breathing-disturbance trend counts.
+    public static let breathingDisturbanceBaselineNights = 7
+    /// Recent nights averaged for the trend.
+    public static let breathingDisturbanceRecentNights = 7
+    /// The 7-night mean must sit this many baseline SDs above the baseline
+    /// mean to count. A 7-night mean varies less than single nights, so one
+    /// SD of nightly values is already a clear shift. App's choice: Apple's
+    /// apnoea notification, built on this series, catches about two thirds of
+    /// moderate-to-severe cases, and no study of the series as an illness
+    /// signal was found (docs/research/watch-features.md 1.2), so this is one
+    /// signal among several, never an alert on its own.
+    public static let breathingDisturbanceZThreshold = 1.0
+
+    /// True when the last 7 nights' breathing disturbances average well above
+    /// the 30 nights before them (`breathingDisturbanceZThreshold`). `nightly`
+    /// is oldest first; false with fewer than 14 nights.
+    public static func breathingDisturbancesRising(nightly: [Double]) -> Bool {
+        let recent = nightly.suffix(breathingDisturbanceRecentNights)
+        let baseline = Array(nightly.dropLast(breathingDisturbanceRecentNights).suffix(30))
+        guard recent.count == breathingDisturbanceRecentNights,
+              baseline.count >= breathingDisturbanceBaselineNights else { return false }
+        let recentMean = recent.reduce(0, +) / Double(recent.count)
+        let mean = baseline.reduce(0, +) / Double(baseline.count)
+        let variance = baseline.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(baseline.count - 1)
+        let sd = variance.squareRoot()
+        guard sd > 0 else { return recentMean > mean }
+        return (recentMean - mean) / sd >= breathingDisturbanceZThreshold
+    }
 
     /// Yesterday's values, compared with the same baselines, so a signal can
     /// be checked for two consecutive days.
@@ -148,12 +201,21 @@ public enum IllnessWatch {
         /// Days since the morning check-in last logged "On my period"; nil when
         /// not tracked or none logged.
         public var daysSinceLastPeriod: Int?
+        /// Night-to-night SD of the sleeping temperature over the 30-night
+        /// baseline, °C; nil until enough nights, when the fixed bar is used
+        /// (`temperatureBar`).
+        public var temperatureBaselineSD: Double?
+        /// The last 7 nights' breathing disturbances are up on the 30 before
+        /// (`breathingDisturbancesRising`). A week-long trend already spans
+        /// days, so it satisfies the two-day rule by itself.
+        public var breathingDisturbancesRising: Bool
 
         public init(restingHeartRate: Double? = nil, rhrBaseline: (mean: Double, sd: Double)? = nil,
                     respiratoryRate: Double? = nil, respiratoryBaseline: (mean: Double, sd: Double)? = nil,
                     temperatureDelta: Double? = nil, hrvChangePercent: Double? = nil,
                     drinksLastNight: Int? = nil, yesterdayStrain: Double? = nil, reportedSymptoms: Bool = false,
-                    previousDay: PreviousDay? = nil, daysSinceLastPeriod: Int? = nil) {
+                    previousDay: PreviousDay? = nil, daysSinceLastPeriod: Int? = nil,
+                    temperatureBaselineSD: Double? = nil, breathingDisturbancesRising: Bool = false) {
             self.restingHeartRate = restingHeartRate
             self.rhrBaseline = rhrBaseline
             self.respiratoryRate = respiratoryRate
@@ -165,6 +227,8 @@ public enum IllnessWatch {
             self.reportedSymptoms = reportedSymptoms
             self.previousDay = previousDay
             self.daysSinceLastPeriod = daysSinceLastPeriod
+            self.temperatureBaselineSD = temperatureBaselineSD
+            self.breathingDisturbancesRising = breathingDisturbancesRising
         }
 
         /// Whether the cycle allowances apply (see `lutealWindowDays`).
@@ -182,6 +246,8 @@ public enum IllnessWatch {
                 && a.drinksLastNight == b.drinksLastNight && a.yesterdayStrain == b.yesterdayStrain
                 && a.reportedSymptoms == b.reportedSymptoms
                 && a.previousDay == b.previousDay && a.daysSinceLastPeriod == b.daysSinceLastPeriod
+                && a.temperatureBaselineSD == b.temperatureBaselineSD
+                && a.breathingDisturbancesRising == b.breathingDisturbancesRising
         }
     }
 
@@ -218,13 +284,14 @@ public enum IllnessWatch {
     /// Which of resting heart rate, breathing rate and temperature are up.
     /// Thresholds: RHR ≥ max(2 SD, 4 bpm) above baseline (Mishra et al., Nat
     /// Biomed Eng 2020 used RHR residuals); breathing ≥ max(2 SD, 1/min)
-    /// (Natarajan et al., npj Digit Med 2020); temperature ≥ +0.5 °C vs the
-    /// 14-night mean (Smarr et al., Sci Rep 2020). The luteal allowances are
+    /// (Natarajan et al., npj Digit Med 2020); temperature ≥ `temperatureBar`
+    /// (+1.5 SD vs the 30-night mean, Mason et al., Sci Rep 2022; or +0.5 °C
+    /// without an SD, Smarr et al., Sci Rep 2020). The luteal allowances are
     /// added when `luteal` is true.
     static func bodySignals(
         restingHeartRate: Double?, rhrBaseline: (mean: Double, sd: Double)?,
         respiratoryRate: Double?, respiratoryBaseline: (mean: Double, sd: Double)?,
-        temperatureDelta: Double?, luteal: Bool
+        temperatureDelta: Double?, temperatureBaselineSD: Double? = nil, luteal: Bool
     ) -> [Signal] {
         var signals: [Signal] = []
         if let rhr = restingHeartRate, let base = rhrBaseline,
@@ -235,7 +302,7 @@ public enum IllnessWatch {
            rate - base.mean >= max(2 * base.sd, 1) {
             signals.append(Signal(id: "breathing", text: String(format: "Breathing rate +%.1f/min", rate - base.mean)))
         }
-        if let delta = temperatureDelta, delta >= (luteal ? lutealTemperatureThreshold : temperatureThreshold) {
+        if let delta = temperatureDelta, delta >= temperatureBar(baselineSD: temperatureBaselineSD, luteal: luteal) {
             signals.append(Signal(id: "temperature", text: String(format: "Temperature +%.1f °C", delta)))
         }
         return signals
@@ -246,9 +313,13 @@ public enum IllnessWatch {
         let today = bodySignals(
             restingHeartRate: inputs.restingHeartRate, rhrBaseline: inputs.rhrBaseline,
             respiratoryRate: inputs.respiratoryRate, respiratoryBaseline: inputs.respiratoryBaseline,
-            temperatureDelta: inputs.temperatureDelta, luteal: luteal
+            temperatureDelta: inputs.temperatureDelta, temperatureBaselineSD: inputs.temperatureBaselineSD, luteal: luteal
         )
         var signals = today.map(\.text)
+        if inputs.breathingDisturbancesRising {
+            // Fourth body signal: the week's nightly breathing disturbances are up (watch-features.md 1.2).
+            signals.append("Breathing disturbances up this week")
+        }
         if let hrv = inputs.hrvChangePercent, hrv <= -20, !signals.isEmpty {
             // HRV falls days before diagnosis (Hirten et al., JMIR 2021), but only counts alongside another signal.
             signals.append("HRV \(Int(hrv.rounded()))%")
@@ -263,11 +334,12 @@ public enum IllnessWatch {
             bodySignals(
                 restingHeartRate: previous.restingHeartRate, rhrBaseline: inputs.rhrBaseline,
                 respiratoryRate: previous.respiratoryRate, respiratoryBaseline: inputs.respiratoryBaseline,
-                temperatureDelta: previous.temperatureDelta, luteal: luteal
+                temperatureDelta: previous.temperatureDelta, temperatureBaselineSD: inputs.temperatureBaselineSD, luteal: luteal
             )
         } ?? []
         let repeated = today.contains { signal in yesterday.contains { $0.id == signal.id } }
-        let confirmed = inputs.reportedSymptoms || repeated
+        // A week-long breathing-disturbance trend already spans more than two days.
+        let confirmed = inputs.reportedSymptoms || repeated || inputs.breathingDisturbancesRising
 
         var level: Level = total >= 2 ? .major : .minor
         let awaitingSecondDay = level == .major && !confirmed

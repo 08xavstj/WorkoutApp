@@ -1,3 +1,4 @@
+import RelevanceKit
 import SwiftUI
 import WidgetKit
 
@@ -24,6 +25,15 @@ nonisolated struct FaceEntry: TimelineEntry {
 /// change on its own (midnight, a session's start and end of its window), so
 /// "next session" rolls forward without the phone.
 nonisolated struct FaceProvider: TimelineProvider {
+    /// Which complication this provider feeds: they share entries but not
+    /// Smart Stack relevance (`relevance()`).
+    nonisolated enum Kind: Sendable {
+        case recoveryStrain
+        case nextSession
+    }
+
+    var kind: Kind
+
     func placeholder(in context: Context) -> FaceEntry {
         FaceEntry(date: .now, data: WatchFaceData.sample(), doneAt: nil)
     }
@@ -46,6 +56,49 @@ nonisolated struct FaceProvider: TimelineProvider {
         dates += data?.changeDates(after: now) ?? [Calendar.current.startOfDay(for: now).addingTimeInterval(86_400)]
         let entries = dates.map { FaceEntry(date: $0, data: data, doneAt: doneAt) }
         completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60))))
+    }
+
+    // MARK: Smart Stack
+
+    /// How long before a planned session "Next session" should surface.
+    static let sessionLeadTime: TimeInterval = 3600
+    /// "Recovery & strain" surfaces 06:00-10:00, once the morning scores are in.
+    static let morningHours = 6..<10
+
+    /// When the Smart Stack should offer each complication (watchOS 11
+    /// `TimelineProvider.relevance()`, RelevanceKit date clues; see
+    /// docs/research/watch-features.md §2.6). Without this the complications
+    /// never appear in the stack. Attributes go first-is-most-important.
+    func relevance() async -> WidgetRelevance<Void> {
+        let now = Date.now
+        let calendar = Calendar.current
+        var intervals: [DateInterval] = []
+        let dateKind: RelevantContext.DateKind
+        switch kind {
+        case .nextSession:
+            // The hour before each planned slot (the slots the phone sent, a week ahead).
+            dateKind = .scheduled
+            let slots = (WatchFaceStore.load()?.slots ?? []).sorted { $0.start < $1.start }
+            for slot in slots where slot.start > now {
+                intervals.append(DateInterval(start: slot.start.addingTimeInterval(-Self.sessionLeadTime), end: slot.start))
+            }
+        case .recoveryStrain:
+            dateKind = .informational
+            var day = calendar.startOfDay(for: now)
+            for _ in 0..<7 {
+                if let start = calendar.date(bySettingHour: Self.morningHours.lowerBound, minute: 0, second: 0, of: day),
+                   let end = calendar.date(bySettingHour: Self.morningHours.upperBound, minute: 0, second: 0, of: day),
+                   end > now, end > start {
+                    intervals.append(DateInterval(start: start, end: end))
+                }
+                guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+                day = next
+            }
+        }
+        let attributes = intervals.prefix(10).map { interval in
+            WidgetRelevanceAttribute<Void>(context: .date(interval: interval, kind: dateKind))
+        }
+        return WidgetRelevance(Array(attributes))
     }
 }
 

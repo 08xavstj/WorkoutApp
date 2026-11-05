@@ -6,7 +6,7 @@ import WidgetKit
 /// today's is done or its time has passed.
 struct NextSessionComplication: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "NextSession", provider: FaceProvider()) { entry in
+        StaticConfiguration(kind: "NextSession", provider: FaceProvider(kind: .nextSession)) { entry in
             NextSessionView(entry: entry)
                 .containerBackground(for: .widget) { }
                 .widgetURL(URL(string: "tensile://start"))

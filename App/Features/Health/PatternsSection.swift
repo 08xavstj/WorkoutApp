@@ -16,6 +16,9 @@ struct PatternsSection: View {
                     InsightsPage()
                 }
                 Divider()
+                // Mood (watch-features.md 4.1): 14-day average with a sparkline; `MoodView.swift`.
+                MoodRow()
+                Divider()
                 HealthNavigationRow(title: "Alcohol and your sleep", detail: alcoholDetail, icon: "wineglass.fill") {
                     AlcoholPage()
                 }

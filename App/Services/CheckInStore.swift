@@ -10,6 +10,12 @@ final class CheckInStore {
         var evenings: [String: EveningCheckIn] = [:]
         /// Sleep score per morning, kept so patterns can use past nights.
         var sleepScores: [String: Double] = [:]
+        /// Strain per day (0-100), kept so patterns can test "a harder day than usual".
+        var strains: [String: Double]? = [:]
+        /// What your training days usually reach, from the last refresh.
+        var usualTrainingStrain: Double?
+        /// Your sleep need (h), from Settings at the last refresh (sleep-debt factor).
+        var sleepNeedHours: Double?
     }
 
     private var saved = Saved()
@@ -19,6 +25,9 @@ final class CheckInStore {
     private(set) var alcoholFindings: [AlcoholEffect.Finding] = []
     /// Nights with a known drink count (0 or more), for the empty state.
     private(set) var alcoholNightsLogged = 0
+    /// The last 30 days of moods: Health's (any app) first, the check-ins'
+    /// where Health has nothing (`MoodHistory.merge`). Oldest first.
+    private(set) var moods: [MoodSample] = []
 
     @ObservationIgnored private let fileURL: URL = {
         let folder = URL.applicationSupportDirectory
@@ -52,6 +61,49 @@ final class CheckInStore {
         guard let score, saved.sleepScores[key(morning)] != Double(score) else { return }
         saved.sleepScores[key(morning)] = Double(score)
         write()
+    }
+
+    /// Keeps each day's strain, your usual training strain and your sleep
+    /// need, so the mood patterns can use them (`CheckInInsights`).
+    /// Today's value is overwritten on every call; finished days settle.
+    func recordContext(dayStrains: [(date: Date, strain: Double)], usualTrainingStrain: Double?, sleepNeedHours: Double) {
+        var changed = false
+        var strains = saved.strains ?? [:]
+        for day in dayStrains where strains[key(day.date)] != day.strain {
+            strains[key(day.date)] = day.strain
+            changed = true
+        }
+        if changed { saved.strains = strains }
+        if saved.usualTrainingStrain != usualTrainingStrain {
+            saved.usualTrainingStrain = usualTrainingStrain
+            changed = true
+        }
+        if saved.sleepNeedHours != sleepNeedHours {
+            saved.sleepNeedHours = sleepNeedHours
+            changed = true
+        }
+        if changed { write() }
+    }
+
+    /// The check-ins' moods as State of Mind entries (morning = daily mood,
+    /// evening = momentary emotion), for merging with Health's.
+    private func checkInMoods(from start: Date) -> [MoodSample] {
+        var samples: [MoodSample] = []
+        for morning in saved.mornings.values where morning.day >= start {
+            guard let mood = morning.mood else { continue }
+            samples.append(MoodSample(
+                date: morning.day.addingTimeInterval(8 * 3600), valence: MoodScale.valence(mood: mood), kind: .daily,
+                labels: morning.feelings ?? [], associations: morning.associations ?? [], fromThisApp: true
+            ))
+        }
+        for evening in saved.evenings.values where evening.day >= start {
+            guard let valence = evening.eveningValence else { continue }
+            samples.append(MoodSample(
+                date: evening.day.addingTimeInterval(21 * 3600), valence: valence, kind: .momentary,
+                labels: evening.feelings ?? [], associations: evening.associations ?? [], fromThisApp: true
+            ))
+        }
+        return samples
     }
 
     private func write() {
@@ -114,6 +166,37 @@ final class CheckInStore {
             bedtimeByMorning[key(morning)] = Int(night.bedtime.timeIntervalSince(evening) / 60)
         }
         var alcoholNights: [AlcoholEffect.Night] = []
+        // Mood (watch-features.md 4.1): Health's State of Mind for 90 days, this
+        // app's own entries dropped (they mirror the check-ins), merged per day.
+        let moodStart = calendar.date(byAdding: .day, value: -90, to: today) ?? today
+        let healthMoods = (try? await health.stateOfMind(from: moodStart, to: .now)) ?? []
+        let allMoods = MoodHistory.merge(health: healthMoods, checkIns: checkInMoods(from: moodStart))
+        var moodByMorning: [String: Double] = [:]
+        for day in MoodHistory.dailyValence(allMoods) {
+            moodByMorning[key(day.day)] = day.valence
+        }
+        let moodWindow = calendar.date(byAdding: .day, value: -29, to: today) ?? today
+        moods = allMoods.filter { $0.date >= moodWindow }
+        // Training days: any workout of 10 min or more, from any app.
+        var trainingDays = Set<String>()
+        for workout in (try? await health.workoutIntervals(from: moodStart, to: .now)) ?? [] where workout.duration >= 10 * 60 {
+            trainingDays.insert(key(workout.start))
+        }
+        var mindfulByDay: [String: Double] = [:]
+        for day in (try? await health.mindfulMinutes(days: 91)) ?? [] {
+            mindfulByDay[key(day.date)] = day.value
+        }
+        // Sleep debt up to each morning: the running 14-night balance (`SleepDebt`).
+        var debtByMorning: [String: Double] = [:]
+        if let need = saved.sleepNeedHours {
+            let ordered = nights.sorted { $0.wake < $1.wake }
+            for (index, night) in ordered.enumerated() {
+                let window = ordered[max(0, index - SleepDebt.nights + 1)...index].map(\.hoursAsleep)
+                if let debt = SleepDebt.compute(nightlyHours: window, needHours: need) {
+                    debtByMorning[key(calendar.startOfDay(for: night.wake))] = debt.hours
+                }
+            }
+        }
 
         var days: [CheckInDay] = []
         for offset in 0..<90 {
@@ -129,13 +212,21 @@ final class CheckInStore {
                     hrv: vital?.hrvMilliseconds, sleepScore: saved.sleepScores[key(morning)]
                 ))
             }
-            guard evening != nil || checkIn != nil || water != nil else { continue }
+            let mood = moodByMorning[key(morning)]
+            guard evening != nil || checkIn != nil || water != nil || mood != nil else { continue }
             days.append(CheckInDay(
                 morning: morning, evening: evening, checkIn: checkIn,
                 hrv: vital?.hrvMilliseconds, restingHeartRate: vital?.restingHeartRate,
                 sleepScore: saved.sleepScores[key(morning)],
                 waterLiters: water,
-                bedtimeMinutes: bedtimeByMorning[key(morning)]
+                bedtimeMinutes: bedtimeByMorning[key(morning)],
+                moodValence: mood,
+                // Workouts are known for the whole window, so a day with none is a rest day.
+                trainedYesterday: trainingDays.contains(key(previous)),
+                strainYesterday: saved.strains?[key(previous)],
+                usualTrainingStrain: saved.usualTrainingStrain,
+                sleepDebtHours: debtByMorning[key(morning)],
+                mindfulMinutes: mindfulByDay[key(previous)] ?? 0
             ))
         }
         insights = CheckInInsights.analyze(days)
@@ -151,7 +242,8 @@ final class CheckInStore {
             var line = "This morning:"
             if let rested = morning.rested { line += " rested \(rested)/5," }
             if let soreness = morning.soreness { line += " soreness \(soreness)/10" + (morning.soreAreas.isEmpty ? "," : " (\(morning.soreAreas.map(\.rawValue).joined(separator: ", "))),") }
-            if let mood = morning.mood { line += " mood \(mood)/5," }
+            if let mood = morning.mood { line += " mood \(mood)/5" + ((morning.feelings?.isEmpty ?? true) ? "," : " (\((morning.feelings ?? []).map(MoodScale.readable).joined(separator: ", ").lowercased()))," }
+            if let associations = morning.associations, !associations.isEmpty { line += " on their mind: \(associations.map(MoodScale.readable).joined(separator: ", ").lowercased())," }
             if morning.isSick { line += " symptoms: \(morning.symptoms.map(\.rawValue).joined(separator: ", "))," }
             parts.append(String(line.dropLast()))
         }

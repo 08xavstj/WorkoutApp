@@ -75,6 +75,39 @@ struct HomeBloodPressureTests {
         #expect(HomeBloodPressure.lastCompletedCheck(Array(readings.prefix(2)), calendar: calendar) == nil)
     }
 
+    /// A watch hypertension notification (sensitivity 41%, specificity 92%;
+    /// watch-features.md 1.1) prompts the 7-day check for 30 days, until a
+    /// full check has been completed after it.
+    @Test func hypertensionNotificationPromptsTheHomeCheck() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = calendar.date(from: DateComponents(year: 2027, month: 3, day: 20, hour: 20))!
+        let event = calendar.date(byAdding: .day, value: -10, to: now)!
+        let old = calendar.date(byAdding: .day, value: -40, to: now)!
+
+        // Recent notification, no readings: prompt with that date.
+        #expect(HomeBloodPressure.pendingHypertensionEvent(events: [event], readings: [], now: now, calendar: calendar) == event)
+        // Older than 30 days, or in the future: nothing.
+        #expect(HomeBloodPressure.pendingHypertensionEvent(events: [old], readings: [], now: now, calendar: calendar) == nil)
+        #expect(HomeBloodPressure.pendingHypertensionEvent(events: [now.addingTimeInterval(3600)], readings: [], now: now, calendar: calendar) == nil)
+        #expect(HomeBloodPressure.pendingHypertensionEvent(events: [], readings: [], now: now, calendar: calendar) == nil)
+
+        // A full week of readings (two a day, 14 readings) ending after the notification clears it.
+        func week(ending end: Date) -> [HomeBloodPressure.Reading] {
+            (0..<7).flatMap { daysAgo -> [HomeBloodPressure.Reading] in
+                let day = calendar.date(byAdding: .day, value: -daysAgo, to: end)!
+                return [-12.0, 0].map { .init(date: day.addingTimeInterval($0 * 3600), systolic: 124, diastolic: 78) }
+            }
+        }
+        let after = week(ending: calendar.date(byAdding: .day, value: -1, to: now)!)
+        #expect(HomeBloodPressure.pendingHypertensionEvent(events: [event], readings: after, now: now, calendar: calendar) == nil)
+        // A check completed before the notification doesn't count.
+        let before = week(ending: calendar.date(byAdding: .day, value: -12, to: now)!)
+        #expect(HomeBloodPressure.pendingHypertensionEvent(events: [event], readings: before, now: now, calendar: calendar) == event)
+        // A few readings since aren't a completed check.
+        #expect(HomeBloodPressure.pendingHypertensionEvent(events: [event], readings: Array(after.prefix(3)), now: now, calendar: calendar) == event)
+    }
+
     @Test func oneDayIsKeptButNotReliable() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let check = HomeBloodPressure.weekCheck([.init(date: now, systolic: 132, diastolic: 84)], asOf: now)

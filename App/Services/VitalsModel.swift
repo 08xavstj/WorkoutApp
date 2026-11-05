@@ -75,6 +75,14 @@ final class VitalsModel {
     private(set) var apnoeaNights30: [Date] = []
     /// Minutes in daylight today (Apple Watch), nil without the data.
     private(set) var daylightMinutesToday: Double?
+    // Builder B (watch-features.md 1.1, 1.2, 4.5): nightly breathing disturbances,
+    // symptoms logged in Health by other apps, the watch's hypertension notification.
+    @ObservationIgnored private var breathingDisturbanceHistory: [DatedValue] = []
+    /// Days in the last 3 with a symptom logged in Health outside this app.
+    private(set) var healthSymptomDays: [Date] = []
+    /// A hypertension notification still waiting for the 7-day home check
+    /// (`HomeBloodPressure.pendingHypertensionEvent`); nil when none.
+    private(set) var hypertensionPromptDate: Date?
     private(set) var isLoading = false
     @ObservationIgnored private var isRefreshing = false
 
@@ -169,6 +177,11 @@ final class VitalsModel {
         // iOS 17/18 types (HealthKitClient+iOS26; competitors.md §1g).
         async let daylight = health.timeInDaylight(days: 90)
         async let apnoea = health.sleepApneaNights(days: 30)
+        // Builder B (watch-features.md 1.1, 1.2, 4.5).
+        async let breathing = health.dailySeries(.appleSleepingBreathingDisturbances, unit: .count(), days: 90, cumulative: false)
+        async let healthSymptoms = health.reportedSymptoms(from: calendar.date(byAdding: .day, value: -3, to: today) ?? today, to: now)
+        async let hypertension = health.hypertensionEvents(since: calendar.date(byAdding: .day, value: -HomeBloodPressure.hypertensionPromptDays, to: today) ?? today)
+        async let cuffReadings = health.bloodPressureReadings(days: 90)
 
         func get(_ value: [DatedValue]?) -> [DatedValue] { value ?? [] }
         let rhrSeries = get(try? await rhr)
@@ -281,6 +294,16 @@ final class VitalsModel {
         let apnoeaNights = (try? await apnoea) ?? []
         apnoeaNights30 = apnoeaNights
         result.append(Self.apnoeaStat(nights: apnoeaNights, today: today))
+        // Builder B: the nightly series behind the apnoea flags (VitalsModel+Breathing),
+        // Health symptoms for the illness watch, and the hypertension prompt.
+        let breathingSeries = get(try? await breathing)
+        breathingDisturbanceHistory = breathingSeries
+        result.append(Self.breathingDisturbancesStat(series: breathingSeries, today: today))
+        healthSymptomDays = (try? await healthSymptoms) ?? []
+        hypertensionPromptDate = HomeBloodPressure.pendingHypertensionEvent(
+            events: (try? await hypertension) ?? [],
+            readings: ((try? await cuffReadings) ?? []).map(\.asCore)
+        )
         let daylightSeries = get(try? await daylight)
         daylightMinutesToday = daylightSeries.isEmpty ? nil : (latestToday(daylightSeries)?.value ?? 0)
         result.append(Self.daylightStat(series: daylightSeries, today: today))
@@ -351,6 +374,8 @@ final class VitalsModel {
         result.append(Self.strengthDaysStat(sessions: sessions, now: now))
         result.append(todayStat("active", "Active energy", "flame.fill", series: get(try? await active), unit: "kcal", digits: 0, today: latestToday))
         result.append(todayStat("resting", "Resting energy", "battery.75percent", series: get(try? await resting), unit: "kcal", digits: 0, today: latestToday))
+        // Hearing (HealthKitClient+Hearing; watch-features.md §1.6): headphone dB(A) against the WHO weekly budget.
+        result.append(Self.hearingStat(try? await health.weeklyHeadphoneExposure(), today: today))
 
         // MARK: Body
         let unit = settings.weightUnit
@@ -524,21 +549,41 @@ final class VitalsModel {
             hrvChangePercent: metrics.recovery?.hrvChangePercent,
             drinksLastNight: drinksLastNight,
             yesterdayStrain: metrics.yesterdayStrain,
-            reportedSymptoms: reportedSymptoms,
+            // Builder B: symptoms logged in Health by other apps count too (watch-features.md 4.5).
+            reportedSymptoms: reportedSymptoms || !healthSymptomDays.isEmpty,
             previousDay: previousDay,
-            daysSinceLastPeriod: daysSinceLastPeriod
+            daysSinceLastPeriod: daysSinceLastPeriod,
+            // Builder B: temperature as a z-score against the 30-night baseline, and the
+            // week's breathing-disturbance trend (watch-features.md §1 note, 1.2).
+            temperatureBaselineSD: temperatureBaselineSD(on: today),
+            breathingDisturbancesRising: IllnessWatch.breathingDisturbancesRising(nightly: breathingDisturbanceHistory.map(\.value))
         ))
     }
 
-    /// Sleeping wrist temperature on `day` minus the mean of the 14 nights
+    /// Nights of sleeping wrist temperature used as the baseline (Builder B:
+    /// 14 → 30, matching the resting heart rate baseline; TemPredict, Mason
+    /// et al., Sci Rep 2022, used per-person baselines of several weeks).
+    private static let temperatureBaselineNights = 30
+
+    /// Sleeping wrist temperature on `day` minus the mean of the 30 nights
     /// before it (needs 5); nil without a reading that day (Smarr et al., Sci
     /// Rep 2020: fever onset shows as a rise against your own baseline).
     private func temperatureDelta(on day: Date) -> Double? {
         let calendar = Calendar.current
         guard let index = wristTemperatureHistory.lastIndex(where: { calendar.isDate($0.date, inSameDayAs: day) }) else { return nil }
-        let previous = wristTemperatureHistory[..<index].suffix(14).map(\.value)
+        let previous = wristTemperatureHistory[..<index].suffix(Self.temperatureBaselineNights).map(\.value)
         guard previous.count >= 5 else { return nil }
         return wristTemperatureHistory[index].value - previous.reduce(0, +) / Double(previous.count)
+    }
+
+    /// Night-to-night SD of the same baseline (needs 7 nights), for the
+    /// illness watch's z-score bar (`IllnessWatch.temperatureBar`).
+    private func temperatureBaselineSD(on day: Date) -> Double? {
+        let calendar = Calendar.current
+        guard let index = wristTemperatureHistory.lastIndex(where: { calendar.isDate($0.date, inSameDayAs: day) }) else { return nil }
+        let previous = wristTemperatureHistory[..<index].suffix(Self.temperatureBaselineNights).map(\.value)
+        guard previous.count >= 7 else { return nil }
+        return Self.meanSD(previous)?.sd
     }
 
     private static func meanSD(_ values: [Double]) -> (mean: Double, sd: Double)? {
@@ -815,6 +860,40 @@ extension VitalsModel {
             stat.tone = .neutral
         }
         stat.footnote = "About 2 hours a day is the anchor (Burns 2023; evidence is observational)."
+        return stat
+    }
+}
+
+// MARK: - Hearing (HealthKitClient+Hearing; AppCore HearingExposure)
+
+extension VitalsModel {
+    /// Headphone sound this week as a share of the WHO/ITU weekly budget
+    /// (80 dB(A) for 40 h; WHO-ITU H.870 2019, WHO 2019), with the nudge
+    /// when it is used up. Nil exposure: Health has no headphone levels.
+    static func hearingStat(_ exposure: HearingExposure.Result?, today: Date) -> Stat {
+        let calendar = Calendar.current
+        var stat = Stat(id: "hearing", category: .activity, title: "Headphone sound", icon: "headphones", unit: "% of weekly budget")
+        stat.chart = .bars
+        stat.defaultDays = 7
+        stat.historyUnit = "%"
+        stat.about = "How much of the WHO/ITU weekly safe-listening budget your headphones have used in the last 7 days: 80 dB(A) for 40 hours, and every 3 dB louder halves the time (WHO-ITU H.870, 2019; WHO 2019). The budget comes from workplace hearing limits with a safety margin, so it is a guideline rather than a measured line between safe and harmful. Levels come from your iPhone or Apple Watch (Health › Hearing)."
+        guard let exposure, exposure.hours > 0 else {
+            stat.footnote = "Needs headphone levels from an iPhone or Apple Watch (Health › Hearing)."
+            return stat
+        }
+        stat.value = "\(exposure.percentOfBudget)"
+        stat.gauge = min(1, exposure.budgetFraction)
+        stat.series = (-6...0).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: today).map {
+                DatedValue(date: $0, value: (exposure.dailyFractions[$0] ?? 0) * 100)
+            }
+        }
+        let hours = exposure.hours.formatted(.number.precision(.fractionLength(1)))
+        let level = exposure.equivalentLevel.map { $0.formatted(.number.precision(.fractionLength(0))) } ?? "--"
+        stat.status = "\(hours) h at about \(level) dB(A) this week"
+        stat.tone = exposure.isOverBudget ? .caution : .good
+        stat.footnote = HearingExposure.nudge(for: exposure)
+            ?? "Budget: 80 dB(A) for 40 h a week (WHO-ITU H.870); every 3 dB louder halves the time."
         return stat
     }
 }

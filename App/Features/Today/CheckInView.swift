@@ -107,9 +107,7 @@ struct CheckInView: View {
         } footer: {
             Text("The trainer works around sore muscles.")
         }
-        Section("Mood") {
-            ScalePicker(value: $morning.mood, labels: ["Low", "Meh", "OK", "Good", "Great"], color: Theme.recoveryHigh)
-        }
+        MoodQuestions(mood: $morning.mood, feelings: $morning.feelings, associations: $morning.associations)
         Section {
             ChipFlow(options: MorningCheckIn.Symptom.allCases, selection: $morning.symptoms, label: \.rawValue, color: Theme.recoveryLow)
         } header: {
@@ -212,6 +210,7 @@ struct CheckInView: View {
         Section("Stress today") {
             ScalePicker(value: $evening.stress, labels: ["Calm", "Low", "Some", "High", "Very high"], color: Theme.recoveryModerate)
         }
+        MoodQuestions(mood: $evening.mood, feelings: $evening.feelings, associations: $evening.associations)
         Section("Food") {
             optionalTime("Last meal", \.lastMealMinutes, default: 19 * 60)
         }
@@ -302,9 +301,28 @@ struct CheckInView: View {
             }
             store.save(morning)
             // Mood → Apple Health state of mind (daily mood; iOS 18 type;
-            // HealthKitClient+Writes), so Health's mental-wellbeing view sees it.
+            // HealthKitClient+Writes), so Health's mental-wellbeing view sees it,
+            // with the chosen words and what it's about, plus what the app knows:
+            // training in the last day → fitness, symptoms → health (watch-features.md 4.2).
             if let mood = morning.mood, let health {
-                Task { try? await health.saveStateOfMind(mood: mood, date: .now) }
+                var associations = morning.associations ?? []
+                let dayAgo = Date.now.addingTimeInterval(-24 * 3600)
+                if sessions.contains(where: { !$0.isActive && $0.startedAt >= dayAgo }), !associations.contains(MoodAssociation.fitness.rawValue) {
+                    associations.append(MoodAssociation.fitness.rawValue)
+                }
+                if morning.isSick, !associations.contains(MoodAssociation.health.rawValue) {
+                    associations.append(MoodAssociation.health.rawValue)
+                }
+                let feelings = morning.feelings ?? []
+                Task {
+                    try? await health.saveStateOfMind(mood: mood, date: .now, kind: .daily, feelings: feelings, associations: associations)
+                }
+            }
+            // Symptoms → Apple Health symptom samples (HealthKitClient+Symptoms), so
+            // Health and other apps see them; clearing them here clears Health too.
+            if let health {
+                let symptoms = morning.symptoms
+                Task { try? await health.saveSymptoms(symptoms, date: .now) }
             }
             // Late hard workout last night is filled in from your data, not asked.
             let yesterday = Calendar.current.date(byAdding: .day, value: -2, to: .now) ?? .now
@@ -326,8 +344,65 @@ struct CheckInView: View {
                 evening.syncDrinksFromAlcohol()
             }
             store.save(evening)
+            // Evening mood (or, failing that, the stress scale turned around) →
+            // a momentary emotion in Apple Health (watch-features.md 4.2).
+            if let valence = evening.eveningValence, let health {
+                let mood = evening.mood ?? evening.stress.map { 6 - $0 } ?? 3
+                let feelings = evening.feelings ?? []
+                let associations = evening.associations ?? []
+                Task {
+                    try? await health.saveStateOfMind(mood: mood, date: .now, valence: valence, kind: .momentary,
+                                                      feelings: feelings, associations: associations)
+                }
+            }
         }
         dismiss()
+    }
+}
+
+/// "How are you feeling?": the 1-5 mood, then optional words for it and
+/// what it's about (Apple's State of Mind labels and associations; see
+/// `MoodFeeling`, `MoodAssociation`). Nothing is required. The chips only
+/// appear once a mood is picked, so the form stays short.
+private struct MoodQuestions: View {
+    @Binding var mood: Int?
+    /// `MoodFeeling` raw values.
+    @Binding var feelings: [String]?
+    /// `MoodAssociation` raw values.
+    @Binding var associations: [String]?
+
+    var body: some View {
+        Section {
+            ScalePicker(value: $mood, labels: ["Low", "Meh", "OK", "Good", "Great"], color: Theme.recoveryHigh)
+            if mood != nil {
+                ChipFlow(options: MoodFeeling.allCases, selection: feelingSelection, label: \.title, color: Theme.recoveryHigh)
+            }
+        } header: {
+            Text("How are you feeling?")
+        }
+        if mood != nil {
+            Section {
+                ChipFlow(options: MoodAssociation.allCases, selection: associationSelection, label: \.title, color: Theme.sleep)
+            } header: {
+                Text("What's affecting it?")
+            } footer: {
+                Text("Optional. Saved to Apple Health with your mood, and used to spot what moves it.")
+            }
+        }
+    }
+
+    private var feelingSelection: Binding<[MoodFeeling]> {
+        Binding(
+            get: { (feelings ?? []).compactMap(MoodFeeling.init(rawValue:)) },
+            set: { feelings = $0.isEmpty ? nil : $0.map(\.rawValue) }
+        )
+    }
+
+    private var associationSelection: Binding<[MoodAssociation]> {
+        Binding(
+            get: { (associations ?? []).compactMap(MoodAssociation.init(rawValue:)) },
+            set: { associations = $0.isEmpty ? nil : $0.map(\.rawValue) }
+        )
     }
 }
 

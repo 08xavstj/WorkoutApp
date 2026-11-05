@@ -18,6 +18,8 @@ struct UpNextCard: View {
     @Environment(UserSettings.self) private var settings
     @Environment(CheckInStore.self) private var checkIns
     @Environment(MedicationsModel.self) private var meds
+    // Builder B: for the hypertension-notification row (watch-features.md 1.1).
+    @Environment(VitalsModel.self) private var vitals
 
     /// Most rows shown at once (ux-audit.md 4.6).
     private static let maximumRows = 4
@@ -55,6 +57,12 @@ struct UpNextCard: View {
             items.append(UpNextItem(id: "breathing", minutes: now, kind: .breathing))
         }
         if let bedtime = bedtimeItem() { items.append(bedtime) }
+        // Builder B: the watch flagged possible hypertension and no 7-day home
+        // check has been done since (`HomeBloodPressure.pendingHypertensionEvent`;
+        // Apple's validation: sensitivity 41%, specificity 92%, watch-features.md 1.1).
+        if let flagged = vitals.hypertensionPromptDate {
+            items.append(UpNextItem(id: "bp-check", minutes: settings.morningCheckInMinutes, kind: .bloodPressure(flagged)))
+        }
         return items.sorted { $0.minutes < $1.minutes }
     }
 
@@ -133,6 +141,8 @@ private struct UpNextItem: Identifiable {
         case bedtime(title: String, detail: String)
         /// Advice with no action, e.g. the caffeine cut-off.
         case info(icon: String, color: Color, title: String, detail: String?)
+        /// Builder B: a watch hypertension notification waiting for the 7-day home check.
+        case bloodPressure(Date)
     }
 
     let id: String
@@ -159,7 +169,32 @@ private struct UpNextItemRow: View {
         case .info(let icon, let color, let title, let detail):
             UpNextRow(icon: icon, color: color, title: title, detail: detail)
                 .accessibilityElement(children: .combine)
+        case .bloodPressure(let flagged):
+            BloodPressureUpNextRow(flagged: flagged)
         }
+    }
+}
+
+/// Builder B: opens the blood pressure sheet (`AppRouter.showBloodPressure`)
+/// after an Apple Watch hypertension notification (watch-features.md 1.1).
+private struct BloodPressureUpNextRow: View {
+    let flagged: Date
+    @Environment(AppRouter.self) private var router
+
+    var body: some View {
+        Button { router.showBloodPressure = true } label: {
+            UpNextRow(
+                icon: "heart.text.square.fill",
+                color: Theme.heart,
+                title: "7-day blood pressure check",
+                detail: "Your watch flagged possible high blood pressure on \(flagged.formatted(date: .abbreviated, time: .omitted))"
+            ) {
+                UpNextChevron()
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens the blood pressure log")
     }
 }
 

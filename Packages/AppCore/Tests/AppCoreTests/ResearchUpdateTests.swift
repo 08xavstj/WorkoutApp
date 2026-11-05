@@ -164,6 +164,51 @@ struct WellbeingTests {
         #expect(IllnessWatch.evaluate(.init(restingHeartRate: 55, rhrBaseline: (54, 1.5))) == nil)
     }
 
+    /// Temperature is judged against your own night-to-night spread (+1.5 SD,
+    /// TemPredict: Mason 2022; per-person residuals: Mishra 2020) once the SD
+    /// is known; the fixed +0.5 °C (Smarr 2020) stays the fallback.
+    @Test func temperatureUsesYourOwnSpread() throws {
+        #expect(abs(IllnessWatch.temperatureBar(baselineSD: nil, luteal: false) - 0.5) < 0.001)
+        #expect(abs(IllnessWatch.temperatureBar(baselineSD: nil, luteal: true) - 0.8) < 0.001)
+        #expect(abs(IllnessWatch.temperatureBar(baselineSD: 0.2, luteal: false) - 0.3) < 0.001)
+        #expect(abs(IllnessWatch.temperatureBar(baselineSD: 0.2, luteal: true) - 0.6) < 0.001)
+        // A very steady baseline can't trip on noise: the 0.2 °C floor.
+        #expect(abs(IllnessWatch.temperatureBar(baselineSD: 0.05, luteal: false) - 0.2) < 0.001)
+
+        // Steady sleeper (SD 0.15): +0.36 °C is 2.4 SD and counts, where the fixed bar missed it.
+        let steady = try #require(IllnessWatch.evaluate(.init(temperatureDelta: 0.36, reportedSymptoms: true, temperatureBaselineSD: 0.15)))
+        #expect(steady.signals.contains("Temperature +0.4 °C"))
+        #expect(steady.level == .major)
+        #expect(IllnessWatch.evaluate(.init(temperatureDelta: 0.36)) == nil)
+        // Variable sleeper (SD 0.4): +0.5 °C is only 1.25 SD, so it doesn't count.
+        #expect(IllnessWatch.evaluate(.init(temperatureDelta: 0.5, temperatureBaselineSD: 0.4)) == nil)
+        // The luteal allowance is added to the z-score bar too.
+        #expect(IllnessWatch.evaluate(.init(temperatureDelta: 0.5, daysSinceLastPeriod: 20, temperatureBaselineSD: 0.15)) == nil)
+        let lutealFever = try #require(IllnessWatch.evaluate(.init(temperatureDelta: 0.7, daysSinceLastPeriod: 20, temperatureBaselineSD: 0.15)))
+        #expect(lutealFever.signals == ["Temperature +0.7 °C"])
+    }
+
+    /// The last 7 nights' breathing disturbances well above the 30 before
+    /// (one SD of nightly values) count as one sign (watch-features.md 1.2).
+    @Test func breathingDisturbanceTrend() throws {
+        let quiet = Array(repeating: [4.0, 5.0, 6.0, 5.0, 4.5, 5.5, 5.0, 4.0, 6.0, 5.0], count: 3).flatMap { $0 }
+        #expect(!IllnessWatch.breathingDisturbancesRising(nightly: quiet))
+        // Baseline SD here is about 0.7; a week averaging 7 is almost 3 SD up.
+        #expect(IllnessWatch.breathingDisturbancesRising(nightly: quiet + Array(repeating: 7.0, count: 7)))
+        // One odd night in the week isn't a trend.
+        #expect(!IllnessWatch.breathingDisturbancesRising(nightly: quiet + [5.0, 5, 5, 8, 5, 5, 5]))
+        // Too little history.
+        #expect(!IllnessWatch.breathingDisturbancesRising(nightly: Array(repeating: 5.0, count: 10) + Array(repeating: 9.0, count: 3)))
+
+        // As a signal it already spans a week, so RHR up + the trend is "major" without yesterday's data.
+        let alert = try #require(IllnessWatch.evaluate(.init(restingHeartRate: 62, rhrBaseline: (54, 1.5), breathingDisturbancesRising: true)))
+        #expect(alert.level == .major)
+        #expect(alert.signals.contains("Breathing disturbances up this week"))
+        // Alone it's one quiet sign.
+        let alone = try #require(IllnessWatch.evaluate(.init(breathingDisturbancesRising: true)))
+        #expect(alone.level == .minor)
+    }
+
     @Test func stalledLiftsWithLowHRVSuggestDeload() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         func point(_ name: String, daysAgo: Double, _ value: Double) -> DeloadAdvisor.LiftPoint {

@@ -7,11 +7,7 @@ import WidgetKit
 struct MedsLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MedsActivityAttributes.self) { context in
-            MedsLockScreenView(state: context.state)
-                .padding(16)
-                .activityBackgroundTint(Color.white.opacity(0.92))
-                .activitySystemActionForegroundColor(WidgetPalette.ink)
-                .widgetURL(URL(string: "workoutapp://meds"))
+            MedsActivityContent(state: context.state)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -41,6 +37,64 @@ struct MedsLiveActivityWidget: Widget {
             }
             .widgetURL(URL(string: "workoutapp://meds"))
         }
+        // Apple Watch Smart Stack (watchOS 11+): the `.small` family below.
+        .supplementalActivityFamilies([.small])
+    }
+}
+
+/// Lock Screen (`.medium`) or Apple Watch Smart Stack (`.small`) layout.
+private struct MedsActivityContent: View {
+    let state: MedsActivityAttributes.ContentState
+    @Environment(\.activityFamily) private var family
+
+    var body: some View {
+        switch family {
+        case .small:
+            MedsWatchView(state: state)
+                .padding(12)
+                .widgetURL(URL(string: "workoutapp://meds"))
+        default:
+            MedsLockScreenView(state: state)
+                .padding(16)
+                .activityBackgroundTint(Color.white.opacity(0.92))
+                .activitySystemActionForegroundColor(WidgetPalette.ink)
+                .widgetURL(URL(string: "workoutapp://meds"))
+        }
+    }
+}
+
+/// The wrist layout: how many doses are left and the next one. Marking a
+/// dose taken stays on the phone (and the Watch's Health app).
+private struct MedsWatchView: View {
+    let state: MedsActivityAttributes.ContentState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Meds", systemImage: "pills.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WidgetPalette.pink)
+                Spacer(minLength: 4)
+                Text("\(state.takenCount) of \(state.doses.count) taken")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if let next = state.remaining.first {
+                Text(next.name)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                Text([next.dose, next.time.formatted(date: .omitted, time: .shortened)].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
+                Label("All taken", systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(WidgetPalette.green)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

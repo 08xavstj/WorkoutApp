@@ -134,4 +134,34 @@ public enum HomeBloodPressure {
         guard check.isReliable else { return nil }
         return (calendar.startOfDay(for: latest), check)
     }
+
+    // MARK: Apple Watch hypertension notification
+
+    /// Apple Watch's hypertension notification (Series 9+/Ultra 2+, watchOS 26,
+    /// FDA-cleared Sept 2025) reviews 30 days of optical data and notifies on
+    /// consistent signs of hypertension; Apple's validation against 30-day
+    /// home blood pressure found sensitivity 41% and specificity 92%, so a
+    /// notification is a good reason to do the home check and a missing one
+    /// doesn't rule hypertension out (docs/research/watch-features.md 1.1,
+    /// refs B1 MacRumors/Apple Sept 2025, B2 AAFP Community Blog, B3 JAMA
+    /// research letter Dec 2025).
+    public static let hypertensionNotificationSensitivity = 0.41
+    public static let hypertensionNotificationSpecificity = 0.92
+    /// How long after a notification the app keeps prompting the 7-day check:
+    /// the notification itself covers 30 days of data (app's choice).
+    public static let hypertensionPromptDays = 30
+
+    /// The latest notification that still needs a home check: within the last
+    /// `hypertensionPromptDays` and not followed by a completed 7-day check
+    /// (`lastCompletedCheck` ending on or after the notification's day).
+    public static func pendingHypertensionEvent(events: [Date], readings: [Reading], now: Date = .now, calendar: Calendar = .current) -> Date? {
+        guard let latest = events.filter({ $0 <= now }).max() else { return nil }
+        let today = calendar.startOfDay(for: now)
+        guard let cutoff = calendar.date(byAdding: .day, value: -hypertensionPromptDays, to: today), latest >= cutoff else { return nil }
+        if let completed = lastCompletedCheck(readings, calendar: calendar),
+           completed.ended >= calendar.startOfDay(for: latest) {
+            return nil
+        }
+        return latest
+    }
 }

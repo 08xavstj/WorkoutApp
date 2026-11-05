@@ -11,6 +11,8 @@ struct BloodPressureView: View {
     @Environment(\.healthClient) private var health
     @Environment(\.dismiss) private var dismiss
     @State private var readings: [BloodPressureReading] = []
+    /// Apple Watch hypertension notifications in the last 30 days (HealthKitClient+Hypertension).
+    @State private var hypertensionEvents: [Date] = []
     @State private var isLoading = true
     @State private var showingEntry = false
     /// True when pushed onto another NavigationStack.
@@ -18,6 +20,11 @@ struct BloodPressureView: View {
 
     private var check: HomeBloodPressure.WeekCheck {
         HomeBloodPressure.weekCheck(readings.map(\.asCore))
+    }
+
+    /// A notification not yet followed by a completed 7-day check.
+    private var pendingHypertensionEvent: Date? {
+        HomeBloodPressure.pendingHypertensionEvent(events: hypertensionEvents, readings: readings.map(\.asCore))
     }
 
     /// The last full 7-day check and when the next is due (3 months if it was
@@ -34,6 +41,9 @@ struct BloodPressureView: View {
         SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if let flagged = pendingHypertensionEvent {
+                        HypertensionNoticeCard(flagged: flagged) { showingEntry = true }
+                    }
                     weekCard
                     BloodPressureGuide()
                     readingsList
@@ -67,6 +77,8 @@ struct BloodPressureView: View {
     private func load() async {
         guard let health else { isLoading = false; return }
         readings = (try? await health.bloodPressureReadings(days: 90)) ?? []
+        let since = Calendar.current.date(byAdding: .day, value: -HomeBloodPressure.hypertensionPromptDays, to: .now) ?? .now
+        hypertensionEvents = (try? await health.hypertensionEvents(since: since)) ?? []
         isLoading = false
         // The 3-6-monthly reminder to repeat the protocol ("measure|bp"), from the last completed check.
         await Reminders.scheduleBloodPressureReminder(due: nextCheckDue)
@@ -170,6 +182,42 @@ struct BloodPressureView: View {
         case .elevated: Theme.recoveryModerateText
         case .stage1, .stage2, .severe: Theme.recoveryLowText
         }
+    }
+}
+
+/// The watch flagged possible hypertension: do the 7-day home check. Apple's
+/// validation against 30-day home blood pressure: sensitivity 41%, specificity
+/// 92% (`HomeBloodPressure`; docs/research/watch-features.md 1.1, refs B1-B3),
+/// so a notification is worth acting on and a missing one isn't an all-clear.
+struct HypertensionNoticeCard: View {
+    let flagged: Date
+    let start: () -> Void
+
+    private var sensitivity: Int { Int((HomeBloodPressure.hypertensionNotificationSensitivity * 100).rounded()) }
+    private var specificity: Int { Int((HomeBloodPressure.hypertensionNotificationSpecificity * 100).rounded()) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Apple Watch flagged possible high blood pressure", systemImage: "applewatch")
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+            Text("Your Apple Watch flagged possible high blood pressure on \(flagged.formatted(date: .abbreviated, time: .omitted)). Do the 7-day home check: two cuff readings each morning and evening. A missing notification doesn't rule it out: the alert catches about 4 in 10 cases (Apple's validation: sensitivity \(sensitivity)%, specificity \(specificity)%).")
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: start) {
+                Label("Start the 7-day check", systemImage: "plus")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .tint(Theme.heartText)
+            Text("Not a diagnosis. Share your home average with your doctor either way.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(tint: Theme.heart)
     }
 }
 

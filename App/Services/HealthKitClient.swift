@@ -13,7 +13,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
     private var readTypes: Set<HKObjectType> {
-        [
+        var types: Set<HKObjectType> = [
             HKQuantityType(.heartRate),
             HKQuantityType(.restingHeartRate),
             HKQuantityType(.heartRateVariabilitySDNN),
@@ -69,13 +69,27 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             // iOS 17/18 types (see HealthKitClient+iOS26): minutes outdoors from an
             // Apple Watch, and its sleep-apnoea (breathing disturbance) notifications.
             HKQuantityType(.timeInDaylight),
-            HKCategoryType(.sleepApneaEvent)
+            HKCategoryType(.sleepApneaEvent),
+            // Hearing (HealthKitClient+Hearing): headphone and environmental sound
+            // levels in dB(A), for the WHO/ITU weekly safe-listening budget.
+            HKQuantityType(.headphoneAudioExposure),
+            HKQuantityType(.environmentalAudioExposure),
+            // iOS 26 Medications (HealthKitClient+iOS26): dose events read with the
+            // usual sheet; the medications list itself needs per-object authorization.
+            HKObjectType.medicationDoseEventType(),
+            // Nightly breathing disturbances behind the apnoea notification (iOS 18; watch-features.md 1.2).
+            HKQuantityType(.appleSleepingBreathingDisturbances)
         ]
+        // Symptoms logged in Health (HealthKitClient+Symptoms) and the watch's
+        // hypertension notification (HealthKitClient+Hypertension; empty until its flag is on).
+        types.formUnion(Self.symptomReadTypes as [HKObjectType])
+        types.formUnion(Self.hypertensionReadTypes)
+        return types
     }
 
     private var shareTypes: Set<HKSampleType> {
         // Heart rate and energy are written by the live workout session (AirPods Pro 3 / chest strap).
-        [HKObjectType.workoutType(), HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned),
+        var types: Set<HKSampleType> = [HKObjectType.workoutType(), HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned),
          // Home blood pressure readings you type in.
          HKQuantityType(.bloodPressureSystolic), HKQuantityType(.bloodPressureDiastolic),
          // Paced-breathing sessions, the check-in mood and the session RPE (HealthKitClient+Writes).
@@ -83,6 +97,9 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
          // Quick-estimate meals, flagged as estimates in their metadata.
          HKQuantityType(.dietaryEnergyConsumed), HKQuantityType(.dietaryProtein), HKQuantityType(.dietaryCarbohydrates),
          HKQuantityType(.dietaryFatTotal), HKQuantityType(.dietaryFiber)]
+        // The morning check-in's symptoms (HealthKitClient+Symptoms).
+        types.formUnion(Self.symptomTypes as [HKSampleType])
+        return types
     }
 
     @concurrent

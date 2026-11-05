@@ -16,7 +16,8 @@ final class MedicationsModel {
 
     var todayDoses: [Dose] { MedicationStore.doses(on: .now) }
 
-    func isTaken(_ dose: Dose) -> Bool { taken[dose.id] != nil }
+    /// Taken in this app, or logged as taken in the Health app (`healthTakenAt`).
+    func isTaken(_ dose: Dose) -> Bool { taken[dose.id] != nil || healthTakenAt(dose) != nil }
 
     func save(_ medication: Medication) {
         var all = MedicationStore.medications()
@@ -85,15 +86,16 @@ final class MedicationsModel {
     /// (matched by name, case-insensitive, or by Apple's id in the notes).
     /// Read-only merge: nothing the user typed is changed or removed, and
     /// imported entries carry no reminder times so Apple's reminders aren't
-    /// doubled (competitors.md item 7). Archived ones are skipped. Returns
-    /// how many were added.
+    /// doubled (competitors.md item 7); doses logged in Health still count as
+    /// taken here (`healthTakenAt`). Archived ones are skipped. Returns how
+    /// many were added.
     @discardableResult
     func merge(healthMedications: [HealthMedication]) -> Int {
         var all = MedicationStore.medications()
         let names = Set(all.map { $0.name.lowercased().trimmingCharacters(in: .whitespaces) })
         var added = 0
         for imported in healthMedications where !imported.isArchived {
-            let name = (imported.nickname?.isEmpty == false ? imported.nickname! : imported.name).trimmingCharacters(in: .whitespaces)
+            let name = imported.shownName
             guard !name.isEmpty else { continue }
             let marker = "\(Self.healthImportNote) (\(imported.id))"
             if names.contains(name.lowercased()) || all.contains(where: { $0.notes.contains(marker) }) { continue }
@@ -106,11 +108,70 @@ final class MedicationsModel {
         return added
     }
 
-    /// Reads the Health app's medications (when the API is enabled in this
-    /// build) and merges them in.
+    /// Reads the Health app's medications and merges them in, then loads the
+    /// doses logged there (`healthDoses`). Asks for the per-object Medications
+    /// access once (the list has its own picker, not the usual Health sheet);
+    /// `reconnectHealth` asks again.
     func importFromHealth(_ health: HealthKitClient) async {
-        guard let imported = try? await health.importedMedications(), !imported.isEmpty else { return }
-        merge(healthMedications: imported)
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: Self.healthAccessAskedKey) {
+            do {
+                try await health.requestMedicationsAccess()
+                defaults.set(true, forKey: Self.healthAccessAskedKey)
+            } catch {
+                return
+            }
+        }
+        if let imported = try? await health.importedMedications(), !imported.isEmpty {
+            merge(healthMedications: imported)
+        }
+        healthDoses = (try? await health.healthDoseEvents(days: Self.healthDoseDays)) ?? []
+    }
+
+    /// Shows the Medications picker again (e.g. from Settings) and reloads.
+    func reconnectHealth(_ health: HealthKitClient) async {
+        UserDefaults.standard.set(false, forKey: Self.healthAccessAskedKey)
+        await importFromHealth(health)
+    }
+
+    // MARK: Adherence from the Health app's log (read-only)
+
+    /// Doses logged in the Health app in the last `healthDoseDays` days, when
+    /// the user allowed reading them. The app's own reminders and "Taken"
+    /// buttons keep working; a dose logged in Health just counts as taken
+    /// here too, so nothing is logged twice.
+    private(set) var healthDoses: [HealthDoseEvent] = []
+    private static let healthAccessAskedKey = "medsHealthAccessAsked"
+    /// Matches `MedicationStore.markTaken`'s 60-day log.
+    private static let healthDoseDays = 60
+    /// A Health dose answers a scheduled dose when its reminder (or log) time
+    /// is within this of the dose's time; app choice, wide enough for a late dose.
+    private static let healthMatchWindow: TimeInterval = 4 * 3600
+
+    /// When the Health app logged this dose as taken, if it did: the same
+    /// medication on the same day, nearest the dose's time (any time of day
+    /// when the medication has a single daily dose).
+    func healthTakenAt(_ dose: Dose) -> Date? {
+        guard !healthDoses.isEmpty,
+              let medication = medications.first(where: { $0.id == dose.medicationID }) else { return nil }
+        let calendar = Calendar.current
+        let sameDay = healthDoses.filter {
+            $0.taken && Self.matches(medication, $0) && calendar.isDate($0.scheduledDate ?? $0.loggedAt, inSameDayAs: dose.day)
+        }
+        if medication.times.count <= 1 { return sameDay.first?.loggedAt }
+        let doseTime = dose.time
+        func distance(_ event: HealthDoseEvent) -> TimeInterval {
+            abs((event.scheduledDate ?? event.loggedAt).timeIntervalSince(doseTime))
+        }
+        let nearest = sameDay.filter { distance($0) <= Self.healthMatchWindow }.min { distance($0) < distance($1) }
+        return nearest?.loggedAt
+    }
+
+    /// Same medication: the Health id kept in the notes marker, or the same name.
+    static func matches(_ medication: Medication, _ event: HealthDoseEvent) -> Bool {
+        if medication.notes.contains("(\(event.medicationID))") { return true }
+        return medication.name.lowercased().trimmingCharacters(in: .whitespaces)
+            == event.name.lowercased().trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: What the medications mean

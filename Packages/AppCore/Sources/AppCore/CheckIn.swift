@@ -41,6 +41,10 @@ public struct MorningCheckIn: Codable, Sendable, Equatable {
     public var cycle: Cycle?
     /// Filled in by the app, not asked: a hard workout ended within an hour of falling asleep.
     public var lateHardWorkout: Bool?
+    /// Optional words for the mood, as `MoodFeeling` raw values (Apple label names).
+    public var feelings: [String]?
+    /// Optional "what's affecting it", as `MoodAssociation` raw values (Apple association names).
+    public var associations: [String]?
 
     public init(day: Date) {
         self.day = day
@@ -65,9 +69,23 @@ public struct EveningCheckIn: Codable, Sendable, Equatable {
     /// Drinks logged one by one (type, amount, strength). When present,
     /// `drinks` and `lastDrinkMinutes` are worked out from these.
     public var alcohol: [AlcoholEntry]?
+    /// How the evening feels, 1-5 (optional; `stress` stands in for it when missing).
+    public var mood: Int?
+    /// Optional words for the mood, as `MoodFeeling` raw values (Apple label names).
+    public var feelings: [String]?
+    /// Optional "what's affecting it", as `MoodAssociation` raw values (Apple association names).
+    public var associations: [String]?
 
     public init(day: Date) {
         self.day = day
+    }
+
+    /// Valence for the evening's State of Mind entry: the mood when given,
+    /// else the stress scale turned around (`MoodScale.valence(stress:)`).
+    public var eveningValence: Double? {
+        if let mood { return MoodScale.valence(mood: mood) }
+        if let stress { return MoodScale.valence(stress: stress) }
+        return nil
     }
 
     /// Standard drinks from the itemised log, or nil if nothing was itemised.
@@ -246,9 +264,23 @@ public struct CheckInDay: Sendable, Equatable {
     /// When you fell asleep that night, minutes after the evening's midnight
     /// (over 1440 after midnight, e.g. 1500 = 1:00 am). Nil if unknown.
     public var bedtimeMinutes: Int?
+    /// This morning's mood valence (−1...1), from Health's daily mood or the
+    /// check-in's 1-5 mood (`MoodScale`). The outcome the day before acts on.
+    public var moodValence: Double?
+    /// Did the day before have a workout (any app, 10 min or more)?
+    public var trainedYesterday: Bool?
+    /// The day before's strain (0-100) and what your training days usually reach.
+    public var strainYesterday: Double?
+    public var usualTrainingStrain: Double?
+    /// Hours of sleep debt over the 14 nights up to and including this night (`SleepDebt`).
+    public var sleepDebtHours: Double?
+    /// Mindful minutes logged the day before (Mindfulness app, breathing, Calm...).
+    public var mindfulMinutes: Double?
 
     public init(morning: Date, evening: EveningCheckIn?, checkIn: MorningCheckIn?, hrv: Double?, restingHeartRate: Double?, sleepScore: Double?,
-                waterLiters: Double? = nil, bedtimeMinutes: Int? = nil) {
+                waterLiters: Double? = nil, bedtimeMinutes: Int? = nil,
+                moodValence: Double? = nil, trainedYesterday: Bool? = nil, strainYesterday: Double? = nil,
+                usualTrainingStrain: Double? = nil, sleepDebtHours: Double? = nil, mindfulMinutes: Double? = nil) {
         self.morning = morning
         self.evening = evening
         self.checkIn = checkIn
@@ -257,6 +289,22 @@ public struct CheckInDay: Sendable, Equatable {
         self.sleepScore = sleepScore
         self.waterLiters = waterLiters
         self.bedtimeMinutes = bedtimeMinutes
+        self.moodValence = moodValence
+        self.trainedYesterday = trainedYesterday
+        self.strainYesterday = strainYesterday
+        self.usualTrainingStrain = usualTrainingStrain
+        self.sleepDebtHours = sleepDebtHours
+        self.mindfulMinutes = mindfulMinutes
+    }
+
+    /// Associations named in the evening before or this morning ("work", "family"...).
+    var moodAssociations: Set<String> {
+        Set((evening?.associations ?? []) + (checkIn?.associations ?? []))
+    }
+
+    /// A mood (or its chips) was answered in the evening before or this morning.
+    var hasMoodAnswer: Bool {
+        checkIn?.mood != nil || checkIn?.associations != nil || evening?.mood != nil || evening?.associations != nil
     }
 }
 
@@ -265,8 +313,15 @@ public enum CheckInInsights {
         case hrv = "HRV"
         case restingHeartRate = "Resting heart rate"
         case sleepScore = "Sleep score"
+        /// Next-morning mood as a 0-100 score (`MoodScale.score`). Sleep loss
+        /// reliably lowers positive affect (Palmer et al., Psychol Bull 2024:
+        /// 154 experiments, n 5,717) and exercise lowers depressive symptoms
+        /// (Heissel et al., Br J Sports Med 2023; Singh et al., Br J Sports Med
+        /// 2023 umbrella review), so the levers the app already tracks are the
+        /// ones mood should move with.
+        case mood = "Mood"
 
-        /// Higher is better for HRV and sleep, lower for resting heart rate.
+        /// Higher is better for HRV, sleep and mood, lower for resting heart rate.
         var higherIsBetter: Bool { self != .restingHeartRate }
 
         func value(_ day: CheckInDay) -> Double? {
@@ -274,6 +329,7 @@ public enum CheckInInsights {
             case .hrv: day.hrv
             case .restingHeartRate: day.restingHeartRate
             case .sleepScore: day.sleepScore
+            case .mood: day.moodValence.map(MoodScale.score(valence:))
             }
         }
     }
@@ -307,7 +363,9 @@ public enum CheckInInsights {
         }
     }
 
-    public static let factors: [Factor] = [
+    public static let factors: [Factor] = habitFactors + associationFactors
+
+    static let habitFactors: [Factor] = [
         Factor(id: "drinks2", name: "2+ drinks") { $0.evening?.drinks.map { $0 >= 2 } },
         Factor(id: "anyAlcohol", name: "Any alcohol") { $0.evening?.drinks.map { $0 >= 1 } },
         Factor(id: "caffeine300", name: "300 mg+ caffeine") { $0.evening?.caffeineMg.map { $0 >= 300 } },
@@ -327,7 +385,36 @@ public enum CheckInInsights {
         Factor(id: "lateWorkout", name: "A hard workout within an hour of bed") { $0.checkIn?.lateHardWorkout },
         Factor(id: "sick", name: "Feeling sick") { $0.checkIn.map(\.isSick) },
         Factor(id: "lowWater", name: "Under 2 L of water") { $0.waterLiters.map { $0 < 2 } },
+        // Exercise and mood: Heissel et al., Br J Sports Med 2023 (RCTs in
+        // depression, moderate-to-large effect); Singh et al., Br J Sports Med
+        // 2023 (umbrella review). A rest day is the same test with the sign
+        // flipped, so it isn't listed twice.
+        Factor(id: "training", name: "A training day") { $0.trainedYesterday },
+        // "Harder than usual": strain at or above what your training days
+        // usually reach (`StrainCalculator.usualTrainingStrain`). App-made cut.
+        Factor(id: "highStrain", name: "A harder day than usual") { day in
+            guard let strain = day.strainYesterday, let usual = day.usualTrainingStrain, usual > 0 else { return nil }
+            return strain >= usual
+        },
+        // Sleep loss lowers positive affect and raises anxiety (Palmer et al.,
+        // Psychol Bull 2024, 154 experiments). 3 h is `SleepDebt`'s "moderate" line.
+        Factor(id: "sleepDebt", name: "3 h+ of sleep debt") { $0.sleepDebtHours.map { $0 >= 3 } },
+        // Mindfulness programmes: anxiety ES 0.38, depression 0.30 at 8 weeks
+        // (Goyal et al., JAMA Intern Med 2014, 47 RCTs). Those were daily
+        // practice over weeks; 10 minutes in a day is the app's own cut, so
+        // the evidence for a one-day effect is weak.
+        Factor(id: "mindful10", name: "10+ mindful minutes") { $0.mindfulMinutes.map { $0 >= 10 } },
     ]
+
+    /// What the mood was about, from the check-ins' "What's affecting it?"
+    /// chips. Nil on days with no mood answer at all, so days before the
+    /// chips existed don't read as "without".
+    static let associationFactors: [Factor] = MoodAssociation.allCases.map { association in
+        Factor(id: "assoc." + association.rawValue, name: association.factorName) { day in
+            guard day.hasMoodAnswer else { return nil }
+            return day.moodAssociations.contains(association.rawValue)
+        }
+    }
 
     /// Factors that really seem to change an outcome for you.
     ///

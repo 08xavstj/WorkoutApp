@@ -8,10 +8,7 @@ import WidgetKit
 struct WorkoutLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: WorkoutActivityAttributes.self) { context in
-            WorkoutLockScreenView(attributes: context.attributes, state: context.state, isStale: context.isStale)
-                .padding(16)
-                .activityBackgroundTint(Color.white.opacity(0.92))
-                .activitySystemActionForegroundColor(WidgetPalette.ink)
+            WorkoutActivityContent(attributes: context.attributes, state: context.state, isStale: context.isStale)
         } dynamicIsland: { context in
             // Stale means the rest has ended (staleDate = rest end): show the workout again.
             let resting = !context.isStale && (context.state.restEndsAt.map { $0 > .now } ?? false)
@@ -74,6 +71,85 @@ struct WorkoutLiveActivityWidget: Widget {
                 }
             }
             .widgetURL(URL(string: "workoutapp://workout"))
+        }
+        // Apple Watch Smart Stack (watchOS 11+): the `.small` family below.
+        .supplementalActivityFamilies([.small])
+    }
+}
+
+/// Picks the layout by where the activity is shown: the iPhone Lock Screen
+/// (`.medium`) or the Apple Watch Smart Stack (`.small`, opted into with
+/// `supplementalActivityFamilies`; docs/research/watch-features.md §2.7).
+private struct WorkoutActivityContent: View {
+    let attributes: WorkoutActivityAttributes
+    let state: WorkoutActivityAttributes.ContentState
+    let isStale: Bool
+    @Environment(\.activityFamily) private var family
+
+    var body: some View {
+        switch family {
+        case .small:
+            WorkoutWatchView(attributes: attributes, state: state, isStale: isStale)
+                .padding(12)
+        default:
+            WorkoutLockScreenView(attributes: attributes, state: state, isStale: isStale)
+                .padding(16)
+                .activityBackgroundTint(Color.white.opacity(0.92))
+                .activitySystemActionForegroundColor(WidgetPalette.ink)
+        }
+    }
+}
+
+/// The wrist layout: exercise, "Set x of y" and the rest countdown. No
+/// buttons: the Smart Stack card is glanceable, and the Watch app has the
+/// rest controls.
+private struct WorkoutWatchView: View {
+    let attributes: WorkoutActivityAttributes
+    let state: WorkoutActivityAttributes.ContentState
+    let isStale: Bool
+
+    private var resting: Bool {
+        !isStale && (state.restEndsAt.map { $0 > .now } ?? false)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(resting ? "Rest" : attributes.workoutName, systemImage: resting ? "timer" : "dumbbell.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WidgetPalette.orange)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                timer
+            }
+            Text(resting ? "Next: \(state.exercise)" : state.exercise)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+            Text(state.detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Rest countdown while resting, else time in the session (both self-updating).
+    @ViewBuilder
+    private var timer: some View {
+        if let restRange = state.restRange, resting {
+            Text(timerInterval: restRange, countsDown: true)
+                .font(.title3.weight(.bold))
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .frame(width: 60, alignment: .trailing)
+                .foregroundStyle(WidgetPalette.orange)
+        } else {
+            Text(attributes.startedAt, style: .timer)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .frame(width: 60, alignment: .trailing)
+                .foregroundStyle(.secondary)
         }
     }
 }

@@ -324,6 +324,9 @@ struct RootView: View {
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         checkIns.recordSleepScore(metrics.sleep?.score)
+        // Mood patterns (builder A): each day's strain, your usual training strain and sleep need.
+        checkIns.recordContext(dayStrains: metrics.weekStrain.map { (date: $0.date, strain: $0.strain) },
+                               usualTrainingStrain: metrics.usualTrainingStrain, sleepNeedHours: settings.sleepNeedHours)
         await conditions.refresh(settings: settings)
         // Hot days (by estimated WBGT) lower the strain target (less once you're heat-acclimatised).
         conditions.heatAcclimation = HeatAdvice.acclimation(hotDays: conditions.hotDays, trainingDays: metrics.recentTrainingDays)
