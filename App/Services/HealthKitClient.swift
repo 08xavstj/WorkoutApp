@@ -74,9 +74,10 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             // levels in dB(A), for the WHO/ITU weekly safe-listening budget.
             HKQuantityType(.headphoneAudioExposure),
             HKQuantityType(.environmentalAudioExposure),
-            // iOS 26 Medications (HealthKitClient+iOS26): dose events read with the
-            // usual sheet; the medications list itself needs per-object authorization.
-            HKObjectType.medicationDoseEventType(),
+            // iOS 26 Medications are NOT here: HealthKit refuses them in the usual
+            // sheet ("Authorization to read … MedicationDoseEvent is disallowed");
+            // both the list and dose events use per-object authorization
+            // (`requestMedicationsAccess` in HealthKitClient+iOS26).
             // Nightly breathing disturbances behind the apnoea notification (iOS 18; watch-features.md 1.2).
             HKQuantityType(.appleSleepingBreathingDisturbances)
         ]
