@@ -247,7 +247,7 @@ final class WatchSync: NSObject {
         } else {
             restSeconds = RestPreferences.global > 0 ? RestPreferences.global : 90
         }
-        return WatchSession(
+        var snapshot = WatchSession(
             id: WatchSession.id(for: session.startedAt),
             startedAt: session.startedAt,
             name: session.name,
@@ -261,6 +261,15 @@ final class WatchSync: NSObject {
             sentAt: .now,
             weightStepKg: profile.unit == .kg ? 2.5 : profile.unit.toKilograms(5)
         )
+        // Movement warm-up (`WarmUpStore`): the steps, which one is up and when it ends.
+        if !finished, let warmUp = WarmUpStore.shared.entry(for: session.startedAt) {
+            snapshot.warmUp = warmUp.routine.movements.map {
+                WatchWarmUpStep(name: $0.name, seconds: $0.seconds, cue: $0.cue, reps: $0.reps)
+            }
+            snapshot.warmUpStepIndex = warmUp.isDone ? warmUp.routine.movements.count : warmUp.stepIndex
+            snapshot.warmUpStepEndsAt = warmUp.stepEndsAt
+        }
+        return snapshot
     }
 
     /// Up to 20 loads either side of the planned weight that the gym can make, in kg.
@@ -340,6 +349,10 @@ final class WatchSync: NSObject {
         case .pause, .resume:
             // The Watch pauses its own HKWorkoutSession; the phone's log has no pause.
             break
+        case .warmUpNext:
+            WarmUpStore.shared.advance(for: session.startedAt)
+        case .warmUpFinish:
+            WarmUpStore.shared.finish(for: session.startedAt)
         case let .finish(sessionRPE):
             if let sessionRPE { session.sessionRPE = max(1, min(10, sessionRPE)) }
             try? context.save()

@@ -22,6 +22,9 @@ struct ActiveWorkoutView: View {
     @State private var savedTemplate = false
     /// Exercise order → superset group for this session (`SupersetRegistry`).
     @State private var supersetGroups: [Int: Int] = [:]
+    /// The builder's warm-up toggle (`WarmUpToggleRow`): a movement warm-up
+    /// (`WarmUpRoutine`) is made for a session that just started with it on.
+    @AppStorage("warmUpBeforeWorkout") private var warmUpBeforeWorkout = true
     @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
     /// Strain number inside the ring; scales with Dynamic Type (ux-audit W5).
     @ScaledMetric(relativeTo: .title2) private var ringValueSize: CGFloat = 26
@@ -50,6 +53,11 @@ struct ActiveWorkoutView: View {
                                 WatchSync.shared.update(from: session) // Apple Watch rest timer
                             }
                         }
+                    }
+                    // Movement warm-up before the first lift (`WarmUpStore`); the Watch
+                    // mirrors the current step and can advance it (`WatchSync`).
+                    WarmUpPhaseCard(sessionStart: session.startedAt) {
+                        WatchSync.shared.update(from: session)
                     }
                     ForEach(session.orderedExercises) { exercise in
                         exerciseCard(exercise)
@@ -110,6 +118,11 @@ struct ActiveWorkoutView: View {
             .task {
                 supersetGroups = SupersetRegistry.groups(for: session.startedAt)
                 guard session.isActive else { return }
+                WarmUpStore.shared.prepareIfNeeded(
+                    sessionStart: session.startedAt, enabled: warmUpBeforeWorkout,
+                    exerciseIDs: session.orderedExercises.map(\.exerciseID), gym: gym.profile
+                )
+                WatchSync.shared.update(from: session) // the first snapshot went out before the warm-up existed
                 // Lock Screen / Dynamic Island: elapsed time, next set and rest timer.
                 let next = nextSetText()
                 await WorkoutActivityController.startIfNeeded(

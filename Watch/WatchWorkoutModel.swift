@@ -284,6 +284,32 @@ final class WatchWorkoutModel: NSObject {
         selectedExercise = nil
     }
 
+    // MARK: Warm-up
+
+    /// Next warm-up movement. Shown here straight away; the phone confirms with a snapshot.
+    func warmUpNext() {
+        guard var current = snapshot, let index = current.warmUpStepIndex, let steps = current.warmUp,
+              index < steps.count else { return }
+        current.warmUpStepIndex = index + 1
+        current.warmUpStepEndsAt = index + 1 < steps.count
+            ? Date.now.addingTimeInterval(Double(steps[index + 1].seconds)) : nil
+        lastLocalEdit = .now
+        snapshot = current
+        send(.warmUpNext)
+        WKInterfaceDevice.current().play(.click)
+    }
+
+    /// Finish or skip the warm-up: the set view takes over.
+    func warmUpFinish() {
+        guard var current = snapshot, let steps = current.warmUp, current.isWarmingUp else { return }
+        current.warmUpStepIndex = steps.count
+        current.warmUpStepEndsAt = nil
+        lastLocalEdit = .now
+        snapshot = current
+        send(.warmUpFinish)
+        WKInterfaceDevice.current().play(.click)
+    }
+
     // MARK: Rest
 
     /// Superset: no rest between the first lift and its partner, one rest after
@@ -347,6 +373,11 @@ final class WatchWorkoutModel: NSObject {
         }
         snapshot = incoming
         if previous?.id != incoming.id { selectedExercise = nil }
+        // The phone moved the warm-up on (its countdown ended, or a tap there): a tick on the wrist.
+        if let previous, previous.id == incoming.id, previous.warmUp != nil,
+           previous.warmUpStepIndex != incoming.warmUpStepIndex {
+            WKInterfaceDevice.current().play(.click)
+        }
         if isRecording, recordingSessionID == nil { adopt(incoming.id) }
         // A set ticked on the phone starts the rest there; run it here too.
         if let ends = incoming.restEndsAt, ends > .now {

@@ -49,6 +49,14 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
     var sentAt: Date
     /// Weight jump in kg when an exercise has no load list (2.5 kg, or 5 lb).
     var weightStepKg: Double?
+    /// The movement warm-up before the first lift (`WarmUpRoutine` on the
+    /// phone), when the session has one. Missing on older phones.
+    var warmUp: [WatchWarmUpStep]?
+    /// Index into `warmUp` of the current step; at or past its count once
+    /// the warm-up is done or skipped.
+    var warmUpStepIndex: Int?
+    /// When the current step's countdown ends on the phone.
+    var warmUpStepEndsAt: Date?
 
     static func id(for startedAt: Date) -> String {
         String(Int(startedAt.timeIntervalSince1970))
@@ -86,11 +94,28 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         return exercises.firstIndex { $0.sets.contains { !$0.isCompleted } }
     }
 
+    /// The warm-up step to show, or nil when there's none left (or none at all).
+    var currentWarmUpStep: WatchWarmUpStep? {
+        guard let warmUp, let index = warmUpStepIndex, index >= 0, index < warmUp.count else { return nil }
+        return warmUp[index]
+    }
+
+    var isWarmingUp: Bool { currentWarmUpStep != nil }
+
     /// The other half of a superset, by position in `exercises`.
     func partnerIndex(of index: Int) -> Int? {
         guard index < exercises.count, let label = exercises[index].supersetLabel, let group = label.first else { return nil }
         return exercises.indices.first { $0 != index && exercises[$0].supersetLabel?.first == group }
     }
+}
+
+/// One movement of the warm-up, as the Watch shows it.
+nonisolated struct WatchWarmUpStep: Codable, Sendable, Equatable {
+    var name: String
+    var seconds: Int
+    var cue: String
+    /// e.g. "10 each side".
+    var reps: String?
 }
 
 /// What the Watch asks the phone to do with the session.
@@ -108,6 +133,10 @@ nonisolated enum WatchCommand: Codable, Sendable, Equatable {
     case recordingStarted
     /// The Watch stopped without saving a workout (discarded or failed).
     case recordingStopped
+    /// Next warm-up movement (the last one finishes the warm-up).
+    case warmUpNext
+    /// Finish or skip the warm-up and start lifting.
+    case warmUpFinish
 }
 
 nonisolated struct WatchCommandMessage: Codable, Sendable, Equatable {

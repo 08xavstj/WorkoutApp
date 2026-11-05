@@ -78,7 +78,10 @@ struct WatchLiveView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let session = model.snapshot, let index = shownIndex(in: session) {
+        if let session = model.snapshot, let step = session.currentWarmUpStep {
+            // The movement warm-up runs before the first set (`WatchWarmUpView`).
+            WatchWarmUpView(session: session, step: step)
+        } else if let session = model.snapshot, let index = shownIndex(in: session) {
             WatchExerciseBlock(
                 session: session,
                 index: index,
