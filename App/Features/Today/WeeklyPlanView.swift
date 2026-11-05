@@ -153,7 +153,7 @@ struct WeeklyPlanView: View {
 
     private var reviewTime: Binding<Date> {
         Binding(
-            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(settings.weeklyReviewMinutes * 60)) },
+            get: { Reminders.fireDate(day: .now, minutes: settings.weeklyReviewMinutes) ?? .now },
             set: { date in
                 let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
                 settings.weeklyReviewMinutes = (parts.hour ?? 8) * 60 + (parts.minute ?? 0)
@@ -236,7 +236,8 @@ private struct WeekdayPicker: View {
                     .frame(maxWidth: .infinity, minHeight: 40)
                     .foregroundStyle(isOn ? .white : Theme.primaryText)
                     .background(isOn ? Theme.lifting : Theme.cardRaised, in: .circle)
-                    .contentShape(.circle)
+                    .padding(.vertical, 2)
+                    .contentShape(.rect)
                     .onTapGesture { toggle(weekday) }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(WeeklyPlan.weekdayName(weekday))
@@ -274,7 +275,7 @@ private struct PlannedDaySection: View {
 
     private var time: Binding<Date> {
         Binding(
-            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(day.time * 60)) },
+            get: { Reminders.fireDate(day: .now, minutes: day.time) ?? .now },
             set: { date in
                 let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
                 day.time = (parts.hour ?? 18) * 60 + (parts.minute ?? 0)
@@ -300,7 +301,8 @@ private struct SuggestionChips: View {
                     .padding(.horizontal, 8)
                     .foregroundStyle(isOn ? .white : Theme.primaryText)
                     .background(isOn ? Theme.lifting : Theme.cardRaised, in: .capsule)
-                    .contentShape(.capsule)
+                    .padding(.vertical, 4)
+                    .contentShape(.rect)
                     .onTapGesture { selection = option }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(option)

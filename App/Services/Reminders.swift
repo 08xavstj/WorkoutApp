@@ -175,8 +175,8 @@ nonisolated enum Reminders {
     /// The separate HRV reminder is gone: last night's HRV is part of the
     /// morning check-in notification (one morning prompt, one evening prompt;
     /// docs/research/behaviour-change.md rec. 8). This only clears reminders
-    /// left over from older versions; the arguments are kept so call sites compile.
-    static func scheduleHRV(enabled: Bool, minutes: Int, loggedToday: Bool) async {
+    /// left over from older versions.
+    static func clearLegacyHRVReminders() {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: (0..<7).map { "hrv|\($0)" })
     }
 
@@ -345,7 +345,7 @@ nonisolated enum Reminders {
             scheduled.append(key)
             let content = UNMutableNotificationContent()
             content.title = "\(slot.name) at \(slot.start.formatted(date: .omitted, time: .shortened))"
-            content.body = slot.ifThen ?? "Your planned session in 30 minutes. The short version counts too."
+            content.body = slot.ifThen ?? "Your planned session in \(workoutLeadMinutes) minutes. The short version counts too."
             content.sound = .default
             content.userInfo = ["link": "workoutapp://plan"]
             await add(content, identifier: workoutIdentifier(forDayKey: key), at: fire, center: center, calendar: calendar)

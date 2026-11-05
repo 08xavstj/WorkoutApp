@@ -383,12 +383,18 @@ final class WatchSync: NSObject {
         if let found = matchingSession(for: summary) {
             session = found
         } else {
+            // No session to join and no Health workout (the Watch's save failed):
+            // nothing to record, and an empty session would never be swept.
+            guard summary.workoutUUID != nil else { return }
             session = WorkoutSession(name: "Watch workout, \(summary.minutes) min", startedAt: summary.start)
             session.endedAt = summary.end
             context.insert(session)
         }
-        session.watchWorkoutUUID = summary.workoutUUID
-        if summary.workoutUUID != nil { session.savedToHealth = true }
+        // A failed save mustn't erase an earlier recording's id.
+        if let id = summary.workoutUUID {
+            session.watchWorkoutUUID = id
+            session.savedToHealth = true
+        }
         if session.sessionRPE == nil, let rpe = summary.sessionRPE { session.sessionRPE = max(1, min(10, rpe)) }
         try? context.save()
         // A session already finished on the phone skipped its effort score while the Watch

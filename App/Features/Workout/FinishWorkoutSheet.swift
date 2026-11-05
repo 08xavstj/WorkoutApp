@@ -18,6 +18,8 @@ struct FinishWorkoutSheet: View {
     @State private var showingRPEGuide = false
     @State private var confirmingUnticked = false
     @State private var saveAsTemplate = false
+    /// Set once the template is made, so a retry after a Health error doesn't make a second one.
+    @State private var templateSaved = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -136,8 +138,9 @@ struct FinishWorkoutSheet: View {
         // workout ends with the phone's and its summary can join this session.
         // (`onFinished` sends it again; repeats are harmless.)
         WatchSync.shared.sessionFinished(session)
-        if saveAsTemplate {
+        if saveAsTemplate, !templateSaved {
             _ = WorkoutTemplate.from(session, in: modelContext)
+            templateSaved = true
         }
         if let end = session.endedAt {
             // Apple Watch (`WatchSync`): when the Watch records this session, its HKWorkout is
@@ -152,7 +155,9 @@ struct FinishWorkoutSheet: View {
                         try await recorder.finish(at: end)
                         session.savedToHealth = true
                     } catch {
-                        recorder.discard()
+                        // Stay open: the session is saved; the Health write can be retried or skipped.
+                        errorMessage = healthSaveMessage(error)
+                        return
                     }
                 } else {
                     recorder.discard()
@@ -162,7 +167,8 @@ struct FinishWorkoutSheet: View {
                     try await health.saveStrengthWorkout(start: session.startedAt, end: end)
                     session.savedToHealth = true
                 } catch {
-                    // The workout is saved in the app either way.
+                    errorMessage = healthSaveMessage(error)
+                    return
                 }
             }
             // Session RPE → Apple Health workout effort score, linked to the
@@ -181,5 +187,9 @@ struct FinishWorkoutSheet: View {
         await WorkoutLiveActivity.endAll()
         dismiss()
         onFinished()
+    }
+
+    private func healthSaveMessage(_ error: any Error) -> String {
+        "Couldn't save to Apple Health: \(error.localizedDescription) The workout is saved in Tensile. Try again, or untick Save to Apple Health."
     }
 }

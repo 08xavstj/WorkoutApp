@@ -12,6 +12,7 @@ struct GoalsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var goals = Goals()
     @State private var targetText = ""
+    @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 90
     /// True when pushed onto another NavigationStack.
     var pushed = false
 
@@ -63,7 +64,7 @@ struct GoalsView: View {
                                 TextField(settings.weightUnit.rawValue, text: $targetText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
-                                    .frame(width: 90)
+                                    .frame(width: fieldWidth)
                                 Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
                             }
                         }

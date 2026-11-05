@@ -332,7 +332,11 @@ final class VitalsModel {
             stepStat.value = stepSeries.isEmpty ? nil : "0"
         }
         result.append(stepStat)
-        result.append(todayStat("distance", "Distance", "map.fill", series: get(try? await distance), unit: "km", digits: 2, today: latestToday))
+        // Miles alongside pounds, kilometres alongside kilograms (Health stores km).
+        let distanceKm = get(try? await distance)
+        let miles = settings.weightUnit == .pounds
+        let distanceSeries = miles ? distanceKm.map { DatedValue(date: $0.date, value: $0.value / 1.609344) } : distanceKm
+        result.append(todayStat("distance", "Distance", "map.fill", series: distanceSeries, unit: miles ? "mi" : "km", digits: 2, today: latestToday))
         result.append(todayStat("floors", "Floors climbed", "stairs", series: get(try? await floors), unit: "floors", digits: 0, today: latestToday))
         let intensity = derived.intensityWeek
         result.append(Stat(

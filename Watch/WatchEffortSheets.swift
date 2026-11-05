@@ -183,7 +183,7 @@ private struct WatchRPEButton: View {
                 Text("\(choice.value)")
                     .font(.headline)
                 Text(choice.label)
-                    .font(.system(size: 9))
+                    .font(.caption2)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
             }

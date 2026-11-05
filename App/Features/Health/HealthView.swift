@@ -406,11 +406,18 @@ struct BodyAgeCard: View {
 
 private struct FactorRow: View {
     let factor: BodyAge.Factor
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var barWidth: CGFloat = 90
+    @ScaledMetric(relativeTo: .subheadline) private var valueWidth: CGFloat = 56
+
+    private var helps: Bool { factor.years <= 0 }
+    private var color: Color { helps ? Theme.recoveryHigh : Theme.recoveryModerate }
 
     var body: some View {
-        let helps = factor.years <= 0
-        let color = helps ? Theme.recoveryHigh : Theme.recoveryModerate
-        HStack(spacing: 10) {
+        // Name beside the bar normally; above it at accessibility sizes.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 10))
+        layout {
             VStack(alignment: .leading, spacing: 1) {
                 Text(factor.name)
                     .font(.subheadline.weight(.semibold))
@@ -419,30 +426,36 @@ private struct FactorRow: View {
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
-            Spacer(minLength: 8)
-            // Bar centred on zero: left = younger, right = older.
-            GeometryReader { geo in
-                let half = geo.size.width / 2
-                let length = min(half, half * abs(factor.years) / 8)
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.track).frame(height: 6)
-                    Rectangle().fill(Theme.secondaryText.opacity(0.4)).frame(width: 1.5, height: 12).offset(x: half - 0.75)
-                    Capsule()
-                        .fill(LinearGradient(colors: helps ? [Theme.recoveryHighLight, color] : [Theme.recoveryModerateLight, color], startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(4, length), height: 6)
-                        .offset(x: helps ? half - max(4, length) : half)
-                }
-                .frame(height: 12)
-                .frame(maxHeight: .infinity)
+            if !stacked { Spacer(minLength: 8) }
+            HStack(spacing: 10) {
+                bar
+                Text("\(helps ? "−" : "+")\(abs(factor.years).formatted(.number.precision(.fractionLength(1)))) y")
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textColor(for: color))
+                    .frame(width: valueWidth, alignment: .trailing)
             }
-            .frame(width: 90, height: 28)
-            Text("\(helps ? "−" : "+")\(abs(factor.years).formatted(.number.precision(.fractionLength(1)))) y")
-                .font(.subheadline.weight(.bold))
-                .monospacedDigit()
-                .foregroundStyle(Theme.textColor(for: color))
-                .frame(width: 56, alignment: .trailing)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// Bar centred on zero: left = younger, right = older.
+    private var bar: some View {
+        GeometryReader { geo in
+            let half = geo.size.width / 2
+            let length = min(half, half * abs(factor.years) / 8)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.track).frame(height: 6)
+                Rectangle().fill(Theme.secondaryText.opacity(0.4)).frame(width: 1.5, height: 12).offset(x: half - 0.75)
+                Capsule()
+                    .fill(LinearGradient(colors: helps ? [Theme.recoveryHighLight, color] : [Theme.recoveryModerateLight, color], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(4, length), height: 6)
+                    .offset(x: helps ? half - max(4, length) : half)
+            }
+            .frame(height: 12)
+            .frame(maxHeight: .infinity)
+        }
+        .frame(width: barWidth, height: 28)
     }
 }
 

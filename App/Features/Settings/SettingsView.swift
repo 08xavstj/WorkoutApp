@@ -71,6 +71,8 @@ private struct YouSettingsSection: View {
 private struct ProfileSettingsSection: View {
     @Environment(UserSettings.self) private var settings
     @Environment(\.healthClient) private var health
+    @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 80
+    @ScaledMetric(relativeTo: .body) private var wideFieldWidth: CGFloat = 110
 
     /// " · Health" when Apple Health filled this field.
     private func source(_ field: String) -> String {
@@ -123,22 +125,27 @@ private struct ProfileSettingsSection: View {
                 )
                 .keyboardType(.numberPad)
                 .multilineTextAlignment(.trailing)
-                .frame(width: 110)
+                .frame(width: wideFieldWidth)
                 Text("bpm").foregroundStyle(Theme.secondaryText)
             }
         }
     }
 
+    /// Inches alongside pounds, centimetres alongside kilograms; stored in cm (`LengthUnit`).
+    private var heightUnit: LengthUnit { settings.weightUnit == .pounds ? .inches : .centimeters }
+
     private var heightRow: some View {
-        @Bindable var settings = settings
-        return LabeledContent("Height\(source("height"))") {
+        LabeledContent("Height\(source("height"))") {
             HStack(spacing: 4) {
-                TextField("cm", value: $settings.heightCm, format: .number)
+                TextField(heightUnit.rawValue, value: Binding(
+                    get: { (heightUnit.display(settings.heightCm) * 10).rounded() / 10 },
+                    set: { settings.heightCm = heightUnit.toCentimeters($0) }
+                ), format: .number)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
-                    .frame(width: 80)
+                    .frame(width: fieldWidth)
                     .disabled(locked("height"))
-                Text("cm").foregroundStyle(Theme.secondaryText)
+                Text(heightUnit.rawValue).foregroundStyle(Theme.secondaryText)
             }
         }
     }
@@ -152,7 +159,7 @@ private struct ProfileSettingsSection: View {
                 ), format: .number)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
-                    .frame(width: 80)
+                    .frame(width: fieldWidth)
                     .disabled(locked("weight"))
                 Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
             }
@@ -232,7 +239,7 @@ private struct RemindersSettingsSection: View {
 
     private func minutesBinding(_ keyPath: ReferenceWritableKeyPath<UserSettings, Int>) -> Binding<Date> {
         Binding(
-            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(settings[keyPath: keyPath] * 60)) },
+            get: { Reminders.fireDate(day: .now, minutes: settings[keyPath: keyPath]) ?? .now },
             set: { date in
                 let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
                 settings[keyPath: keyPath] = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
@@ -249,7 +256,7 @@ private struct RemindersSettingsSection: View {
 
     private var creatineTime: Binding<Date> {
         Binding(
-            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(meds.creatineMinutes * 60)) },
+            get: { Reminders.fireDate(day: .now, minutes: meds.creatineMinutes) ?? .now },
             set: { date in
                 let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
                 meds.setCreatineReminder(on: true, minutes: (parts.hour ?? 0) * 60 + (parts.minute ?? 0))

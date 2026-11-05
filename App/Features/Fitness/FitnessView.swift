@@ -75,20 +75,14 @@ private struct WeekStrip: View {
                     Text(date.formatted(.dateTime.weekday(.narrow)))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(isToday ? Theme.strainTextColor : Theme.secondaryText)
-                    if date > today {
-                        Circle()
-                            .strokeBorder(Theme.secondaryText.opacity(0.35), style: StrokeStyle(lineWidth: 2.5, dash: [3, 3]))
-                            .frame(width: 36, height: 36)
-                    } else {
-                        GradientRing(progress: (strain ?? 0) / StrainCalculator.maximum, colors: Theme.strainColors, lineWidth: 4, showsDisk: false) {
-                            Text(strain.map { "\(whole($0))" } ?? "–")
-                                .font(.system(size: ringNumberSize, weight: .semibold, design: .rounded))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                                .foregroundStyle(Theme.primaryText)
-                        }
-                        .frame(width: 36, height: 36)
+                    GradientRing(progress: (strain ?? 0) / StrainCalculator.maximum, colors: Theme.strainColors, lineWidth: 4, showsDisk: false) {
+                        Text(strain.map { "\(whole($0))" } ?? "–")
+                            .font(.system(size: ringNumberSize, weight: .semibold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .foregroundStyle(Theme.primaryText)
                     }
+                    .frame(width: 36, height: 36)
                     Text(date.formatted(.dateTime.day()))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(isToday ? Theme.primaryText : Theme.secondaryText)

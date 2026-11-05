@@ -50,6 +50,9 @@ final class WatchWorkoutModel: NSObject {
     @ObservationIgnored private var lastLocalEdit = Date.distantPast
     @ObservationIgnored private var restStartedAt = Date.distantPast
     @ObservationIgnored private var restTask: Task<Void, Never>?
+    /// A stop that arrived while the recording was still starting: applied once
+    /// it runs, instead of being acknowledged and lost.
+    @ObservationIgnored private var stopRequestedWhileStarting: String?
 
     var isRecording: Bool { phase == .running || phase == .paused }
 
@@ -123,11 +126,20 @@ final class WatchWorkoutModel: NSObject {
             }
             send(.recordingStarted, sessionID: recordingSessionID)
             WKInterfaceDevice.current().play(.start)
+            // The phone finished while this was starting: end now that it runs.
+            if let id = stopRequestedWhileStarting {
+                stopRequestedWhileStarting = nil
+                if stopApplies(to: id) { await end(sessionRPE: nil) }
+            }
         } catch {
             problem = "Couldn't start the workout: \(error.localizedDescription)"
             workoutSession = nil
             builder = nil
             phase = .idle
+            if let id = stopRequestedWhileStarting {
+                stopRequestedWhileStarting = nil
+                send(.recordingStopped, sessionID: id)
+            }
         }
     }
 
@@ -362,6 +374,11 @@ final class WatchWorkoutModel: NSObject {
                 if recordingSessionID == nil || recordingSessionID == request.sessionID { adopt(request.sessionID) }
             }
         case .stopRecording:
+            if phase == .starting {
+                // Not recording yet, so `stopApplies` can't tell; `start` applies it.
+                stopRequestedWhileStarting = request.sessionID
+                return
+            }
             guard stopApplies(to: request.sessionID) else {
                 // Already ended here: confirm, so the phone stops resending.
                 if !isRecording { send(.recordingStopped, sessionID: request.sessionID) }

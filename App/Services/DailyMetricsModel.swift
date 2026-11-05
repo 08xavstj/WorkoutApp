@@ -171,7 +171,8 @@ final class DailyMetricsModel {
 
     var calories: CalorieSummary? {
         let now = Date.now
-        let midnight = Calendar.current.startOfDay(for: now.addingTimeInterval(86_400))
+        let calendar = Calendar.current
+        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
         let minutesLeft = max(0, midnight.timeIntervalSince(now) / 60)
         let eaten = nutritionToday?.calories
         // Prefer what the watch measured so the numbers match Garmin.
@@ -626,18 +627,18 @@ final class DailyMetricsModel {
                 implausibleMaintenance = nil
             }
             maintenanceProgress = AdaptiveTDEE.progress(intake: intake, weights: weights, now: now, expectedExpenditure: expected)
-            weightTrendWeekly = WeightTrend.weeklyChange(weights.filter { $0.date >= today.addingTimeInterval(-28 * 86_400) })
+            weightTrendWeekly = WeightTrend.weeklyChange(weights.filter { $0.date >= (calendar.date(byAdding: .day, value: -28, to: today) ?? today) })
             lastWeighIn = weights.map(\.date).max()
             // Energy availability: the last 7 logged days against workout calories (`EnergyAvailability`).
             let workoutEnergy = (try? await health.workoutEnergyPerDay(days: 8)) ?? []
             // The lowest safe target for this body and training (`CalorieSafety`, IOC REDs 2023).
-            let exercisePerDay = workoutEnergy.map(\.value).reduce(0, +) / 7
+            let exercisePerDay = workoutEnergy.filter { $0.date < today }.map(\.value).reduce(0, +) / 7
             calorieMinimum = bodyMassKg.map { weight in
                 CalorieSafety.minimumTarget(sex: settings.sex, weightKg: weight, heightCm: heightCm,
                                             bodyFatPercent: bodyFatPercent, exerciseKcalPerDay: exercisePerDay)
             }
             updateWeeklyCalorieTarget(settings: settings, now: now)
-            let weekAgo = today.addingTimeInterval(-7 * 86_400)
+            let weekAgo = calendar.date(byAdding: .day, value: -7, to: today) ?? today
             energyAvailability = EnergyAvailability.assess(
                 days: intake.filter { $0.date >= weekAgo }.map { day in
                     EnergyAvailability.Day(date: day.date, intakeKcal: day.value,

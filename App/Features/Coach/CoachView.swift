@@ -131,7 +131,7 @@ struct CoachView: View {
                 .foregroundStyle(Theme.primaryText)
             Text(gym.isConfigured
                  ? "Workouts are built from \(gym.profile.name) and rounded to the weights you can load."
-                 : "Set up your gym in Settings so workouts use your equipment.")
+                 : "Add your gym equipment in Settings so workouts use what you have.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
             ForEach(CoachModel.suggestions, id: \.self) { suggestion in

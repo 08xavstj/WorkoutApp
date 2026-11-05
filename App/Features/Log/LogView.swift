@@ -79,8 +79,12 @@ private struct StartWorkoutButtons: View {
     let start: () -> Void
     let startEmpty: () -> Void
     let openSaved: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
+        // Side by side normally; stacked at accessibility sizes so neither label truncates.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let secondary = stacked ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
         VStack(spacing: 10) {
             Button(action: start) {
                 Label("Start workout", systemImage: "play.fill")
@@ -94,10 +98,10 @@ private struct StartWorkoutButtons: View {
             .buttonStyle(.plain)
             .accessibilityHint("The trainer plans it from your gym and recovery.")
 
-            HStack(spacing: 10) {
-                SecondaryCapsuleButton(title: "Empty workout", systemImage: "dumbbell.fill", action: startEmpty)
+            secondary {
+                SecondaryCapsuleButton(title: "Empty workout", systemImage: "dumbbell.fill", stacked: stacked, action: startEmpty)
                     .accessibilityHint("Starts now. Add exercises as you go.")
-                SecondaryCapsuleButton(title: "Saved workouts", systemImage: "list.bullet.rectangle.portrait", action: openSaved)
+                SecondaryCapsuleButton(title: "Saved workouts", systemImage: "list.bullet.rectangle.portrait", stacked: stacked, action: openSaved)
             }
         }
     }
@@ -106,13 +110,15 @@ private struct StartWorkoutButtons: View {
 private struct SecondaryCapsuleButton: View {
     let title: String
     let systemImage: String
+    /// Full width under the other button: the label may wrap instead of shrinking.
+    var stacked = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
+                .lineLimit(stacked ? nil : 1)
                 .minimumScaleFactor(0.8)
                 .foregroundStyle(Theme.primaryText)
                 .frame(maxWidth: .infinity, minHeight: 44)

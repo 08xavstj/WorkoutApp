@@ -71,6 +71,9 @@ struct WaistCard: View {
     let openHistory: (VitalsModel.Stat) -> Void
     @State private var value: Double?
     @State private var unit: LengthUnit = Locale.current.measurementSystem == .metric ? .centimeters : .inches
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 90
+    @ScaledMetric(relativeTo: .body) private var pickerWidth: CGFloat = 110
 
     private var ratio: Double? { store.waistToHeightRatio(heightCm: heightCm) }
 
@@ -102,11 +105,14 @@ struct WaistCard: View {
     }
 
     private var entryRow: some View {
-        HStack(spacing: 10) {
+        // One row normally; field, unit and Save stack at accessibility sizes.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
             TextField(unit == .centimeters ? "84" : "33", value: $value, format: .number.precision(.fractionLength(0...1)))
                 .keyboardType(.decimalPad)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 90)
+                .frame(width: fieldWidth)
                 .accessibilityLabel("Waist in \(unit == .centimeters ? "centimetres" : "inches")")
             Picker("Unit", selection: $unit) {
                 ForEach(LengthUnit.allCases) { option in
@@ -114,8 +120,8 @@ struct WaistCard: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 110)
-            Spacer()
+            .frame(width: stacked ? nil : pickerWidth)
+            if !stacked { Spacer() }
             Button("Save") { save() }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.nutrition)
@@ -216,6 +222,9 @@ struct GripCard: View {
     let openHistory: (VitalsModel.Stat) -> Void
     @State private var value: Double?
     @State private var hand: GripStrength.Hand = .right
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 90
+    @ScaledMetric(relativeTo: .body) private var pickerWidth: CGFloat = 120
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -245,23 +254,28 @@ struct GripCard: View {
     }
 
     private var entryRow: some View {
-        HStack(spacing: 10) {
-            TextField(settings.weightUnit == .kilograms ? "48" : "106", value: $value, format: .number.precision(.fractionLength(0...1)))
-                .keyboardType(.decimalPad)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 90)
-                .accessibilityLabel("Grip strength in \(settings.weightUnit == .kilograms ? "kilograms" : "pounds")")
-            Text(settings.weightUnit.rawValue)
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
+        // One row normally; field, hand and Save stack at accessibility sizes.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
+            HStack(spacing: 10) {
+                TextField(settings.weightUnit == .kilograms ? "48" : "106", value: $value, format: .number.precision(.fractionLength(0...1)))
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: fieldWidth)
+                    .accessibilityLabel("Grip strength in \(settings.weightUnit == .kilograms ? "kilograms" : "pounds")")
+                Text(settings.weightUnit.rawValue)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
             Picker("Hand", selection: $hand) {
                 ForEach(GripStrength.Hand.allCases) { option in
                     Text(option.label).tag(option)
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 120)
-            Spacer()
+            .frame(width: stacked ? nil : pickerWidth)
+            if !stacked { Spacer() }
             Button("Save") { save() }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.lifting)

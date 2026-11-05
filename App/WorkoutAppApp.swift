@@ -224,7 +224,7 @@ struct RootView: View {
                 // Takes effect only once Health access is granted (safe to repeat).
                 health?.enableBackgroundDelivery()
             }
-            scheduleHRVReminder()
+            Reminders.clearLegacyHRVReminders()
             await refreshMetrics()
             scheduleCheckInReminders() // after the refresh, so the evening reminder carries tonight's bed-by window
             measurements.scheduleReminders() // monthly waist, 6-monthly grip ("measure|waist", "measure|grip")
@@ -259,7 +259,6 @@ struct RootView: View {
             reloadMedications: { medications.reload() },
             openWorkout: { if let active = sessions.first(where: \.isActive) { launcher.activeSession = active } },
             refresh: { Task { await refreshMetrics() } },
-            scheduleHRV: scheduleHRVReminder,
             scheduleCheckIns: scheduleCheckInReminders,
             scheduleWorkouts: scheduleWorkoutReminders,
             setRestMode: { metrics.restMode = settings.isRestMode }
@@ -388,14 +387,6 @@ struct RootView: View {
         // Still on a reminder that hasn't fired: keep it. Otherwise wait a week.
         if last >= today { return true }
         return (Calendar.current.dateComponents([.day], from: last, to: today).day ?? 0) >= 7
-    }
-
-    /// The separate HRV reminder is folded into the morning check-in; this clears old ones.
-    private func scheduleHRVReminder() {
-        let loggedToday = hrvReadings.contains { Calendar.current.isDateInToday($0.date) }
-        let enabled = settings.hrvReminderOn
-        let minutes = settings.hrvReminderMinutes
-        Task { await Reminders.scheduleHRV(enabled: enabled, minutes: minutes, loggedToday: loggedToday) }
     }
 
     /// Planned slots over the next week from the weekly plan (this week's and,
@@ -557,7 +548,6 @@ private struct SettingsReactions: ViewModifier {
     let reloadMedications: () -> Void
     let openWorkout: () -> Void
     let refresh: () -> Void
-    let scheduleHRV: () -> Void
     let scheduleCheckIns: () -> Void
     let scheduleWorkouts: () -> Void
     let setRestMode: () -> Void
@@ -565,7 +555,7 @@ private struct SettingsReactions: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(RouterReactions(router: router, reloadMedications: reloadMedications, openWorkout: openWorkout))
-            .modifier(ReminderReactions(settings: settings, plans: plans, scheduleHRV: scheduleHRV,
+            .modifier(ReminderReactions(settings: settings, plans: plans,
                                         scheduleCheckIns: scheduleCheckIns, scheduleWorkouts: scheduleWorkouts))
             .onChange(of: settings.goals) { refresh() }
             .onChange(of: settings.restModeUntil) { setRestMode() }
@@ -593,14 +583,11 @@ private struct RouterReactions: ViewModifier {
 private struct ReminderReactions: ViewModifier {
     let settings: UserSettings
     let plans: [WeeklyPlan]
-    let scheduleHRV: () -> Void
     let scheduleCheckIns: () -> Void
     let scheduleWorkouts: () -> Void
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: settings.hrvReminderOn) { scheduleHRV() }
-            .onChange(of: settings.hrvReminderMinutes) { scheduleHRV() }
             .onChange(of: settings.checkInRemindersOn) { scheduleCheckIns() }
             .onChange(of: settings.morningCheckInMinutes) { scheduleCheckIns() }
             .onChange(of: settings.eveningCheckInMinutes) { scheduleCheckIns() }

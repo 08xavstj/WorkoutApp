@@ -5,8 +5,8 @@ The mark is a "T" made from a loaded barbell: the bar flexes under load (the
 the stem of the T rising from the middle of the bar. On the light icon it is
 white on the app's strain-to-sleep gradient (butter, orange, pink, violet).
 
-The same geometry is drawn in SwiftUI by `TensileMark` (App/Design/AppLogo.swift).
-Keep the numbers in `GEOMETRY` in sync with it.
+`GEOMETRY` below is the only copy of the mark's geometry (the SwiftUI
+`TensileMark` that mirrored it was removed as unused).
 
 Run: python3 docs/brand/make_logo.py
 """
@@ -19,7 +19,7 @@ SIZE = 1024
 SS = 4  # supersampling
 W = SIZE * SS
 
-# Unit-square geometry, shared with TensileMark in Swift.
+# Unit-square geometry.
 GEOMETRY = {
     "bar_start": (0.14, 0.40),
     "bar_control": (0.50, 0.25),

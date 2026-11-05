@@ -8,6 +8,9 @@ import AppCore
 /// muscles counted as half a set (Pelland et al., Sports Med 2026).
 struct WeeklySetsCard: View {
     @Environment(MuscleModel.self) private var muscles
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var nameWidth: CGFloat = 84
+    @ScaledMetric(relativeTo: .subheadline) private var countWidth: CGFloat = 36
 
     /// Also counted by the Fitness › Progress › Muscles row.
     static let shown: [Muscle] = [.chest, .shoulders, .triceps, .lats, .middleBack, .biceps, .quadriceps, .hamstrings, .glutes, .calves, .abdominals]
@@ -48,36 +51,45 @@ struct WeeklySetsCard: View {
         case .productive: Theme.recoveryHigh
         case .high: Theme.strain
         }
-        return HStack(spacing: 10) {
+        // Name beside the bar normally; above it at accessibility sizes.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
             Text(state.muscle.name)
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
-                .frame(width: 84, alignment: .leading)
-                .lineLimit(1)
+                .frame(width: stacked ? nil : nameWidth, alignment: .leading)
+                .lineLimit(stacked ? 2 : 1)
                 .minimumScaleFactor(0.8)
-            GeometryReader { geo in
-                let width = geo.size.width
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.track)
-                    // The 10-20 band.
-                    Rectangle()
-                        .fill(Theme.recoveryHigh.opacity(0.18))
-                        .frame(width: width * 10 / Self.scale)
-                        .offset(x: width * 10 / Self.scale)
-                    Capsule()
-                        .fill(color)
-                        .frame(width: max(6, width * min(1, sets / Self.scale)))
-                }
+            HStack(spacing: 10) {
+                bar(sets: sets, color: color)
+                Text(sets.formatted(.number.precision(.fractionLength(0...1))))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.primaryText)
+                    .frame(width: countWidth, alignment: .trailing)
             }
-            .frame(height: 10)
-            Text(sets.formatted(.number.precision(.fractionLength(0...1))))
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(Theme.primaryText)
-                .frame(width: 36, alignment: .trailing)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(state.muscle.name): \(sets.formatted(.number.precision(.fractionLength(0...1)))) hard sets this week, \(state.volume.rawValue.lowercased())")
+    }
+
+    private func bar(sets: Double, color: Color) -> some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.track)
+                // The 10-20 band.
+                Rectangle()
+                    .fill(Theme.recoveryHigh.opacity(0.18))
+                    .frame(width: width * 10 / Self.scale)
+                    .offset(x: width * 10 / Self.scale)
+                Capsule()
+                    .fill(color)
+                    .frame(width: max(6, width * min(1, sets / Self.scale)))
+            }
+        }
+        .frame(height: 10)
     }
 }
 

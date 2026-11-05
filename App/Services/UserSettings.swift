@@ -78,10 +78,6 @@ final class UserSettings {
     var profileFromHealth: Bool { didSet { defaults.set(profileFromHealth, forKey: "profileFromHealth") } }
     /// Which profile fields Apple Health filled in last time (shown in Settings).
     var healthFilledFields: Set<String> { didSet { defaults.set(Array(healthFilledFields), forKey: "healthFilledFields") } }
-    /// Daily "log your HRV" reminder.
-    var hrvReminderOn: Bool { didSet { defaults.set(hrvReminderOn, forKey: "hrvReminderOn") } }
-    /// Minutes after midnight for the reminder (default 7:30).
-    var hrvReminderMinutes: Int { didSet { defaults.set(hrvReminderMinutes, forKey: "hrvReminderMinutes") } }
     var name: String { didSet { defaults.set(name, forKey: "name") } }
     var placeName: String { didSet { defaults.set(placeName, forKey: "placeName") } }
     var latitude: Double { didSet { defaults.set(latitude, forKey: "latitude") } }
@@ -152,8 +148,6 @@ final class UserSettings {
         weightKg = defaults.double(forKey: "weightKg")
         profileFromHealth = defaults.object(forKey: "profileFromHealth") as? Bool ?? true
         healthFilledFields = Set(defaults.stringArray(forKey: "healthFilledFields") ?? [])
-        hrvReminderOn = defaults.bool(forKey: "hrvReminderOn")
-        hrvReminderMinutes = defaults.object(forKey: "hrvReminderMinutes") as? Int ?? 7 * 60 + 30
         name = defaults.string(forKey: "name") ?? ""
         placeName = defaults.string(forKey: "placeName") ?? ""
         latitude = defaults.double(forKey: "latitude")

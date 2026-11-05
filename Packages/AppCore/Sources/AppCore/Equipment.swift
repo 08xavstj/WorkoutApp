@@ -171,12 +171,6 @@ public struct GymProfile: Codable, Sendable, Equatable {
 
 // MARK: - Loading math
 
-public struct LoadOption: Sendable, Equatable {
-    public var total: Double
-    /// Plates for ONE side of the bar, largest first. Empty for non-plate equipment.
-    public var platesPerSide: [Double]
-}
-
 extension GymProfile {
     /// Every weight you can actually set up on this equipment, ascending.
     /// Dumbbell and kettlebell weights are per hand / per bell.

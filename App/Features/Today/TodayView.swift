@@ -889,7 +889,7 @@ private struct HealthMonitorHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("Health Monitor")
+            Text("Health monitor")
                 .font(Theme.Typography.section)
                 .foregroundStyle(Theme.primaryText)
                 .accessibilityAddTraits(.isHeader)

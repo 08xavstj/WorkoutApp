@@ -113,7 +113,7 @@ struct ScoreRing: View {
             .frame(maxWidth: .infinity)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title): \(value)\(unit)")
+        .accessibilityLabel(["\(title): \(value)\(unit)", subtitle].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -310,16 +310,30 @@ struct StrainGoalBar: View {
 
             GeometryReader { geo in
                 let w = geo.size.width
+                let x = { (value: Double) in w * min(1, max(0, value / maximum)) }
+                // Band labels skip the ends (they'd sit on "0" or "100") and a
+                // narrow band gets one "20–25" label centred under it.
+                let showLower = target.lowerBound > 0
+                let showUpper = target.upperBound < maximum - 4
+                let combined = x(target.upperBound) - x(target.lowerBound) < 28
                 ZStack(alignment: .topLeading) {
-                    ForEach([0.0], id: \.self) { tick in
-                        Text("\(whole(tick))").offset(x: w * tick / maximum)
+                    Text("0")
+                    if combined, showLower, showUpper {
+                        Text("\(whole(target.lowerBound))–\(whole(target.upperBound))")
+                            .foregroundStyle(Theme.recoveryHigh)
+                            .offset(x: (x(target.lowerBound) + x(target.upperBound)) / 2 - 14)
+                    } else {
+                        if showLower {
+                            Text("\(whole(target.lowerBound))")
+                                .foregroundStyle(Theme.recoveryHigh)
+                                .offset(x: x(target.lowerBound) - 6)
+                        }
+                        if showUpper {
+                            Text("\(whole(target.upperBound))")
+                                .foregroundStyle(Theme.recoveryHigh)
+                                .offset(x: x(target.upperBound) - 6)
+                        }
                     }
-                    Text("\(whole(target.lowerBound))")
-                        .foregroundStyle(Theme.recoveryHigh)
-                        .offset(x: w * target.lowerBound / maximum - 6)
-                    Text("\(whole(target.upperBound))")
-                        .foregroundStyle(Theme.recoveryHigh)
-                        .offset(x: w * target.upperBound / maximum - 6)
                     Text("\(whole(maximum))")
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
@@ -369,92 +383,6 @@ struct VerticalRangeGauge: View {
         }
         .frame(width: 12)
         .accessibilityHidden(true)
-    }
-}
-
-/// Thin vertical ticks across a rect, for positions in `from...to` (0...1).
-nonisolated struct TickRow: Shape {
-    var from: Double = 0
-    var to: Double = 1
-    var tickWidth: CGFloat = 3.5
-    var gap: CGFloat = 2.5
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let count = max(1, Int((rect.width + gap) / (tickWidth + gap)))
-        for index in 0..<count {
-            let position = (Double(index) + 0.5) / Double(count)
-            guard position > from, position <= to else { continue }
-            let tick = CGRect(x: rect.minX + CGFloat(index) * (tickWidth + gap), y: rect.minY, width: tickWidth, height: rect.height)
-            path.addRoundedRect(in: tick, cornerSize: CGSize(width: tickWidth / 2, height: tickWidth / 2))
-        }
-        return path
-    }
-}
-
-/// A row of thin vertical ticks, colored by segment (energy split, zones).
-struct SegmentedBar: View {
-    struct Segment {
-        let value: Double
-        let color: Color
-    }
-
-    let segments: [Segment]
-    var height: CGFloat = 26
-
-    var body: some View {
-        let visible = segments.filter { $0.value > 0 }
-        let total = visible.map(\.value).reduce(0, +)
-        let spans: [(from: Double, to: Double, color: Color)] = {
-            var running = 0.0
-            return visible.map { segment in
-                let start = running
-                running += segment.value / max(total, 0.0001)
-                return (start, running, segment.color)
-            }
-        }()
-        ZStack {
-            if spans.isEmpty {
-                TickRow().fill(Theme.track)
-            }
-            ForEach(Array(spans.enumerated()), id: \.offset) { _, span in
-                TickRow(from: span.from, to: span.to).fill(span.color)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: height)
-        .accessibilityHidden(true)
-    }
-}
-
-/// Horizontal progress bar with a value and optional goal.
-struct ProgressRow: View {
-    let label: String
-    let value: Double
-    var goal: Double?
-    var unit: String = "g"
-    let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(label).foregroundStyle(Theme.secondaryText)
-                Spacer()
-                Text(LocalizedStringKey(goal.map { "**\(whole(value))** / \(whole($0)) \(unit)" } ?? "**\(whole(value))** \(unit)"))
-                    .foregroundStyle(Theme.primaryText)
-                    .monospacedDigit()
-            }
-            .font(.subheadline)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.track)
-                    Capsule()
-                        .fill(LinearGradient(colors: [color.opacity(0.55), color], startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(7, geo.size.width * min(1, value / max(goal ?? value * 1.4, 1))))
-                }
-            }
-            .frame(height: 7)
-        }
     }
 }
 
