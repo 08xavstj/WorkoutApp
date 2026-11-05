@@ -58,6 +58,7 @@ jobs:
             -only-testing:WorkoutAppUITests/ScreenshotTests \
             -resultBundlePath shots.xcresult \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG' \
             > test.log 2>&1
           echo "xcodebuild exit: $?"
           grep -E "error:|Test Case|passed|failed" test.log | tail -20

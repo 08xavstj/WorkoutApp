@@ -22,6 +22,10 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+    # Code that needs the iOS 27 SDK (Xcode 27+): FoundationModels'
+    # LanguageModelError in OnDeviceCoach. CI builds with Xcode 26 and
+    # overrides this to empty on the xcodebuild command line.
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) TENSILE_IOS27_SDK"
 
 packages:
   AppCore:

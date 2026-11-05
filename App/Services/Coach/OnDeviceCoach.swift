@@ -140,7 +140,7 @@ final class OnDeviceCoach {
 
     /// The prompt didn't fit the model's context, on either SDK's error type.
     static func isContextOverflow(_ error: Error) -> Bool {
-        #if compiler(>=6.3)
+        #if TENSILE_IOS27_SDK
         if #available(iOS 27.0, *), let modern = error as? LanguageModelError,
            case .contextSizeExceeded = modern { return true }
         #endif
@@ -167,9 +167,10 @@ final class OnDeviceCoach {
         // Built with Xcode 27, the framework throws `LanguageModelError` instead
         // of the deprecated `GenerationError` (Apple's migration note), so an
         // app that only checked the old type showed the generic text for
-        // everything. The type exists only in the iOS 27 SDK, so the
-        // compiler-version guard keeps Xcode 26 builds (CI) compiling.
-        #if compiler(>=6.3)
+        // everything. The type exists only in the iOS 27 SDK, so it's behind
+        // TENSILE_IOS27_SDK (on in project.yml; CI's Xcode 26 passes
+        // OTHER_SWIFT_FLAGS without it).
+        #if TENSILE_IOS27_SDK
         if #available(iOS 27.0, *), let modern = error as? LanguageModelError {
             return friendlyModern(modern, detail: detail, generic: generic)
         }
@@ -201,7 +202,7 @@ final class OnDeviceCoach {
     }
 }
 
-#if compiler(>=6.3)
+#if TENSILE_IOS27_SDK
 extension OnDeviceCoach {
     @available(iOS 27.0, *)
     static func friendlyModern(_ error: LanguageModelError, detail: String, generic: String) -> Error {
