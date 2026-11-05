@@ -66,7 +66,7 @@ final class OnDeviceCoach {
             let answer = try await generate(message, topic: topic, snapshot: snapshot, hasPlan: hasPlan, scale: 1)
             lastExchange = (message, answer)
             return answer
-        } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
+        } catch where Self.isContextOverflow(error) {
             // Still too long: retry once with half the data and no recap.
             lastExchange = nil
             do {
@@ -138,6 +138,16 @@ final class OnDeviceCoach {
         return data + "\n\n" + question
     }
 
+    /// The prompt didn't fit the model's context, on either SDK's error type.
+    static func isContextOverflow(_ error: Error) -> Bool {
+        #if compiler(>=6.3)
+        if #available(iOS 27.0, *), let modern = error as? LanguageModelError,
+           case .contextSizeExceeded = modern { return true }
+        #endif
+        if let old = error as? LanguageModelSession.GenerationError, case .exceededContextWindowSize = old { return true }
+        return false
+    }
+
     /// Plain words for the model's errors, instead of an error code. The
     /// underlying description rides along in brackets for the less common
     /// cases, so the user can report what actually happened; every failure
@@ -154,6 +164,16 @@ final class OnDeviceCoach {
         let detail = error.localizedDescription
         log.error("Coach generation failed: \(String(describing: error), privacy: .public)")
         let generic = "The coach couldn't answer that. Try again, or word it differently. (\(detail))"
+        // Built with Xcode 27, the framework throws `LanguageModelError` instead
+        // of the deprecated `GenerationError` (Apple's migration note), so an
+        // app that only checked the old type showed the generic text for
+        // everything. The type exists only in the iOS 27 SDK, so the
+        // compiler-version guard keeps Xcode 26 builds (CI) compiling.
+        #if compiler(>=6.3)
+        if #available(iOS 27.0, *), let modern = error as? LanguageModelError {
+            return friendlyModern(modern, detail: detail, generic: generic)
+        }
+        #endif
         guard let generation = error as? LanguageModelSession.GenerationError else {
             return CoachError.unavailable(generic)
         }
@@ -180,6 +200,32 @@ final class OnDeviceCoach {
         }
     }
 }
+
+#if compiler(>=6.3)
+extension OnDeviceCoach {
+    @available(iOS 27.0, *)
+    static func friendlyModern(_ error: LanguageModelError, detail: String, generic: String) -> Error {
+        switch error {
+        case .guardrailViolation:
+            return CoachError.unavailable("Apple's on-device model declined that question; its safety filter is strict about health topics. Try wording it differently.")
+        case .refusal:
+            return CoachError.unavailable("The on-device model declined to answer that one; it is cautious with health topics. Try asking in a different way, or about one thing at a time. (\(detail))")
+        case .contextSizeExceeded:
+            return CoachError.unavailable("That was more than the on-device coach can handle at once. Try a shorter question, or tap New conversation.")
+        case .rateLimited:
+            return CoachError.unavailable("The on-device coach is busy. Try again in a moment.")
+        case .timeout:
+            return CoachError.unavailable("The on-device model took too long. Try again.")
+        case .unsupportedLanguageOrLocale:
+            return CoachError.unavailable("The on-device model doesn't support your iPhone's language yet. (\(detail))")
+        case .unsupportedCapability, .unsupportedTranscriptContent, .unsupportedGenerationGuide:
+            return CoachError.unavailable("The coach asked the model for something it can't do. Try again. (\(detail))")
+        @unknown default:
+            return CoachError.unavailable(generic)
+        }
+    }
+}
+#endif
 
 /// Errors the coach shows in the chat, in plain words.
 enum CoachError: LocalizedError {
