@@ -77,17 +77,20 @@ nonisolated struct HealthDoseEvent: Sendable, Equatable {
 // .userAnnotatedMedicationType() / .medicationDoseEventType(); all iOS 26.0+).
 // `HKHealthConceptIdentifier` has no string property, so its description is
 // the app's text id (stable within a run; the name match covers the rest). The medications
-// list and the dose events both use per-object authorization (Health's own
-// medication picker); putting the dose-event type in the usual sheet is an
-// error at runtime. Read-only: the app never writes dose events.
+// list uses per-object authorization (Health's own medication picker) and
+// dose events are readable for the medications picked; requesting either type
+// any other way is a runtime exception. Read-only: the app never writes dose events.
 nonisolated extension HealthKitClient {
     /// Asks for per-object read access to the Medications list (the API uses
     /// object-level authorization, not the usual type-level sheet).
     @concurrent
     func requestMedicationsAccess() async throws {
         guard isAvailable else { return }
+        // Only the medications list takes per-object authorization; asking for the
+        // dose-event type raises an Objective-C exception ("Per-Object authorization
+        // to read … MedicationDoseEvent is disallowed"), which Swift can't catch and
+        // which aborts the app. Dose events come with the medications you pick.
         try await store.requestPerObjectReadAuthorization(for: HKObjectType.userAnnotatedMedicationType(), predicate: nil)
-        try await store.requestPerObjectReadAuthorization(for: HKObjectType.medicationDoseEventType(), predicate: nil)
     }
 
     /// The user's medications from the Health app, read-only.

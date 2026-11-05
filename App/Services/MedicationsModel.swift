@@ -111,27 +111,36 @@ final class MedicationsModel {
     /// Reads the Health app's medications and merges them in, then loads the
     /// doses logged there (`healthDoses`). Asks for the per-object Medications
     /// access once (the list has its own picker, not the usual Health sheet);
-    /// `reconnectHealth` asks again.
+    /// `connectHealth` shows the picker again.
+    /// Whether the user has connected Apple Health's medications (the picker was shown).
+    var isHealthConnected: Bool { UserDefaults.standard.bool(forKey: Self.healthAccessAskedKey) }
+
+    /// Reloads medications and doses from Health, only once the user has
+    /// connected them (`connectHealth`). Never asks at launch: HealthKit's
+    /// medication picker raises an uncatchable exception on some setups, so
+    /// it's shown only from an explicit tap.
     func importFromHealth(_ health: HealthKitClient) async {
-        let defaults = UserDefaults.standard
-        if !defaults.bool(forKey: Self.healthAccessAskedKey) {
-            do {
-                try await health.requestMedicationsAccess()
-                defaults.set(true, forKey: Self.healthAccessAskedKey)
-            } catch {
-                return
-            }
+        guard isHealthConnected else { return }
+        await loadFromHealth(health)
+    }
+
+    /// The Medications screen's "Connect Apple Health" button: shows Health's
+    /// own medication picker, then loads what was picked.
+    func connectHealth(_ health: HealthKitClient) async {
+        do {
+            try await health.requestMedicationsAccess()
+        } catch {
+            return
         }
+        UserDefaults.standard.set(true, forKey: Self.healthAccessAskedKey)
+        await loadFromHealth(health)
+    }
+
+    private func loadFromHealth(_ health: HealthKitClient) async {
         if let imported = try? await health.importedMedications(), !imported.isEmpty {
             merge(healthMedications: imported)
         }
         healthDoses = (try? await health.healthDoseEvents(days: Self.healthDoseDays)) ?? []
-    }
-
-    /// Shows the Medications picker again (e.g. from Settings) and reloads.
-    func reconnectHealth(_ health: HealthKitClient) async {
-        UserDefaults.standard.set(false, forKey: Self.healthAccessAskedKey)
-        await importFromHealth(health)
     }
 
     // MARK: Adherence from the Health app's log (read-only)

@@ -10,6 +10,7 @@ import AppCore
 struct MedicationsView: View {
     @Environment(MedicationsModel.self) private var meds
     @Environment(AppRouter.self) private var router
+    @Environment(\.healthClient) private var health
     @Environment(\.dismiss) private var dismiss
     @State private var editing: Medication?
     /// True when pushed onto another NavigationStack.
@@ -28,6 +29,11 @@ struct MedicationsView: View {
                         MedicationNotesCard(notes: meds.notes)
                     }
                     SectionTitle(text: "Medications & supplements")
+                    if let health, health.isAvailable {
+                        HealthMedicationsRow(connected: meds.isHealthConnected) {
+                            Task { await meds.connectHealth(health) }
+                        }
+                    }
                     if meds.creatine == nil {
                         CreatineSuggestionCard()
                     }
@@ -401,5 +407,33 @@ struct MedicationDetailView: View {
             Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textColor(for: color))
         }
         .tint(Theme.secondaryText)
+    }
+}
+
+/// "Connect Apple Health" for the Medications list (iOS 26's Health
+/// medications API, per-object authorization through Health's own picker).
+private struct HealthMedicationsRow: View {
+    let connected: Bool
+    let connect: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconBadge(systemName: "heart.text.square.fill", color: Theme.heart, size: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(connected ? "Apple Health medications" : "Have medications in Apple Health?")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text(connected ? "Doses you log in Health count as taken here." : "Pick the ones to share, and doses logged there count as taken here.")
+                    .font(Theme.Typography.context)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button(connected ? "Change" : "Connect", action: connect)
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.bordered)
+                .frame(minHeight: 44)
+        }
+        .card()
     }
 }
