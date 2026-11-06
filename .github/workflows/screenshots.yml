@@ -52,6 +52,15 @@ jobs:
       - name: Capture screens
         run: |
           set +e
+          # Every 45 s, sample the app's main thread so a hang can be traced.
+          (
+            for i in $(seq 1 40); do
+              sleep 45
+              PID=$(pgrep -x WorkoutApp | head -1)
+              [ -n "$PID" ] && sample "$PID" 3 -file "app-sample-$i.txt" >/dev/null 2>&1
+            done
+          ) &
+          SAMPLER=$!
           xcodebuild test \
             -project WorkoutApp.xcodeproj \
             -scheme WorkoutApp \
@@ -63,8 +72,31 @@ jobs:
             SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG' \
             > test.log 2>&1
           echo "xcodebuild exit: $?"
+          kill $SAMPLER 2>/dev/null
           grep -E "error:|Test Case|passed|failed" test.log | tail -20
           grep -E "MISSING " test.log | sort -u | head -100 || true
+
+      - name: Show where the app was busy
+        if: always()
+        run: |
+          # Samples taken during the run (a hung main thread shows up in the
+          # test as "Timed out while requesting screenshot").
+          for f in app-sample-*.txt; do
+            [ -f "$f" ] || continue
+            echo "=== SAMPLE $f ==="
+            awk '/Thread_.*main-thread|com.apple.main-thread/{p=1} p{print; n++} n>120{exit}' "$f"
+          done
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-xcresult
+          path: |
+            shots.xcresult
+            test.log
+            app-sample-*.txt
+          retention-days: 3
 
       - name: Print screenshots
         run: |
@@ -88,6 +120,10 @@ jobs:
                   subprocess.run(["sips", "-Z", "900", "-s", "format", "jpeg", "-s", "formatOptions", "55", file, "--out", out],
                                  check=True, capture_output=True)
                   data = base64.b64encode(open(out, "rb").read()).decode()
+              elif not file.endswith(".txt") and b"\x00" in raw[:512]:
+                  # Binary attachments (screen recording, UI snapshots): in the artifact.
+                  print(f"=== SKIP {name} ===")
+                  continue
               else:
                   # A text note (the MISSING list).
                   print(f"=== NOTE {name} ===")
