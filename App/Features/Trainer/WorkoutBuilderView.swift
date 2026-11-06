@@ -126,6 +126,7 @@ struct WorkoutBuilderView: View {
                         .background(Theme.ink, in: .capsule)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("builder-start")
                 .disabled(plan?.exercises.isEmpty ?? true)
                 .opacity((plan?.exercises.isEmpty ?? true) ? 0.5 : 1)
                 .padding(.horizontal)

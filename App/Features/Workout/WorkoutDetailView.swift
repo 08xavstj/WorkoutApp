@@ -91,6 +91,7 @@ struct WorkoutDetailView: View {
                 Label("Progress", systemImage: "chart.line.uptrend.xyaxis")
                     .font(.subheadline)
             }
+            .accessibilityIdentifier("lift-progress-link")
         } header: {
             HStack(spacing: 8) {
                 Text(exercise.name)

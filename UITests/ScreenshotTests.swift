@@ -128,7 +128,7 @@ final class ScreenshotTests: XCTestCase {
             capture(app, "history", pages: 1)
             if tap(app, ["history-session"], name: "History first session", scroll: false) || tapFirstCell(app, name: "History first session") {
                 capture(app, "workout-detail", pages: 2)
-                if tap(app, ["Progress"], name: "Workout detail progress") {
+                if tap(app, ["lift-progress-link", "Progress"], name: "Workout detail progress") {
                     capture(app, "lift-progress", pages: 2)
                     back(app)
                 }
@@ -223,7 +223,7 @@ final class ScreenshotTests: XCTestCase {
             (["Goals"], "goals"),
             (["Gym equipment"], "gym"),
             (["City"], "city"),
-            (["Medication reminders"], "medication-reminders"),
+            (["Medications & supplements", "Medication reminders"], "medications"),
             (["Using a Garmin"], "garmin-help"),
             (["Using Cronometer"], "cronometer-help"),
         ]
@@ -259,7 +259,7 @@ final class ScreenshotTests: XCTestCase {
             capture(app, "pain-log", pages: 1)
             back(app)
         }
-        guard tap(app, ["Start workout"], name: "Builder start", type: .button, scroll: false) else { return }
+        guard tap(app, ["builder-start", "Start workout"], name: "Builder start", type: .button, scroll: false) else { return }
         sleep(3)
         dismissSystemAlerts()
         capture(app, "active-workout", pages: 1)
@@ -427,9 +427,18 @@ final class ScreenshotTests: XCTestCase {
 
     /// Pops a pushed page with the navigation bar's back button.
     private func back(_ app: XCUIApplication) {
-        let bar = app.navigationBars.firstMatch
-        let backButton = bar.buttons["BackButton"].exists ? bar.buttons["BackButton"] : bar.buttons.element(boundBy: 0)
-        if backButton.exists && backButton.isHittable {
+        // The frontmost bar's back button; never a sheet's Cancel/Done, which
+        // would close the sheet instead of going back one page.
+        let bars = app.navigationBars.allElementsBoundByIndex.reversed()
+        let backButton = bars.lazy.compactMap { bar -> XCUIElement? in
+            let back = bar.buttons["BackButton"]
+            if back.exists && back.isHittable { return back }
+            return bar.buttons.allElementsBoundByIndex.first { button in
+                button.isHittable && button.frame.minX < 80 &&
+                    !["Cancel", "Done", "Close", "Later"].contains(button.label)
+            }
+        }.first
+        if let backButton {
             backButton.tap()
         } else {
             // Edge swipe, like a person going back.
