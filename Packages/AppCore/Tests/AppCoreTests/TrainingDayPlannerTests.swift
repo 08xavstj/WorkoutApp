@@ -75,4 +75,68 @@ struct TrainingDayPlannerTests {
         // Missed two days ago, but trained yesterday (made up already).
         #expect(guidance(today: nil, [day(2, .pull, strain: 5), day(1, nil, strain: 30)]).kind == .rest)
     }
+
+    // MARK: Flexible weeks (a quota, any days)
+
+    func flexible(target: Int = 4, done: Int, daysLeft: Int, trainedToday: Bool = false,
+                  past: [TrainingDayPlanner.PastDay] = [], low: Bool = false) -> TrainingDayPlanner.Guidance {
+        TrainingDayPlanner.flexibleGuidance(
+            week: WeeklyPlan.Progress(target: target, done: done, daysLeft: daysLeft, trainedToday: trainedToday),
+            nextFocus: .pull, past: past, lowRecovery: low, usualTrainingStrain: 65, calendar: calendar
+        )
+    }
+
+    @Test func flexibleWeekTrainsWhenSessionsRemainAndRecoveryIsFine() {
+        // Wednesday: 1 of 4 done, 5 days left, yesterday light.
+        let result = flexible(done: 1, daysLeft: 5, past: [day(1, nil, strain: 12)])
+        #expect(result.kind == .training)
+        #expect(result.focus == .pull)
+        #expect(result.strainRange == StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: 65))
+        #expect(result.reason.contains("3 sessions to go"))
+    }
+
+    @Test func flexibleWeekRestsOnceTheQuotaIsMet() {
+        let result = flexible(done: 4, daysLeft: 3)
+        #expect(result.kind == .rest)
+        #expect(result.isRestDay)
+        #expect(result.title == "Week done")
+        #expect(result.strainRange == TrainingDayPlanner.restDayRange)
+        // Trained today and that made the quota: a training day, with the week closed.
+        let last = flexible(done: 4, daysLeft: 3, trainedToday: true)
+        #expect(last.kind == .training)
+        #expect(last.reason.contains("rest days from here"))
+    }
+
+    @Test func flexibleWeekAsksForTrainingWhenEveryDayIsNeeded() {
+        // Saturday: 2 of 4 done, 2 days left.
+        let result = flexible(done: 2, daysLeft: 2, past: [day(1, nil, strain: 62)])
+        #expect(result.kind == .training)
+        #expect(result.reason.contains("train today to make the week"))
+        // Never a "missed" label, whatever the state.
+        for guidance in [result, flexible(done: 0, daysLeft: 1), flexible(done: 1, daysLeft: 4, low: true)] {
+            #expect(!guidance.title.lowercased().contains("miss"))
+            #expect(!guidance.reason.lowercased().contains("missed"))
+        }
+    }
+
+    @Test func flexibleWeekGoesEasyOnLowRecovery() {
+        // Room in the week: rest, even though sessions are "due".
+        let rest = flexible(done: 1, daysLeft: 5, low: true)
+        #expect(rest.kind == .rest)
+        #expect(rest.strainRange == TrainingDayPlanner.restDayRange)
+        // No room left: an easy session rather than a skip.
+        let easy = flexible(done: 2, daysLeft: 2, low: true)
+        #expect(easy.kind == .easyTraining)
+        #expect(easy.focus == .pull)
+        #expect(easy.strainRange.upperBound < StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: 65).lowerBound)
+    }
+
+    @Test func flexibleWeekSpacesSessionsAfterAHardDay() {
+        // Hard day yesterday and slack in the week: a rest day is suggested, training allowed.
+        let spaced = flexible(done: 1, daysLeft: 5, past: [day(1, nil, strain: 62)])
+        #expect(spaced.kind == .rest)
+        #expect(spaced.reason.contains("training today is fine too"))
+        // Trained today: a training day whatever else.
+        #expect(flexible(done: 2, daysLeft: 4, trainedToday: true).kind == .training)
+    }
 }

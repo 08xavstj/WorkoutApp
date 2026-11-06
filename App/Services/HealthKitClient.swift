@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 import AppCore
+import os
 
 /// All HealthKit reads and writes. Every method runs off the main actor and
 /// returns plain AppCore values, so no HealthKit objects cross actors.
@@ -11,6 +12,9 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     private let rmssdCache = RMSSDCache()
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
+
+    /// Diagnostics for reads that fail or come back empty (Console: category "health").
+    nonisolated static let log = Logger(subsystem: "com.lontraindustries.workoutapp", category: "health")
 
     private var readTypes: Set<HKObjectType> {
         var types: Set<HKObjectType> = [
@@ -111,12 +115,29 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     /// Shows the Health permission sheet again only when there are types the
     /// user hasn't been asked about yet (e.g. after an update adds new stats).
+    /// Never throws and never blocks a refresh: a failed request (a type the
+    /// device refuses, no window to present in) is logged and the data the
+    /// user already shares keeps flowing. Returns true when a request was
+    /// made and answered, so the caller can refresh again for the new types.
     @concurrent
-    func requestAuthorizationIfNeeded() async {
-        guard isAvailable,
-              let status = try? await store.statusForAuthorizationRequest(toShare: shareTypes, read: readTypes),
-              status == .shouldRequest else { return }
-        try? await store.requestAuthorization(toShare: shareTypes, read: readTypes)
+    @discardableResult
+    func requestAuthorizationIfNeeded() async -> Bool {
+        guard isAvailable else { return false }
+        let status: HKAuthorizationRequestStatus
+        do {
+            status = try await store.statusForAuthorizationRequest(toShare: shareTypes, read: readTypes)
+        } catch {
+            Self.log.error("Health authorization status failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        guard status == .shouldRequest else { return false }
+        do {
+            try await store.requestAuthorization(toShare: shareTypes, read: readTypes)
+            return true
+        } catch {
+            Self.log.error("Health authorization request failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     /// Age and sex from the Health profile, if the user allowed it.

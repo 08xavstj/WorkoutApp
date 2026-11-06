@@ -149,6 +149,18 @@ struct StrainCalculatorTests {
         #expect(result.cardioLoad == result.totalLoad)
     }
 
+    @Test func exerciseMinutesWithoutHeartRateAddNoZoneMinutes() {
+        // Zone minutes come from heart rate only: a day credited from Apple
+        // Watch exercise minutes (and a rated gym session) has strain but no
+        // time in zones. The app says so instead of showing an empty chart.
+        let session = StrengthSessionSummary(start: start, end: start.addingTimeInterval(45 * 60), sessionRPE: 7)
+        let result = calculator.dailyStrain(heartRate: [], strengthSessions: [session], profile: profile,
+                                            movementMinutes: exerciseMinutes(30, from: start.addingTimeInterval(3 * 3600)))
+        #expect(result.strain > 0)
+        #expect(result.movementMinutes == 30)
+        #expect(result.zoneMinutes == [0, 0, 0, 0, 0])
+    }
+
     @Test func exerciseMinutesCoveredByHeartRateAreNotCountedTwice() {
         let heartRate = steady(bpm: bpm(atReserve: 0.6), minutes: 30, from: start)
         let alone = calculator.dailyStrain(heartRate: heartRate, strengthSessions: [], profile: profile)

@@ -377,6 +377,27 @@ public struct WorkoutPlanner: Sendable {
         }
     }
 
+    /// The focus that closes the most of this week's gap to 10-20 hard sets
+    /// per muscle (`MuscleCoverage.suggest`), falling back to the rotation
+    /// above when nothing lags or every lagging muscle is still recovering.
+    /// The rotation's pick wins ties, so a fresh week starts where it would
+    /// have anyway and the coverage rule only steers once muscles fall behind.
+    /// - Parameters:
+    ///   - setsThisWeek: hard sets per muscle since Monday (`MuscleCoverage.setsThisWeek`).
+    ///   - states: muscle recovery (`MuscleRecovery.evaluate`).
+    ///   - sessionsLeft: sessions still to come this week, today's included.
+    public static func suggestedFocus(
+        recentExerciseIDs: [String],
+        setsThisWeek: [Muscle: Double],
+        states: [Muscle: MuscleRecovery.State],
+        sessionsLeft: Int
+    ) -> (focus: WorkoutFocus, coverage: MuscleCoverage.Result?) {
+        let rotation = suggestedFocus(recentExerciseIDs: recentExerciseIDs)
+        let coverage = MuscleCoverage.suggest(setsThisWeek: setsThisWeek, states: states,
+                                              sessionsLeft: sessionsLeft, preferred: rotation)
+        return (coverage?.focus ?? rotation, coverage)
+    }
+
     /// Target RPE from recovery: train hard when recovered, back off when not.
     ///
     /// Adjusting effort to the day is autoregulation, which works for strength
@@ -507,6 +528,9 @@ public struct WorkoutPlanner: Sendable {
     /// (`LoadEstimator`); `warmUpMinutes` is the movement warm-up
     /// (`WarmUpRoutine`) the session starts with: 0 (the default) for the
     /// off and ramp-only tiers, the routine's minutes for short and full.
+    /// `prioritySlots` (from `MuscleCoverage`) are movements for muscles
+    /// behind on the week's sets: they go straight after the compound lifts,
+    /// so a short session drops a default isolation movement instead of them.
     public func plan(
         focus: WorkoutFocus,
         minutes: Int,
@@ -514,6 +538,7 @@ public struct WorkoutPlanner: Sendable {
         history: [String: ExerciseHistory],
         block: TrainingBlock.WeekState? = nil,
         focusReason: String? = nil,
+        prioritySlots: [MovementSlot] = [],
         bodyMassKg: Double? = nil,
         sex: BiologicalSex = .male,
         trainingStatus: TrainingStatus = .novice,
@@ -522,7 +547,7 @@ public struct WorkoutPlanner: Sendable {
         let rpe = Self.targetRPE(recovery: recovery, block: block)
         let lifter = LoadEstimator.Lifter(bodyMassKg: bodyMassKg, sex: sex, status: trainingStatus)
         let exerciseCount = Self.exerciseCount(minutes: minutes)
-        let slots = minutes >= Self.longSessionMinutes ? focus.slots + [focus.extraSlot] : focus.slots
+        let slots = Self.orderedSlots(focus: focus, minutes: minutes, priority: prioritySlots)
         var exercises: [PlannedExercise] = []
         for slot in slots {
             // A repeated slot (the long session's extra) gets a different exercise.
@@ -548,6 +573,20 @@ public struct WorkoutPlanner: Sendable {
                                            rpe: rpe, block: block, exercises: exercises)
         workout.estimatedMinutes = Self.estimatedMinutes(exercises, style: style, warmUpMinutes: warmUpMinutes)
         return workout
+    }
+
+    /// The focus's movements for the session length (the long session adds
+    /// `extraSlot`), with any priority movements moved to directly after the
+    /// leading compound lifts: multi-joint lifts stay first (Nunes et al.
+    /// 2021), the lagging muscle's movement comes next, the defaults after.
+    static func orderedSlots(focus: WorkoutFocus, minutes: Int, priority: [MovementSlot]) -> [MovementSlot] {
+        var base = minutes >= longSessionMinutes ? focus.slots + [focus.extraSlot] : focus.slots
+        guard !priority.isEmpty else { return base }
+        base.removeAll { priority.contains($0) }
+        let leading = base.prefix { $0.isCompound }
+        var unique: [MovementSlot] = []
+        for slot in priority where !unique.contains(slot) { unique.append(slot) }
+        return Array(leading) + unique + Array(base.dropFirst(leading.count))
     }
 
     /// Below this share of the time you picked, `fill` adds work. The 60-min

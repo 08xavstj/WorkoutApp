@@ -27,6 +27,20 @@ private struct ZonesCard: View {
         return "\(whole(low))–\(whole(high))"
     }
 
+    /// Why a day with workouts can show no zones: Apple Health's heart-rate read
+    /// failed, or strain today came only from exercise minutes and session effort,
+    /// which add strain but no zone time (`StrainCalculator`).
+    private var noZonesReason: String? {
+        if let error = metrics.heartRateReadError {
+            return "Heart rate couldn't be read from Apple Health (\(error)). Pull down on Today to try again."
+        }
+        guard let strain = metrics.strain, strain.strain > 0 else { return nil }
+        if strain.movementMinutes > 0 || strain.liftingLoad > 0 {
+            return "Today's strain so far comes from exercise minutes and workout effort, which count without heart rate. Zones need heart-rate readings in Apple Health, from a watch or an AirPods recording; past workouts keep theirs on the workout's page."
+        }
+        return nil
+    }
+
     var body: some View {
         let minutes = metrics.strain?.zoneMinutes ?? [0, 0, 0, 0, 0]
         let total = minutes.reduce(0, +)
@@ -36,6 +50,12 @@ private struct ZonesCard: View {
             Text(total > 0 ? "\(whole(total)) min in zones today" : "No time in heart-rate zones yet today")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
+            if total == 0, let reason = noZonesReason {
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(alignment: .bottom, spacing: 12) {
                 ForEach(0..<5, id: \.self) { index in
                     zoneColumn(index, minutes: index < minutes.count ? minutes[index] : 0, peak: peak)

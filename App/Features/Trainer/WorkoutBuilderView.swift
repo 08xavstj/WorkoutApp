@@ -131,13 +131,22 @@ struct WorkoutBuilderView: View {
 
     /// Your pick, else what sore or tired muscles allow, else what you haven't trained lately.
     private var resolvedFocus: WorkoutFocus {
-        focus ?? checkIns.suggestedFocus ?? muscles.suggestedFocus
+        focus ?? checkIns.suggestedFocus ?? muscles.suggestedFocus ?? coverage?.focus
             ?? WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))
+    }
+
+    /// The session that closes this week's biggest gap to 10-20 hard sets per
+    /// muscle (`MuscleCoverage`), when nothing more pressing picks the focus.
+    private var coverage: MuscleCoverage.Result? {
+        guard focus == nil, checkIns.suggestedFocus == nil, muscles.suggestedFocus == nil else { return nil }
+        let left = plans.progress(sessions: sessions)?.remaining ?? 2
+        return muscles.coverage(sessionsLeft: max(1, left), preferred: nil)
     }
 
     private var autoReason: String {
         if checkIns.suggestedFocus != nil { return "because of the soreness you reported this morning" }
         if muscles.suggestedFocus != nil { return "to rest the muscles that are still recovering" }
+        if let coverage { return coverage.reason }
         return "based on what you've trained recently"
     }
 
@@ -157,6 +166,7 @@ struct WorkoutBuilderView: View {
         // the warm-up tier's minutes count toward the time.
         plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history, block: block,
                                 focusReason: focus == nil ? autoReason : nil,
+                                prioritySlots: coverage?.prioritySlots ?? [],
                                 bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,
                                 trainingStatus: metrics.trainingStatus ?? .novice,
                                 warmUpMinutes: warmUpMinutes)

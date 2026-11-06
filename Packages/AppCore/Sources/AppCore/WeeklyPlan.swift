@@ -37,6 +37,21 @@ public struct PlannedDay: Codable, Sendable, Equatable, Identifiable {
         self.shortVersionMinutes = shortVersionMinutes
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case weekday, time, focus, minutes, ifThen, shortVersionMinutes
+    }
+
+    /// Plans saved before `shortVersionMinutes` existed decode with the 15-minute default.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        weekday = try container.decode(Int.self, forKey: .weekday)
+        time = try container.decode(Int.self, forKey: .time)
+        focus = try container.decode(WorkoutFocus.self, forKey: .focus)
+        minutes = try container.decode(Int.self, forKey: .minutes)
+        ifThen = try container.decodeIfPresent(String.self, forKey: .ifThen)
+        shortVersionMinutes = try container.decodeIfPresent(Int.self, forKey: .shortVersionMinutes) ?? 15
+    }
+
     /// e.g. "6:00 pm" in the user's locale.
     public func clockText(calendar: Calendar = .current) -> String {
         let day = calendar.startOfDay(for: .now)
@@ -53,17 +68,126 @@ public struct PlannedDay: Codable, Sendable, Equatable, Identifiable {
 /// (`TrainingBlock`, kept by the app's `WeeklyPlanStore`) and its
 /// `weekStart` says which plan week it covers.
 public struct WeeklyPlan: Codable, Sendable, Equatable {
+    /// How the week's sessions are held to days.
+    ///
+    /// - `fixedDays`: each session has its weekday and time, an implementation
+    ///   intention (Gollwitzer & Sheeran 2006, d = 0.65; Bélanger-Gravel 2013,
+    ///   d = 0.31 for physical activity). The stronger evidence is here.
+    /// - `flexible`: a number of sessions a week, done on whichever days feel
+    ///   right. The evidence is thinner and indirect: autonomy support
+    ///   predicts adherence (Teixeira et al. 2012; Ntoumanis et al. 2021,
+    ///   docs/research/behaviour-change.md rec. 5), HRV-guided day selection
+    ///   (train when recovered, go easy when not) did as well as or better
+    ///   than fixed plans in small trials (Kiviniemi et al., Eur J Appl Physiol
+    ///   2007; Javaloyes et al., IJSPP 2019; both from memory in
+    ///   docs/research/strain-science.md), and for equal weekly volume the
+    ///   spread across the week makes little difference (Schoenfeld, Grgic &
+    ///   Krieger 2019). No trial has compared flexible with fixed training
+    ///   days directly, so the editor says so.
+    public enum Mode: String, Codable, Sendable, CaseIterable {
+        case fixedDays
+        case flexible
+    }
+
     /// Start of the Monday that begins the week.
     public var weekStart: Date
+    /// The week's sessions. In `fixedDays` mode each is tied to its weekday;
+    /// in `flexible` mode they are the sessions to get done in any order on
+    /// any day (the weekday is only the session's id and a default time).
     public var plannedDays: [PlannedDay]
     /// Up to three changes the user confirmed for this week at the review
     /// (review of goals: Michie et al., Health Psychol 2009).
     public var changes: [String]
+    /// Fixed weekdays (plans saved before modes existed decode as this) or a
+    /// weekly quota on any days.
+    public var mode: Mode
+    /// Sessions to do this week in `flexible` mode; nil means one per
+    /// `plannedDays` entry.
+    public var sessionsPerWeek: Int?
 
-    public init(weekStart: Date, plannedDays: [PlannedDay] = [], changes: [String] = []) {
+    public init(weekStart: Date, plannedDays: [PlannedDay] = [], changes: [String] = [],
+                mode: Mode = .fixedDays, sessionsPerWeek: Int? = nil) {
         self.weekStart = weekStart
         self.plannedDays = plannedDays
         self.changes = changes
+        self.mode = mode
+        self.sessionsPerWeek = sessionsPerWeek
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case weekStart, plannedDays, changes, mode, sessionsPerWeek
+    }
+
+    /// Plans saved before `mode` existed are fixed-day plans.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        weekStart = try container.decode(Date.self, forKey: .weekStart)
+        plannedDays = try container.decodeIfPresent([PlannedDay].self, forKey: .plannedDays) ?? []
+        changes = try container.decodeIfPresent([String].self, forKey: .changes) ?? []
+        mode = try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .fixedDays
+        sessionsPerWeek = try container.decodeIfPresent(Int.self, forKey: .sessionsPerWeek)
+    }
+
+    public var isFlexible: Bool { mode == .flexible }
+
+    /// Sessions the week asks for: the quota in flexible mode, else the
+    /// number of planned days. What the consistency score counts against.
+    public var sessionTarget: Int {
+        isFlexible ? (sessionsPerWeek ?? plannedDays.count) : plannedDays.count
+    }
+
+    /// Days left in the week containing `now`, today included (Monday 7 …
+    /// Sunday 1).
+    public static func daysLeft(now: Date, calendar: Calendar = .current) -> Int {
+        7 - order(calendar.component(.weekday, from: now))
+    }
+
+    /// Where a week stands against its session target.
+    public struct Progress: Sendable, Equatable {
+        public var target: Int
+        /// Training days so far this week (any day counts).
+        public var done: Int
+        /// Days left this week, today included.
+        public var daysLeft: Int
+        public var trainedToday: Bool
+
+        public init(target: Int, done: Int, daysLeft: Int, trainedToday: Bool) {
+            self.target = target
+            self.done = done
+            self.daysLeft = daysLeft
+            self.trainedToday = trainedToday
+        }
+
+        /// Sessions still to do, never negative.
+        public var remaining: Int { max(0, target - done) }
+        public var isMet: Bool { remaining == 0 }
+        /// Rest days still available after the remaining sessions; 0 or less
+        /// means every day left is needed.
+        public var slack: Int { daysLeft - remaining - (trainedToday ? 1 : 0) }
+        /// "2 of 4 done · 3 days left".
+        public var label: String {
+            "\(min(done, target)) of \(target) done · \(daysLeft) \(daysLeft == 1 ? "day" : "days") left"
+        }
+    }
+
+    /// Sessions done against the target as of `now` (which must fall in this
+    /// plan's week).
+    public func progress(trainingDays: [Date], now: Date = .now, calendar: Calendar = .current) -> Progress {
+        let days = Set(trainingDays.map { calendar.startOfDay(for: $0) })
+            .filter { $0 >= weekStart && $0 < (calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart) }
+        let today = calendar.startOfDay(for: now)
+        return Progress(target: sessionTarget, done: days.count, daysLeft: Self.daysLeft(now: now, calendar: calendar),
+                        trainedToday: days.contains(today))
+    }
+
+    /// In flexible mode, the session to do next: the first of the week's
+    /// sessions not yet done (by count, since days aren't fixed). Nil when
+    /// the quota is met or the plan has fixed days.
+    public func nextFlexibleSession(done: Int) -> PlannedDay? {
+        guard isFlexible, done < sessionTarget else { return nil }
+        let sessions = sortedDays
+        guard !sessions.isEmpty else { return nil }
+        return sessions[min(done, sessions.count - 1)]
     }
 
     /// The fewest and most training days a week the planner offers.
@@ -179,7 +303,9 @@ public struct WeekRecord: Codable, Sendable, Equatable {
     public var planned: Int
     /// Days with a logged session that week (any day counts, planned or not:
     /// weekly total matters, not the pattern; dos Santos et al., JAMA Intern
-    /// Med 2022, from memory in docs/research/behaviour-change.md).
+    /// Med 2022, from memory in docs/research/behaviour-change.md). So the
+    /// score is sessions against the week's target in both plan modes, never
+    /// weekday matches.
     public var done: Int
 
     public init(weekStart: Date, planned: Int, done: Int) {
@@ -192,7 +318,7 @@ public struct WeekRecord: Codable, Sendable, Equatable {
     public static func make(plan: WeeklyPlan, trainingDays: [Date], calendar: Calendar = .current) -> WeekRecord {
         let days = Set(trainingDays.map { calendar.startOfDay(for: $0) })
             .filter { $0 >= plan.weekStart && $0 < (calendar.date(byAdding: .day, value: 7, to: plan.weekStart) ?? plan.weekStart) }
-        return WeekRecord(weekStart: plan.weekStart, planned: plan.plannedDays.count, done: days.count)
+        return WeekRecord(weekStart: plan.weekStart, planned: plan.sessionTarget, done: days.count)
     }
 }
 

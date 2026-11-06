@@ -258,8 +258,11 @@ struct WeeklyReviewView: View {
     }
 
     private func confirm() {
+        let last = store.lastPlan(before: thisWeek)
+        // Keep last week's mode: a flexible week stays "any days, N a week".
         var plan = store.plan(for: thisWeek)
-            ?? WeeklyPlan(weekStart: thisWeek, plannedDays: store.lastPlan(before: thisWeek)?.plannedDays ?? [])
+            ?? WeeklyPlan(weekStart: thisWeek, plannedDays: last?.plannedDays ?? [],
+                          mode: last?.mode ?? .fixedDays, sessionsPerWeek: last?.sessionsPerWeek)
         plan.changes = changes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         store.save(plan)
         dismiss()

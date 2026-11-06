@@ -66,6 +66,13 @@ extension KeyMeasuresSection {
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .padding(.vertical, 10)
+        } else if let problem = vitals.readProblem {
+            // A core read threw on the last refresh (`VitalsModel.readProblem`).
+            if hasRows { Divider() }
+            Text(problem)
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+                .padding(.vertical, 10)
         } else if isMissingRows {
             if hasRows { Divider() }
             AddDataHint { router.selectedTab = .log }

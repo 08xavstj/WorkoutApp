@@ -7,8 +7,18 @@ import AppCore
 final class MuscleModel {
     private(set) var states: [Muscle: MuscleRecovery.State] = [:]
     private(set) var deload: DeloadAdvisor.Advice?
+    /// Hard sets per muscle since Monday (`MuscleCoverage.setsThisWeek`), for
+    /// the coverage-driven focus; `states[].weeklySets` is the rolling 7 days.
+    private(set) var weekSets: [Muscle: Double] = [:]
 
     var suggestedFocus: WorkoutFocus? { MuscleRecovery.suggestedFocus(states) }
+
+    /// The focus that closes the most of this week's gap to 10-20 sets per
+    /// muscle, with the movements to prioritise (`MuscleCoverage.suggest`);
+    /// nil when nothing lags or every lagging muscle is still recovering.
+    func coverage(sessionsLeft: Int, preferred: WorkoutFocus?) -> MuscleCoverage.Result? {
+        MuscleCoverage.suggest(setsThisWeek: weekSets, states: states, sessionsLeft: sessionsLeft, preferred: preferred)
+    }
 
     func refresh(sessions: [WorkoutSession], library: ExerciseLibrary, health: HealthKitClient?, hrvBelowNormal: Bool = false) async {
         let now = Date.now
@@ -53,6 +63,7 @@ final class MuscleModel {
             }
         }
         states = MuscleRecovery.evaluate(sets: sets, cardio: cardio, now: now)
+        weekSets = MuscleCoverage.setsThisWeek(sets, weekStart: WeeklyPlan.weekStart(containing: now), now: now)
     }
 }
 

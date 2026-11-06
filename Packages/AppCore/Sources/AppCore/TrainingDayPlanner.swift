@@ -26,6 +26,17 @@ import Foundation
 ///   the risk to avoid (Gabbett, Br J Sports Med 2016). So after an unplanned
 ///   hard day, the next day is a rest day, or an easy version of a planned
 ///   session when recovery is fine. The thresholds are app choices.
+///
+/// **Flexible weeks** (`WeeklyPlan.Mode.flexible`, `flexibleGuidance`) have a
+/// session quota instead of fixed days, so there is no planned day to miss and
+/// no rest day in the plan: the week is happy once its sessions are done. The
+/// day's kind comes from sessions left, days left and recovery (train when
+/// recovered, go easy when not: Kiviniemi et al. 2007; Javaloyes et al. 2019,
+/// from memory in docs/research/strain-science.md), and the equal-volume
+/// frequency evidence says the spread doesn't matter (Schoenfeld, Grgic &
+/// Krieger 2019). Autonomy support, not pressure, is what keeps people
+/// training (Teixeira et al. 2012; Ntoumanis et al. 2021), so the wording is
+/// a suggestion and nothing is ever "missed" mid-week.
 public enum TrainingDayPlanner {
     public enum Kind: String, Sendable, Equatable {
         /// A planned session, recovery fine.
@@ -146,6 +157,87 @@ public enum TrainingDayPlanner {
         return Guidance(
             kind: .rest, strainRange: restDayRange, title: "Rest day",
             reason: "Rest day in your plan. Light movement like a walk is good; save hard training for your next session so you come to it recovered."
+        )
+    }
+
+    // MARK: Flexible weeks
+
+    /// Today's guidance for a flexible plan (sessions a week, any days).
+    ///
+    /// In order: trained today → a training day (and "week done" once the
+    /// quota is met); quota met → rest days to the end of the week; low
+    /// recovery → rest when the week has room, else an easy session (never
+    /// skipped when every day left is needed: HRV-guided trials re-route, they
+    /// don't stop); every day left needed → "train today to make the week";
+    /// yesterday hard and room to spare → a rest day, so sessions alternate
+    /// with rest by default (rest days lower training monotony, Foster 1998;
+    /// about two sessions a muscle a week, Schoenfeld et al. 2016) while the
+    /// user stays free to train anyway; otherwise a training day with the
+    /// coverage-driven focus (`MuscleCoverage`). The ordering and the one-day
+    /// spacing are app choices.
+    /// - Parameters:
+    ///   - week: sessions done against the quota, days left, trained today.
+    ///   - nextFocus: the focus the coverage rule suggests, if any.
+    public static func flexibleGuidance(
+        week: WeeklyPlan.Progress,
+        nextFocus: WorkoutFocus?,
+        past: [PastDay],
+        lowRecovery: Bool,
+        usualTrainingStrain: Double?,
+        calendar: Calendar = .current
+    ) -> Guidance {
+        let training = StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: usualTrainingStrain)
+        let easy = StrainCalculator.targetStrain(forRecovery: 0, usualTrainingStrain: usualTrainingStrain)
+        let hard = hardDayStrain(usualTrainingStrain: usualTrainingStrain)
+        let yesterday = past.max { $0.date < $1.date }
+        let sessions = week.target == 1 ? "session" : "sessions"
+        let left = week.remaining == 1 ? "1 session" : "\(week.remaining) sessions"
+        let days = week.daysLeft == 1 ? "1 day" : "\(week.daysLeft) days"
+
+        if week.trainedToday {
+            let rest = week.isMet
+                ? " That's the week's \(week.target) \(sessions): rest days from here."
+                : " \(left) to go, \(week.daysLeft - 1) more \(week.daysLeft - 1 == 1 ? "day" : "days") this week."
+            return Guidance(kind: .training, strainRange: training, title: "Training day",
+                            reason: "Session done today.\(rest)", focus: nextFocus)
+        }
+        if week.isMet {
+            return Guidance(
+                kind: .rest, strainRange: restDayRange, title: "Week done",
+                reason: "All \(week.target) \(sessions) done this week. Rest days until Monday; a walk is good, and an extra session adds little that next week won't."
+            )
+        }
+        if lowRecovery {
+            if week.slack > 0 {
+                return Guidance(
+                    kind: .rest, strainRange: restDayRange, title: "Rest day",
+                    reason: "Recovery is low and the week has room (\(left) to go, \(days) left), so today can be a rest day. Train on a day you feel better."
+                )
+            }
+            return Guidance(
+                kind: .easyTraining, strainRange: easy, title: "Easy day",
+                reason: "Every day left is needed for the week's \(left), but recovery is low, so make it the short version or an easy session. It still counts.",
+                focus: nextFocus
+            )
+        }
+        if week.slack <= 0 {
+            return Guidance(
+                kind: .training, strainRange: training, title: "Training day",
+                reason: "\(left) and \(days) left: train today to make the week. The short version counts too.",
+                focus: nextFocus
+            )
+        }
+        if let yesterday, yesterday.strain >= hard {
+            return Guidance(
+                kind: .rest, strainRange: restDayRange, title: "Rest day",
+                reason: "Yesterday was a hard day and the week has room (\(left) to go, \(days) left), so today suits a rest day. If you feel good, training today is fine too."
+            )
+        }
+        let what = nextFocus.map { "\($0.title) suits today" } ?? "Any session suits today"
+        return Guidance(
+            kind: .training, strainRange: training, title: "Training day",
+            reason: "\(what): \(left) to go and \(days) left, with recovery fine. Rest instead if the day isn't right; the week only needs its total.",
+            focus: nextFocus
         )
     }
 }

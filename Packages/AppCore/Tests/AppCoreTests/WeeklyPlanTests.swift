@@ -167,5 +167,63 @@ struct WeeklyPlanTests {
         let decoded = try JSONDecoder().decode(WeeklyPlan.self, from: data)
         #expect(decoded == plan)
         #expect(decoded.plannedDays[0].shortVersionMinutes == 15)
+        #expect(decoded.mode == .fixedDays)
+        #expect(decoded.sessionsPerWeek == nil)
+        // Flexible plans keep their mode and quota.
+        let flexible = WeeklyPlan(weekStart: monday, plannedDays: plan.plannedDays, mode: .flexible, sessionsPerWeek: 4)
+        let back = try JSONDecoder().decode(WeeklyPlan.self, from: try JSONEncoder().encode(flexible))
+        #expect(back == flexible)
+        #expect(back.isFlexible)
+        #expect(back.sessionTarget == 4)
+    }
+
+    @Test func plansSavedBeforeModesDecodeAsFixedDays() throws {
+        let json = """
+        {"weekStart": 0, "plannedDays": [{"weekday": 3, "time": 1080, "focus": "push", "minutes": 45, "shortVersionMinutes": 15}], "changes": ["Bed by 11"]}
+        """
+        let plan = try JSONDecoder().decode(WeeklyPlan.self, from: Data(json.utf8))
+        #expect(plan.mode == .fixedDays)
+        #expect(!plan.isFlexible)
+        #expect(plan.sessionsPerWeek == nil)
+        #expect(plan.sessionTarget == 1)
+        #expect(plan.plannedDays.count == 1)
+        #expect(plan.changes == ["Bed by 11"])
+        #expect(plan.nextFlexibleSession(done: 0) == nil)
+    }
+
+    @Test func flexibleWeekCountsSessionsAgainstTheQuotaNotWeekdays() {
+        // Two session templates (Tue, Fri) but a quota of 4, trained Mon, Wed, Thu.
+        let plan = WeeklyPlan(weekStart: monday, plannedDays: [
+            PlannedDay(weekday: 3, time: 1080, focus: .push, minutes: 45),
+            PlannedDay(weekday: 6, time: 1080, focus: .pull, minutes: 45),
+        ], mode: .flexible, sessionsPerWeek: 4)
+        let trained = [day(0), day(2), day(3), day(-2)]
+        let record = WeekRecord.make(plan: plan, trainingDays: trained, calendar: utc)
+        #expect(record.planned == 4)
+        #expect(record.done == 3) // none on the template weekdays, all counted
+        #expect(Consistency.weekKept(planned: record.planned, done: record.done))
+        // Progress as of Thursday evening: 3 of 4 done, 4 days left (Thu-Sun), trained today.
+        let progress = plan.progress(trainingDays: trained, now: day(3, hour: 20), calendar: utc)
+        #expect(progress == WeeklyPlan.Progress(target: 4, done: 3, daysLeft: 4, trainedToday: true))
+        #expect(progress.remaining == 1)
+        #expect(progress.slack == 2)
+        #expect(progress.label == "3 of 4 done · 4 days left")
+        #expect(WeeklyPlan.daysLeft(now: monday, calendar: utc) == 7)
+        #expect(WeeklyPlan.daysLeft(now: day(6), calendar: utc) == 1)
+        // The next session is the first template not yet done, by count; the last one repeats past the templates.
+        #expect(plan.nextFlexibleSession(done: 0)?.focus == .push)
+        #expect(plan.nextFlexibleSession(done: 1)?.focus == .pull)
+        #expect(plan.nextFlexibleSession(done: 3)?.focus == .pull)
+        #expect(plan.nextFlexibleSession(done: 4) == nil)
+        // Without a quota the templates set it.
+        let counted = WeeklyPlan(weekStart: monday, plannedDays: plan.plannedDays, mode: .flexible)
+        #expect(counted.sessionTarget == 2)
+    }
+
+    @Test func plannedDaysSavedBeforeTheShortVersionStillDecode() throws {
+        let json = #"{"weekday":2,"time":1080,"focus":"push","minutes":45}"#
+        let day = try JSONDecoder().decode(PlannedDay.self, from: Data(json.utf8))
+        #expect(day.shortVersionMinutes == 15)
+        #expect(day.focus == .push)
     }
 }

@@ -223,6 +223,7 @@ private struct ScoresPrimaryButton: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
     @Environment(WeeklyPlanStore.self) private var plans
+    @Environment(MuscleModel.self) private var muscles
     @Environment(WorkoutLauncher.self) private var launcher
 
     private struct Choice {
@@ -255,6 +256,10 @@ private struct ScoresPrimaryButton: View {
         if let planned = plannedToday {
             return Choice(title: "Start \(planned.focus.shortTitle) · \(planned.minutes) min", focus: planned.focus, minutes: planned.minutes)
         }
+        // A flexible week (`WeeklyPlan.Mode.flexible`): the next session, with the coverage rule's focus.
+        if let next = flexibleNext {
+            return Choice(title: "Start \(next.focus.shortTitle) · \(next.minutes) min", focus: next.focus, minutes: next.minutes)
+        }
         // A session missed in the last two days moved to today (`TrainingDayPlanner`).
         if let guidance = metrics.dayGuidance, guidance.kind == .makeUp, let focus = guidance.focus,
            metrics.activities.isEmpty {
@@ -268,6 +273,20 @@ private struct ScoresPrimaryButton: View {
         let strength = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions)
             .first { $0.option.kind == .strength }
         return Choice(title: "Start workout", focus: strength?.focus, minutes: strength?.minutes)
+    }
+
+    /// In a flexible week, the session to do next (`WeeklyPlanStore.nextSession`:
+    /// focus from `MuscleCoverage`), unless the quota is met, a session was
+    /// logged today, or today's guidance is a rest day. On an easy day the
+    /// button offers the short version.
+    private var flexibleNext: PlannedDay? {
+        guard plans.current?.isFlexible == true, metrics.activities.isEmpty,
+              metrics.dayGuidance?.isRestDay != true,
+              let progress = plans.progress(sessions: sessions, extra: metrics.recentTrainingDays), !progress.trainedToday,
+              let next = plans.nextSession(sessions: sessions, extra: metrics.recentTrainingDays, muscles: muscles) else { return nil }
+        var day = next.day
+        if metrics.dayGuidance?.kind == .easyTraining { day.minutes = day.shortVersionMinutes }
+        return day
     }
 
     /// Today's planned session from this week's plan, unless a session was

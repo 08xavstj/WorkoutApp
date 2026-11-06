@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 import AppCore
+import os
 
 /// Loads today's data from Apple Health, combines it with logged gym sessions,
 /// and computes every score shown on Today and Fitness.
@@ -99,6 +100,12 @@ final class DailyMetricsModel {
     /// week at all. Set by the app before a refresh (`TrainingDayPlanner`).
     var plannedFocusByDay: [Date: WorkoutFocus] = [:]
     var hasWeeklyPlan = false
+    // MARK: Flexible weeks (WeeklyPlanStore builder)
+    /// In a flexible week (`WeeklyPlan.Mode.flexible`): sessions done against
+    /// the quota, days left, trained today, and the coverage rule's next focus.
+    /// Set by the app before a refresh; nil in a fixed-day week or without a plan.
+    var flexibleWeek: WeeklyPlan.Progress?
+    var flexibleNextFocus: WorkoutFocus?
 
     // MARK: Energy availability (body & nutrition measures)
 
@@ -190,6 +197,14 @@ final class DailyMetricsModel {
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private(set) var lastUpdated: Date?
+    /// Set when both heart-rate reads threw on the last refresh, so a day
+    /// with workouts but no zones can say why (ZonesDetailView). A read that
+    /// answers with no samples is not a failure. Zone minutes come only from
+    /// heart rate; exercise minutes and session RPE add strain without zones.
+    private(set) var heartRateReadError: String?
+    /// Diagnostics: heart-rate samples per source and zone minutes after each
+    /// refresh (Console: category "strain").
+    private static let log = Logger(subsystem: "com.lontraindustries.workoutapp", category: "strain")
 
     @ObservationIgnored private let strainCalculator = StrainCalculator()
     /// Finished days don't change, so their strain is kept between refreshes.
@@ -331,6 +346,14 @@ final class DailyMetricsModel {
                     strain: day.strain
                 )
             }
+        // Flexible week: a quota on any days, no planned day to miss (`TrainingDayPlanner.flexibleGuidance`).
+        if let flexibleWeek {
+            return TrainingDayPlanner.flexibleGuidance(
+                week: flexibleWeek, nextFocus: flexibleNextFocus, past: past,
+                lowRecovery: recovery.score < 34 || trainEasyToday,
+                usualTrainingStrain: usualTrainingStrain, calendar: calendar
+            )
+        }
         return TrainingDayPlanner.guidance(
             plannedToday: plannedFocusByDay[today],
             past: past,
@@ -514,11 +537,25 @@ final class DailyMetricsModel {
                 // If the per-source query fails or comes back empty, fall back to the plain
                 // per-minute average, so heart rate can never stop the rest of the refresh
                 // (strain, recovery, sleep and calories all come after this).
-                var sourceSeries = (try? await health.heartRatePerMinuteBySource(from: firstNeeded, to: now)) ?? []
-                if sourceSeries.allSatisfy({ $0.samples.isEmpty }) {
-                    let combined = (try? await health.heartRatePerMinute(from: firstNeeded, to: now)) ?? []
-                    sourceSeries = combined.isEmpty ? [] : [HeartRateSource(name: "Apple Health", samples: combined)]
+                var sourceSeries: [HeartRateSource] = []
+                var heartRateError: String?
+                do {
+                    sourceSeries = try await health.heartRatePerMinuteBySource(from: firstNeeded, to: now)
+                } catch {
+                    heartRateError = error.localizedDescription
+                    Self.log.error("Heart rate by source failed: \(error.localizedDescription, privacy: .public)")
                 }
+                if sourceSeries.allSatisfy({ $0.samples.isEmpty }) {
+                    do {
+                        let combined = try await health.heartRatePerMinute(from: firstNeeded, to: now)
+                        sourceSeries = combined.isEmpty ? [] : [HeartRateSource(name: "Apple Health", samples: combined)]
+                        if !combined.isEmpty { heartRateError = nil }
+                    } catch {
+                        heartRateError = heartRateError ?? error.localizedDescription
+                        Self.log.error("Heart rate per minute failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+                heartRateReadError = heartRateError
                 let mergeSources = sourceSeries.map(\.mergeSource)
                 let fetchedWorkouts = (try? await health.externalWorkouts(from: firstNeeded, to: now)) ?? []
                 let liftingWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
@@ -540,6 +577,17 @@ final class DailyMetricsModel {
                 }
                 todaysHeartRate = heartRate.filter { $0.date >= today }
                 todaysDisagreements = merged.disagreements.filter { $0.start >= today }
+                // Why a workout day shows no zones: no samples from any source, every minute
+                // dropped by the merge, or readings below zone 1 for this profile.
+                let todayZones = computed[today]?.zoneMinutes ?? []
+                let todayMovement = computed[today]?.movementMinutes ?? 0
+                let sourceCounts = sourceSeries.map { "\($0.name): \($0.samples.count)" }.joined(separator: ", ")
+                let zoneText = todayZones.map { String(Int($0.rounded())) }.joined(separator: "/")
+                let report = "Heart rate since \(firstNeeded.formatted(.iso8601)): sources [\(sourceCounts)], "
+                    + "merged \(heartRate.count) min (\(todaysHeartRate.count) today), exercise minutes \(exerciseMinutes.count), "
+                    + "profile rest \(Int(profile.restingHeartRate)) max \(Int(profile.maxHeartRate)); "
+                    + "today zones Z1-5 [\(zoneText)] min, movement credit \(Int(todayMovement)) min"
+                Self.log.info("\(report, privacy: .public)")
             }
             dayCache = dayCache.filter { $0.key >= historyStart }
             let days: [(Date, StrainCalculator.Result)] = allDays.map { ($0, dayCache[$0]?.result ?? .empty) }

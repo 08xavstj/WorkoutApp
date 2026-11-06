@@ -9,6 +9,11 @@ import AppCore
 /// follow-through, d = 0.65 across 94 tests (Gollwitzer & Sheeran 2006;
 /// d = 0.31 in physical activity, Bélanger-Gravel 2013); coping plans
 /// predicted maintenance (Sniehotta 2005, from memory in the report).
+///
+/// Or a flexible week (`WeeklyPlan.Mode.flexible`): N sessions on any days,
+/// the default for a first plan. Its evidence is thinner and indirect
+/// (autonomy support: Teixeira 2012, Ntoumanis 2021; HRV-guided day choice:
+/// Kiviniemi 2007, Javaloyes 2019), and the footer says so.
 struct WeeklyPlanView: View {
     /// Days to start from instead of this week's (or last week's) plan.
     var initialDays: [PlannedDay]? = nil
@@ -16,11 +21,14 @@ struct WeeklyPlanView: View {
     @Environment(WeeklyPlanStore.self) private var store
     @Environment(UserSettings.self) private var settings
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(MuscleModel.self) private var muscles
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var days: [PlannedDay] = []
     @State private var ifThen = ""
     @State private var loaded = false
+    /// Fixed days or a quota on any days; new plans start flexible.
+    @State private var mode: WeeklyPlan.Mode = .flexible
 
     private var weekStart: Date { WeeklyPlan.weekStart(containing: .now) }
 
@@ -44,7 +52,7 @@ struct WeeklyPlanView: View {
             Form {
                 daysSection
                 ForEach($days) { $day in
-                    PlannedDaySection(day: $day)
+                    PlannedDaySection(day: $day, title: sectionTitle(for: day), flexible: mode == .flexible)
                 }
                 ifThenSection
                 blockSection
@@ -82,9 +90,19 @@ struct WeeklyPlanView: View {
 
     private var daysSection: some View {
         Section {
-            WeekdayPicker(selected: days.map(\.weekday), toggle: toggle)
+            Picker("Schedule", selection: $mode) {
+                Text("Fixed days").tag(WeeklyPlan.Mode.fixedDays)
+                Text("Any days").tag(WeeklyPlan.Mode.flexible)
+            }
+            .pickerStyle(.segmented)
+            if mode == .flexible {
+                Stepper("\(days.count) a week", value: countBinding, in: WeeklyPlan.dayRange)
+                    .accessibilityLabel("Sessions a week: \(days.count)")
+            } else {
+                WeekdayPicker(selected: days.map(\.weekday), toggle: toggle)
+            }
         } header: {
-            Text("Training days")
+            Text(mode == .flexible ? "Sessions this week" : "Training days")
         } footer: {
             // Days per week from the goal: 2-3 health, 3-4 muscle/strength (report rec. 2).
             Text(daysFooter)
@@ -92,12 +110,31 @@ struct WeeklyPlanView: View {
     }
 
     private var daysFooter: String {
-        var text = "\(days.count) of \(WeeklyPlan.dayRange.lowerBound)–\(WeeklyPlan.dayRange.upperBound) days. About \(suggestedCount) a week suits your goal; a plan you can keep beats a bigger one."
+        var text: String
+        if mode == .flexible {
+            // Autonomy support (Teixeira 2012; Ntoumanis 2021); HRV-guided day choice (Kiviniemi 2007;
+            // Javaloyes 2019, from memory); equal-volume frequency (Schoenfeld, Grgic & Krieger 2019).
+            text = "\(days.count) sessions on whichever days feel right; the week is done when they are. About \(suggestedCount) a week suits your goal. Fixed days have the stronger evidence (if-then plans); training on the days you feel recovered rests on fewer, smaller studies. Pick the one you'll keep."
+        } else {
+            text = "\(days.count) of \(WeeklyPlan.dayRange.lowerBound)–\(WeeklyPlan.dayRange.upperBound) days. About \(suggestedCount) a week suits your goal; a plan you can keep beats a bigger one."
+        }
         // A block's deload week keeps the days; the trainer halves the sets (`TrainingBlock`).
         if blockWeek?.isDeload == true {
             text += " This is the block's planned deload week: keep the days, the sessions will be lighter."
         }
         return text
+    }
+
+    /// "Session 2" in a flexible week, the weekday otherwise.
+    private func sectionTitle(for day: PlannedDay) -> String {
+        guard mode == .flexible else { return WeeklyPlan.weekdayName(day.weekday) }
+        let index = days.firstIndex { $0.weekday == day.weekday } ?? 0
+        return "Session \(index + 1)"
+    }
+
+    /// The flexible week's session count, kept to `WeeklyPlan.dayRange`.
+    private var countBinding: Binding<Int> {
+        Binding(get: { days.count }, set: { setCount($0) })
     }
 
     /// Where the training block is: "Block week 3 of 5 · RIR 1" (`TrainingBlock`).
@@ -166,6 +203,12 @@ struct WeeklyPlanView: View {
     private func load() {
         guard !loaded else { return }
         loaded = true
+        // Existing plans keep their mode; a first plan is flexible.
+        if let current = store.plan(for: weekStart) {
+            mode = current.mode
+        } else if let last = store.lastPlan(before: weekStart) {
+            mode = last.mode
+        }
         if let initialDays {
             days = initialDays
         } else if let current = store.plan(for: weekStart) {
@@ -182,9 +225,30 @@ struct WeeklyPlanView: View {
         ifThen = days.compactMap(\.ifThen).first ?? ""
     }
 
-    /// The focus that has rested longest, so the rotation starts there.
+    /// The focus that has rested longest, so the rotation starts there, unless
+    /// muscles are behind on this week's sets (`MuscleCoverage`).
     private var suggestedStart: WorkoutFocus {
-        WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))
+        let rotation = WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))
+        return muscles.coverage(sessionsLeft: max(1, days.count), preferred: rotation)?.focus ?? rotation
+    }
+
+    /// Flexible week: `count` sessions, keeping what the user set on the
+    /// first ones; new ones take the suggested weekday (their id), the last
+    /// session's time and length, and the rotation's focus.
+    private func setCount(_ count: Int) {
+        let target = max(WeeklyPlan.dayRange.lowerBound, min(WeeklyPlan.dayRange.upperBound, count))
+        let weekdays = WeeklyPlan.suggestedWeekdays(count: target)
+        let rotation = WeeklyPlan.focusRotation(start: suggestedStart, count: target)
+        let template = days.last
+        days = weekdays.indices.map { index in
+            if index < days.count {
+                var day = days[index]
+                day.weekday = weekdays[index]
+                return day
+            }
+            return PlannedDay(weekday: weekdays[index], time: template?.time ?? 18 * 60,
+                              focus: rotation[min(index, rotation.count - 1)], minutes: template?.minutes ?? 45)
+        }
     }
 
     private func toggle(_ weekday: Int) {
@@ -212,6 +276,8 @@ struct WeeklyPlanView: View {
             copy.ifThen = text.isEmpty ? nil : text
             return copy
         }
+        plan.mode = mode
+        plan.sessionsPerWeek = mode == .flexible ? days.count : nil
         // The first confirmed plan starts a training block in the goal's style (`WeeklyPlanStore.save`).
         store.trainingStyle = style
         store.save(plan)
@@ -249,15 +315,18 @@ private struct WeekdayPicker: View {
     }
 }
 
-/// One planned day: time, session and length.
+/// One planned day (or, in a flexible week, one session): time, session and length.
 private struct PlannedDaySection: View {
     @Binding var day: PlannedDay
+    let title: String
+    /// In a flexible week the time is only the usual time, for reminders.
+    let flexible: Bool
 
     private static let lengths = [15, 20, 30, 45, 60, 75, 90]
 
     var body: some View {
         Section {
-            DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
+            DatePicker(flexible ? "Usual time" : "Time", selection: time, displayedComponents: .hourAndMinute)
             Picker("Session", selection: $day.focus) {
                 ForEach(WorkoutFocus.allCases) { focus in
                     Text(focus.shortTitle).tag(focus)
@@ -269,7 +338,7 @@ private struct PlannedDaySection: View {
                 }
             }
         } header: {
-            Text(WeeklyPlan.weekdayName(day.weekday))
+            Text(title)
         }
     }
 

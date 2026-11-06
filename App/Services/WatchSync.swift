@@ -164,12 +164,20 @@ final class WatchSync: NSObject {
     /// Sends today's recovery, strain and planned sessions to the Watch's
     /// complications. Called after every metrics refresh; sends only when
     /// something on the face changed, or every 30 minutes.
+    /// Sessions from the last 8 days, for this week's flexible-plan progress on the face.
+    private func recentSessions(now: Date = .now) -> [WorkoutSession] {
+        guard let context else { return [] }
+        let since = now.addingTimeInterval(-8 * 86_400)
+        let descriptor = FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.startedAt >= since })
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
     func updateFace(metrics: DailyMetricsModel, plans: WeeklyPlanStore, lastWorkoutEnd: Date?, now: Date = .now) {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         let horizon = today.addingTimeInterval(8 * 86_400)
         // From the start of today, so today's session stays on the face (done or not).
-        let slots = plans.upcomingSlots(now: today)
+        let slots = plans.upcomingSlots(now: today, trainingDays: WeeklyPlanStore.trainingDays(sessions: recentSessions(), extra: metrics.recentTrainingDays))
             .filter { $0.start < horizon }
             .map { slot in
                 WatchFaceData.Slot(start: slot.start, title: slot.day.focus.title,

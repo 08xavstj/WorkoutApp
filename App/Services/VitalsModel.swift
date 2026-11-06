@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 import AppCore
+import os
 
 /// Every health stat the app can read from Apple Health, grouped for the
 /// Biology tab. Garmin Connect writes some of these, scales and food apps
@@ -83,6 +84,14 @@ final class VitalsModel {
     /// A hypertension notification still waiting for the 7-day home check
     /// (`HomeBloodPressure.pendingHypertensionEvent`); nil when none.
     private(set) var hypertensionPromptDate: Date?
+    /// One line for the Health tab when a core read (resting heart rate, VO₂
+    /// max, heart rate, steps, weight) threw on the last refresh; nil when
+    /// they all answered (an empty answer is not a failure). The extras added
+    /// later (breathing disturbances, symptoms, blood pressure, hearing) only
+    /// log: none of them may empty the stats.
+    private(set) var readProblem: String?
+    /// Diagnostics for reads that fail (Console: category "vitals").
+    private static let log = Logger(subsystem: "com.lontraindustries.workoutapp", category: "vitals")
     private(set) var isLoading = false
     @ObservationIgnored private var isRefreshing = false
 
@@ -178,21 +187,32 @@ final class VitalsModel {
         async let daylight = health.timeInDaylight(days: 90)
         async let apnoea = health.sleepApneaNights(days: 30)
         // Builder B (watch-features.md 1.1, 1.2, 4.5).
-        async let breathing = health.dailySeries(.appleSleepingBreathingDisturbances, unit: .count(), days: 90, cumulative: false)
+        // Read as samples with a unit check, never as a statistics collection (see `breathingDisturbances`).
+        async let breathing = health.breathingDisturbances(days: 90)
         async let healthSymptoms = health.reportedSymptoms(from: calendar.date(byAdding: .day, value: -3, to: today) ?? today, to: now)
         async let hypertension = health.hypertensionEvents(since: calendar.date(byAdding: .day, value: -HomeBloodPressure.hypertensionPromptDays, to: today) ?? today)
         async let cuffReadings = health.bloodPressureReadings(days: 90)
 
         func get(_ value: [DatedValue]?) -> [DatedValue] { value ?? [] }
-        let rhrSeries = get(try? await rhr)
+        // Reads that throw are logged; the core ones also set `readProblem`.
+        // Every read stays non-fatal, so `stats` is assigned whatever fails.
+        var coreFailures: [String] = []
+        func failed(_ name: String, _ error: any Error, core: Bool = false) {
+            Self.log.error("\(name, privacy: .public) read failed: \(error.localizedDescription, privacy: .public)")
+            if core { coreFailures.append(name) }
+        }
+        let rhrSeries: [DatedValue]
+        do { rhrSeries = try await rhr } catch { failed("resting heart rate", error, core: true); rhrSeries = [] }
         let resolvedProfile = profile ?? settings.heartRateProfile(restingHeartRate: rhrSeries.last?.value)
 
         // Heart-rate derived stats are computed off the main thread.
         let workoutWindows = ((try? await workouts) ?? [])
             + sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
         let nights = (try? await sleepHistory) ?? []
+        let heartRateMinutes: [HeartRateSample]
+        do { heartRateMinutes = try await perMinute } catch { failed("heart rate", error, core: true); heartRateMinutes = [] }
         let derived = await Self.derive(
-            heartRate: (try? await perMinute) ?? [],
+            heartRate: heartRateMinutes,
             workouts: workoutWindows,
             sleep: (try? await lastNight) ?? [],
             nights: nights,
@@ -274,7 +294,8 @@ final class VitalsModel {
                                footnote: "Needs about 30 minutes of daytime heart rate."))
         }
 
-        let vo2Series = get(try? await vo2)
+        let vo2Series: [DatedValue]
+        do { vo2Series = try await vo2 } catch { failed("VO₂ max", error, core: true); vo2Series = [] }
         result.append(makeStat(
             "vo2", .heart, "VO₂ max", "lungs.fill", series: vo2Series, unit: "ml/kg/min", digits: 1,
             status: { Biomarkers.vo2MaxLabel($0, age: settings.age, sex: settings.sex) },
@@ -296,13 +317,18 @@ final class VitalsModel {
         result.append(Self.apnoeaStat(nights: apnoeaNights, today: today))
         // Builder B: the nightly series behind the apnoea flags (VitalsModel+Breathing),
         // Health symptoms for the illness watch, and the hypertension prompt.
-        let breathingSeries = get(try? await breathing)
+        let breathingSeries: [DatedValue]
+        do { breathingSeries = try await breathing } catch { failed("breathing disturbances", error); breathingSeries = [] }
         breathingDisturbanceHistory = breathingSeries
         result.append(Self.breathingDisturbancesStat(series: breathingSeries, today: today))
-        healthSymptomDays = (try? await healthSymptoms) ?? []
+        do { healthSymptomDays = try await healthSymptoms } catch { failed("Health symptoms", error); healthSymptomDays = [] }
+        let hypertensionDates: [Date]
+        do { hypertensionDates = try await hypertension } catch { failed("hypertension events", error); hypertensionDates = [] }
+        let cuff: [BloodPressureReading]
+        do { cuff = try await cuffReadings } catch { failed("blood pressure readings", error); cuff = [] }
         hypertensionPromptDate = HomeBloodPressure.pendingHypertensionEvent(
-            events: (try? await hypertension) ?? [],
-            readings: ((try? await cuffReadings) ?? []).map(\.asCore)
+            events: hypertensionDates,
+            readings: cuff.map(\.asCore)
         )
         let daylightSeries = get(try? await daylight)
         daylightMinutesToday = daylightSeries.isEmpty ? nil : (latestToday(daylightSeries)?.value ?? 0)
@@ -342,7 +368,8 @@ final class VitalsModel {
         result.append(mindfulStat)
 
         // MARK: Activity
-        let stepSeries = get(try? await steps)
+        let stepSeries: [DatedValue]
+        do { stepSeries = try await steps } catch { failed("steps", error, core: true); stepSeries = [] }
         var stepStat = makeStat("steps", .activity, "Steps", "shoeprints.fill", series: stepSeries, unit: "", digits: 0)
         // The goal grows (or eases) with your usual day; see StepGoal.
         let stepGoal = StepGoal.personal(dailySteps: stepSeries.filter { !calendar.isDateInToday($0.date) }.suffix(28).map(\.value), age: settings.age)
@@ -375,11 +402,14 @@ final class VitalsModel {
         result.append(todayStat("active", "Active energy", "flame.fill", series: get(try? await active), unit: "kcal", digits: 0, today: latestToday))
         result.append(todayStat("resting", "Resting energy", "battery.75percent", series: get(try? await resting), unit: "kcal", digits: 0, today: latestToday))
         // Hearing (HealthKitClient+Hearing; watch-features.md §1.6): headphone dB(A) against the WHO weekly budget.
-        result.append(Self.hearingStat(try? await health.weeklyHeadphoneExposure(), today: today))
+        let hearing: HearingExposure.Result?
+        do { hearing = try await health.weeklyHeadphoneExposure() } catch { failed("headphone exposure", error); hearing = nil }
+        result.append(Self.hearingStat(hearing, today: today))
 
         // MARK: Body
         let unit = settings.weightUnit
-        let rawWeight = get(try? await weight)
+        let rawWeight: [DatedValue]
+        do { rawWeight = try await weight } catch { failed("weight", error, core: true); rawWeight = [] }
         let weightSeries = rawWeight.map { DatedValue(date: $0.date, value: unit.display($0.value)) }
         // Weight as a smoothed trend: daily readings swing 1-2 kg with water and food.
         let trendKg = WeightTrend.smooth(rawWeight.map { DayValue(date: $0.date, value: $0.value) })
@@ -481,6 +511,9 @@ final class VitalsModel {
         result.append(consistencyStat)
 
         stats = result.map(Self.describe)
+        readProblem = coreFailures.isEmpty
+            ? nil
+            : "Some health data couldn't be read from Apple Health (\(coreFailures.joined(separator: ", "))). Pull down to try again."
 
         // Body age from the same data (30-day averages where it helps).
         func average(_ series: [DatedValue], last days: Int) -> Double? {

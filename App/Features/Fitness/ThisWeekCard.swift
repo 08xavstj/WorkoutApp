@@ -13,6 +13,10 @@ import AppCore
 /// formation (Lally et al. 2010) and showing a broken streak lowers
 /// engagement (Silverman & Barasch 2023), so a missed day is a grey dot, not
 /// a red one, and there is no "broken" anywhere.
+///
+/// A flexible plan (`WeeklyPlan.Mode.flexible`) shows "2 of 4 done · 3 days
+/// left" with one dot per session, and the next session's focus from the
+/// coverage rule (`MuscleCoverage`): the week only needs its total.
 struct ThisWeekCard: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
@@ -29,7 +33,10 @@ struct ThisWeekCard: View {
         let done = store.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
         VStack(alignment: .leading, spacing: 14) {
             header(consistency)
-            if let plan {
+            if let plan, plan.isFlexible {
+                FlexibleWeekRow(plan: plan, sessions: sessions)
+                FlexibleNextSlot(sessions: sessions)
+            } else if let plan {
                 PlanDots(days: plan.sortedDays, done: done,
                          sessionsDone: store.sessionsDone(sessions: sessions, extra: metrics.recentTrainingDays))
                 PlanTodaySlot(plan: plan, done: done)
@@ -70,15 +77,18 @@ struct ThisWeekCard: View {
             Text("No plan for this week yet")
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)
-            // Implementation intentions: Gollwitzer & Sheeran 2006 (d = 0.65 across 94 tests).
-            Text("Pick your training days and a time, and decide now what you'll do when the day goes wrong. People who plan the when and what follow through far more often.")
+            // Implementation intentions: Gollwitzer & Sheeran 2006 (d = 0.65 across 94 tests). The
+            // flexible option (sessions a week, any days) rests on autonomy support (Teixeira 2012;
+            // Ntoumanis 2021) and is offered as a choice, not a recommendation.
+            Text("Pick how many sessions this week, or fixed days and a time, and decide now what you'll do when the day goes wrong. People who plan the when and what follow through far more often.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
                 if let last = store.lastPlan(before: thisWeek), !last.plannedDays.isEmpty {
-                    PlanButton(title: "Same days as last week", filled: false) {
-                        store.save(WeeklyPlan(weekStart: thisWeek, plannedDays: last.plannedDays))
+                    PlanButton(title: last.isFlexible ? "Same as last week" : "Same days as last week", filled: false) {
+                        store.save(WeeklyPlan(weekStart: thisWeek, plannedDays: last.plannedDays,
+                                              mode: last.mode, sessionsPerWeek: last.sessionsPerWeek))
                     }
                 }
                 PlanButton(title: "Plan your week", filled: true) { router.showWeeklyPlan = true }
@@ -94,7 +104,7 @@ struct ThisWeekCard: View {
                 PlanTextButton(title: "Edit plan", systemImage: "calendar.badge.clock") {
                     router.showWeeklyPlan = true
                 }
-                .accessibilityHint("Change your training days and times")
+                .accessibilityHint("Change your training days, or how many sessions a week")
             }
             PlanTextButton(title: "Review", systemImage: "chart.bar.doc.horizontal") {
                 router.showWeeklyReview = true
@@ -127,7 +137,11 @@ struct ThisWeekCard: View {
                     Chip(text: "Lighter week set", color: Theme.recoveryHigh)
                 } else {
                     PlanButton(title: "Use this lighter week", filled: true) {
-                        store.save(WeeklyPlan(weekStart: thisWeek, plannedDays: lighter.plannedDays, changes: store.current?.changes ?? []))
+                        // Keeps the plan's mode; a flexible restart week asks for the lighter count on any days.
+                        let template = store.current ?? store.lastPlan(before: thisWeek)
+                        store.save(WeeklyPlan(weekStart: thisWeek, plannedDays: lighter.plannedDays, changes: store.current?.changes ?? [],
+                                              mode: template?.mode ?? .fixedDays,
+                                              sessionsPerWeek: template?.isFlexible == true ? lighter.plannedDays.count : nil))
                     }
                 }
             }
@@ -170,6 +184,99 @@ private struct PlanDots: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
         }
+    }
+}
+
+/// Flexible week: one dot per session, filled by count (any day counts), and
+/// "2 of 4 done · 3 days left".
+private struct FlexibleWeekRow: View {
+    let plan: WeeklyPlan
+    let sessions: [WorkoutSession]
+
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        let progress = plan.progress(trainingDays: WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays))
+        HStack(alignment: .center, spacing: 14) {
+            HStack(spacing: 8) {
+                ForEach(0..<max(progress.target, 0), id: \.self) { index in
+                    Circle()
+                        .fill(index < progress.done ? Theme.recoveryHigh : Theme.track)
+                        .frame(width: 14, height: 14)
+                }
+            }
+            .accessibilityHidden(true)
+            Spacer(minLength: 0)
+            Text(progress.label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Sessions this week: \(progress.label)")
+    }
+}
+
+/// Flexible week: the next session (focus from `MuscleCoverage`, length from
+/// the plan) with Start / Short version, the day's guidance when it says rest
+/// or easy, and "Week done" once the quota is met.
+private struct FlexibleNextSlot: View {
+    let sessions: [WorkoutSession]
+
+    @Environment(WeeklyPlanStore.self) private var store
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(MuscleModel.self) private var muscles
+    @Environment(WorkoutLauncher.self) private var launcher
+
+    var body: some View {
+        let progress = store.progress(sessions: sessions, extra: metrics.recentTrainingDays)
+        if let progress, progress.isMet {
+            Text(progress.trainedToday
+                 ? "Done today, and that's the week's \(progress.target). Rest days until Monday."
+                 : "Week done: all \(progress.target) sessions. Rest days until Monday; a walk is good.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let progress, progress.trainedToday {
+            Chip(text: "Done today", color: Theme.recoveryHigh)
+            Text("\(progress.remaining) to go, \(max(0, progress.daysLeft - 1)) more \(progress.daysLeft - 1 == 1 ? "day" : "days") this week. Any day you feel good is a training day.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let next = store.nextSession(sessions: sessions, extra: metrics.recentTrainingDays, muscles: muscles) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Next: \(next.day.focus.shortTitle), \(next.day.minutes) min")
+                    .font(.headline)
+                    .foregroundStyle(Theme.primaryText)
+                Text(nextLine(next.coverage))
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    PlanButton(title: "Start", filled: true) {
+                        launcher.openBuilder(focus: next.day.focus, minutes: next.day.minutes)
+                    }
+                    // The minimum version (Swann 2021; report rec. 7).
+                    PlanButton(title: "Short version · \(next.day.shortVersionMinutes) min", filled: false) {
+                        launcher.openBuilder(focus: next.day.focus, minutes: next.day.shortVersionMinutes)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Why this focus (the coverage rule), then today's guidance when it
+    /// says rest or easy (`TrainingDayPlanner.flexibleGuidance`).
+    private func nextLine(_ coverage: MuscleCoverage.Result?) -> String {
+        var parts: [String] = []
+        if let reason = coverage?.reason {
+            parts.append(reason.prefix(1).uppercased() + reason.dropFirst() + ".")
+        } else {
+            parts.append("Any day you feel good is a training day; the week only needs its total.")
+        }
+        if let guidance = metrics.dayGuidance, guidance.kind != .training {
+            parts.append(guidance.reason)
+        }
+        return parts.joined(separator: " ")
     }
 }
 

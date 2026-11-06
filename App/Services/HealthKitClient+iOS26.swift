@@ -36,6 +36,46 @@ nonisolated extension HealthKitClient {
             return []
         }
     }
+
+    /// Apple Watch's nightly breathing-disturbance score
+    /// (`appleSleepingBreathingDisturbances`, iOS 18), one value per night
+    /// dated by the morning it ended, oldest first. Read as plain samples, not
+    /// a statistics collection: Apple's reference page gives the type no
+    /// description, so its unit and aggregation style (cumulative or discrete)
+    /// couldn't be confirmed, and a wrong statistics option or unit raises an
+    /// Objective-C exception that would take the whole app down. A sample
+    /// whose quantity isn't a count is skipped (and logged) instead.
+    @concurrent
+    func breathingDisturbances(days: Int) async throws -> [DatedValue] {
+        guard isAvailable else { return [] }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        guard let start = calendar.date(byAdding: .day, value: -days, to: today) else { return [] }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: HKQuantityType(.appleSleepingBreathingDisturbances), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        let unit = HKUnit.count()
+        var sums: [Date: (total: Double, count: Int)] = [:]
+        do {
+            for sample in try await descriptor.result(for: store) {
+                guard sample.quantity.`is`(compatibleWith: unit) else {
+                    Self.log.error("Breathing disturbances sample isn't a count; skipped")
+                    continue
+                }
+                let night = calendar.startOfDay(for: sample.endDate)
+                let current = sums[night] ?? (total: 0, count: 0)
+                sums[night] = (current.total + sample.quantity.doubleValue(for: unit), current.count + 1)
+            }
+        } catch let error as HKError where error.code == .errorNoData {
+            return []
+        }
+        return sums.keys.sorted().map { night in
+            let entry = sums[night] ?? (total: 0, count: 1)
+            return DatedValue(date: night, value: entry.total / Double(max(1, entry.count)))
+        }
+    }
 }
 
 /// A medication from the Health app's Medications list (iOS 26 Medications API).

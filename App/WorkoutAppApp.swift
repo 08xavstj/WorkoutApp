@@ -218,14 +218,19 @@ struct RootView: View {
         }
         .task {
             refresher.perform = { await refreshMetrics() }
-            // After an update adds new health stats, ask for just those.
+            Reminders.clearLegacyHRVReminders()
+            // Scores first, from what Apple Health already shares. Only then, after an
+            // update adds new health stats, ask for just those: the permission sheet waits
+            // for an answer, and asking before the first refresh left every screen at
+            // zero until it was dismissed. A second refresh picks up the new types.
+            await refreshMetrics()
             if settings.hasOnboarded && !Self.skipHealthPrompt {
-                await health?.requestAuthorizationIfNeeded()
+                if await health?.requestAuthorizationIfNeeded() == true {
+                    await refreshMetrics()
+                }
                 // Takes effect only once Health access is granted (safe to repeat).
                 health?.enableBackgroundDelivery()
             }
-            Reminders.clearLegacyHRVReminders()
-            await refreshMetrics()
             scheduleCheckInReminders() // after the refresh, so the evening reminder carries tonight's bed-by window
             measurements.scheduleReminders() // monthly waist, 6-monthly grip ("measure|waist", "measure|grip")
             await Reminders.scheduleDoses()
@@ -311,6 +316,14 @@ struct RootView: View {
             }
             metrics.plannedFocusByDay = byDay
             metrics.hasWeeklyPlan = !(weeklyPlans.current?.plannedDays.isEmpty ?? true)
+            // Flexible week (WeeklyPlanStore builder): quota progress and the coverage rule's next focus.
+            if weeklyPlans.current?.isFlexible == true {
+                metrics.flexibleWeek = weeklyPlans.progress(sessions: sessions, extra: metrics.recentTrainingDays)
+                metrics.flexibleNextFocus = weeklyPlans.nextSession(sessions: sessions, extra: metrics.recentTrainingDays, muscles: muscles)?.day.focus
+            } else {
+                metrics.flexibleWeek = nil
+                metrics.flexibleNextFocus = nil
+            }
         }
         // Personal calories (docs/research/calories.md): training status from the whole lifting log.
         metrics.trainingStatus = TrainingStatus.resolve(reported: settings.liftingExperience, sessionDates: sessions.filter { !$0.isActive }.map(\.startedAt))
@@ -395,14 +408,8 @@ struct RootView: View {
     /// Planned slots over the next week from the weekly plan (this week's and,
     /// once saved, next week's), as dates.
     private func plannedSlots() -> [Reminders.PlannedSlot] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        return (0..<8).compactMap { offset -> Reminders.PlannedSlot? in
-            guard let day = calendar.date(byAdding: .day, value: offset, to: today),
-                  let planned = weeklyPlans.plan(containing: day)?.day(for: calendar.component(.weekday, from: day)),
-                  let start = Reminders.fireDate(day: day, minutes: planned.time, calendar: calendar) else { return nil }
-            return Reminders.PlannedSlot(start: start, name: planned.focus.shortTitle, ifThen: planned.ifThen)
-        }
+        // Fixed days: every planned slot; flexible week: only days when the sessions left need them (`WeeklyPlanStore.reminderSlots`).
+        weeklyPlans.reminderSlots(trainingDays: WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays))
     }
 
     private func scheduleWorkoutReminders() {

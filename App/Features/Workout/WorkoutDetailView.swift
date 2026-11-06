@@ -140,8 +140,13 @@ private struct HeartRateSourcesSection: View {
     var reload = 0
 
     @Environment(\.healthClient) private var health
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(UserSettings.self) private var settings
     @State private var sources: [HeartRateSource] = []
     @State private var merged: HeartRateMerge.Result = .empty
+    /// Minutes in zones 1-5 during this workout, from the merged heart rate,
+    /// so a past workout keeps its zones whatever today's total says.
+    @State private var zoneMinutes: [Double] = []
     @State private var linkedWorkout: ExternalWorkout?
     @State private var loaded = false
     /// Avg and Max columns widen with the text instead of clipping.
@@ -157,6 +162,7 @@ private struct HeartRateSourcesSection: View {
                     .foregroundStyle(Theme.secondaryText)
             } else {
                 MergedHeartRateRow(merged: merged, linkedWorkout: linkedWorkout, linkedSource: linkedWorkoutSource)
+                WorkoutZonesRow(minutes: zoneMinutes)
                 ForEach(sources) { source in
                     if let summary = HeartRateComparison.summary(source.samples) {
                         HStack {
@@ -206,6 +212,10 @@ private struct HeartRateSourcesSection: View {
         sources = found.sorted { $0.samples.count > $1.samples.count }
         // The same merge strain uses: ear over wrist during this lift, no averaging (`HeartRateMerge`).
         merged = HeartRateMerge.merge(sources: sources.map(\.mergeSource), liftingWindows: [DateInterval(start: start, end: end)])
+        // The same zones strain uses (`StrainCalculator.dailyStrain`, `HeartRateProfile.zone`),
+        // with today's profile, or the settings profile before the first refresh.
+        let profile = metrics.heartRateProfile ?? settings.heartRateProfile(restingHeartRate: nil)
+        zoneMinutes = StrainCalculator().dailyStrain(heartRate: merged.samples, strengthSessions: [], profile: profile).zoneMinutes
         if let linkedWorkoutUUID {
             let margin = WorkoutLinker.searchMargin
             let workouts = (try? await health.externalWorkouts(from: start.addingTimeInterval(-margin), to: end.addingTimeInterval(margin))) ?? []
@@ -227,6 +237,71 @@ private struct HeartRateSourcesSection: View {
         if abs(bias) < 1 { return "Neither source reads consistently higher." }
         let higher = bias > 0 ? sources[0].name : sources[1].name
         return "\(higher) reads about \(whole(abs(bias))) bpm higher on average. Optical sensors often lag or drop out during heavy sets; ear and wrist can also differ in how fast they react."
+    }
+}
+
+/// Minutes in each heart-rate zone during this workout (zones 1-5 by
+/// heart-rate reserve, `HeartRateProfile.zone`), as small bars, or one line
+/// when the heart rate stayed below zone 1.
+private struct WorkoutZonesRow: View {
+    let minutes: [Double]
+
+    private var total: Double { minutes.reduce(0, +) }
+
+    var body: some View {
+        if total > 0 {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(whole(total)) min in heart-rate zones")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                HStack(alignment: .bottom, spacing: 8) {
+                    ForEach(0..<5, id: \.self) { index in
+                        zoneColumn(index)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(spokenZones)
+        } else {
+            Text("Heart rate stayed below zone 1 (50% of your heart-rate reserve), so no zone minutes.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+    }
+
+    private func zoneMinutes(_ index: Int) -> Double {
+        index < minutes.count ? minutes[index] : 0
+    }
+
+    private func zoneColumn(_ index: Int) -> some View {
+        let value = zoneMinutes(index)
+        let peak = max(minutes.max() ?? 1, 1)
+        return VStack(spacing: 3) {
+            Text(value > 0 ? "\(whole(value.rounded()))m" : "")
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(Theme.primaryText)
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 4).fill(Theme.track)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Theme.zoneColors[index])
+                    .frame(height: max(3, 40 * value / peak))
+            }
+            .frame(height: 40)
+            Text("Z\(index + 1)")
+                .font(.caption2)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var spokenZones: String {
+        let parts = (0..<5).compactMap { index -> String? in
+            let value = zoneMinutes(index)
+            return value >= 0.5 ? "zone \(index + 1) \(whole(value.rounded())) minutes" : nil
+        }
+        return "\(whole(total)) minutes in heart-rate zones: " + parts.joined(separator: ", ")
     }
 }
 
