@@ -212,6 +212,9 @@ private struct NutritionCard: View {
             }
             if let food, !food.isEmpty {
                 MacroBars(food: food)
+                if !settings.hideCalories {
+                    MacroTargetsLine()
+                }
                 if let line = habits.proteinLine(metrics: metrics) {
                     // Protein per meal (`ProteinMeals`), from the old Daily habits card.
                     Text(line)
@@ -298,12 +301,35 @@ private struct MacroBars: View {
                 MacroColumn(label: "Fibre", grams: food.fiberGrams ?? 0,
                             goal: Micronutrients.Nutrient.fiber.target(settings.sex, age: settings.age), color: Theme.oxygen)
             } else {
-                MacroColumn(label: "Carbs", grams: food.carbsGrams ?? 0, goal: nil, color: Theme.strain)
-                MacroColumn(label: "Fat", grams: food.fatGrams ?? 0, goal: nil, color: Theme.sleep)
+                // Carb and fat targets from the calorie split (`MacroSplit`; Helms 2014).
+                MacroColumn(label: "Carbs", grams: food.carbsGrams ?? 0, goal: metrics.macroSplit?.carbsGrams, color: Theme.strain)
+                MacroColumn(label: "Fat", grams: food.fatGrams ?? 0, goal: metrics.macroSplit?.fatGrams, color: Theme.sleep)
             }
             if food.waterLiters ?? 0 > 0 {
                 WaterColumn()
             }
+        }
+    }
+}
+
+/// "Protein 145 g · Carbs 148 g+ · Fat 52 g+", and one line when protein was
+/// lowered to fit the calories (`MacroSplit`; Helms 2014; Morton 2018).
+private struct MacroTargetsLine: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        if let split = metrics.macroSplit {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(split.summaryLine)
+                    .font(Theme.Typography.context)
+                    .foregroundStyle(Theme.secondaryText)
+                if let note = split.capNote {
+                    Text(note)
+                        .font(Theme.Typography.context)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -650,6 +676,7 @@ private struct CalorieDetailsSheet: View {
                         if let carbs = NutritionTargets.carbsText(bodyMassKg: metrics.bodyMassKg, trainingDay: !metrics.activities.isEmpty, goals: metrics.goals) {
                             Text(carbs + " The calorie target doesn't change; this is how to split it, with protein first.")
                         }
+                        MacroSplitNotes()
                         if let availability = metrics.energyAvailability, let message = EnergyAvailability.message(availability, goals: metrics.goals) {
                             Text("Energy availability is low. " + message)
                         }
@@ -719,6 +746,30 @@ private struct CalorieDetailsSheet: View {
             Text("\(whole(value).formatted()) kcal")
                 .monospacedDigit()
                 .fontWeight(bold ? .semibold : .regular)
+        }
+    }
+}
+
+/// How protein, carbs and fat share the calorie target (`MacroSplit`;
+/// docs/research/nutrition.md, "Protein and the calorie budget").
+private struct MacroSplitNotes: View {
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        if let split = metrics.macroSplit {
+            Text("Today's split: protein \(whole(split.proteinGrams)) g, carbs about \(whole(split.carbsGrams)) g, fat about \(whole(split.fatGrams)) g. Fat stays at or above \(whole(split.fatFloorGrams)) g (0.7 g per kg) and carbs at or above \(whole(split.carbsFloorGrams)) g so you can train; above those, the split is flexible (Helms 2014).")
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+            if split.proteinWasCapped {
+                Text("Your goal alone would say \(whole(split.proteinGramsUncapped)) g of protein, but that doesn't fit \(whole(split.calorieTarget)) kcal alongside enough carbs and fat. Above about 1.6 g per kg, more protein adds little (Morton 2018); on a cut, 1.8-2 g per kg of body weight, about 2.3 g per kg of lean mass, keeps muscle and leaves room for carbs to train (Helms 2014; Phillips & Van Loon 2011). The evidence for the top of the range comes from a few small studies.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if split.tooFewCaloriesForFloors {
+                Text("Even at 1.6 g per kg, \(whole(split.calorieTarget)) kcal leaves too little for carbs and fat. Pick a slower rate in Goals rather than cutting protein further.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
         }
     }
 }

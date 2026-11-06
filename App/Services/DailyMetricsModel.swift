@@ -215,12 +215,29 @@ final class DailyMetricsModel {
     var medicationProteinPerKg: Double?
     private(set) var bodyFatPercent: Double?
     private(set) var heightCm: Double?
-    /// Daily protein from the goal: lean mass when losing and body fat is known,
-    /// goal or adjusted weight otherwise (see `GoalPlanner.proteinGrams`).
-    var proteinTarget: Double? {
+    /// Daily protein from the goal before the calorie cap: lean mass when losing
+    /// and body fat is known, goal or adjusted weight otherwise (see
+    /// `GoalPlanner.proteinGrams`).
+    var proteinTargetUncapped: Double? {
         guard goals != nil else { return NutritionTargets.proteinGrams(bodyMassKg: bodyMassKg, gramsPerKg: proteinGramsPerKg) }
         return GoalPlanner.proteinGrams(goals: goals, bodyMassKg: bodyMassKg, bodyFatPercent: bodyFatPercent,
                                         heightCm: heightCm, minimumPerKg: medicationProteinPerKg)
+    }
+
+    /// Protein, carbs and fat that fit inside the calorie target (`MacroSplit`:
+    /// fat ≥ 0.7 g/kg, carbs ≥ 2 g/kg when lifting, protein capped to fit;
+    /// Helms 2014, Morton 2018). Nil without a goal, weight or calorie target.
+    var macroSplit: MacroSplit? {
+        guard goals != nil else { return nil }
+        return MacroSplit.make(calorieTarget: calorieTarget, bodyMassKg: bodyMassKg, bodyFatPercent: bodyFatPercent,
+                               heightCm: heightCm, goals: goals, sex: sex, trainingStatus: trainingStatus,
+                               minimumProteinPerKg: medicationProteinPerKg)
+    }
+
+    /// Daily protein: the goal's target, lowered when it doesn't leave room for
+    /// enough carbs and fat in the calorie target (`macroSplit`).
+    var proteinTarget: Double? {
+        macroSplit?.proteinGrams ?? proteinTargetUncapped
     }
 
     /// Heat-day change to the strain target's upper end (negative on hot days).

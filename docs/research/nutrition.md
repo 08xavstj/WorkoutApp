@@ -248,3 +248,70 @@ CalorieNinjas retirement notice; Cronometer help centre (Timestamps, Mobile disp
 threads on Apple Health timestamps; Apple HealthKit documentation for `HKMetadataKeyFoodType`
 and `HKCorrelationTypeIdentifierFood`; Kodeco/Apple forum material on VisionKit barcode
 symbologies.
+
+## 5. Protein and the calorie budget (November 2026)
+
+**Problem.** The app set protein and calories independently. For a 74 kg man at about 15 % body
+fat losing weight, the protein target was 2.6 g per kg of lean mass (the middle of Helms' 2.3-3.1
+range) ≈ 164 g, and 2.2 g/kg of body weight without a body-fat reading ≈ 163 g. On a 1,700 kcal
+target that is 650-670 kcal, about 40 % of the day. With fat held at 0.7 g/kg (52 g, 466 kcal) only
+about 560 kcal were left for carbohydrate, about 140 g or 1.9 g/kg, under the 2 g/kg a lifter
+needs on a rest day. The user's own words: "168 grams of protein on 1,600-1,800 calories is very
+hard and almost impossible."
+
+**What the evidence says.**
+
+- Morton et al., *Br J Sports Med* 2018 (meta-analysis, 49 RCTs, n = 1,863): protein beyond a total
+  of about **1.62 g/kg/day** (95 % CI 1.03-2.20) gave no further gain in fat-free mass with
+  resistance training. The breakpoint is imprecise, but there is no evidence of benefit above the
+  upper CI of 2.2 g/kg.
+- Helms, Zinn, Rowlands & Brown, *IJSNEM* 2014 (systematic review of resistance-trained, lean
+  people in a deficit, **six studies**): protein of **2.3-3.1 g per kg of fat-free mass**, higher
+  with leanness and the depth of the deficit. Henselmans' re-analysis of the same studies argues
+  the case for the top of that range is weak; the authors' own thesis puts energy balance above
+  protein as the driver. A 74 kg man at 15 % fat (62.9 kg FFM) lands at 145-195 g.
+- Phillips & Van Loon, *J Sports Sci* 2011: **1.8-2.0 g/kg of body weight**, "depending on the
+  caloric deficit", to limit lean-mass loss while dieting (the 1.8-2.7 g/kg figure often quoted
+  comes from the 2014/2015 Murphy, Hector & Phillips follow-up).
+- Jäger et al., ISSN position stand on protein, *JISSN* 2017: 1.4-2.0 g/kg for building and keeping
+  muscle; 2.3-3.1 g/kg FFM may be needed in hypocaloric periods for resistance-trained people
+  (citing Helms 2014).
+- Fat: Helms, Aragon & Fitschen, *JISSN* 2014 recommend **15-30 % of calories** from fat for dieting
+  lifters, carbohydrate making up the rest. Iraki et al., *Sports* 2019 give 0.5-1.5 g/kg for
+  lifters at or above maintenance **(m) not re-verified this round**.
+- Carbohydrate: Burke et al., *J Sports Sci* 2011 give 3-5 g/kg for light or skill-based days (the
+  app's training-day lifter band); the app's rest-day band of 2-3 g/kg is an app choice under
+  that. The Institute of Medicine's RDA for carbohydrate (2005) is 130 g/day for everyone. Kerksick
+  et al.'s ISSN nutrient-timing stand (2017) quotes 5-12 g/kg for athletes in general and 8-12 g/kg
+  to maximise glycogen; its lower bands for light training were not found in this round, so the
+  floor below leans on Burke 2011 and the IOM RDA.
+- No 2024 umbrella review on the dose-response in trained people was found; the closest are Morton
+  2018 and a 2020 dose-response meta-analysis (Tagawa et al., *Nutr Rev*) showing small gains per
+  0.1 g/kg with diminishing returns.
+
+**Decision (`MacroSplit` in AppCore).** The calorie target stays; the macros are made to fit it.
+
+1. Fat floor **0.7 g/kg** of body weight (app choice inside Helms' 15-30 %: 27 % of a 1,700 kcal
+   day for a 74 kg man, 17 % of a 2,800 kcal day for an 80 kg man).
+2. Carbohydrate floor **2.0 g/kg** when lifting (muscle or strength focus, or losing weight), and
+   never under the 130 g RDA; 130 g for everyone else.
+3. Protein is the goal's target (`GoalPlanner.proteinGrams`) when it fits alongside those floors.
+   When it does not, it steps down to the **bottom of the deficit range**: 2.3 g/kg FFM (Helms
+   2014) with a body-fat reading, else 2.0 g/kg of body weight (Phillips & Van Loon 2011; Jäger
+   2017). If even that leaves no room, protein is cut to what fits but **never under 1.6 g/kg**
+   (Morton 2018), and the day is flagged `tooFewCaloriesForFloors` so the UI says the calorie
+   target, not protein, is the problem (pick a slower rate). A medication floor (e.g. 2.0 g/kg on
+   GLP-1 drugs) is kept even when it breaks the carb floor, with the flag set.
+4. Above the floors, fat sits at 25 % of calories (inside Helms' range) and carbs take the rest.
+
+For the user's case (74 kg, 15 % fat, lose, 1,700 kcal) this gives **protein 145 g (34 % of
+calories), carbs about 163 g (2.2 g/kg), fat 52 g**; at 2,800 kcal gaining nothing is capped
+(128 g protein, 78 g fat, about 396 g carbs); at 1,200 kcal protein is held at 118 g (1.6 g/kg) and
+the day is flagged. Honest summary for the UI: above about 1.6 g/kg more protein adds little; on a
+cut 1.8-2 g/kg body weight (≈ 2.3 g/kg lean mass) keeps muscle and leaves room for carbs to train;
+the evidence for the top of the range comes from a few small studies.
+
+Sources checked this round: PubMed 24092765 (Helms 2014 IJSNEM); bjsm.bmj.com/content/52/6/376
+(Morton 2018); JISSN 14:20 (Jäger 2017); PMC4033492 (Helms, Aragon & Fitschen 2014); PMC5596471
+(Kerksick 2017); Phillips & Van Loon 2011 abstract (DOI 10.1080/02640414.2011.619204);
+Henselmans, "Eric Helms & protein: a research review" (blog, not peer reviewed).

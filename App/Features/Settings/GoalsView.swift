@@ -96,8 +96,7 @@ struct GoalsView: View {
                     if let target = calorieTarget {
                         LabeledContent("Calories", value: "\(whole(target).formatted()) kcal/day")
                     }
-                    if let protein = GoalPlanner.proteinGrams(goals: goals, bodyMassKg: metrics.bodyMassKg, bodyFatPercent: metrics.bodyFatPercent,
-                                                              heightCm: metrics.heightCm, minimumPerKg: metrics.medicationProteinPerKg) {
+                    if let protein = proteinPreview {
                         LabeledContent("Protein", value: "\(whole(protein)) g/day")
                     }
                     if let weeks = weeksToTarget {
@@ -171,6 +170,18 @@ struct GoalsView: View {
 
     private var parsedTarget: Double? {
         Double(targetText.replacingOccurrences(of: ",", with: ".")).map { settings.weightUnit.toKilograms($0) }
+    }
+
+    /// Protein for the goals being edited, capped so carbs and fat still fit
+    /// the calorie target (`MacroSplit`), as on Today.
+    private var proteinPreview: Double? {
+        if let split = MacroSplit.make(calorieTarget: calorieTarget, bodyMassKg: metrics.bodyMassKg, bodyFatPercent: metrics.bodyFatPercent,
+                                       heightCm: metrics.heightCm, goals: goals, sex: metrics.sex,
+                                       trainingStatus: metrics.trainingStatus, minimumProteinPerKg: metrics.medicationProteinPerKg) {
+            return split.proteinGrams
+        }
+        return GoalPlanner.proteinGrams(goals: goals, bodyMassKg: metrics.bodyMassKg, bodyFatPercent: metrics.bodyFatPercent,
+                                        heightCm: metrics.heightCm, minimumPerKg: metrics.medicationProteinPerKg)
     }
 
     private var calorieTarget: Double? {
