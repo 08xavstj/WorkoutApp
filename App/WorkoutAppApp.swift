@@ -139,6 +139,7 @@ struct RootView: View {
     @Environment(CoachModel.self) private var coach
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(VitalsModel.self) private var vitals
+    @Environment(BiologyModel.self) private var biology
     @Environment(AppRouter.self) private var router
     @Environment(MedicationsModel.self) private var medications
     @Environment(CheckInStore.self) private var checkIns
