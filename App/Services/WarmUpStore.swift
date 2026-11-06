@@ -2,41 +2,42 @@ import Foundation
 import Observation
 import AppCore
 
-/// The movement warm-up of a live session (`WarmUpRoutine`) and how far
-/// through it you are, keyed by the session's start time in UserDefaults,
-/// like `SupersetRegistry`: `WorkoutSession` has no field for it (a schema
-/// migration), and it only matters while the session is open, so entries
-/// older than two days are dropped.
+/// The movement warm-up of a live session (`WarmUpRoutine`) and where you
+/// are in it: the pre-flight overview, a step, or done. Keyed by the
+/// session's start time in UserDefaults, like `SupersetRegistry`:
+/// `WorkoutSession` has no field for it (a schema migration), and it only
+/// matters while the session is open, so entries older than two days are
+/// dropped.
 nonisolated struct WarmUpEntry: Codable, Sendable, Equatable {
     var routine: WarmUpRoutine.Routine
-    /// Index into `routine.movements`; past the end once finished.
+    /// Index into `routine.steps`; past the end once finished.
     var stepIndex: Int
-    /// When the current step began; its countdown runs from here.
+    /// When the current step began; a timed step's countdown runs from here.
     var stepStartedAt: Date
+    /// False while the overview ("Start warm-up" / "Skip to ramp sets") shows.
+    var hasStarted: Bool
     /// Finished or skipped.
     var isDone: Bool
 
-    var current: WarmUpRoutine.Movement? {
-        guard !isDone, stepIndex < routine.movements.count else { return nil }
-        return routine.movements[stepIndex]
+    var current: WarmUpRoutine.Step? {
+        guard hasStarted, !isDone, stepIndex < routine.steps.count else { return nil }
+        return routine.steps[stepIndex]
     }
 
+    /// When the current step's countdown ends; nil for a rep step.
     var stepEndsAt: Date? {
-        current.map { stepStartedAt.addingTimeInterval(Double($0.seconds)) }
+        current?.dose.seconds.map { stepStartedAt.addingTimeInterval(Double($0)) }
     }
 
-    /// Steps after the current one.
-    var upcoming: [WarmUpRoutine.Movement] {
-        guard !isDone, stepIndex + 1 < routine.movements.count else { return [] }
-        return Array(routine.movements[(stepIndex + 1)...])
-    }
+    var canGoBack: Bool { hasStarted && !isDone }
 }
 
 @Observable
 final class WarmUpStore {
     static let shared = WarmUpStore()
 
-    private static let key = "warmUpRoutines"
+    /// New key: entries saved by the old routine shape don't decode.
+    private static let key = "warmUpRoutines2"
     private static let keepSeconds: TimeInterval = 2 * 86_400
     /// A session older than this when the workout screen opens was started
     /// without this feature (or long ago): no warm-up is made for it.
@@ -53,28 +54,59 @@ final class WarmUpStore {
         entries[Self.id(sessionStart)]
     }
 
-    /// Makes the routine for a session that just started, once, when the
-    /// builder's toggle is on. Sessions with no exercises get none.
-    func prepareIfNeeded(sessionStart: Date, enabled: Bool, exerciseIDs: [String], gym: GymProfile, now: Date = .now) {
-        guard enabled, !exerciseIDs.isEmpty, entries[Self.id(sessionStart)] == nil,
+    /// Makes the routine for a session that just started, once, when the tier
+    /// has movement steps (off and ramp-only make none: the ramp sets are
+    /// `WarmUp`). `firstSlots`: the session's exercises' movement slots in order.
+    func prepareIfNeeded(sessionStart: Date, tier: WarmUpRoutine.Tier, firstSlots: [MovementSlot], gym: GymProfile, now: Date = .now) {
+        guard tier.hasSteps, entries[Self.id(sessionStart)] == nil,
               now.timeIntervalSince(sessionStart) < Self.freshSeconds else { return }
-        let routine = WarmUpRoutine.make(focus: nil, exerciseIDs: exerciseIDs, gym: gym)
-        save(WarmUpEntry(routine: routine, stepIndex: 0, stepStartedAt: now, isDone: false), for: sessionStart)
+        let routine = WarmUpRoutine.make(tier: tier, firstSlots: firstSlots, gym: gym)
+        guard !routine.isEmpty else { return }
+        save(WarmUpEntry(routine: routine, stepIndex: 0, stepStartedAt: now, hasStarted: false, isDone: false), for: sessionStart)
     }
 
-    /// Moves to the next movement; the last one finishes the warm-up.
-    func advance(for sessionStart: Date, now: Date = .now) {
-        guard var entry = entry(for: sessionStart), !entry.isDone else { return }
-        entry.stepIndex += 1
+    /// Leaves the overview for the first step.
+    func start(for sessionStart: Date, now: Date = .now) {
+        guard var entry = entry(for: sessionStart), !entry.isDone, !entry.hasStarted else { return }
+        entry.hasStarted = true
+        entry.stepIndex = 0
         entry.stepStartedAt = now
-        if entry.stepIndex >= entry.routine.movements.count { entry.isDone = true }
         save(entry, for: sessionStart)
     }
 
-    /// Finishes (or skips) the warm-up.
+    /// Moves to the next step; the last one finishes the warm-up. From the
+    /// overview it starts instead. `fromStep` makes a timed step's auto-advance
+    /// idempotent: the phone and the Watch both fire at 0, only one counts.
+    func advance(for sessionStart: Date, fromStep: Int? = nil, now: Date = .now) {
+        guard var entry = entry(for: sessionStart), !entry.isDone else { return }
+        guard entry.hasStarted else {
+            start(for: sessionStart, now: now)
+            return
+        }
+        if let fromStep, fromStep != entry.stepIndex { return }
+        entry.stepIndex += 1
+        entry.stepStartedAt = now
+        if entry.stepIndex >= entry.routine.steps.count { entry.isDone = true }
+        save(entry, for: sessionStart)
+    }
+
+    /// Back one step; from the first step, back to the overview.
+    func back(for sessionStart: Date, now: Date = .now) {
+        guard var entry = entry(for: sessionStart), entry.canGoBack else { return }
+        if entry.stepIndex == 0 {
+            entry.hasStarted = false
+        } else {
+            entry.stepIndex -= 1
+        }
+        entry.stepStartedAt = now
+        save(entry, for: sessionStart)
+    }
+
+    /// Finishes (or skips) the warm-up: on to the ramp sets.
     func finish(for sessionStart: Date) {
         guard var entry = entry(for: sessionStart), !entry.isDone else { return }
         entry.isDone = true
+        entry.hasStarted = true
         save(entry, for: sessionStart)
     }
 

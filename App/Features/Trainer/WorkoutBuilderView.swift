@@ -11,6 +11,8 @@ struct WorkoutBuilderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(GymStore.self) private var gym
+    /// The warm-up tier for this focus (`WarmUpPlanRow`): its minutes count in the plan's length.
+    @Environment(UserSettings.self) private var settings
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(WorkoutLauncher.self) private var launcher
     @Environment(MedicationsModel.self) private var medications
@@ -55,7 +57,7 @@ struct WorkoutBuilderView: View {
                         } else {
                             summaryCard(plan)
                             // Optional movement warm-up before the first lift (`WarmUpRoutine`).
-                            WarmUpToggleRow(routine: WarmUpRoutine.make(for: plan, gym: gym.profile))
+                            WarmUpPlanRow(focus: plan.focus, slots: WarmUpRoutine.slots(of: plan))
                             ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { index, exercise in
                                 PlannedExerciseRow(
                                     index: index + 1, exercise: exercise, unit: plan.unit,
@@ -123,6 +125,7 @@ struct WorkoutBuilderView: View {
             }
             .onChange(of: focus) { rebuild() }
             .onChange(of: minutes) { rebuild() }
+            .onChange(of: settings.warmUpTier(for: resolvedFocus)) { rebuild() }
         }
     }
 
@@ -138,14 +141,25 @@ struct WorkoutBuilderView: View {
         return "based on what you've trained recently"
     }
 
+    /// Minutes of movement warm-up before the first lift for the chosen tier
+    /// (`WarmUpRoutine`): 0 for off and ramp-only, so only real warm-up time counts.
+    private var warmUpMinutes: Int {
+        WarmUpRoutine.make(tier: settings.warmUpTier(for: resolvedFocus), firstSlots: resolvedFocus.slots, gym: gym.profile).minutes
+    }
+
     private func rebuild() {
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
         // This week in the training block scales the sets and sets the RIR target;
         // recovery still lowers the effort on a low day (`TrainingBlock`, `WorkoutPlanner.targetRPE`).
         plans.trainingStyle = gym.style
         let block = plans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
+        // Body weight, sex and training status give first-time lifts a starting weight (`LoadEstimator`);
+        // the warm-up tier's minutes count toward the time.
         plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history, block: block,
-                                focusReason: focus == nil ? autoReason : nil)
+                                focusReason: focus == nil ? autoReason : nil,
+                                bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,
+                                trainingStatus: metrics.trainingStatus ?? .novice,
+                                warmUpMinutes: warmUpMinutes)
     }
 
     /// True when there's another exercise for the same movement to swap to.
@@ -170,6 +184,7 @@ struct WorkoutBuilderView: View {
         replacement.supersetGroup = current.exercises[index].supersetGroup
         current.exercises[index] = replacement
         gym.planner.addWarmUps(&current.exercises)
+        current.estimatedMinutes = WorkoutPlanner.estimatedMinutes(current.exercises, style: gym.style, warmUpMinutes: warmUpMinutes)
         plan = current
     }
 
@@ -261,7 +276,7 @@ struct WorkoutBuilderView: View {
 
     private func summaryCard(_ plan: PlannedWorkout) -> some View {
         let planner = StrainPlanner()
-        let estimated = WorkoutPlanner.estimatedMinutes(plan.exercises)
+        let estimated = plan.estimatedMinutes ?? WorkoutPlanner.estimatedMinutes(plan.exercises, style: gym.style)
         let gain = metrics.strainGain(addedLoad: planner.liftingLoad(minutes: Double(estimated), rpe: plan.targetRPE))
         let current = metrics.strain?.strain ?? 0
         let landsAt = current + gain
@@ -457,6 +472,12 @@ struct PlannedExerciseRow: View {
                     Text("\(load.formatted(.number.precision(.fractionLength(0...2)))) \(unit.rawValue)")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.strainTextColor)
+                }
+                // How the weight moved since last time (double progression, `WorkoutPlanner.suggestedLoad`).
+                if let progression = exercise.progressionNote {
+                    Text(progression)
+                        .font(.caption)
+                        .foregroundStyle(Theme.liftingText)
                 }
                 if let note = exercise.note {
                     Text(note)

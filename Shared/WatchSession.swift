@@ -55,8 +55,13 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
     /// Index into `warmUp` of the current step; at or past its count once
     /// the warm-up is done or skipped.
     var warmUpStepIndex: Int?
-    /// When the current step's countdown ends on the phone.
+    /// When the current step's countdown ends on the phone (timed steps only).
     var warmUpStepEndsAt: Date?
+    /// False while the phone shows the warm-up overview ("Start warm-up");
+    /// nil (older phones) counts as started.
+    var warmUpStarted: Bool?
+    /// The routine's planned length, for the overview.
+    var warmUpMinutes: Int?
 
     static func id(for startedAt: Date) -> String {
         String(Int(startedAt.timeIntervalSince1970))
@@ -102,6 +107,9 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
 
     var isWarmingUp: Bool { currentWarmUpStep != nil }
 
+    /// True while the overview shows (before the first step is started).
+    var isWarmUpOverview: Bool { isWarmingUp && warmUpStarted == false }
+
     /// The other half of a superset, by position in `exercises`.
     func partnerIndex(of index: Int) -> Int? {
         guard index < exercises.count, let label = exercises[index].supersetLabel, let group = label.first else { return nil }
@@ -109,13 +117,21 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
     }
 }
 
-/// One movement of the warm-up, as the Watch shows it.
+/// One step of the warm-up, as the Watch shows it (`WarmUpRoutine.Step` on
+/// the phone). Only the raise has `seconds`; drills are rep-based and
+/// advance on tap. `dose` and `why` are optional so a snapshot from another
+/// app version still decodes.
 nonisolated struct WatchWarmUpStep: Codable, Sendable, Equatable {
     var name: String
-    var seconds: Int
+    /// "10 each side", "15" or "90 s".
+    var dose: String?
     var cue: String
-    /// e.g. "10 each side".
-    var reps: String?
+    /// One line on what the step is for.
+    var why: String?
+    /// Countdown length for the timed step; nil for a rep step.
+    var seconds: Int?
+
+    var isTimed: Bool { seconds != nil }
 }
 
 /// What the Watch asks the phone to do with the session.
@@ -133,8 +149,12 @@ nonisolated enum WatchCommand: Codable, Sendable, Equatable {
     case recordingStarted
     /// The Watch stopped without saving a workout (discarded or failed).
     case recordingStopped
-    /// Next warm-up movement (the last one finishes the warm-up).
-    case warmUpNext
+    /// Next warm-up step (the last one finishes the warm-up; from the overview
+    /// it starts). `fromStep`: the step the Watch was on, so a timed step that
+    /// ends on both devices advances once; nil advances unconditionally.
+    case warmUpNext(fromStep: Int?)
+    /// Back one warm-up step (from the first, back to the overview).
+    case warmUpBack
     /// Finish or skip the warm-up and start lifting.
     case warmUpFinish
 }

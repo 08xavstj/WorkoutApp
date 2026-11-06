@@ -22,9 +22,6 @@ struct ActiveWorkoutView: View {
     @State private var savedTemplate = false
     /// Exercise order → superset group for this session (`SupersetRegistry`).
     @State private var supersetGroups: [Int: Int] = [:]
-    /// The builder's warm-up toggle (`WarmUpToggleRow`): a movement warm-up
-    /// (`WarmUpRoutine`) is made for a session that just started with it on.
-    @AppStorage("warmUpBeforeWorkout") private var warmUpBeforeWorkout = true
     @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
     /// Strain number inside the ring; scales with Dynamic Type (ux-audit W5).
     @ScaledMetric(relativeTo: .title2) private var ringValueSize: CGFloat = 26
@@ -118,9 +115,14 @@ struct ActiveWorkoutView: View {
             .task {
                 supersetGroups = SupersetRegistry.groups(for: session.startedAt)
                 guard session.isActive else { return }
+                // Movement warm-up (`WarmUpRoutine`) for a session that just started, per the
+                // Settings tier; ramp sets are separate (`WarmUp`). The session doesn't store
+                // its focus, so the general tier applies.
                 WarmUpStore.shared.prepareIfNeeded(
-                    sessionStart: session.startedAt, enabled: warmUpBeforeWorkout,
-                    exerciseIDs: session.orderedExercises.map(\.exerciseID), gym: gym.profile
+                    sessionStart: session.startedAt,
+                    tier: settings.warmUpTier(for: nil),
+                    firstSlots: session.orderedExercises.compactMap { ExerciseCatalog.slot(for: $0.exerciseID) },
+                    gym: gym.profile
                 )
                 WatchSync.shared.update(from: session) // the first snapshot went out before the warm-up existed
                 // Lock Screen / Dynamic Island: elapsed time, next set and rest timer.
@@ -339,7 +341,7 @@ struct ActiveWorkoutView: View {
                 bestBefore: LiftHistory.bestOneRepMax(for: exercise.exerciseID, before: session.startedAt, in: sessions),
                 unit: workoutUnit,
                 gym: gym.profile,
-                onSetCompleted: { startRest(for: exercise) },
+                onSetCompleted: { afterWarmUp in startRest(for: exercise, afterWarmUp: afterWarmUp) },
                 onCollapse: { expanded.remove(exercise.persistentModelID) },
                 supersetLabel: supersetLabel(exercise)
             )
@@ -380,8 +382,16 @@ struct ActiveWorkoutView: View {
         return index == currentIndex + 1
     }
 
-    private func startRest(for exercise: ExerciseLog) {
+    private func startRest(for exercise: ExerciseLog, afterWarmUp: Bool = false) {
         defer { WatchSync.shared.update(from: session) } // Apple Watch: rest timer and next set
+        // After a ramp set: a short fixed rest, so the muscles stay warm for the
+        // next one (`RestTimer.warmUpRestSeconds`; McGowan et al., Sports Med 2015).
+        if afterWarmUp {
+            RestTimerStore.start(seconds: Double(RestTimer.warmUpRestSeconds))
+            let next = nextSetText()
+            Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
+            return
+        }
         // Superset: no rest between the first lift and its partner, one rest after both
         // (paired sets, Iversen et al., Sports Med 2021; `Supersets`).
         if let mate = partner(of: exercise), mate.order > exercise.order,
@@ -435,7 +445,8 @@ private struct ExerciseCard: View {
     let bestBefore: Double
     let unit: WeightUnit
     let gym: GymProfile
-    let onSetCompleted: () -> Void
+    /// Called with true after a warm-up ramp set, false after a working set.
+    let onSetCompleted: (_ afterWarmUp: Bool) -> Void
     let onCollapse: () -> Void
     /// "A1" / "A2" when this exercise is half of a superset.
     var supersetLabel: String? = nil
@@ -562,7 +573,8 @@ private struct ExerciseCard: View {
                     isEditing: set.persistentModelID == editing?.persistentModelID,
                     onTap: { focusedSetID = set.persistentModelID },
                     onToggle: { toggle(set) },
-                    previousSet: set.isWarmup ? nil : previousSet(index: workingNumber(set, in: sets) - 1)
+                    previousSet: set.isWarmup ? nil : previousSet(index: workingNumber(set, in: sets) - 1),
+                    warmUp: set.isWarmup ? warmUpPosition(set, in: sets) : nil
                 )
                 .contextMenu {
                     Button(set.isWarmup ? "Make working set" : "Make warm-up set") { set.isWarmup.toggle() }
@@ -597,6 +609,12 @@ private struct ExerciseCard: View {
             }
             .buttonStyle(.plain)
 
+            if needsWeightFinding(sets) {
+                // No history and nothing to estimate from, so no ramp sets: the first set finds the weight.
+                Text("First set: find your weight. Start light and add weight until the reps feel like the plan's effort.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
             if !previous.isEmpty {
                 Text("Last time: \(previous.map { "\(unit.format($0.weightKg)) × \($0.reps)" }.joined(separator: ", "))")
                     .font(.footnote)
@@ -620,14 +638,32 @@ private struct ExerciseCard: View {
         restSeconds = seconds
     }
 
-    /// Completes (or un-completes) a set; completing starts rest and moves to the next set.
+    /// Completes (or un-completes) a set; completing starts rest (short after
+    /// a warm-up ramp set) and moves to the next set.
     private func toggle(_ set: SetLog) {
         set.completedAt = set.isCompleted ? nil : .now
         try? modelContext.save()
         if set.isCompleted {
             focusedSetID = nil
-            if !set.isWarmup { onSetCompleted() }
+            onSetCompleted(set.isWarmup)
         }
+    }
+
+    /// "Warm-up 1 of 3 · 50%": the ramp set's place and its share of the working weight.
+    private func warmUpPosition(_ set: SetLog, in sets: [SetLog]) -> SetRow.WarmUpPosition {
+        let ramps = sets.filter(\.isWarmup)
+        let number = (ramps.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1
+        let working = sets.first { !$0.isWarmup && $0.weightKg > 0 }?.weightKg
+        let percent = working.map { Int((set.weightKg / $0 * 100).rounded()) }
+        return SetRow.WarmUpPosition(number: number, count: ramps.count, percent: percent)
+    }
+
+    /// A loaded catalog lift with no weight and no ramp sets: the planner had
+    /// nothing to estimate from (`LoadEstimator`), so the first set finds it.
+    private func needsWeightFinding(_ sets: [SetLog]) -> Bool {
+        guard previous.isEmpty, !sets.contains(where: \.isWarmup),
+              let first = sets.first, first.weightKg == 0, !first.isCompleted else { return false }
+        return ExerciseCatalog.exercise(id: exercise.exerciseID)?.load != nil
     }
 
     /// Next/previous weight you can actually load with your gym's plates,
@@ -721,6 +757,14 @@ private struct SetRow: View {
     let onToggle: () -> Void
     /// Last session's matching set, for VoiceOver.
     var previousSet: SetLog? = nil
+    /// For a warm-up ramp set: its place in the ramp and its share of the working weight.
+    var warmUp: WarmUpPosition? = nil
+
+    struct WarmUpPosition {
+        var number: Int
+        var count: Int
+        var percent: Int?
+    }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Fits "W" or "12" at every text size.
@@ -754,12 +798,20 @@ private struct SetRow: View {
     /// the RPE pill moves under the weight so nothing is cut off.
     private var details: some View {
         HStack(spacing: 10) {
-            Text(label)
-                .font(.headline)
-                // Text colour for the amber accent (ux-audit.md X4, P24).
-                .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.primaryText)
-                .frame(width: labelWidth, alignment: .leading)
+            if warmUp == nil {
+                Text(label)
+                    .font(.headline)
+                    // Text colour for the amber accent (ux-audit.md X4, P24).
+                    .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.primaryText)
+                    .frame(width: labelWidth, alignment: .leading)
+            }
             VStack(alignment: .leading, spacing: 1) {
+                if let warmUp {
+                    // "Warm-up 1 of 3 · 50%" instead of a bare "W" (user report: unclear).
+                    Text(warmUpTitle(warmUp))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.recoveryModerateText)
+                }
                 Text(isFilled ? "\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)" : "Not set")
                     .font(.headline)
                     .monospacedDigit()
@@ -814,9 +866,15 @@ private struct SetRow: View {
         .accessibilityLabel(set.isCompleted ? "Undo \(spokenName.lowercased())" : "Mark \(spokenName.lowercased()) done")
     }
 
-    /// "Set 2" or "Warm-up set".
+    /// "Warm-up 2 of 3 · 70%".
+    private func warmUpTitle(_ warmUp: WarmUpPosition) -> String {
+        "Warm-up \(warmUp.number) of \(warmUp.count)" + (warmUp.percent.map { " · \($0)%" } ?? "")
+    }
+
+    /// "Set 2", "Warm-up set 1 of 3" or "Warm-up set".
     private var spokenName: String {
-        self.set.isWarmup ? "Warm-up set" : "Set \(label)"
+        if let warmUp { return "Warm-up set \(warmUp.number) of \(warmUp.count)" }
+        return self.set.isWarmup ? "Warm-up set" : "Set \(label)"
     }
 
     /// "Set 2, 8 reps at 60 kilograms, RPE 8, done".

@@ -193,6 +193,14 @@ private struct TrainingSettingsSection: View {
                 }
             }
             Toggle("Start workouts on Apple Watch", isOn: $settings.startWatchWithWorkout)
+            // Warm-up before lifting (`WarmUpRoutine.Tier`); the builder can
+            // override it per focus. Default: ramp sets only (best evidence:
+            // Ribeiro 2020 IJERPH; Ribeiro/Neves 2021 Motricidade).
+            Picker("Warm-up", selection: $settings.warmUpTier) {
+                ForEach(WarmUpRoutine.Tier.allCases) { tier in
+                    Text(tier.menuLabel).tag(tier)
+                }
+            }
             Button(action: showRPEGuide) {
                 LabeledContent("RPE guide", value: "What each number means")
             }
@@ -200,7 +208,7 @@ private struct TrainingSettingsSection: View {
         } header: {
             Text("Training")
         } footer: {
-            Text("Gym equipment lists what your gym has, down to the plates and dumbbells, so planned weights are ones you can load. Automatic rest follows your goal: about 2 min on big lifts and 90 s on small ones for muscle, 3 min for strength; set rest per exercise from its ••• menu during a workout. Lifting experience is used to choose your calorie equation and how fast to gain. Your logged workouts update it once there are 8 weeks of them; the 6-month and 2-year lines are rough guides, not exact.")
+            Text("Gym equipment lists what your gym has, down to the plates and dumbbells, so planned weights are ones you can load. Automatic rest follows your goal: about 2 min on big lifts and 90 s on small ones for muscle, 3 min for strength; set rest per exercise from its ••• menu during a workout. Warm-up: ramp sets have the best evidence. Movement prep adds a small, mostly feel-based benefit. You can pick a different warm-up for one focus from the workout planner. Lifting experience is used to choose your calorie equation and how fast to gain. Your logged workouts update it once there are 8 weeks of them; the 6-month and 2-year lines are rough guides, not exact.")
         }
     }
 }

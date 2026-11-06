@@ -286,16 +286,52 @@ final class WatchWorkoutModel: NSObject {
 
     // MARK: Warm-up
 
-    /// Next warm-up movement. Shown here straight away; the phone confirms with a snapshot.
+    /// Next warm-up step (from the overview: start). Shown here straight away;
+    /// the phone confirms with a snapshot. `fromStep` is sent so a timed step
+    /// that ends on both devices advances once.
     func warmUpNext() {
         guard var current = snapshot, let index = current.warmUpStepIndex, let steps = current.warmUp,
               index < steps.count else { return }
+        if current.warmUpStarted == false {
+            current.warmUpStarted = true
+            current.warmUpStepIndex = 0
+            current.warmUpStepEndsAt = steps[0].seconds.map { Date.now.addingTimeInterval(Double($0)) }
+            lastLocalEdit = .now
+            snapshot = current
+            send(.warmUpNext(fromStep: nil))
+            WKInterfaceDevice.current().play(.click)
+            return
+        }
         current.warmUpStepIndex = index + 1
         current.warmUpStepEndsAt = index + 1 < steps.count
-            ? Date.now.addingTimeInterval(Double(steps[index + 1].seconds)) : nil
+            ? steps[index + 1].seconds.map { Date.now.addingTimeInterval(Double($0)) } : nil
         lastLocalEdit = .now
         snapshot = current
-        send(.warmUpNext)
+        send(.warmUpNext(fromStep: index))
+        WKInterfaceDevice.current().play(.click)
+    }
+
+    /// The timed step ran out on the wrist: advance once (the phone may have
+    /// already moved on; `fromStep` makes it a no-op there if so).
+    func warmUpTimedStepEnded(at index: Int) {
+        guard let current = snapshot, current.warmUpStarted != false, current.warmUpStepIndex == index else { return }
+        warmUpNext()
+    }
+
+    /// Back one step; from the first step, back to the overview.
+    func warmUpBack() {
+        guard var current = snapshot, let index = current.warmUpStepIndex, let steps = current.warmUp,
+              current.isWarmingUp, current.warmUpStarted != false else { return }
+        if index == 0 {
+            current.warmUpStarted = false
+            current.warmUpStepEndsAt = nil
+        } else {
+            current.warmUpStepIndex = index - 1
+            current.warmUpStepEndsAt = steps[index - 1].seconds.map { Date.now.addingTimeInterval(Double($0)) }
+        }
+        lastLocalEdit = .now
+        snapshot = current
+        send(.warmUpBack)
         WKInterfaceDevice.current().play(.click)
     }
 

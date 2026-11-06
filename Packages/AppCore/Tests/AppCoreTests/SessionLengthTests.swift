@@ -22,6 +22,52 @@ struct SessionLengthTests {
         #expect(Set(long.exercises.map(\.exerciseID)).count == 7)
         #expect(long.exercises.last?.exerciseID == "Dumbbell_Bench_Press")
         #expect(!long.hasSupersets)
+        #expect(hour.estimatedMinutes == hourMinutes)
+    }
+
+    /// The plan uses the time you picked: never over it, never far under it
+    /// (`WorkoutPlanner.fill`, `fillFraction`). A user's 60-minute plan once
+    /// took 40 because ramp sets, transitions and the rest style weren't counted.
+    @Test func plansFillTheTimePicked() {
+        for focus in WorkoutFocus.allCases {
+            for minutes in [30, 45, 60, 75] {
+                let plan = planner.plan(focus: focus, minutes: minutes, recovery: 80, history: [:])
+                let estimate = plan.estimatedMinutes ?? 0
+                #expect(estimate <= minutes, "\(focus) \(minutes): \(estimate)")
+                #expect(Double(estimate) >= 0.8 * Double(minutes), "\(focus) \(minutes): \(estimate)")
+                #expect(estimate == WorkoutPlanner.estimatedMinutes(plan.exercises))
+                #expect(plan.exercises.allSatisfy { $0.sets <= WorkoutPlanner.maximumSetsPerExercise + 1 })
+            }
+        }
+        // A 60-minute leg day lands near the hour, not at 40.
+        let legs = planner.plan(focus: .legs, minutes: 60, recovery: 80, history: [:])
+        #expect((52...60).contains(legs.estimatedMinutes ?? 0))
+    }
+
+    @Test func estimateCountsWarmUpRampsTransitionsAndStyle() {
+        var squat = PlannedExercise(exerciseID: "Barbell_Squat", name: "Squat", sets: 3, reps: 6...8, rpe: 8, load: 185, loadKind: .barbell, note: nil)
+        let curl = PlannedExercise(exerciseID: "Seated_Leg_Curl", name: "Leg Curl", sets: 3, reps: 10...12, rpe: 9, load: nil, loadKind: .machine, note: nil)
+        // Balanced, no movement warm-up: 2 min transition + 3 × 3.25 + 3 × 2.25 = 18.5 → 19 (rounded half up).
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 19)
+        // A 6-minute movement warm-up (short tier) is added as is.
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], warmUpMinutes: 6) == 25)
+        // Muscle style rests 2 min on big lifts: 2 + 3 × 2.75 + 3 × 2.25 = 17.
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], style: .muscle) == 17)
+        // Three ramp sets at 1.5 min each (30 s work + 60 s rest): 18.5 + 4.5 = 23.
+        squat.warmUpSets = WarmUp.sets(workingLoad: 185, kind: .barbell, gym: .commercialPounds)
+        #expect(squat.warmUpSets?.count == 3)
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 23)
+    }
+
+    @Test func rampSetsOnlyWhenThereIsAWeight() {
+        // No history and no body weight: nothing to estimate from, so no load and no ramp sets.
+        let plan = planner.plan(focus: .legs, minutes: 60, recovery: 80, history: [:])
+        #expect(plan.exercises.allSatisfy { $0.load == nil && $0.warmUpSets == nil })
+        #expect(plan.exercises.first?.note?.hasPrefix("First time") == true)
+        // With a body weight the first lift gets a starting weight and a ramp.
+        let weighed = planner.plan(focus: .legs, minutes: 60, recovery: 80, history: [:], bodyMassKg: 80)
+        #expect(weighed.exercises.first?.load != nil)
+        #expect(weighed.exercises.first?.warmUpSets?.isEmpty == false)
     }
 
     @Test func setsAndExerciseCountFollowTheLength() {

@@ -134,6 +134,28 @@ final class UserSettings {
         didSet { defaults.set(liftingExperience?.rawValue, forKey: "liftingExperience") }
     }
 
+    // MARK: Warm-up (Settings › Training; `WarmUpRoutine`)
+
+    /// How much warm-up before lifting. Default: ramp sets only, the option
+    /// with the best evidence (Ribeiro et al. 2020 IJERPH; Ribeiro/Neves 2021
+    /// Motricidade). Replaces the old `warmUpBeforeWorkout` toggle, which is ignored.
+    var warmUpTier: WarmUpRoutine.Tier { didSet { defaults.set(warmUpTier.rawValue, forKey: "warmUpTier") } }
+    /// Per-focus override (`WorkoutFocus.rawValue` → `Tier.rawValue`), so the
+    /// user can keep Short on leg day only. Set from the builder's warm-up row.
+    var warmUpTierByFocus: [String: String] { didSet { defaults.set(warmUpTierByFocus, forKey: "warmUpTierByFocus") } }
+
+    /// The tier for a session: the focus's own choice, else the general one.
+    func warmUpTier(for focus: WorkoutFocus?) -> WarmUpRoutine.Tier {
+        focus.flatMap { warmUpTierByFocus[$0.rawValue] }.flatMap(WarmUpRoutine.Tier.init(rawValue:)) ?? warmUpTier
+    }
+
+    /// Remembers a tier for one focus; nil clears it (back to the general setting).
+    func setWarmUpTier(_ tier: WarmUpRoutine.Tier?, for focus: WorkoutFocus) {
+        var byFocus = warmUpTierByFocus
+        if let tier { byFocus[focus.rawValue] = tier.rawValue } else { byFocus.removeValue(forKey: focus.rawValue) }
+        warmUpTierByFocus = byFocus
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         age = defaults.object(forKey: "age") as? Int ?? 30
@@ -172,6 +194,9 @@ final class UserSettings {
         calorieAdjustmentNote = defaults.string(forKey: "calorieAdjustmentNote") ?? ""
         // Lifting experience (Settings › Training).
         liftingExperience = defaults.string(forKey: "liftingExperience").flatMap(LiftingExperience.init(rawValue:))
+        // Warm-up tier (Settings › Training).
+        warmUpTier = defaults.string(forKey: "warmUpTier").flatMap(WarmUpRoutine.Tier.init(rawValue:)) ?? .rampOnly
+        warmUpTierByFocus = defaults.dictionary(forKey: "warmUpTierByFocus") as? [String: String] ?? [:]
     }
 
     /// Fills the profile from Apple Health (only fields Health actually has).

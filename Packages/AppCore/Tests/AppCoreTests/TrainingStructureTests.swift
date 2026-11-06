@@ -133,9 +133,12 @@ struct BlockPlannerTests {
     }
 
     @Test func blockScalesSetsAndTheDeloadHalvesThem() {
-        // 120 minutes is a long session: seven exercises, four sets each (`WorkoutPlanner.baseSets`).
+        // 120 minutes is a long session: seven exercises, four sets each (`WorkoutPlanner.baseSets`);
+        // `fill` then adds a fifth set to the first two compound lifts and an eighth exercise
+        // (a second horizontal press, 2 sets) to reach 85% of the time.
         let base = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:])
-        #expect(base.exercises.map(\.sets) == [4, 4, 4, 4, 4, 4, 4])
+        #expect(base.exercises.map(\.sets) == [5, 5, 4, 4, 4, 4, 4, 2])
+        #expect(base.exercises.last?.exerciseID == "Leverage_Chest_Press")
         #expect(base.blockWeek == nil)
         let week4 = TrainingBlock.weekState(4, style: .balanced, length: 5) // ×1.25, RIR 1
         let ramped = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:], block: week4)
@@ -186,8 +189,9 @@ struct SupersetTests {
     @Test func pairedSetsCountAtSixtyPercent() {
         let straight = [exercise("Barbell_Squat"), exercise("Seated_Leg_Curl")]
         let paired = [exercise("Barbell_Squat", group: 1), exercise("Seated_Leg_Curl", group: 1)]
-        #expect(WorkoutPlanner.estimatedMinutes(straight) == 16) // 5 + 2×3.25 + 2×2.25
-        #expect(WorkoutPlanner.estimatedMinutes(paired) == 12)   // 5 + 0.6 × 11
+        // One 2 min transition between the two exercises, then the sets.
+        #expect(WorkoutPlanner.estimatedMinutes(straight) == 13) // 2 + 2×3.25 + 2×2.25
+        #expect(WorkoutPlanner.estimatedMinutes(paired) == 9)    // 2 + 0.6 × 11 = 8.6
     }
 
     @Test func orphansLoseTheirGroup() {
@@ -205,6 +209,7 @@ struct SupersetTests {
         #expect(short.exercises.map(\.supersetGroup) == [1, 1, nil])
         #expect(short.exercises.map(\.exerciseID) == ["Barbell_Squat", "Seated_Leg_Curl", "Romanian_Deadlift"])
         #expect(WorkoutPlanner.estimatedMinutes(short.exercises) <= 20)
+        #expect(short.estimatedMinutes == 17) // 2 transitions + 0.6 × 11 + 2 × 3.25
         // 45 minutes: trimming sets is enough, so no supersets.
         let usual = planner.plan(focus: .legs, minutes: 45, recovery: 70, history: [:])
         #expect(!usual.hasSupersets)

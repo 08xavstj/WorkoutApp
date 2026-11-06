@@ -261,13 +261,16 @@ final class WatchSync: NSObject {
             sentAt: .now,
             weightStepKg: profile.unit == .kg ? 2.5 : profile.unit.toKilograms(5)
         )
-        // Movement warm-up (`WarmUpStore`): the steps, which one is up and when it ends.
+        // Movement warm-up (`WarmUpStore`): the steps, which one is up, whether
+        // it has started, and when the timed step ends.
         if !finished, let warmUp = WarmUpStore.shared.entry(for: session.startedAt) {
-            snapshot.warmUp = warmUp.routine.movements.map {
-                WatchWarmUpStep(name: $0.name, seconds: $0.seconds, cue: $0.cue, reps: $0.reps)
+            snapshot.warmUp = warmUp.routine.steps.map {
+                WatchWarmUpStep(name: $0.name, dose: $0.dose.text, cue: $0.cue, why: $0.why, seconds: $0.dose.seconds)
             }
-            snapshot.warmUpStepIndex = warmUp.isDone ? warmUp.routine.movements.count : warmUp.stepIndex
+            snapshot.warmUpStepIndex = warmUp.isDone ? warmUp.routine.steps.count : warmUp.stepIndex
             snapshot.warmUpStepEndsAt = warmUp.stepEndsAt
+            snapshot.warmUpStarted = warmUp.hasStarted
+            snapshot.warmUpMinutes = warmUp.routine.minutes
         }
         return snapshot
     }
@@ -333,7 +336,13 @@ final class WatchSync: NSObject {
             guard !set.isCompleted else { return }
             set.completedAt = .now
             try? context.save()
-            if !set.isWarmup { startRest(after: exercise, in: session) }
+            if set.isWarmup {
+                // Short rest after a ramp set, as on the phone (`RestTimer.warmUpRestSeconds`).
+                RestTimerStore.start(seconds: Double(RestTimer.warmUpRestSeconds))
+                Task { await WorkoutLiveActivity.refresh() }
+            } else {
+                startRest(after: exercise, in: session)
+            }
         case .skipRest:
             RestTimerStore.stop()
             Task { await WorkoutLiveActivity.refresh() }
@@ -349,8 +358,10 @@ final class WatchSync: NSObject {
         case .pause, .resume:
             // The Watch pauses its own HKWorkoutSession; the phone's log has no pause.
             break
-        case .warmUpNext:
-            WarmUpStore.shared.advance(for: session.startedAt)
+        case let .warmUpNext(fromStep):
+            WarmUpStore.shared.advance(for: session.startedAt, fromStep: fromStep)
+        case .warmUpBack:
+            WarmUpStore.shared.back(for: session.startedAt)
         case .warmUpFinish:
             WarmUpStore.shared.finish(for: session.startedAt)
         case let .finish(sessionRPE):

@@ -233,7 +233,12 @@ struct CoachView: View {
                 minutes: minutes ?? lastPlan?.minutes ?? 45,
                 recovery: metrics.recoveryForTraining,
                 history: LiftHistory.make(from: sessions, unit: gym.profile.unit),
-                block: weeklyPlans.blockWeek
+                block: weeklyPlans.blockWeek,
+                bodyMassKg: metrics.bodyMassKg,
+                sex: metrics.sex,
+                trainingStatus: metrics.trainingStatus ?? .novice,
+                warmUpMinutes: WarmUpRoutine.make(tier: settings.warmUpTier(for: resolvedFocus),
+                                                  firstSlots: resolvedFocus.slots, gym: gym.profile).minutes
             )
         }
         var snapshot = CoachSnapshot.make(
@@ -463,7 +468,7 @@ private struct PlanCard: View {
     @ScaledMetric(relativeTo: .headline) private var badgeSize: CGFloat = 32
 
     var body: some View {
-        let minutes = WorkoutPlanner.estimatedMinutes(plan.exercises)
+        let minutes = plan.estimatedMinutes ?? WorkoutPlanner.estimatedMinutes(plan.exercises)
         let gain = metrics.strainGain(addedLoad: StrainPlanner().liftingLoad(minutes: Double(minutes), rpe: plan.targetRPE))
         VStack(alignment: .leading, spacing: 12) {
             CardLabel(text: "Suggested", color: Theme.lifting)

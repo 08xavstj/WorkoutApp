@@ -9,11 +9,18 @@ import Foundation
 ///   Act Living 2024), so 90 s for small lifts and 2 min for big ones, which
 ///   need more time to keep their reps up.
 /// - Strength: 3 min between heavy sets lifted more and built more muscle than
-///   1 min in trained men (Schoenfeld et al., J Strength Cond Res 2016); the
-///   ACSM suggests 2-3+ min for heavy multi-joint lifts (position stand, Med
-///   Sci Sports Exerc 2009).
+///   1 min in trained men (Schoenfeld et al., J Strength Cond Res 2016); a
+///   review of trained lifters found rests over 2 min better for strength
+///   (Grgic et al., Sports Med 2018); the ACSM suggests 2-3+ min for heavy
+///   multi-joint lifts (position stand, Med Sci Sports Exerc 2009). So 3 min
+///   on big lifts and 2 min on small ones.
+/// - Balanced: 2.5 min on big lifts (between the 2-3 min the strength evidence
+///   wants and the ~90 s that is enough for growth), 90 s on small ones.
 /// - Endurance / general health: shorter rests (60-90 s) keep the session
 ///   brisk; this is common practice rather than a tested optimum.
+///
+/// These defaults are also what `WorkoutPlanner.estimatedMinutes` counts per
+/// set, so the plan's length matches the timer the session actually runs.
 public enum RestTimer {
     public static func defaultSeconds(style: TrainingStyle, compound: Bool) -> Int {
         switch style {
@@ -23,6 +30,13 @@ public enum RestTimer {
         case .endurance: compound ? 90 : 60
         }
     }
+
+    /// Rest after a warm-up ramp set (`WarmUp`). Kept short, an app choice:
+    /// ramp sets are light and far from failure, and the point of a warm-up
+    /// is raised muscle temperature, which starts to decay within about 15-20
+    /// minutes of stopping (McGowan, Pyne, Thompson & Rattray, Sports Med
+    /// 2015, review), so long waits between ramp sets would undo it.
+    public static let warmUpRestSeconds = 60
 
     /// Choices offered for a manual override.
     public static let choices = [45, 60, 90, 120, 150, 180, 240]

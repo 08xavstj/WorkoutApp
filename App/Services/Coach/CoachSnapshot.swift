@@ -198,7 +198,8 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
             let load = exercise.load.map { " at \($0.formatted(.number.precision(.fractionLength(0...2)))) \(plan.unit.rawValue)" } ?? ""
             return "- \(exercise.name): \(exercise.sets) x \(exercise.reps.lowerBound)-\(exercise.reps.upperBound) @ RPE \(exercise.rpe.formatted())\(load)"
         }
-        return (["\(plan.title), about \(WorkoutPlanner.estimatedMinutes(plan.exercises)) min:"] + lines).joined(separator: "\n")
+        let minutes = plan.estimatedMinutes ?? WorkoutPlanner.estimatedMinutes(plan.exercises)
+        return (["\(plan.title), about \(minutes) min:"] + lines).joined(separator: "\n")
     }
 
     var trainerSummary: String {
