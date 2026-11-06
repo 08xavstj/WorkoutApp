@@ -9,6 +9,8 @@ struct StrengthDetailView: View {
     var body: some View {
         FitnessDetailPage(title: "Strength") {
             DeloadCard()
+            // Lift goals with the e1RM projection band (`LiftGoalProjection`; McEwan 2016, Swann 2021).
+            LiftGoalsSection()
             StrengthDaysCard()
             StrengthForHealthCard()
         }

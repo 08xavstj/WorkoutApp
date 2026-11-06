@@ -16,12 +16,31 @@ public struct Goals: Codable, Sendable, Equatable {
     public var weeklyRatePercent: Double
     public var focuses: [Focus]
     public var targetWeightKg: Double?
+    /// Long-term lift targets ("Bench 100 kg"), projected by `LiftGoalProjection`.
+    public var liftGoals: [LiftGoal]
 
-    public init(weight: Weight = .maintain, weeklyRatePercent: Double = 0.5, focuses: [Focus] = [.muscle], targetWeightKg: Double? = nil) {
+    public init(weight: Weight = .maintain, weeklyRatePercent: Double = 0.5, focuses: [Focus] = [.muscle], targetWeightKg: Double? = nil,
+                liftGoals: [LiftGoal] = []) {
         self.weight = weight
         self.weeklyRatePercent = weeklyRatePercent
         self.focuses = focuses
         self.targetWeightKg = targetWeightKg
+        self.liftGoals = liftGoals
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case weight, weeklyRatePercent, focuses, targetWeightKg, liftGoals
+    }
+
+    /// Goals saved before lift goals existed have no `liftGoals` key; they
+    /// decode with none.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        weight = try container.decode(Weight.self, forKey: .weight)
+        weeklyRatePercent = try container.decode(Double.self, forKey: .weeklyRatePercent)
+        focuses = try container.decode([Focus].self, forKey: .focuses)
+        targetWeightKg = try container.decodeIfPresent(Double.self, forKey: .targetWeightKg)
+        liftGoals = try container.decodeIfPresent([LiftGoal].self, forKey: .liftGoals) ?? []
     }
 
     /// Losing fat while building muscle ("recomposition").

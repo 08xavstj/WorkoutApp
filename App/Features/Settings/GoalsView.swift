@@ -43,7 +43,11 @@ struct GoalsView: View {
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
-                    Button("Use suggestion") { goals = suggestion }
+                    Button("Use suggestion") {
+                        let liftGoals = goals.liftGoals // The suggestion is about body weight; keep the lift goals.
+                        goals = suggestion
+                        goals.liftGoals = liftGoals
+                    }
                 }
 
                 Section {
@@ -90,6 +94,9 @@ struct GoalsView: View {
                 } footer: {
                     Text("Muscle: 6-15 reps, close to failure. Strength: 3-6 reps on big lifts, 2-3 left in the tank. Stamina: higher reps plus Zone 2 cardio. Pick more than one if you like.")
                 }
+
+                // Long-term lift targets with a projected range (`LiftGoalProjection`).
+                LiftGoalsFormSection(goals: $goals.liftGoals)
 
                 Section("Your plan") {
                     LabeledContent("Goal", value: goals.title)

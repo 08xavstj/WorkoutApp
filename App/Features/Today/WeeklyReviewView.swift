@@ -132,7 +132,16 @@ struct WeeklyReviewView: View {
         if let protein = proteinLine { lines.append(protein) }
         if let calories = caloriesLine { lines.append(calories) }
         if let weight = weightLine { lines.append(weight) }
+        lines += liftGoalLines
         return lines
+    }
+
+    /// Progress toward each lift goal, framed as an approach goal (McEwan
+    /// 2016; Swann 2021; `LiftGoalProjection`).
+    private var liftGoalLines: [ReviewLine] {
+        LiftGoalReview.lines(goals: settings.goals.liftGoals, sessions: sessions, bodyMassKg: metrics.bodyMassKg ?? settings.weightKg,
+                             trainingStatus: metrics.trainingStatus, unit: settings.weightUnit)
+            .map { ReviewLine(id: $0.id, title: $0.title, value: $0.value, detail: $0.detail) }
     }
 
     private var sessionsLine: ReviewLine {

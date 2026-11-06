@@ -385,6 +385,8 @@ private struct FitnessProgressCard: View {
             strengthRow
             Divider().overlay(Theme.separator)
             musclesRow
+            Divider().overlay(Theme.separator)
+            LiftGoalsMetricRow()
         }
         .card()
     }
