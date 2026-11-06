@@ -70,7 +70,7 @@ public struct MacroSplit: Sendable, Equatable {
     /// Protein's share of the calorie target, 0-100.
     public var proteinPercentOfCalories: Double {
         guard calorieTarget > 0 else { return 0 }
-        return proteinGrams * kcalPerGramProtein / calorieTarget * 100
+        return proteinGrams * Self.kcalPerGramProtein / calorieTarget * 100
     }
 
     // MARK: Constants

@@ -81,6 +81,86 @@ public enum CoachIntent {
 
     /// Whether a message asks for cardio instead of lifting (whole words: not "crunches").
     public static func wantsCardio(_ text: String) -> Bool {
-        !Set(words(text)).isDisjoint(with: ["run", "running", "ride", "riding", "cycle", "cycling", "bike", "cardio", "swim", "row", "rowing"])
+        !Set(words(text)).isDisjoint(with: cardioWords)
+    }
+
+    static let cardioWords: Set<String> = ["run", "running", "ride", "riding", "cycle", "cycling", "bike", "cardio", "swim", "row", "rowing"]
+
+    // MARK: - Questions the app answers itself
+
+    /// A question the app can answer from its own numbers, without the
+    /// language model (`CoachAnswers`). Routing is by whole words and short
+    /// phrases, so "what should I eat after my workout" is `eatAfter`, not a
+    /// workout request, and "how can I sleep better" (advice, not a reading)
+    /// stays an open question for the model.
+    public enum Question: String, Sendable, Equatable, CaseIterable {
+        /// "How should I train today?"
+        case trainToday
+        /// "Why is my recovery where it is?"
+        case whyRecovery
+        /// "Plan my next workout", "Make it leg day", "Make it 30 min"
+        case planWorkout
+        /// "Swap for a ride": cardio instead of the gym.
+        case cardioSwap
+        /// "Am I eating enough?"
+        case eatingEnough
+        /// "What should I eat after?"
+        case eatAfter
+        /// "How did I sleep?"
+        case sleep
+        /// "What's my strain?"
+        case strain
+        /// "Should I rest today?"
+        case shouldRest
+    }
+
+    static let restQuestions = [
+        "should i rest", "rest today", "take a rest", "day off", "today off", "skip today", "should i skip",
+        "rest day", "need a rest", "need rest", "take it easy today", "is today a rest",
+    ]
+
+    static let trainTodayQuestions = [
+        "how should i train", "train today", "training today", "workout today", "work out today",
+        "what should i do today", "should i train", "should i lift", "should i work out", "should i go to the gym",
+        "gym today", "lift today", "what kind of day", "hard today", "what today", "plan for today",
+        "how hard today", "how hard should i", "how hard can i",
+    ]
+
+    static let sleepReadingWords: Set<String> = ["how", "did", "was", "my", "score", "night", "enough", "last", "hours", "much", "long"]
+    /// Sleep *advice* ("how can I sleep better") goes to the model.
+    static let sleepAdviceWords: Set<String> = ["better", "improve", "improving", "tips", "tip", "advice", "help", "fall", "trouble", "insomnia", "earlier", "cant", "can't", "routine"]
+    /// "What is strain?" or "how is strain calculated" is an explanation, not a reading.
+    static let explanationWords: Set<String> = ["calculated", "computed", "mean", "means", "meaning", "definition", "work", "works", "explain", "explained"]
+    static let enoughWords: Set<String> = ["enough", "left", "remaining", "track", "today", "far", "many", "much", "hit", "target", "under", "over", "short", "low", "deficit", "surplus"]
+
+    /// The question the app can answer itself, or nil for an open question.
+    public static func question(_ text: String) -> Question? {
+        let tokens = words(text)
+        let set = Set(tokens)
+        func has(_ phrases: [String]) -> Bool { phrases.contains { containsPhrase($0, in: tokens) } }
+        let food = !set.isDisjoint(with: nutritionWords)
+
+        if !food, has(restQuestions) { return .shouldRest }
+        if !food, has(trainTodayQuestions) { return .trainToday }
+        if !food, wantsCardio(text), set.contains("swap") || set.contains("instead") || set.contains("rather")
+            || has(["make it a", "make it cardio", "change it to"]) { return .cardioSwap }
+        if wantsWorkoutPlan(text) { return .planWorkout }
+        if food {
+            if set.contains("after") || set.contains("post") || has(["for recovery"]) { return .eatAfter }
+            if has(["am i eating", "have i eaten", "did i eat", "eating enough", "eaten enough", "eat enough", "protein left", "calories left"])
+                || (!set.isDisjoint(with: enoughWords) && (set.contains("protein") || set.contains("calories") || set.contains("calorie")
+                    || set.contains("eating") || set.contains("eaten") || set.contains("eat") || set.contains("kcal"))) {
+                return .eatingEnough
+            }
+            return nil
+        }
+        if !set.isDisjoint(with: ["recovery", "recovered"]), set.isDisjoint(with: explanationWords) { return .whyRecovery }
+        if !set.isDisjoint(with: ["sleep", "slept", "sleeping"]) {
+            if !set.isDisjoint(with: sleepAdviceWords) || !set.isDisjoint(with: explanationWords) { return nil }
+            if !set.isDisjoint(with: sleepReadingWords) || set.contains("slept") { return .sleep }
+            return nil
+        }
+        if set.contains("strain"), set.isDisjoint(with: explanationWords) { return .strain }
+        return nil
     }
 }

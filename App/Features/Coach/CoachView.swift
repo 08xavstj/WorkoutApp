@@ -24,6 +24,7 @@ struct CoachView: View {
     /// The send button grows with Dynamic Type and never drops below 44 pt (HIG Accessibility; ux-audit.md P23).
     @ScaledMetric(relativeTo: .headline) private var sendButtonSize: CGFloat = 44
     @FocusState private var inputFocused: Bool
+    @State private var showingStatus = false
 
     var body: some View {
         NavigationStack {
@@ -39,7 +40,8 @@ struct CoachView: View {
                             MessageView(
                                 message: message,
                                 onStart: { plan in launcher.start(plan, in: modelContext) },
-                                onRetry: retryAction(for: message)
+                                onRetry: retryAction(for: message),
+                                onSayMore: sayMoreAction(for: message)
                             )
                             .id(message.id)
                         }
@@ -83,6 +85,14 @@ struct CoachView: View {
                         coach.newConversation()
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("More", systemImage: "ellipsis.circle") {
+                        Button("Coach status", systemImage: "waveform.path.ecg") { showingStatus = true }
+                    }
+                }
+            }
+            .sheet(isPresented: $showingStatus) {
+                CoachDiagnosticsView(diagnostics: coach.diagnostics)
             }
             .tabToolbar()
             .safeAreaInset(edge: .bottom) { inputBar }
@@ -99,7 +109,7 @@ struct CoachView: View {
 
     /// What the coach knows and where it runs; the title is in the navigation bar.
     private var modeLine: some View {
-        Text("Knows today's data and your gym · on-device")
+        Text("Answers from your data first · on-device model for the rest")
             .font(.subheadline)
             .foregroundStyle(Theme.secondaryText)
     }
@@ -221,6 +231,12 @@ struct CoachView: View {
         return { Task { await send(text) } }
     }
 
+    /// For a data-backed reply: asks the on-device model to say more about it.
+    private func sayMoreAction(for message: CoachModel.ChatMessage) -> (() -> Void)? {
+        guard message.canSayMore, OnDeviceCoach.availabilityMessage == nil else { return nil }
+        return { Task { await coach.sayMore(about: message) } }
+    }
+
     private func send(_ text: String) async {
         var plan: PlannedWorkout?
         if CoachModel.isTrainingQuestion(text) && !CoachModel.wantsCardio(text) {
@@ -241,18 +257,82 @@ struct CoachView: View {
                                                   firstSlots: resolvedFocus.slots, gym: gym.profile).minutes
             )
         }
-        var snapshot = CoachSnapshot.make(
-            metrics: metrics, sessions: sessions, unit: settings.weightUnit,
-            gymSummary: gym.isConfigured ? gym.planner.gymSummary() : nil, plan: plan
-        )
-        snapshot.medications = medications.coachSummary
-        snapshot.labs = labs.coachSummary
-        snapshot.checkIns = checkIns.coachSummary
-        snapshot.name = settings.name.isEmpty ? nil : settings.name
-        snapshot.weather = conditions.coachSummary(place: settings.placeName)
-        snapshot.weeklyPlan = weeklyPlans.coachSummary(sessions: sessions, extra: metrics.recentTrainingDays)
-        snapshot.health = healthSummary
-        await coach.send(text, snapshot: snapshot, plan: plan)
+        await coach.send(text, facts: makeFacts(plan: plan), plan: plan)
+    }
+}
+
+extension CoachView {
+    /// Today's numbers as plain values for `CoachAnswers` (the answers the app
+    /// gives without the model) and for the facts an open question gets.
+    func makeFacts(plan: PlannedWorkout?) -> CoachFacts {
+        var f = CoachFacts()
+        let calendar = Calendar.current
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: .now) ?? .now
+        f.goals = settings.goalsSet ? settings.goals : nil
+        f.restMode = settings.isRestMode
+
+        f.strain = metrics.strain?.strain
+        f.targetStrain = metrics.targetStrain
+        f.yesterdayStrain = metrics.yesterdayStrain
+        f.cardioLoad = metrics.strain?.cardioLoad
+        f.liftingLoad = metrics.strain?.liftingLoad
+        f.dayGuidance = metrics.dayGuidance
+        f.hrvBelowNormal = metrics.trainEasyToday
+
+        f.recovery = metrics.recovery?.score
+        f.recoveryCalibrated = metrics.recovery?.isCalibrated ?? true
+        f.recoveryContributors = metrics.recoveryContributors(drinksLastNight: checkIns.evening(on: yesterday)?.drinks, illness: nil)
+        f.hrv = metrics.hrv
+        f.hrvChangePercent = metrics.recovery?.hrvChangePercent
+        f.restingHeartRate = metrics.restingHeartRate
+        f.restingHeartRateChange = metrics.recovery?.restingHeartRateChange
+
+        f.sleepScore = metrics.sleep?.score
+        f.sleepHours = metrics.sleep.map { $0.asleep / 3600 }
+        f.sleepNeedHours = metrics.sleep.map { $0.need / 3600 }
+        f.deepHours = metrics.sleep.map { $0.deep / 3600 }
+        f.remHours = metrics.sleep.map { $0.rem / 3600 }
+        f.sleepInterruptions = metrics.sleep?.interruptions
+        f.sleepDebtHours = metrics.sleepDebt?.hours
+
+        // The same numbers as Today's calorie card; hidden with the Settings switch.
+        if !settings.hideCalories {
+            f.caloriesEaten = metrics.calories?.eaten ?? metrics.nutritionToday?.calories
+            f.calorieTarget = metrics.calorieTarget
+            f.caloriesProjectedBurn = metrics.calories?.projected ?? metrics.energy?.projectedTotal
+        }
+        f.proteinGrams = metrics.nutritionToday?.proteinGrams
+        f.proteinTargetGrams = metrics.proteinTarget
+        f.carbsGrams = metrics.nutritionToday?.carbsGrams
+        f.bodyMassKg = metrics.bodyMassKg
+        f.trainedToday = !metrics.activities.isEmpty
+
+        if let plan {
+            f.plannedSession = CoachFacts.PlannedSession(
+                title: plan.title,
+                minutes: plan.estimatedMinutes ?? WorkoutPlanner.estimatedMinutes(plan.exercises),
+                exerciseCount: plan.exercises.count,
+                rationale: plan.rationale,
+                targetRPE: plan.targetRPE
+            )
+        }
+        f.gymConfigured = gym.isConfigured
+        let finished = sessions.filter { !$0.isActive }
+        let cutoff = calendar.date(byAdding: .day, value: -14, to: .now) ?? .now
+        f.workoutsLast14Days = finished.filter { $0.startedAt >= cutoff }.count
+        if let last = finished.map(\.startedAt).max() {
+            f.daysSinceLastWorkout = calendar.dateComponents([.day], from: calendar.startOfDay(for: last), to: calendar.startOfDay(for: .now)).day
+        }
+
+        var extras = healthSummary.split(separator: "\n").map(String.init)
+        if let weather = conditions.coachSummary(place: settings.placeName) { extras.append(weather) }
+        if let plan = weeklyPlans.coachSummary(sessions: sessions, extra: metrics.recentTrainingDays) { extras.append(plan) }
+        if let notes = checkIns.coachSummary { extras.append(contentsOf: notes.split(separator: "\n").map(String.init)) }
+        if gym.isConfigured { extras.append(gym.planner.gymSummary()) }
+        f.extraLines = extras
+        f.medicationLines = medications.coachSummary
+        f.labLines = labs.coachSummary ?? []
+        return f
     }
 }
 
@@ -410,6 +490,8 @@ private struct MessageView: View {
     let onStart: (PlannedWorkout) -> Void
     /// Resends the question behind an error bubble; nil when there is none.
     var onRetry: (() -> Void)? = nil
+    /// Asks the model to say more about a data-backed reply; nil when not offered.
+    var onSayMore: (() -> Void)? = nil
     /// The coach avatar scales with Dynamic Type (HIG Typography; ux-audit.md P22).
     @ScaledMetric(relativeTo: .subheadline) private var avatarSize: CGFloat = 32
 
@@ -435,6 +517,12 @@ private struct MessageView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     CoachReplyText(text: message.text)
                         .textSelection(.enabled)
+                    if let action = message.action, !action.isEmpty {
+                        ActionLine(text: action)
+                    }
+                    if message.source == .data {
+                        ReplyFooter(onSayMore: onSayMore)
+                    }
                     if let plan = message.plan {
                         PlanCard(plan: plan, onStart: onStart)
                     }
@@ -455,6 +543,47 @@ private struct MessageView: View {
             }
             .padding(12)
             .background(Theme.recoveryLow.opacity(0.1), in: .rect(cornerRadius: 14))
+        }
+    }
+}
+
+/// One suggested next step under a reply.
+private struct ActionLine: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "arrow.turn.down.right")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.lifting)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Next step: \(text)")
+    }
+}
+
+/// "From your data" caption under a reply the app computed itself, with the
+/// optional "Say more" that hands it to the on-device model to explain.
+private struct ReplyFooter: View {
+    var onSayMore: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Label("From your data", systemImage: "checkmark.seal")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+            if let onSayMore {
+                Button("Say more", systemImage: "text.bubble", action: onSayMore)
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .tint(Theme.sleep)
+                    .accessibilityHint("Asks the on-device model to explain this answer")
+            }
         }
     }
 }

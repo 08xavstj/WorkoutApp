@@ -1,23 +1,40 @@
 import Foundation
 import AppCore
 
-/// Chat state for the Coach tab. Every message goes to Apple's on-device
-/// model (`OnDeviceCoach`); nothing leaves the iPhone.
+/// Chat state for the Coach tab. Questions the app can answer from its own
+/// numbers (`CoachIntent.question` → `CoachAnswers`) are answered instantly
+/// without the model; open questions go to Apple's on-device model
+/// (`OnDeviceCoach`), and when it declines or fails, the nearest data-backed
+/// answer stands in. Nothing leaves the iPhone.
 @Observable
 final class CoachModel {
     struct ChatMessage: Identifiable, Equatable {
         enum Role { case user, coach, error }
+        /// Where a coach reply came from: the app's own numbers, or the model.
+        enum Source { case data, model }
         let id = UUID()
         let role: Role
         let text: String
+        var source: Source = .model
+        /// One suggested next step under the reply.
+        var action: String?
         /// A workout the trainer built for this reply, shown as a card with Start.
         var plan: PlannedWorkout?
+        /// The facts the reply was built from, so "Say more" can reuse them.
+        var facts: CoachFacts?
+        /// "Say more" was used (or isn't offered) for this reply.
+        var expanded = false
+
+        /// A data-backed reply the model can be asked to explain.
+        var canSayMore: Bool { role == .coach && source == .data && facts != nil && !expanded }
     }
 
     private(set) var messages: [ChatMessage] = []
     private(set) var isThinking = false
     /// Set by other tabs (e.g. "Ask coach" on Today) to pre-fill a question.
     var pendingQuestion: String?
+    /// What the model did last, for the Coach status sheet.
+    private(set) var diagnostics = OnDeviceCoach.Diagnostics()
 
     @ObservationIgnored private let onDevice = OnDeviceCoach()
 
@@ -76,18 +93,67 @@ final class CoachModel {
         return (focus, minutes)
     }
 
-    func send(_ text: String, snapshot: CoachSnapshot, plan: PlannedWorkout? = nil) async {
+    /// Answers `text`: from the app's numbers when `CoachIntent` recognises
+    /// the question, otherwise from the on-device model, with a data-backed
+    /// fallback when the model declines or fails.
+    func send(_ text: String, facts: CoachFacts, plan: PlannedWorkout? = nil) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isThinking else { return }
         messages.append(ChatMessage(role: .user, text: trimmed))
+
+        // 1. Deterministic: instant, never errors.
+        if let question = CoachIntent.question(trimmed), let answer = CoachAnswers.answer(for: question, facts: facts) {
+            onDevice.remember(question: trimmed, answer: answer.text)
+            diagnostics = onDevice.diagnostics
+            messages.append(ChatMessage(role: .coach, text: answer.text, source: .data, action: answer.action, plan: plan, facts: facts))
+            return
+        }
+
+        // 2. Open question: the model, with a small prompt.
         isThinking = true
         defer { isThinking = false }
-
+        let topic = CoachIntent.topic(trimmed)
         do {
-            let reply = try await onDevice.reply(to: trimmed, snapshot: snapshot, hasPlan: plan != nil)
-            messages.append(ChatMessage(role: .coach, text: reply, plan: plan))
+            let reply = try await onDevice.openAnswer(to: trimmed, topic: topic, facts: facts)
+            diagnostics = onDevice.diagnostics
+            messages.append(ChatMessage(role: .coach, text: reply.answer, source: .model, action: reply.action, plan: plan, facts: facts))
         } catch {
+            diagnostics = onDevice.diagnostics
+            // 3. The nearest answer from the data, when there is one.
+            if let fallback = CoachAnswers.fallback(for: topic, facts: facts) {
+                let lead = Self.fallbackLead(for: error)
+                messages.append(ChatMessage(role: .coach, text: lead + " " + fallback.text, source: .data,
+                                            action: fallback.action, plan: plan, facts: facts, expanded: true))
+            } else {
+                messages.append(ChatMessage(role: .error, text: error.localizedDescription))
+            }
+        }
+    }
+
+    /// Asks the model to say more about a data-backed reply, as a new reply under it.
+    func sayMore(about message: ChatMessage) async {
+        guard !isThinking, let index = messages.firstIndex(where: { $0.id == message.id }),
+              message.canSayMore, let facts = message.facts else { return }
+        let question = messages[..<index].last { $0.role == .user }?.text ?? "Say more about this."
+        messages[index].expanded = true
+        isThinking = true
+        defer { isThinking = false }
+        do {
+            let text = try await onDevice.expand(question: question, answer: message.text,
+                                                 topic: CoachIntent.topic(question), facts: facts)
+            diagnostics = onDevice.diagnostics
+            messages.append(ChatMessage(role: .coach, text: text, source: .model, facts: nil, expanded: true))
+        } catch {
+            diagnostics = onDevice.diagnostics
             messages.append(ChatMessage(role: .error, text: error.localizedDescription))
         }
+    }
+
+    /// One short sentence before a fallback answer, saying why the model didn't answer.
+    static func fallbackLead(for error: Error) -> String {
+        if OnDeviceCoach.isRefusal(error) {
+            return "Apple's on-device model declined that one, but here's what your data says:"
+        }
+        return "The on-device model couldn't take that one, but here's what your data says:"
     }
 }
