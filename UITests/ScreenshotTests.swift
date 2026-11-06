@@ -234,7 +234,8 @@ final class ScreenshotTests: XCTestCase {
                     capture(app, "settings-lift-goal-editor", pages: 1)
                     back(app)
                 }
-                back(app)
+                // Goals opens as its own sheet (Cancel/Save); the rest are pushed.
+                if page.name == "goals" { dismissSheet(app) } else { back(app) }
             }
         }
         if tap(app, ["What's RPE?", "RPE guide", "How RPE works"], name: "Settings RPE guide") {
