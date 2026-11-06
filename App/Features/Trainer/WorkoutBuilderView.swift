@@ -146,7 +146,7 @@ struct WorkoutBuilderView: View {
     private var autoReason: String {
         if checkIns.suggestedFocus != nil { return "because of the soreness you reported this morning" }
         if muscles.suggestedFocus != nil { return "to rest the muscles that are still recovering" }
-        if let coverage { return coverage.reason }
+        if let reason = coverage?.reason { return reason }
         return "based on what you've trained recently"
     }
 
