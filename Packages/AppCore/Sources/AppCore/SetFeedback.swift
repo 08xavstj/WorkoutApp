@@ -20,8 +20,11 @@ public enum SetFeedback {
         case heavier(by: Double)
         /// Same weight as last time, more reps.
         case moreReps(Int)
-        /// Hit the plan's target reps.
+        /// Hit the plan's target reps at an effort that was logged (RPE).
         case matchedPlan
+        /// Hit the target reps, effort not logged: the reps are known, whether
+        /// it matched the plan's reps in reserve isn't.
+        case hitTarget(reps: Int)
         /// Same weight and reps as last time (no plan to compare with).
         case matchedLastTime
 
@@ -42,6 +45,8 @@ public enum SetFeedback {
                 return "+\(reps) rep\(reps == 1 ? "" : "s") on last time"
             case .matchedPlan:
                 return "Matched the plan"
+            case let .hitTarget(reps):
+                return "\(reps) rep\(reps == 1 ? "" : "s") ✓"
             case .matchedLastTime:
                 return "Same as last time"
             }
@@ -83,7 +88,7 @@ public enum SetFeedback {
                 return .moreReps(logged.reps - last.reps)
             }
         }
-        if targetReps != nil { return .matchedPlan }
+        if targetReps != nil { return logged.rpe == nil ? .hitTarget(reps: logged.reps) : .matchedPlan }
         if let last, abs(logged.weight - last.weight) <= 0.01, logged.reps == last.reps {
             return .matchedLastTime
         }

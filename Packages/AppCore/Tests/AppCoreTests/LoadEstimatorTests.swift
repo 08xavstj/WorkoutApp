@@ -85,7 +85,10 @@ struct LoadEstimatorTests {
         #expect(plan.exercises.first?.progressionNote == "+5 lb from last time: you hit 8 reps at RPE 7")
         // Held at the same weight until the reps are there.
         let held = ExerciseHistory(bestEstimatedOneRepMax: 32, lastWeight: 20, lastReps: 12, lastRPE: 9, lastDate: .now)
-        #expect(planner.progressionNote(load: 20, history: held, reps: 10...12) == "Same weight as last time: get 12 reps to move up")
+        // Changed with double progression: the note names today's rep target;
+        // 20 → 25 lb dumbbells is a big jump, so the top moves to 14.
+        #expect(planner.progressionNote(load: 20, history: held, reps: 10...12, loadKind: .dumbbell)
+                == "Same weight, aim for 13 reps; it moves up at 14")
         let lighter = ExerciseHistory(bestEstimatedOneRepMax: 234, lastWeight: 185, lastReps: 8, lastRPE: nil, lastDate: .now)
         #expect(planner.progressionNote(load: 175, history: lighter, reps: 6...8) == "−10 lb from last time for today's effort")
         #expect(planner.progressionNote(load: 190, history: lighter, reps: 6...8) == "+5 lb from last time: you hit 8 reps")

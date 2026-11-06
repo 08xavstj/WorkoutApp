@@ -1,5 +1,13 @@
 import Foundation
 
+/// A workout's elapsed time: "4:07" under an hour, "1:04:07" after. The
+/// same on the workout screen, the Today bar and the Apple Watch.
+nonisolated func workoutElapsedText(_ seconds: TimeInterval) -> String {
+    let whole = seconds.isFinite ? Int(max(0, seconds).rounded(.down)) : 0
+    let pattern: Duration.TimeFormatStyle.Pattern = whole >= 3600 ? .hourMinuteSecond : .minuteSecond
+    return Duration.seconds(whole).formatted(.time(pattern: pattern))
+}
+
 /// The live gym session as the Apple Watch sees it. The phone (`WatchSync`)
 /// sends one whenever the session changes; the Watch shows it and sends
 /// `WatchCommand`s back. Weights stay in kilograms; `unit` says how to show

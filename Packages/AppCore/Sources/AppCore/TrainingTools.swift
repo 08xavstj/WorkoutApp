@@ -120,8 +120,9 @@ extension WorkoutPlanner {
                 // template's own sets and reps stay as you set them.
                 let compound = ExerciseCatalog.slot(for: item.exerciseID)?.isCompound ?? false
                 let mode = progressionMode(for: item.exerciseID, kind: kind, compound: compound, at: past.lastWeight)
-                if let kind, let suggested = suggestedLoad(history: past, reps: item.reps, rpe: rpe, kind: kind, mode: mode) {
-                    planned.load = suggested
+                if let kind, let suggested = progression(history: past, reps: item.reps, rpe: rpe, kind: kind, mode: mode) {
+                    planned.load = suggested.load
+                    planned.targetReps = suggested.targetReps
                     suggestedFrom = past
                     suggestedMode = mode
                 } else if past.lastWeight > 0 {
@@ -134,6 +135,8 @@ extension WorkoutPlanner {
             if let load = planned.load, let kind {
                 if let suggestedFrom {
                     planned.note = notes(load: load, history: suggestedFrom, reps: item.reps, rpe: rpe, kind: kind, mode: suggestedMode)
+                    planned.progressionNote = progressionNote(load: load, history: suggestedFrom, reps: item.reps,
+                                                              mode: suggestedMode, rpe: rpe, loadKind: kind)
                 } else {
                     planned.note = loadNote(load: load, kind: kind)
                 }

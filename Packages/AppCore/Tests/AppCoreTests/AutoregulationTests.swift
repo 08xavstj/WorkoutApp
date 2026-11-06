@@ -113,7 +113,10 @@ struct ProgressionModeTests {
     @Test func progressionNotesFollowTheMode() {
         let planner = WorkoutPlanner(gym: gym)
         let held = ExerciseHistory(bestEstimatedOneRepMax: 32, lastWeight: 20, lastReps: 12, lastRPE: 9, lastDate: .now)
-        #expect(planner.progressionNote(load: 20, history: held, reps: 10...12) == "Same weight as last time: get 12 reps to move up")
+        // Changed with double progression: the note names today's rep target;
+        // 20 → 25 lb dumbbells is a big jump, so the top moves to 14.
+        #expect(planner.progressionNote(load: 20, history: held, reps: 10...12, loadKind: .dumbbell)
+                == "Same weight, aim for 13 reps; it moves up at 14")
         // Changed with real rep and set progression: the note names today's target.
         #expect(planner.progressionNote(load: 20, history: held, reps: 10...12, mode: .reps)
                 == "Same weight as last time: aim for 13 reps; it moves up at 14")

@@ -25,7 +25,7 @@ struct ScoresCard: View {
             ScoreRings(onSelect: { sheet = $0 })
             MinorIllnessLine()
             Divider().overlay(Theme.separator)
-            CoachingSection(askCoach: askCoach)
+            CoachingSection(askCoach: askCoach, workoutRunning: sessions.contains(where: \.isActive))
             ScoresPrimaryButton(sessions: sessions)
         }
         .card()
@@ -159,6 +159,8 @@ private struct ScoreRings: View {
 /// The coaching line, this morning's check-in advice, and "Ask why".
 private struct CoachingSection: View {
     let askCoach: (String) -> Void
+    /// A workout is in progress: the line says so instead of offering another.
+    var workoutRunning = false
 
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(CheckInStore.self) private var checkIns
@@ -167,7 +169,9 @@ private struct CoachingSection: View {
     private static let question = "How should I train today, and why?"
 
     var body: some View {
-        let coaching = TrainerSuggestions.coachingLine(metrics: metrics)
+        let coaching: (text: String, highlight: String?) = workoutRunning
+            ? ("Workout in progress. Resume it below.", nil)
+            : TrainerSuggestions.coachingLine(metrics: metrics)
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center) {
                 Label("Coaching", systemImage: "sparkle")
@@ -240,7 +244,10 @@ private struct ScoresPrimaryButton: View {
     }
 
     var body: some View {
-        if let choice {
+        if let running = sessions.first(where: \.isActive) {
+            // A workout in progress: resume it, never a second one (`WorkoutLauncher.running`).
+            ResumeWorkoutButton(session: running) { launcher.activeSession = running }
+        } else if let choice {
             Button {
                 launcher.openBuilder(focus: choice.focus, minutes: choice.minutes)
             } label: {
@@ -321,5 +328,32 @@ private struct ScoresPrimaryButton: View {
         let weekday = Calendar.current.component(.weekday, from: .now)
         let done = plans.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
         return done.contains(weekday) ? nil : today
+    }
+}
+
+/// "Resume Upper Body · 1:11" while a workout runs: the one button goes back
+/// to it instead of offering a second start.
+private struct ResumeWorkoutButton: View {
+    let session: WorkoutSession
+    let resume: () -> Void
+
+    var body: some View {
+        Button(action: resume) {
+            TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
+                let elapsed = workoutElapsedText(context.date.timeIntervalSince(session.startedAt))
+                Label("Resume \(session.name) · \(elapsed)", systemImage: "play.fill")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .foregroundStyle(Color.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .padding(.horizontal, 12)
+                    .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing),
+                                in: .capsule)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the workout in progress")
     }
 }

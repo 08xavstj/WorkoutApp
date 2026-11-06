@@ -196,7 +196,8 @@ nonisolated struct CoachSnapshot: Codable, Sendable, Equatable {
     static func describe(_ plan: PlannedWorkout) -> String {
         let lines = plan.exercises.map { exercise in
             let load = exercise.load.map { " at \($0.formatted(.number.precision(.fractionLength(0...2)))) \(plan.unit.rawValue)" } ?? ""
-            return "- \(exercise.name): \(exercise.sets) x \(exercise.reps.lowerBound)-\(exercise.reps.upperBound) @ RPE \(exercise.rpe.formatted())\(load)"
+            let today = exercise.targetReps.map { ", aim for \($0)" } ?? ""
+            return "- \(exercise.name): \(exercise.sets) x \(exercise.reps.lowerBound)-\(exercise.reps.upperBound)\(today) @ RPE \(exercise.rpe.formatted())\(load)"
         }
         let minutes = plan.estimatedMinutes ?? WorkoutPlanner.estimatedMinutes(plan.exercises)
         return (["\(plan.title), about \(minutes) min:"] + lines).joined(separator: "\n")

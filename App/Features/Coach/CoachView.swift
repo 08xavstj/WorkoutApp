@@ -753,9 +753,11 @@ private struct PlanCard: View {
     }
 
     private func detail(_ exercise: PlannedExercise) -> String {
-        var text = "\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) @ RPE \(exercise.rpe.formatted())"
+        // The same words as the builder and the live workout (`Prescription`).
+        var text = Prescription.sets(exercise.sets, repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound,
+                                     targetReps: exercise.targetReps, rpe: exercise.rpe)
         if let load = exercise.load {
-            text += " · \(load.formatted(.number.precision(.fractionLength(0...2)))) \(plan.unit.rawValue)"
+            text += " · " + Prescription.load(load, unit: plan.unit.rawValue, kind: exercise.loadKind)
         }
         return text
     }

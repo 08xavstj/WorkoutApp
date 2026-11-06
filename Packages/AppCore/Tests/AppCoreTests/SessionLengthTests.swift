@@ -87,8 +87,12 @@ struct SessionLengthTests {
         #expect(!plan.rationale.isEmpty)
         #expect(plan.rationale.contains("Pull Day based on what you've trained recently"))
         #expect(plan.rationale.contains("Recovery 50%"))
-        // Effort is said as reps in reserve, like the sets (RPE 7.5 = 2-3 in reserve).
-        #expect(plan.rationale.contains("2-3 in reserve"))
+        // Effort is said as reps in reserve, like the sets. Changed on purpose: the
+        // range the exercises ask for (big lifts RPE 7.5, small ones 8.5 → 1-3),
+        // not the session's RPE 7.5 alone ("2-3"), which no small lift used.
+        let reserve = ReserveText.text(rpes: plan.exercises.map(\.rpe), fallback: plan.targetRPE)
+        #expect(reserve == "1-3 in reserve")
+        #expect(plan.rationale.contains(reserve))
         #expect(plan.rationale.contains("45 min"))
         let week3 = TrainingBlock.weekState(3, style: .balanced, length: 5)
         let blocked = planner.plan(focus: .legs, minutes: 60, recovery: 90, history: [:], block: week3)

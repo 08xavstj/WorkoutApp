@@ -17,4 +17,16 @@ public enum ReserveText {
     public static func text(rpe: Double) -> String {
         text(10 - rpe)
     }
+
+    /// The range the sets actually ask for, from each one's planned RPE:
+    /// "3 in reserve" when they agree, "2-3 in reserve" when big and small
+    /// lifts differ. `fallback` (an RPE) when there are none.
+    public static func text(rpes: [Double], fallback: Double) -> String {
+        let reserves = rpes.map { (max(0, 10 - $0) * 2).rounded() / 2 }
+        guard let least = reserves.min(), let most = reserves.max() else { return text(rpe: fallback) }
+        let low = Int(least.rounded(.down))
+        let high = Int(most.rounded(.up))
+        if high == 0 { return "to failure" }
+        return low == high ? "\(low) in reserve" : "\(low)-\(high) in reserve"
+    }
 }

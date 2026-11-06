@@ -462,7 +462,8 @@ struct WorkoutBuilderView: View {
             Text(plan.title)
                 .font(.title.weight(.bold))
                 .foregroundStyle(Theme.primaryText)
-            planStats(minutes: estimated, rpe: plan.targetRPE, landsAt: landsAt)
+            planStats(minutes: estimated, plan: plan, landsAt: landsAt,
+                      inRange: metrics.targetStrain.map { $0.contains(landsAt) } ?? false)
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
                 let line: String = inRange
@@ -526,17 +527,21 @@ struct WorkoutBuilderView: View {
 
     /// Time, effort and strain side by side; stacked at accessibility text
     /// sizes so none is cut off (ux-audit.md 4.8, P22).
-    /// Effort is reps in reserve, the same words the sets use; strain is
-    /// where today's total lands after the session, not the gain.
-    private func planStats(minutes: Int, rpe: Double, landsAt: Double) -> some View {
+    /// Effort is reps in reserve, the same words the sets use, and the range
+    /// the exercises actually ask for (not the session's number); strain is
+    /// where today's total lands after the session, not the gain: green
+    /// inside today's range.
+    private func planStats(minutes: Int, plan: PlannedWorkout, landsAt: Double, inRange: Bool) -> some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 18))
-        let reserve = ReserveText.text(rpe: rpe).replacingOccurrences(of: " in reserve", with: "")
+        let reserve = ReserveText.text(rpes: plan.exercises.map(\.rpe), fallback: plan.targetRPE)
+            .replacingOccurrences(of: " in reserve", with: "")
         return layout {
             StatView(label: "Time", value: "~\(minutes) min")
             StatView(label: "In reserve", value: reserve)
-            StatView(label: "Strain after", value: "≈\(strainText(landsAt))", color: Theme.strainTextColor)
+            StatView(label: "Strain after", value: "≈\(strainText(landsAt))",
+                     color: inRange ? Theme.recoveryHighText : Theme.strainTextColor)
         }
     }
 
@@ -757,15 +762,16 @@ struct PlannedExerciseRow: View {
         .accessibilityHint("Swap it, mark equipment you don't have, or never plan it again")
     }
 
-    /// "3 × 6–8 · 2 in reserve": sets, reps and effort.
+    /// "3 × 7 · 2 in reserve": sets, today's reps (the range with no rep
+    /// target yet) and effort, as the live workout says it (`Prescription`).
     private var prescription: String {
-        let reserve = ReserveText.text(rpe: exercise.rpe)
-        return "\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · \(reserve)"
+        Prescription.sets(exercise.sets, repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound,
+                          targetReps: exercise.targetReps, rpe: exercise.rpe)
     }
 
-    /// "60 kg", on its own line so the prescription never wraps mid-phrase.
+    /// "60 kg" or "24 kg per hand", on its own line so the prescription never wraps mid-phrase.
     private var loadText: String? {
-        exercise.load.map { "\($0.formatted(.number.precision(.fractionLength(0...2)))) \(unit.rawValue)" }
+        exercise.load.map { Prescription.load($0, unit: unit.rawValue, kind: exercise.loadKind) }
     }
 
     private var summary: some View {
@@ -918,10 +924,8 @@ struct PainLogView: View {
     var body: some View {
         Form {
             PainQuestions(pains: $draft, header: "Where?")
-            Section("Where the rule comes from") {
-                Text(PainGuard.sourceText)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.secondaryText)
+            Section {
+                EvidenceDisclosure(points: [PainGuard.sourceText], title: "Where the rule comes from")
             }
             if !exclusions.items.isEmpty {
                 neverAgainSection

@@ -275,11 +275,13 @@ final class ScreenshotTests: XCTestCase {
         sleep(3)
         dismissSystemAlerts()
         capture(app, "active-workout", pages: 1)
-        // One warm-up, then two working sets (the first "Mark" buttons are warm-ups).
+        // The first warm-up from its editor, then set 1 by its circle (which
+        // skips the other warm-ups and asks "Reps left?"), then set 2 from the
+        // editor. The set being edited has no circle: the editor replaces its row.
         let ticks: [(keys: [String], name: String)] = [
-            (["Mark warm-up set"], "Tick warm-up"),
+            (["complete-set", "Mark warm-up set"], "Tick warm-up"),
             (["Mark set 1 done", "Mark set "], "Tick set 1"),
-            (["Mark set 2 done", "Mark set "], "Tick set 2"),
+            (["complete-set", "Mark set 2 done"], "Tick set 2"),
         ]
         for tick in ticks {
             if tap(app, tick.keys, name: tick.name) {
@@ -291,7 +293,12 @@ final class ScreenshotTests: XCTestCase {
         capture(app, "active-workout-sets", pages: 2)
         if tap(app, ["workout-options", "Workout options"], name: "Workout options", scroll: false) {
             capture(app, "active-workout-menu", pages: 1)
-            if !tap(app, ["Minimize"], name: "Minimize workout", scroll: false) { dismissSheet(app) }
+            // Close the menu (a tap outside it), then the chevron minimizes.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).tap()
+            sleep(1)
+        }
+        if !tap(app, ["workout-minimize", "Minimize"], name: "Minimize workout", type: .button, scroll: false) {
+            dismissSheet(app)
         }
         sleep(2)
         openTab(app, "Today")

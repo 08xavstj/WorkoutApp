@@ -151,6 +151,24 @@ final class WorkoutLauncher {
     /// Set when the Apple Watch asks to finish (`WatchSync`): the workout
     /// screen opens its finish sheet and clears it.
     var pendingFinish = false
+    /// The workout in progress, kept current by the app from its sessions. Every
+    /// start (Today, Log, Fitness, Coach, the Watch) resumes it instead of
+    /// starting a second one.
+    var running: WorkoutSession?
+
+    /// The running workout, if it still exists and hasn't ended.
+    private var resumable: WorkoutSession? {
+        guard let running, !running.isDeleted, running.modelContext != nil, running.isActive else { return nil }
+        return running
+    }
+
+    /// Opens the workout in progress instead of starting another; false when none runs.
+    private func resumeIfRunning() -> Bool {
+        guard let resumable else { return false }
+        builderRequest = nil
+        activeSession = resumable
+        return true
+    }
 
     struct BuilderRequest: Identifiable, Equatable {
         let id = UUID()
@@ -159,6 +177,7 @@ final class WorkoutLauncher {
     }
 
     func openBuilder(focus: WorkoutFocus? = nil, minutes: Int? = nil) {
+        if resumeIfRunning() { return }
         builderRequest = BuilderRequest(focus: focus, minutes: minutes)
     }
 
@@ -171,6 +190,7 @@ final class WorkoutLauncher {
     /// weights you set are used as they are; missing weights are suggested
     /// from your history (loadable with your gym's plates where it knows how).
     func start(_ template: WorkoutTemplate, gym: GymStore, sessions: [WorkoutSession], library: ExerciseLibrary, in context: ModelContext) {
+        if resumeIfRunning() { return }
         let unit = gym.profile.unit
         let history = LiftHistory.make(from: sessions, unit: unit)
         let items = template.orderedExercises.map { exercise in
@@ -190,6 +210,7 @@ final class WorkoutLauncher {
     }
 
     private func start(name: String, exercises: [PlannedExercise], unit: LoadUnit, in context: ModelContext) {
+        if resumeIfRunning() { return }
         let session = WorkoutSession(name: name)
         context.insert(session)
         for (order, planned) in exercises.enumerated() {
@@ -205,7 +226,7 @@ final class WorkoutLauncher {
                 context.insert(set)
             }
             for index in 0..<max(1, planned.sets) {
-                let set = SetLog(order: warmUps.count + index, weightKg: weightKg, reps: planned.reps.upperBound, rpe: nil)
+                let set = SetLog(order: warmUps.count + index, weightKg: weightKg, reps: planned.repsToday, rpe: nil)
                 set.exercise = log
                 context.insert(set)
             }
@@ -224,15 +245,18 @@ final class WorkoutLauncher {
         SupersetRegistry.save(SupersetRegistry.groups(in: exercises), for: session.startedAt)
         SessionTargets.save(exercises, for: session.startedAt, unit: unit)
         try? context.save()
+        running = session
         activeSession = session
     }
 
     func startEmpty(in context: ModelContext) {
+        if resumeIfRunning() { return }
         let hour = Calendar.current.component(.hour, from: .now)
         let name = hour < 12 ? "Morning Workout" : (hour < 17 ? "Afternoon Workout" : "Evening Workout")
         let session = WorkoutSession(name: name)
         context.insert(session)
         try? context.save()
+        running = session
         activeSession = session
     }
 }

@@ -174,7 +174,7 @@ struct WatchElapsedLine: View {
         if let start = model.clockStart {
             TimelineView(.periodic(from: start, by: 1)) { context in
                 HStack {
-                    Text(watchClock(context.date.timeIntervalSince(start)))
+                    Text(workoutElapsedText(context.date.timeIntervalSince(start)))
                         .font(.title2.weight(.bold))
                         .monospacedDigit()
                         .foregroundStyle(WatchTheme.strain)

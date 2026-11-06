@@ -592,13 +592,22 @@ struct ScalePicker: View {
                 }
             }
             if let endLabels {
-                HStack {
-                    Text(endLabels.0)
-                    Spacer()
-                    Text(endLabels.1)
+                // On two rows the right end isn't under the top number, so
+                // say it in one line: "0 none · 10 worst".
+                if range.count > columns.count {
+                    Text("\(range.lowerBound) \(endLabels.0.lowercased()) · \(range.upperBound) \(endLabels.1.lowercased())")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack {
+                        Text(endLabels.0)
+                        Spacer()
+                        Text(endLabels.1)
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
                 }
-                .font(.caption2)
-                .foregroundStyle(Theme.secondaryText)
             }
             if let value, labels.count == range.count, range.contains(value) {
                 Text(labels[value - range.lowerBound])

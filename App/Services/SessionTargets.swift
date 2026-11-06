@@ -19,6 +19,15 @@ enum SessionTargets {
         /// The pain cap on this lift's working weight (kg; `PainGuard.loadCapFraction`,
         /// set by the planner). Set-by-set changes never go above it. Nil = no cap.
         var maxLoadKg: Double? = nil
+        /// Today's rep target from double progression (`PlannedExercise.targetReps`):
+        /// one more than last time at the same weight. Nil = the top of the range.
+        var targetReps: Int? = nil
+        /// How the weight moved since last time ("Same weight, aim for 7 reps"),
+        /// shown under the exercise name. Nil without history.
+        var progressionNote: String? = nil
+
+        /// Reps each working set aims for today.
+        var repsToday: Int { targetReps ?? repsHigh }
 
         /// Reps in reserve the plan asks for.
         var targetRIR: Double { max(0, 10 - rpe) }
@@ -38,7 +47,8 @@ enum SessionTargets {
             var loadKg: Double?
             if let unit, let load = exercise.load, load > 0 { loadKg = unit.toKilograms(load) }
             entry[String(index)] = Target(repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound,
-                                          rpe: exercise.rpe, loadKg: loadKg, maxLoadKg: exercise.maxLoadKg)
+                                          rpe: exercise.rpe, loadKg: loadKg, maxLoadKg: exercise.maxLoadKg,
+                                          targetReps: exercise.targetReps, progressionNote: exercise.progressionNote)
         }
         if !entry.isEmpty { all[WatchSession.id(for: sessionStart)] = entry }
         store(all)
@@ -46,6 +56,16 @@ enum SessionTargets {
 
     static func target(for sessionStart: Date, order: Int) -> Target? {
         load()[WatchSession.id(for: sessionStart)]?[String(order)]
+    }
+
+    /// After exercises are reordered: each target moves to its exercise's new
+    /// order (`mapping`: old → new; orders not in it stay).
+    static func remap(for sessionStart: Date, _ mapping: [Int: Int]) {
+        var all = load()
+        let id = WatchSession.id(for: sessionStart)
+        guard let entry = all[id] else { return }
+        all[id] = remapped(entry, mapping)
+        store(all)
     }
 
     private static func load() -> [String: [String: Target]] {
@@ -109,6 +129,17 @@ enum AutoregulationLog {
         }
     }
 
+    /// After exercises are reordered: each entry moves to its exercise's new order.
+    static func remap(for sessionStart: Date, _ mapping: [Int: Int]) {
+        var all = load()
+        let id = WatchSession.id(for: sessionStart)
+        guard let session = all[id] else { return }
+        all[id] = remapped(session, mapping)
+        if let data = try? JSONEncoder().encode(all) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
     private static func load() -> [String: [String: Entry]] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let saved = try? JSONDecoder().decode([String: [String: Entry]].self, from: data) else { return [:] }
@@ -127,13 +158,13 @@ enum LiveSetCoach {
         return blockRIR.map { Double($0) }
     }
 
-    /// Target reps for a set: the planned top of the range, or the reps an
-    /// autoregulation change set from this set on.
+    /// Target reps for a set: today's planned reps (`Target.repsToday`), or
+    /// the reps an autoregulation change set from this set on.
     static func targetReps(for set: SetLog, target: SessionTargets.Target?, entry: AutoregulationLog.Entry?) -> Int? {
         // A drop stage or mini-set is "as many good reps as you can", not a target (`SetKind`).
         if set.kind.isStage { return nil }
         if let entry, entry.isShown, let reps = entry.reps, set.order >= entry.setOrder { return reps }
-        return target?.repsHigh
+        return target?.repsToday
     }
 
     /// After a working set is ticked: compares its RPE with the target and,
@@ -349,4 +380,15 @@ enum LiveSetCoach {
         guard positions[index].isStage else { return nil }
         return sets[index].kind.restBeforeSeconds
     }
+}
+
+/// A per-session entry keyed by exercise order, moved to the new orders
+/// after a reorder (`mapping`: old → new; others keep theirs).
+private func remapped<Value>(_ entry: [String: Value], _ mapping: [Int: Int]) -> [String: Value] {
+    var result: [String: Value] = [:]
+    for (key, value) in entry {
+        let order = Int(key).map { mapping[$0] ?? $0 }
+        result[order.map { String($0) } ?? key] = value
+    }
+    return result
 }

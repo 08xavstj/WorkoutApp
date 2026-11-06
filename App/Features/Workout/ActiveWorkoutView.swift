@@ -37,11 +37,14 @@ struct ActiveWorkoutView: View {
     @State private var scrollTarget: PersistentIdentifier?
     /// The elapsed time in the pinned header; scales with Dynamic Type.
     @ScaledMetric(relativeTo: .title2) private var timerSize: CGFloat = 24
-    /// Strain number inside the ring; scales with Dynamic Type (ux-audit W5).
-    @ScaledMetric(relativeTo: .title2) private var ringValueSize: CGFloat = 26
-    /// At accessibility text sizes the strain ring goes under the timer
-    /// instead of beside it, so neither is squeezed (ux-audit.md 4.8, P22).
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// A working set ticked with the circle, so without an effort rating: the
+    /// rest bar asks "reps left?" once, then runs the set-by-set check.
+    @State private var pendingEffort: PersistentIdentifier?
+    @State private var renaming = false
+    @State private var draftName = ""
+    @State private var reordering = false
+    /// Settings › Rest timer, also offered in the options menu. 0 = automatic.
+    @AppStorage(RestPreferences.globalKey) private var globalRestSeconds = 0
 
     var body: some View {
         NavigationStack {
@@ -61,11 +64,14 @@ struct ActiveWorkoutView: View {
                         }
                 }
             }
-            // Elapsed time and Finish stay pinned at the top, with the PR banner
-            // under them, wherever you've scrolled to.
+            // A solid edge under the pinned header, so the sets don't show through it.
+            .scrollEdgeEffectStyle(.hard, for: .top)
+            // Elapsed time, options and Finish stay pinned at the top with the
+            // one-line session strip and the PR banner under them.
             .safeAreaBar(edge: .top, spacing: 0) {
                 VStack(spacing: 6) {
                     headerBar
+                    sessionStrip
                     if let recordBanner {
                         RecordBannerView(banner: recordBanner) { self.recordBanner = nil }
                             .transition(.move(edge: .top).combined(with: .opacity))
@@ -78,19 +84,7 @@ struct ActiveWorkoutView: View {
             // timer each second, so +15s / Skip on the Lock Screen show up here too.
             .safeAreaBar(edge: .bottom, spacing: 0) {
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    if let ends = RestTimerStore.endsAt {
-                        RestTimerPill(endsAt: ends, length: RestTimerStore.length) { change in
-                            if let change {
-                                RestTimerStore.adjust(by: change)
-                            } else {
-                                RestTimerStore.stop()
-                            }
-                            Task { await WorkoutLiveActivity.refresh() }
-                            WatchSync.shared.update(from: session) // Apple Watch rest timer
-                        }
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                    }
+                    restBar
                 }
             }
             .scrollIndicators(.hidden)
@@ -185,6 +179,22 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text(WatchSync.shared.startProblem ?? "")
             }
+            .alert("Rename workout", isPresented: $renaming) {
+                TextField("Workout name", text: $draftName)
+                Button("Save") {
+                    let name = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty {
+                        session.name = name
+                        try? modelContext.save()
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+            .sheet(isPresented: $reordering) {
+                ReorderExercisesSheet(session: session) { mapping in
+                    applyReorder(mapping)
+                }
+            }
             .alert("Added to saved workouts", isPresented: $savedTemplate) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -203,11 +213,10 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    /// The scrolling part: name and strain, heart rate, the movement warm-up and the exercises.
+    /// The scrolling part: the movement warm-up and the exercises (name,
+    /// sets, heart rate and strain are in the pinned strip).
     private var workoutContent: some View {
         VStack(spacing: 16) {
-            titleBlock
-            LiveHeartRateBar(recorder: recorder, profile: metrics.heartRateProfile)
             // Movement warm-up before the first lift (`WarmUpStore`); the Watch
             // mirrors the current step and can advance it (`WatchSync`).
             WarmUpPhaseCard(sessionStart: session.startedAt) {
@@ -236,11 +245,54 @@ struct ActiveWorkoutView: View {
 
     // MARK: Header
 
-    /// Pinned at the top: options, elapsed time and Finish.
+    /// Pinned at the top: Minimize, elapsed time, the options menu and Finish.
     private var headerBar: some View {
-        HStack {
-            Menu {
-                Button("Minimize", systemImage: "chevron.down") { dismiss() }
+        HStack(spacing: 8) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.down")
+                    .font(.headline)
+                    .foregroundStyle(Theme.primaryText)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.card, in: .circle)
+                    .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Minimize")
+            .accessibilityHint("The workout keeps running")
+            .accessibilityIdentifier("workout-minimize") // UI tests (ScreenshotTests)
+            Spacer(minLength: 4)
+            elapsedClock
+            Spacer(minLength: 4)
+            optionsMenu
+            finishButton
+        }
+        .padding(.top, 4)
+    }
+
+    /// Rename, add or reorder exercises, the rest timer, the Watch and saving;
+    /// Discard on its own at the bottom.
+    private var optionsMenu: some View {
+        Menu {
+            Section {
+                Button("Rename workout", systemImage: "pencil") {
+                    draftName = session.name
+                    renaming = true
+                }
+                Button("Add exercise", systemImage: "plus") { showingPicker = true }
+                if session.exercises.count > 1 {
+                    Button("Reorder exercises", systemImage: "arrow.up.arrow.down") { reordering = true }
+                }
+                Picker(selection: $globalRestSeconds) {
+                    Text("Automatic (from your goal)").tag(0)
+                    ForEach(RestTimer.choices, id: \.self) { seconds in
+                        Text(RestPreferences.label(seconds)).tag(seconds)
+                    }
+                } label: {
+                    Label("Rest timer", systemImage: "timer")
+                }
+                .pickerStyle(.menu)
+            }
+            Section {
                 // Apple Watch records heart rate and calories for this session (`WatchSync`).
                 if WatchSync.shared.watchOwnsWorkout(session) {
                     Button("Recording on Apple Watch", systemImage: "applewatch") {}
@@ -255,46 +307,65 @@ struct ActiveWorkoutView: View {
                     savedTemplate = true
                 }
                 .disabled(session.exercises.isEmpty)
+            }
+            Section {
                 Button("Discard workout", systemImage: "trash", role: .destructive) { showingDiscard = true }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.headline)
-                    .foregroundStyle(Theme.primaryText)
-                    .frame(width: 44, height: 44)
-                    .background(Theme.card, in: .circle)
-                    .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
             }
-            .accessibilityLabel("Workout options")
-            .accessibilityIdentifier("workout-options") // UI tests (ScreenshotTests)
-            Spacer()
-            elapsedClock
-            Spacer()
-            Button {
-                showingFinish = true
-            } label: {
-                Text("Finish")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 11)
-                    .frame(minHeight: 44)
-                    .background(Theme.lifting, in: .capsule)
-            }
-            .buttonStyle(.plain)
-            .disabled(session.workingSets.isEmpty)
-            .opacity(session.workingSets.isEmpty ? 0.5 : 1)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+                .frame(width: 44, height: 44)
+                .background(Theme.card, in: .circle)
+                .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
         }
-        .padding(.top, 4)
+        .accessibilityLabel("Workout options")
+        .accessibilityIdentifier("workout-options") // UI tests (ScreenshotTests)
     }
 
-    /// A red "live" dot and the elapsed time, ticking each second.
+    /// Working sets done and planned (drop stages and mini-sets aren't counted).
+    private var setCounts: (done: Int, total: Int) {
+        let working = session.exercises.flatMap(\.sets).filter { !$0.isWarmup && !$0.kind.isStage }
+        return (working.filter(\.isCompleted).count, working.count)
+    }
+
+    /// Finish is outlined until most working sets are done, then filled, so
+    /// it doesn't call for a tap at the start (app choice: three quarters).
+    private static let finishFilledFraction = 0.75
+
+    private var finishButton: some View {
+        let counts = setCounts
+        let filled = counts.total > 0 && Double(counts.done) >= Double(counts.total) * Self.finishFilledFraction
+        let disabled = session.workingSets.isEmpty
+        return Button {
+            showingFinish = true
+        } label: {
+            Text("Finish")
+                .font(.headline)
+                .foregroundStyle(filled ? Color.white : Theme.liftingText)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 11)
+                .frame(minHeight: 44)
+                .background(filled ? AnyShapeStyle(Theme.lifting) : AnyShapeStyle(Theme.lifting.opacity(0.12)), in: .capsule)
+                .overlay {
+                    if !filled { Capsule().strokeBorder(Theme.lifting.opacity(0.5)) }
+                }
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1)
+        .accessibilityHint(disabled ? "Tick off a working set first" : "")
+    }
+
+    /// A red "live" dot and the elapsed time, ticking each second: m:ss under
+    /// an hour, h:mm:ss after (`workoutElapsedText`, as on Today and the Watch).
     private var elapsedClock: some View {
         TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
             let elapsed = max(0, context.date.timeIntervalSince(session.startedAt))
             HStack(spacing: 6) {
                 Circle().fill(Theme.recoveryLow).frame(width: 8, height: 8)
                     .accessibilityHidden(true)
-                Text(Duration.seconds(elapsed).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2))))
+                Text(workoutElapsedText(elapsed))
                     .font(.system(size: timerSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -306,76 +377,111 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private var titleBlock: some View {
+    /// One line under the header: "Upper Body · 4/21 sets · ♥ 124 Zone 2 · +2% strain".
+    /// Replaces the title, the 112 pt strain ring and the heart-rate card, so
+    /// the sets start high on the screen.
+    private var sessionStrip: some View {
         TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
             let elapsed = max(0, context.date.timeIntervalSince(session.startedAt))
-            titleContent(live: liveStrain(elapsed: elapsed))
+            let counts = setCounts
+            SessionStrip(name: session.name, doneSets: counts.done, totalSets: counts.total,
+                         strainGain: liveStrain(elapsed: elapsed), recorder: recorder,
+                         profile: metrics.heartRateProfile)
         }
     }
 
-    /// Name and progress beside the strain ring (the elapsed time is in the
-    /// pinned header); stacked at accessibility text sizes.
-    private func titleContent(live: Double) -> some View {
-        let stacked = dynamicTypeSize.isAccessibilitySize
-        let layout = stacked
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-            : AnyLayout(HStackLayout(alignment: .center))
-        return layout {
-            titleText
-            if !stacked { Spacer() }
-            strainRing(live)
+    // MARK: Rest bar
+
+    /// The rest timer, and after a working set ticked without an effort
+    /// rating a one-tap "reps left" strip; either can show on its own.
+    @ViewBuilder
+    private var restBar: some View {
+        let ends = RestTimerStore.endsAt
+        let asking = effortSet
+        if ends != nil || asking != nil {
+            VStack(spacing: 8) {
+                if let asking {
+                    RepsLeftStrip(onPick: { left in logEffort(left: left, for: asking) },
+                                  onDismiss: { pendingEffort = nil })
+                }
+                if let ends {
+                    RestTimerPill(endsAt: ends, length: RestTimerStore.length, next: restNextLine) { change in
+                        if let change {
+                            RestTimerStore.adjust(by: change)
+                        } else {
+                            RestTimerStore.stop()
+                        }
+                        Task { await WorkoutLiveActivity.refresh() }
+                        WatchSync.shared.update(from: session) // Apple Watch rest timer
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
         }
     }
 
-    private var titleText: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            TextField("Workout name", text: $session.name)
-                .font(.title.weight(.bold))
-                .foregroundStyle(Theme.primaryText)
-            Text("\(finishedExercises) of \(session.exercises.count) exercises done")
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
-            if session.workingSets.isEmpty {
-                Text("Tick off a working set to finish.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
+    /// "Next: Bench Press · Set 2 of 3 · 82.5 kg × 7" under the rest countdown.
+    private var restNextLine: String? {
+        let next = nextSetText()
+        guard next.exercise != "All sets done" else { return nil }
+        return "Next: \(next.exercise) · \(next.detail)"
+    }
+
+    /// The working set waiting for "reps left", while it's still ticked and unrated.
+    private var effortSet: SetLog? {
+        guard let pendingEffort else { return nil }
+        for exercise in session.exercises {
+            if let set = exercise.sets.first(where: { $0.persistentModelID == pendingEffort }) {
+                return set.isCompleted && set.rpe == nil ? set : nil
             }
         }
+        return nil
     }
 
-    private func strainRing(_ live: Double) -> some View {
-        GradientRing(progress: ringProgress(live), colors: [Theme.strainLight, Theme.strain], lineWidth: 11) {
-            VStack(spacing: 0) {
-                Text("+\(strainText(live))")
-                    .font(.system(size: ringValueSize, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text("strain")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            .foregroundStyle(Theme.primaryText)
+    /// "Reps left" → RPE on the reps-in-reserve scale (RPE = 10 − reps left;
+    /// Zourdos et al., J Strength Cond Res 2016; "3+" logs as 7), then the
+    /// set-by-set check runs as if it had been rated in the editor.
+    private func logEffort(left: Int, for set: SetLog) {
+        pendingEffort = nil
+        set.rpe = Double(10 - min(3, max(0, left)))
+        try? modelContext.save()
+        if let exercise = set.exercise {
+            LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: session.startedAt,
+                                      gym: gym.profile, blockRIR: weeklyPlans.blockWeek?.targetRIR)
+            try? modelContext.save()
         }
-        .frame(width: 112, height: 112)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Strain added so far")
-        .accessibilityValue("+\(strainText(live)), \(whole(ringProgress(live) * 100)) percent of the way to the top of today's range")
+        WatchSync.shared.update(from: session)
     }
 
-    /// The ring fills as the session uses up the room left to the top of
-    /// today's strain range (the whole 0-100 scale when there's no range
-    /// yet). It used to be full at +40%, which looked like a cap.
-    private func ringProgress(_ live: Double) -> Double {
-        let current = metrics.strain?.strain ?? 0
-        let top = metrics.targetStrain?.upperBound ?? StrainCalculator.maximum
-        let room = top - current
-        guard room > 1 else { return 1 }
-        return min(1, max(0, live / room))
+    /// A ticked working set: ask for its effort when it has none and its type uses one.
+    private func askEffortIfNeeded(_ set: SetLog) {
+        guard set.isCompleted, !set.isWarmup, !set.kind.isStage, set.kind.allowsAutoregulation, set.rpe == nil else {
+            pendingEffort = nil
+            return
+        }
+        pendingEffort = set.persistentModelID
     }
 
-    private var finishedExercises: Int {
-        session.exercises.filter { !$0.sets.isEmpty && $0.sets.allSatisfy(\.isCompleted) }.count
+    // MARK: Reorder
+
+    /// Moves the exercises to their new positions and the session's per-order
+    /// data with them (targets, set-by-set changes, supersets).
+    private func applyReorder(_ mapping: [Int: Int]) {
+        guard !mapping.isEmpty else { return }
+        // Read every old order first, so a swap doesn't see a half-moved list.
+        let moves = session.exercises.compactMap { exercise in mapping[exercise.order].map { (exercise, $0) } }
+        for (exercise, order) in moves { exercise.order = order }
+        SessionTargets.remap(for: session.startedAt, mapping)
+        AutoregulationLog.remap(for: session.startedAt, mapping)
+        var groups: [Int: Int] = [:]
+        for (order, group) in supersetGroups { groups[mapping[order] ?? order] = group }
+        SupersetRegistry.save(groups, for: session.startedAt)
+        supersetGroups = groups
+        shownRecords = [:]
+        lastTickedOrder = nil
+        try? modelContext.save()
+        WatchSync.shared.update(from: session)
     }
 
     /// Changes whenever a set is ticked, added, removed or edited (weight,
@@ -421,9 +527,11 @@ struct ActiveWorkoutView: View {
                 bestBefore: LiftHistory.cachedBestOneRepMax(for: exercise.exerciseID, before: session.startedAt, in: sessions),
                 unit: workoutUnit,
                 gym: gym.profile,
-                onSetCompleted: { afterWarmUp in
+                onSetCompleted: { set in
+                    let afterWarmUp = set.isWarmup
                     startRest(for: exercise, afterWarmUp: afterWarmUp)
                     if !afterWarmUp { workingSetTicked(in: exercise) }
+                    askEffortIfNeeded(set)
                     scrollTarget = nextSetID(after: exercise)
                 },
                 onCollapse: { expanded.remove(exercise.persistentModelID) },
@@ -441,7 +549,8 @@ struct ActiveWorkoutView: View {
                     isNext: isNext(exercise),
                     unit: workoutUnit,
                     position: (session.orderedExercises.firstIndex(where: { $0.persistentModelID == exercise.persistentModelID }) ?? 0) + 1,
-                    supersetLabel: supersetLabel(exercise)
+                    supersetLabel: supersetLabel(exercise),
+                    target: SessionTargets.target(for: session.startedAt, order: exercise.order)
                 )
             }
             .buttonStyle(.plain)
@@ -598,8 +707,8 @@ private struct ExerciseCard: View {
     let bestBefore: Double
     let unit: WeightUnit
     let gym: GymProfile
-    /// Called with true after a warm-up ramp set, false after a working set.
-    let onSetCompleted: (_ afterWarmUp: Bool) -> Void
+    /// Called with the set just ticked (a warm-up ramp set or a working set).
+    let onSetCompleted: (_ set: SetLog) -> Void
     let onCollapse: () -> Void
     /// "A1" / "A2" when this exercise is half of a superset.
     var supersetLabel: String? = nil
@@ -624,6 +733,8 @@ private struct ExerciseCard: View {
     @State private var showingGuide = false
     /// Ticked warm-ups shown in full instead of folded into one row.
     @State private var showingWarmUps = false
+    /// Ramp sets left out because a working set was ticked first, for Undo.
+    @State private var skippedWarmUps: [SkippedWarmUp] = []
     /// This exercise's own rest time (nil = automatic).
     @State private var restSeconds: Int?
     /// Sets whose RPE 10 was filled in by marking them "to failure", so it
@@ -638,7 +749,21 @@ private struct ExerciseCard: View {
             Text(exercise.name)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Theme.primaryText)
-            if let info = library.exercise(id: exercise.exerciseID) {
+            if let planLine {
+                // The plan once, here, instead of "Target 7 · 3 in reserve" on every row.
+                Text(planLine)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.liftingText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let progressionNote = target?.progressionNote {
+                    // How the weight moved since last time (`WorkoutPlanner.progression`).
+                    Text(progressionNote)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if let info = library.exercise(id: exercise.exerciseID) {
                 Text([info.equipment?.capitalized, info.primaryMuscleLabel].compactMap { $0 }.joined(separator: " · "))
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
@@ -741,9 +866,7 @@ private struct ExerciseCard: View {
                 }
             }
 
-            ForEach(sets, id: \.persistentModelID) { set in
-                setSlot(set, in: sets, editing: editing)
-            }
+            setList(sets, editing: editing)
 
             // A change to a set other than the one being edited shows under the sets.
             if let adjustment = shownAdjustment(in: sets), adjustment.setOrder != editing?.order {
@@ -755,11 +878,6 @@ private struct ExerciseCard: View {
             if needsWeightFinding(sets) {
                 // No history and nothing to estimate from, so no ramp sets: the first set finds the weight.
                 Text("First set: find your weight, starting light.")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            if !previous.isEmpty {
-                Text("Last time: \(previous.map { "\(unit.format($0.weightKg)) × \($0.reps)" }.joined(separator: ", "))")
                     .font(.footnote)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -779,38 +897,49 @@ private struct ExerciseCard: View {
         .onChange(of: completedCount) { _, _ in
             adjustment = AutoregulationLog.entry(for: sessionStart, order: exercise.order)
         }
+        // Effort logged from the rest bar's "reps left" strip can make the change too.
+        .onChange(of: exercise.orderedSets.map(\.rpe)) { _, _ in
+            adjustment = AutoregulationLog.entry(for: sessionStart, order: exercise.order)
+        }
     }
 
     private var completedCount: Int { exercise.sets.filter(\.isCompleted).count }
 
-    // MARK: Set rows and set types
-
-    /// Ticked warm-ups fold into one "3 warm-ups done" row until you open them.
-    private func warmUpsFolded(_ sets: [SetLog]) -> Bool {
+    /// Ticked (or skipped) warm-ups as one row at the top, then each set.
+    @ViewBuilder
+    private func setList(_ sets: [SetLog], editing: SetLog?) -> some View {
         let ramps = sets.filter(\.isWarmup)
-        return !ramps.isEmpty && ramps.allSatisfy(\.isCompleted)
+        let folded = !ramps.isEmpty && ramps.allSatisfy(\.isCompleted)
+        if folded || (ramps.isEmpty && !skippedWarmUps.isEmpty) {
+            WarmUpsDoneRow(count: ramps.count, skipped: skippedWarmUps.count, isOpen: showingWarmUps,
+                           onToggle: { withAnimation(.snappy) { showingWarmUps.toggle() } },
+                           onUndoSkip: skippedWarmUps.isEmpty ? nil : { restoreWarmUps() })
+        }
+        ForEach(sets, id: \.persistentModelID) { set in
+            setSlot(set, in: sets, editing: editing, folded: folded)
+        }
     }
 
-    /// One set: its row, and right under it the editor when it's the set being
-    /// edited (so the controls sit where you're looking). Ticked warm-ups fold
-    /// into one row. The id lets the screen scroll the next set into view.
+    // MARK: Set rows and set types
+
+    /// One set: its row, or the editor in its place when it's the set being
+    /// edited (so the controls sit where you're looking and the set isn't
+    /// drawn twice). Ticked warm-ups fold into one row at the top. The id lets
+    /// the screen scroll the next set into view.
     @ViewBuilder
-    private func setSlot(_ set: SetLog, in sets: [SetLog], editing: SetLog?) -> some View {
+    private func setSlot(_ set: SetLog, in sets: [SetLog], editing: SetLog?, folded: Bool) -> some View {
         let isEditing = set.persistentModelID == editing?.persistentModelID
-        let folded = warmUpsFolded(sets)
-        if folded, set.persistentModelID == sets.first(where: \.isWarmup)?.persistentModelID {
-            WarmUpsDoneRow(count: sets.filter(\.isWarmup).count, isOpen: showingWarmUps) {
-                withAnimation(.snappy) { showingWarmUps.toggle() }
-            }
-        }
         if !folded || !set.isWarmup || showingWarmUps || isEditing {
-            VStack(spacing: 10) {
-                setRow(set, in: sets, editing: editing)
-                if isEditing, let editing {
-                    if let adjustment = shownAdjustment(in: sets), adjustment.setOrder == editing.order {
-                        adjustmentNote(adjustment)
+            Group {
+                if isEditing {
+                    VStack(spacing: 10) {
+                        if let adjustment = shownAdjustment(in: sets), adjustment.setOrder == set.order {
+                            adjustmentNote(adjustment)
+                        }
+                        setEditor(set, in: sets)
                     }
-                    setEditor(editing, in: sets)
+                } else {
+                    setRow(set, in: sets)
                 }
             }
             .id(set.persistentModelID)
@@ -821,12 +950,19 @@ private struct ExerciseCard: View {
         SetEditor(
             set: editing,
             title: editorTitle(for: editing, in: sets),
+            subtitle: editorSubtitle(for: editing, in: sets),
             kind: editing.isWarmup ? nil : kindBinding(for: editing),
             unit: unit,
             step: { up in step(editing, up: up) },
             plateHint: plateHint(for: editing),
+            targetRPE: editing.kind == .failure ? nil : targetRIR.map { 10 - $0 },
             onComplete: { toggle(editing) },
-            onShowGuide: { showingRPEGuide = true }
+            onShowGuide: { showingRPEGuide = true },
+            onToggleWarmUp: {
+                editing.isWarmup.toggle()
+                try? modelContext.save()
+            },
+            onDelete: { delete(editing) }
         )
     }
 
@@ -837,7 +973,7 @@ private struct ExerciseCard: View {
     }
 
     /// One set's row with its context menu (warm-up, set type, delete).
-    private func setRow(_ set: SetLog, in sets: [SetLog], editing: SetLog?) -> some View {
+    private func setRow(_ set: SetLog, in sets: [SetLog]) -> some View {
         let position = structurePosition(of: set, in: sets)
         let ghostIndex = (position.number ?? 1) - 1
         let isWorking = !set.isWarmup && !position.isStage
@@ -846,12 +982,11 @@ private struct ExerciseCard: View {
             label: rowLabel(set, position: position),
             previous: isWorking ? previousText(index: ghostIndex) : "",
             unit: unit,
-            isEditing: set.persistentModelID == editing?.persistentModelID,
+            isEditing: false,
             onTap: { focusedSetID = set.persistentModelID },
             onToggle: { toggle(set) },
             previousSet: isWorking ? previousSet(index: ghostIndex) : nil,
             warmUp: set.isWarmup ? warmUpPosition(set, in: sets) : nil,
-            targetText: isWorking ? targetText(for: set) : nil,
             verdict: isWorking ? verdict(for: set, index: ghostIndex) : nil,
             verdictTargetReps: isWorking ? verdictTargetReps(for: set) : nil,
             kindLine: Self.kindLine(set.kind, isStage: position.isStage)
@@ -868,11 +1003,35 @@ private struct ExerciseCard: View {
                 }
                 .pickerStyle(.menu)
             }
-            Button("Delete set", role: .destructive) {
-                modelContext.delete(set)
-                try? modelContext.save()
-            }
+            Button("Delete set", role: .destructive) { delete(set) }
         }
+    }
+
+    private func delete(_ set: SetLog) {
+        if set.persistentModelID == focusedSetID { focusedSetID = nil }
+        modelContext.delete(set)
+        try? modelContext.save()
+    }
+
+    /// Puts back the ramp sets that ticking a working set first left out.
+    private func restoreWarmUps() {
+        for ramp in skippedWarmUps {
+            let set = SetLog(order: ramp.order, weightKg: ramp.weightKg, reps: ramp.reps, rpe: nil, isWarmup: true)
+            set.exercise = exercise
+            modelContext.insert(set)
+        }
+        skippedWarmUps = []
+        try? modelContext.save()
+    }
+
+    /// Ticking a working set while ramp sets before it are still open means
+    /// you've warmed up your own way: they're left out (with Undo), so focus
+    /// goes to the next working set instead of back to a warm-up.
+    private func skipOpenWarmUps(before set: SetLog) {
+        let open = exercise.orderedSets.filter { $0.isWarmup && !$0.isCompleted && $0.order < set.order }
+        guard !open.isEmpty else { return }
+        skippedWarmUps += open.map { SkippedWarmUp(order: $0.order, weightKg: $0.weightKg, reps: $0.reps) }
+        for ramp in open { modelContext.delete(ramp) }
     }
 
     private func structurePosition(of set: SetLog, in sets: [SetLog]) -> SetStructure.Position {
@@ -900,13 +1059,28 @@ private struct ExerciseCard: View {
         }
     }
 
-    /// "Set 2", "Set 3 · To failure", "Warm-up" or "Drop 1 of 2" above the editor.
+    /// "Set 2", "Set 3 · To failure", "Warm-up 1 of 3" or "Drop 1 of 2" above the editor.
     private func editorTitle(for set: SetLog, in sets: [SetLog]) -> String {
-        if set.isWarmup { return "Warm-up" }
+        if set.isWarmup {
+            let position = warmUpPosition(set, in: sets)
+            return "Warm-up \(position.number) of \(position.count)"
+        }
         let position = structurePosition(of: set, in: sets)
         if position.isStage { return LiveSetCoach.title(for: set, in: sets) }
         let number = "Set \(position.number ?? 1)"
         return set.kind == .straight ? number : number + " · " + set.kind.title
+    }
+
+    /// The row's second line, kept in the editor's header: last time's same
+    /// set ("Last: 82.5 × 6 · RPE 7") or the ramp set's share of the working weight.
+    private func editorSubtitle(for set: SetLog, in sets: [SetLog]) -> String? {
+        if set.isWarmup {
+            return warmUpPosition(set, in: sets).percent.map { "\($0)% of the working weight" }
+        }
+        let position = structurePosition(of: set, in: sets)
+        guard !position.isStage else { return Self.kindLine(set.kind, isStage: true) }
+        let last = previousText(index: (position.number ?? 1) - 1)
+        return last.isEmpty ? nil : "Last: \(last)"
     }
 
     /// The set type, from the editor or the row's context menu. Marking a set
@@ -981,15 +1155,22 @@ private struct ExerciseCard: View {
         target?.targetRIR ?? blockRIR.map { Double($0) }
     }
 
-    /// "Target 8 · 2 in reserve" beside last time's set (feature spec §3.1:
-    /// the RIR target shows with the ghost so last time isn't the only goal).
-    private func targetText(for set: SetLog) -> String? {
-        let reps = LiveSetCoach.targetReps(for: set, target: target, entry: adjustment)
-        var parts: [String] = []
-        if let reps { parts.append("Target \(reps)") }
-        // A set to failure has no reserve target: it says "To failure" on its own line.
-        if let targetRIR, set.kind != .failure { parts.append(ReserveText.text(targetRIR)) }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    /// "3 × 7 · 82.5 kg · 3 in reserve" under the exercise name (`Prescription`,
+    /// as in the builder): the plan's target shows once, beside last time's
+    /// sets on the rows, so last time isn't the only goal (feature spec §3.1).
+    /// Nil without a plan (an exercise added during the workout).
+    private var planLine: String? {
+        guard let target else { return nil }
+        let working = exercise.sets.filter { !$0.isWarmup && !$0.kind.isStage }.count
+        var parts = [Prescription.sets(max(1, working), repsLow: target.repsLow, repsHigh: target.repsHigh,
+                                       targetReps: target.repsToday, rpe: nil)]
+        if let kg = target.loadKg, kg > 0 {
+            let kind = ExerciseCatalog.exercise(id: exercise.exerciseID)?.load ?? libraryLoadKind
+            // To 0.1, as the set rows show it (`WeightUnit.format`).
+            parts.append(Prescription.load((unit.display(kg) * 10).rounded() / 10, unit: unit.rawValue, kind: kind))
+        }
+        if let targetRIR { parts.append(ReserveText.text(targetRIR)) }
+        return parts.joined(separator: " · ")
     }
 
     /// The verdict once a working set is ticked (`SetFeedback.verdict`).
@@ -1049,6 +1230,7 @@ private struct ExerciseCard: View {
     /// a warm-up ramp set) and moves to the next set.
     private func toggle(_ set: SetLog) {
         set.completedAt = set.isCompleted ? nil : .now
+        if set.isCompleted, !set.isWarmup { skipOpenWarmUps(before: set) }
         try? modelContext.save()
         if set.isCompleted {
             // Set-by-set effort check: may move the next set's load (`Autoregulation`).
@@ -1058,7 +1240,7 @@ private struct ExerciseCard: View {
                 try? modelContext.save()
             }
             focusedSetID = nil
-            onSetCompleted(set.isWarmup)
+            onSetCompleted(set)
         }
     }
 
@@ -1153,6 +1335,13 @@ private struct ExerciseCard: View {
     }
 }
 
+/// A ramp set left out by ticking a working set first, kept for Undo.
+private struct SkippedWarmUp: Equatable {
+    var order: Int
+    var weightKg: Double
+    var reps: Int
+}
+
 /// "+ Add set", and beside it a "Set type" menu to add a drop stage,
 /// rest-pause or myo-rep mini-set after the last set (`SetKind`). What each
 /// one is and how good the evidence is sits behind the set editor's ⓘ.
@@ -1195,34 +1384,58 @@ private struct AddSetButtons: View {
     }
 }
 
-/// "3 warm-ups done ✓": ticked ramp sets folded into one row; tap to show them.
+/// "3 warm-ups done ✓" (tap to show them), "1 warm-up done · 2 skipped",
+/// or "2 warm-ups skipped" with Undo after a working set was ticked first.
 private struct WarmUpsDoneRow: View {
     let count: Int
+    var skipped = 0
     let isOpen: Bool
     let onToggle: () -> Void
+    /// Puts the skipped ramp sets back; nil when none were skipped.
+    var onUndoSkip: (() -> Void)? = nil
+
+    private var text: String {
+        let done = count == 1 ? "1 warm-up done" : "\(count) warm-ups done"
+        let skip = skipped == 1 ? "1 warm-up skipped" : "\(skipped) warm-ups skipped"
+        if skipped == 0 { return done }
+        return count == 0 ? skip : "\(done) · \(skipped) skipped"
+    }
 
     var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: 10) {
-                Text(count == 1 ? "1 warm-up done" : "\(count) warm-ups done")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.primaryText)
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(Theme.recoveryHigh)
-                    .accessibilityHidden(true)
-                Spacer(minLength: 4)
-                Image(systemName: isOpen ? "chevron.up" : "chevron.down")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
-                    .accessibilityHidden(true)
+        HStack(spacing: 8) {
+            Button(action: onToggle) {
+                HStack(spacing: 10) {
+                    Text(text)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                    if count > 0 {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Theme.recoveryHigh)
+                            .accessibilityHidden(true)
+                    }
+                    Spacer(minLength: 4)
+                    if count > 0 {
+                        Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.secondaryText)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(minHeight: 44)
+                .contentShape(.rect)
             }
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .background(Theme.recoveryHigh.opacity(0.1), in: .rect(cornerRadius: 16))
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+            .disabled(count == 0)
+            .accessibilityHint(count == 0 ? "" : (isOpen ? "Hides the warm-up sets" : "Shows the warm-up sets"))
+            if let onUndoSkip {
+                Button("Undo", action: onUndoSkip)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("Put the skipped warm-ups back")
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityHint(isOpen ? "Hides the warm-up sets" : "Shows the warm-up sets")
+        .padding(.horizontal, 12)
+        .background(Theme.recoveryHigh.opacity(0.1), in: .rect(cornerRadius: 16))
     }
 }
 
@@ -1243,8 +1456,6 @@ private struct SetRow: View {
     var previousSet: SetLog? = nil
     /// For a warm-up ramp set: its place in the ramp and its share of the working weight.
     var warmUp: WarmUpPosition? = nil
-    /// "Target 8 · 2 in reserve", shown beside last time until the set is ticked.
-    var targetText: String? = nil
     /// The one-line verdict once the set is ticked (`SetFeedback`).
     var verdict: SetFeedback.Verdict? = nil
     /// The reps the verdict was judged against ("2 short of 8").
@@ -1263,6 +1474,50 @@ private struct SetRow: View {
     @ScaledMetric(relativeTo: .headline) private var labelWidth: CGFloat = 26
 
     var body: some View {
+        if let warmUp {
+            compactWarmUp(warmUp)
+        } else {
+            fullRow
+        }
+    }
+
+    /// A ramp set on one line: "W2  50 kg × 5  70%  ○", still 44 pt tall to tap.
+    private func compactWarmUp(_ warmUp: WarmUpPosition) -> some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Text("W\(warmUp.number)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .frame(width: labelWidth, alignment: .leading)
+                Text(isFilled ? "\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)" : "Not set")
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(isFilled ? Theme.primaryText : Theme.secondaryText)
+                if let percent = warmUp.percent {
+                    Text("\(percent)%")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Spacer(minLength: 4)
+            }
+            .contentShape(.rect)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenSummary)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Edit this set")
+            .accessibilityAction { onTap() }
+            .onTapGesture(perform: onTap)
+            toggleButton
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 2)
+        .background(rowBackground, in: .rect(cornerRadius: 14))
+    }
+
+    private var fullRow: some View {
         HStack(spacing: 10) {
             details
                 .accessibilityElement(children: .ignore)
@@ -1293,21 +1548,13 @@ private struct SetRow: View {
             if warmUp == nil {
                 Text(label)
                     .font(.headline)
-                    // Text colour for the amber accent (ux-audit.md X4, P24).
-                    .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.primaryText)
+                    .foregroundStyle(set.isWarmup ? Theme.secondaryText : Theme.primaryText)
                     // "RP" for a rest-pause mini-set fits the number's width.
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                     .frame(width: labelWidth, alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 1) {
-                if let warmUp {
-                    // "Warm-up 1 of 3 · 50%" instead of a bare "W" (user report: unclear).
-                    // Amber on the plain row; full-contrast text on the pink row being edited.
-                    Text(warmUpTitle(warmUp))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(isEditing ? Theme.primaryText : Theme.recoveryModerateText)
-                }
                 if let kindLine {
                     Text(kindLine)
                         .font(.caption.weight(.semibold))
@@ -1320,9 +1567,10 @@ private struct SetRow: View {
                     .foregroundStyle(isFilled ? Theme.primaryText : Theme.secondaryText)
                 ghostLine
                 if let verdictText {
+                    // Green for a good set, amber when short or past the plan's effort.
                     Text(verdictText)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(verdict?.isCaution == true ? Theme.recoveryModerateText : Theme.liftingText)
+                        .foregroundStyle(verdict?.isCaution == true ? Theme.recoveryModerateText : Theme.recoveryHighText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if dynamicTypeSize.isAccessibilitySize {
@@ -1336,41 +1584,14 @@ private struct SetRow: View {
         }
     }
 
-    /// Last session's same set in grey, with the target beside it (under it
-    /// when they don't fit). Once ticked, the verdict takes the target's place.
+    /// Last session's same set in grey ("Last: 82.5 × 6 · RPE 7"); the
+    /// target is said once under the exercise name.
     @ViewBuilder
     private var ghostLine: some View {
-        let target = set.isCompleted ? nil : targetText
-        if !previous.isEmpty || target != nil {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    lastText
-                    targetLabel(target)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    lastText
-                    targetLabel(target)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var lastText: some View {
         if !previous.isEmpty {
             Text("Last: \(previous)")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-        }
-    }
-
-    @ViewBuilder
-    private func targetLabel(_ target: String?) -> some View {
-        if let target {
-            Text(target)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.liftingText)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         }
     }
@@ -1413,11 +1634,6 @@ private struct SetRow: View {
         .accessibilityLabel(set.isCompleted ? "Undo \(spokenName.lowercased())" : "Mark \(spokenName.lowercased()) done")
     }
 
-    /// "Warm-up 2 of 3 · 70%".
-    private func warmUpTitle(_ warmUp: WarmUpPosition) -> String {
-        "Warm-up \(warmUp.number) of \(warmUp.count)" + (warmUp.percent.map { " · \($0)%" } ?? "")
-    }
-
     /// "Set 2", "Warm-up set 1 of 3" or "Warm-up set".
     private var spokenName: String {
         if let warmUp { return "Warm-up set \(warmUp.number) of \(warmUp.count)" }
@@ -1434,11 +1650,7 @@ private struct SetRow: View {
         if let previousSet, let last = spokenLoad(weightKg: previousSet.weightKg, reps: previousSet.reps) {
             parts.append("last time \(last)")
         }
-        if let verdictText {
-            parts.append(verdictText)
-        } else if !set.isCompleted, let targetText {
-            parts.append(targetText)
-        }
+        if let verdictText { parts.append(verdictText) }
         return parts.joined(separator: ", ")
     }
 
@@ -1469,13 +1681,20 @@ extension WeightUnit {
 private struct SetEditor: View {
     @Bindable var set: SetLog
     let title: String
+    /// The row's second line, kept here: "Last: 82.5 × 6 · RPE 7", or the ramp's share.
+    var subtitle: String? = nil
     /// The set type, settable here; nil for a warm-up.
     let kind: Binding<SetKind>?
     let unit: WeightUnit
     let step: (Bool) -> Void
     let plateHint: String?
+    /// The plan's effort (RPE), marked on the picker; nil for none or a set to failure.
+    var targetRPE: Double? = nil
     let onComplete: () -> Void
     let onShowGuide: () -> Void
+    /// The row's context-menu actions, since the row isn't drawn while editing.
+    var onToggleWarmUp: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     @FocusState private var typing: Field?
     private enum Field { case weight, reps }
@@ -1493,7 +1712,7 @@ private struct SetEditor: View {
             }
             // A drop stage or mini-set is as many good reps as you can: no effort of its own.
             if !set.isWarmup, !set.kind.isStage {
-                RPEPicker(rpe: $set.rpe, onShowGuide: onShowGuide)
+                RPEPicker(rpe: $set.rpe, targetRPE: targetRPE, onShowGuide: onShowGuide)
             }
             Button(action: {
                 typing = nil
@@ -1510,19 +1729,31 @@ private struct SetEditor: View {
                                 in: .capsule)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("complete-set") // UI tests (ScreenshotTests)
         }
         .padding(14)
-        .background(Theme.lifting.opacity(0.05), in: .rect(cornerRadius: 20))
+        .background(Theme.lifting.opacity(0.07), in: .rect(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Theme.lifting.opacity(0.7), lineWidth: 2))
     }
 
-    /// "SET 2 · TO FAILURE", the set-type menu and, for a set type, an ⓘ
-    /// with how to do it and how good the evidence is.
+    /// "SET 2 · TO FAILURE" with last time under it, an ⓘ for a set type
+    /// (how to do it, how good the evidence is) and a menu with the set type,
+    /// warm-up and delete.
     private var header: some View {
-        HStack(spacing: 8) {
-            Text(title.uppercased())
-                .font(.caption.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(Theme.liftingText)
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title.uppercased())
+                    .font(.caption.weight(.bold))
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.liftingText)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, 4)
             if set.kind != .straight, !set.isWarmup {
                 Button { showingKindInfo = true } label: {
                     Image(systemName: "info.circle")
@@ -1539,6 +1770,12 @@ private struct SetEditor: View {
                 }
             }
             Spacer(minLength: 0)
+            setMenu
+        }
+    }
+
+    private var setMenu: some View {
+        Menu {
             if let kind {
                 Picker(selection: kind) {
                     ForEach(SetKind.allCases) { option in
@@ -1548,10 +1785,21 @@ private struct SetEditor: View {
                     Label("Set type", systemImage: "square.stack.3d.down.right")
                 }
                 .pickerStyle(.menu)
-                .font(.footnote)
-                .accessibilityLabel("Set type")
             }
+            if let onToggleWarmUp {
+                Button(set.isWarmup ? "Make working set" : "Make warm-up set", action: onToggleWarmUp)
+            }
+            if let onDelete {
+                Button("Delete set", systemImage: "trash", role: .destructive, action: onDelete)
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
         }
+        .accessibilityLabel("Set options")
     }
 
     /// Weight and reps side by side; one above the other at accessibility
@@ -1650,9 +1898,12 @@ private struct NumberStepper<Field: View>: View {
     }
 }
 
-/// Big 6-10 buttons plus a ½ toggle, with what the number means.
+/// Big 6-10 buttons plus a ½ toggle, each with the reps left it means
+/// ("8 · 2 left"), since the plan's targets are said in reps in reserve. The
+/// plan's target is outlined, not filled in: an effort you didn't log isn't logged.
 private struct RPEPicker: View {
     @Binding var rpe: Double?
+    var targetRPE: Double? = nil
     let onShowGuide: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -1664,10 +1915,22 @@ private struct RPEPicker: View {
             buttons
                 .sensoryFeedback(.selection, trigger: rpe)
             // One line: the reps left. What each number feels like is in "What's RPE?".
-            Text(rpe.map { RPEScale.summary($0) } ?? "Optional · 8 = 2 reps left, 10 = none")
+            Text(rpe.map { RPEScale.summary($0) } ?? emptyHint)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
+    }
+
+    /// "Plan: 3 left (RPE 7) · optional" with no effort logged yet; the target is outlined.
+    private var emptyHint: String {
+        guard let targetRPE else { return "Optional · 8 = 2 reps left, 10 = none" }
+        let left = ReserveText.text(rpe: targetRPE).replacingOccurrences(of: " in reserve", with: " left")
+        return "Plan: \(left) (RPE \(targetRPE.formatted())) · optional"
+    }
+
+    /// The whole RPE the plan's target falls on, for the outline.
+    private var targetValue: Int? {
+        targetRPE.map { Int($0.rounded(.down)) }
     }
 
     /// Title and the guide link; stacked at accessibility text sizes.
@@ -1713,20 +1976,28 @@ private struct RPEPicker: View {
 
     private func rpeButton(_ value: Int) -> some View {
         let selected = rpe.map { Int($0.rounded(.down)) == value } ?? false
+        let isTarget = rpe == nil && targetValue == value
         return Button {
             if selected && rpe == Double(value) { rpe = nil } else { rpe = Double(value) }
         } label: {
-            Text("\(value)")
-                .font(.title3.weight(.bold))
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .foregroundStyle(selected ? .white : Theme.primaryText)
-                .background(selected
-                            ? AnyShapeStyle(LinearGradient(colors: Theme.strainButtonColors, startPoint: .top, endPoint: .bottom))
-                            : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Color.clear : Theme.separator))
+            VStack(spacing: 0) {
+                Text("\(value)")
+                    .font(.title3.weight(.bold))
+                Text("\(10 - value) left")
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .foregroundStyle(selected ? Color.white.opacity(0.9) : Theme.secondaryText)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .foregroundStyle(selected ? .white : Theme.primaryText)
+            .background(selected ? AnyShapeStyle(Theme.lifting) : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(selected ? Color.clear : (isTarget ? Theme.lifting : Theme.separator), lineWidth: isTarget ? 2 : 1))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("RPE \(value)")
+        .accessibilityLabel("RPE \(value), \(10 - value) reps left")
+        .accessibilityHint(isTarget ? "The plan's target" : "")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -1737,7 +2008,7 @@ private struct RPEPicker: View {
         } label: {
             Text("½")
                 .font(.title3.weight(.bold))
-                .frame(minWidth: 44, maxWidth: fillsWidth ? CGFloat.infinity : 44, minHeight: 48)
+                .frame(minWidth: 44, maxWidth: fillsWidth ? CGFloat.infinity : 44, minHeight: 52)
                 .foregroundStyle(isHalf ? .white : Theme.primaryText)
                 .background(isHalf ? AnyShapeStyle(Theme.lifting) : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isHalf ? Color.clear : Theme.separator))
@@ -1762,6 +2033,8 @@ private struct CollapsedExerciseRow: View {
     var position: Int
     /// "A1" / "A2" when this exercise is half of a superset.
     var supersetLabel: String? = nil
+    /// The plan's reps and effort (`SessionTargets`), for the same line the builder shows.
+    var target: SessionTargets.Target? = nil
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Fits "A1" or "12" at every text size.
@@ -1779,19 +2052,19 @@ private struct CollapsedExerciseRow: View {
                     .foregroundStyle(Theme.secondaryText)
                 // At accessibility text sizes the chip goes under the name (ux-audit.md 4.8).
                 if isNext && dynamicTypeSize.isAccessibilitySize {
-                    Chip(text: "Up next")
+                    Chip(text: "Up next", color: Theme.lifting)
                         .padding(.top, 2)
                 }
             }
             Spacer(minLength: 0)
             if isNext && !dynamicTypeSize.isAccessibilitySize {
-                Chip(text: "Up next")
-            } else if !isNext {
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
-                    .accessibilityHidden(true)
+                Chip(text: "Up next", color: Theme.lifting)
             }
+            // Always there, "Up next" or not: the row opens.
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .accessibilityHidden(true)
         }
         .card()
     }
@@ -1820,16 +2093,29 @@ private struct CollapsedExerciseRow: View {
         if isDone, let best = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) {
             return "\(working.count) sets · \(unit.format(best.weightKg)) \(unit.rawValue) × \(best.reps) · done"
         }
-        // The first working set, not a warm-up ramp or a drop stage.
-        let first = exercise.orderedSets.first { !$0.isWarmup && !$0.kind.isStage }
-        let reps = first.map { "\($0.reps)" } ?? "–"
-        return "\(working.count) × \(reps)" + (first.map { $0.weightKg > 0 ? " · \(unit.format($0.weightKg)) \(unit.rawValue)" : "" } ?? "")
+        // The first working set still to do (else the first), not a warm-up ramp or a drop stage:
+        // "3 × 7 · 82.5 kg · 3 in reserve", as the builder and the exercise header say it (`Prescription`).
+        let ordered = working.sorted { $0.order < $1.order }
+        let first = ordered.first(where: { !$0.isCompleted }) ?? ordered.first
+        let reps = first?.reps ?? target?.repsToday
+        var parts = [reps.map { "\(working.count) × \($0)" } ?? "\(working.count) sets"]
+        if let first, first.weightKg > 0 {
+            let kind = ExerciseCatalog.exercise(id: exercise.exerciseID)?.load
+            let value = (unit.display(first.weightKg) * 10).rounded() / 10
+            parts.append(Prescription.load(value, unit: unit.rawValue, kind: kind))
+        }
+        if let target { parts.append(ReserveText.text(target.targetRIR)) }
+        return parts.joined(separator: " · ")
     }
 }
 
+/// The rest countdown, what's next ("Next: Bench Press · Set 2 of 3 · 82.5 kg
+/// × 7") and −15s / +15s / Skip, in thumb reach. Neutral colours: pink is the
+/// set you're on, green what's done.
 private struct RestTimerPill: View {
     let endsAt: Date
     let length: TimeInterval
+    var next: String? = nil
     /// +/- seconds, or nil to skip.
     let onChange: (TimeInterval?) -> Void
 
@@ -1863,27 +2149,39 @@ private struct RestTimerPill: View {
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
             : AnyLayout(HStackLayout(spacing: 10))
-        let shape = stacked ? AnyShape(RoundedRectangle(cornerRadius: Theme.cornerRadius)) : AnyShape(Capsule())
-        return layout {
-            countdown(remaining: remaining)
-            if !stacked { Spacer() }
-            controls
+        // A capsule for one line; rounded when it wraps or has the "Next" line.
+        let shape = stacked || next != nil ? AnyShape(RoundedRectangle(cornerRadius: 22)) : AnyShape(Capsule())
+        return VStack(alignment: .leading, spacing: 4) {
+            layout {
+                countdown(remaining: remaining)
+                if !stacked { Spacer() }
+                controls
+            }
+            if let next {
+                Text(next)
+                    .font(.footnote)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(stacked ? 3 : 1)
+                    .truncationMode(.middle)
+            }
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 16)
+        .foregroundStyle(Theme.primaryText)
+        .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: shape)
-        .shadow(color: Theme.strain.opacity(0.3), radius: 12, y: 6)
+        .background(Theme.card, in: shape)
+        .overlay(shape.stroke(Theme.separator))
+        .shadow(color: Color.black.opacity(0.12), radius: 12, y: 6)
     }
 
     private func countdown(remaining: TimeInterval) -> some View {
         HStack(spacing: 10) {
             ZStack {
-                Circle().stroke(Color.white.opacity(0.3), lineWidth: 4)
+                Circle().stroke(Theme.track, lineWidth: 4)
                 Circle()
                     .trim(from: 0, to: length > 0 ? remaining / length : 0)
-                    .stroke(Color.white, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(Theme.lifting, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
             .frame(width: 32, height: 32)
@@ -1904,14 +2202,7 @@ private struct RestTimerPill: View {
         HStack(spacing: 8) {
             pillButton("−15s", spoken: "15 seconds less") { onChange(-15) }
             pillButton("+15s", spoken: "15 seconds more") { onChange(15) }
-            Button("Skip") { onChange(nil) }
-                .font(.headline)
-                .lineLimit(1)
-                .fixedSize()
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(.rect)
-                .buttonStyle(.plain)
-                .accessibilityLabel("Skip rest")
+            pillButton("Skip", spoken: "Skip rest") { onChange(nil) }
         }
     }
 
@@ -1923,100 +2214,234 @@ private struct RestTimerPill: View {
             .fixedSize()
             .padding(.horizontal, 8)
             .frame(minWidth: 44, minHeight: 44)
-            .background(Color.white.opacity(0.2), in: .capsule)
+            .background(Theme.cardRaised, in: .capsule)
             .contentShape(.capsule)
             .buttonStyle(.plain)
             .accessibilityLabel(spoken)
     }
 }
 
-/// Live heart rate from the iPhone workout session (AirPods Pro 3 or a chest strap).
-private struct LiveHeartRateBar: View {
+/// One line under the pinned header: "Upper Body · 4/21 sets · ♥ 124 Zone 1 ·
+/// +2% strain". Progress is in working sets, not exercises; heart rate comes
+/// from the iPhone workout session (AirPods Pro 3 or a chest strap), its zone
+/// from heart-rate reserve (`HeartRateProfile.zone`). Parts drop off, the
+/// zone first, when the line doesn't fit.
+private struct SessionStrip: View {
+    let name: String
+    let doneSets: Int
+    let totalSets: Int
+    /// Strain this session has added so far (`DailyMetricsModel.strainGain`), 0-100.
+    let strainGain: Double
     let recorder: LiveWorkoutRecorder
     let profile: HeartRateProfile?
-    /// Scales with Dynamic Type (ux-audit W5).
-    @ScaledMetric(relativeTo: .title2) private var bpmSize: CGFloat = 26
-    /// Avg and Max columns widen with the text instead of clipping.
-    @ScaledMetric(relativeTo: .title3) private var statWidth: CGFloat = 56
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        if let bpm = recorder.heartRate {
-            HStack(spacing: 12) {
-                Image(systemName: "heart.fill")
-                    .font(.title3)
-                    .foregroundStyle(Theme.recoveryLow)
-                    .symbolEffect(.pulse)
-                    .accessibilityHidden(true)
-                live(bpm)
-            }
-            .card()
-            .accessibilityElement(children: .combine)
-        } else {
-            offChip
+        ViewThatFits(in: .horizontal) {
+            line(showName: true, showZone: true)
+            line(showName: true, showZone: false)
+            line(showName: false, showZone: false)
         }
-    }
-
-    /// No heart rate coming in: one quiet line, not a whole card, so the sets stay high up.
-    private var offChip: some View {
-        Label {
-            Text(offText)
-                .font(.footnote)
-                .foregroundStyle(Theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: "heart.slash")
-                .font(.footnote)
-                .foregroundStyle(Theme.recoveryLowText)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Theme.card, in: .capsule)
+        .font(.subheadline)
+        .foregroundStyle(Theme.secondaryText)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
     }
 
-    private var offText: String {
-        if let problem = recorder.problem { return problem }
-        return recorder.isRecording
-            ? "Waiting for heart rate · AirPods Pro 3 or a chest strap"
-            : "Heart rate off · wear AirPods Pro 3 or a chest strap"
+    private func line(showName: Bool, showZone: Bool) -> some View {
+        HStack(spacing: 6) {
+            if showName {
+                Text(name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+                dot
+            }
+            Text("\(doneSets)/\(totalSets) sets")
+                .monospacedDigit()
+                .fixedSize()
+            heart(showZone: showZone)
+            dot
+            Text(strainLabel)
+                .monospacedDigit()
+                .fixedSize()
+        }
+        .lineLimit(1)
     }
 
-    /// Current bpm and zone beside Avg and Max; Avg and Max go underneath at
-    /// accessibility text sizes (ux-audit.md 4.8, P22).
-    private func live(_ bpm: Double) -> some View {
-        let stacked = dynamicTypeSize.isAccessibilitySize
-        let layout = stacked
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(spacing: 12))
-        return layout {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text("\(whole(bpm))")
-                        .font(.system(size: bpmSize, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                    Text("bpm").font(.subheadline).foregroundStyle(Theme.secondaryText)
+    private var dot: some View {
+        Text("·").accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func heart(showZone: Bool) -> some View {
+        if let bpm = recorder.heartRate {
+            dot
+            HStack(spacing: 3) {
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(Theme.heart)
+                    .symbolEffect(.pulse)
+                Text("\(whole(bpm))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .monospacedDigit()
+                if showZone, let zone = zoneText(bpm) {
+                    Text(zone)
                 }
-                .foregroundStyle(Theme.primaryText)
-                Text(zoneText(bpm))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
             }
-            if !stacked { Spacer() }
-            HStack(spacing: 12) {
-                StatView(label: "Avg", value: recorder.averageHeartRate.map { "\(whole($0))" } ?? "–")
-                    .frame(width: statWidth)
-                StatView(label: "Max", value: recorder.maximumHeartRate.map { "\(whole($0))" } ?? "–")
-                    .frame(width: statWidth)
-            }
+            .fixedSize()
+        } else if recorder.problem != nil {
+            dot
+            Image(systemName: "heart.slash")
+                .foregroundStyle(Theme.secondaryText)
         }
     }
 
-    private func zoneText(_ bpm: Double) -> String {
-        guard let profile else { return "Live" }
-        guard let zone = profile.zone(for: bpm) else { return "Below zone 1" }
-        return "Zone \(zone) · \(whole(profile.reserveFraction(for: bpm) * 100))% of reserve"
+    /// "Zone 2" (heart-rate reserve zones), or nil without a profile or below zone 1.
+    private func zoneText(_ bpm: Double) -> String? {
+        guard let zone = profile?.zone(for: bpm) else { return nil }
+        return "Zone \(zone)"
+    }
+
+    /// "+2% strain"; "+<1% strain" until it rounds to 1, so the start doesn't read "+0%".
+    private var strainLabel: String {
+        strainGain < 0.5 ? "+<1% strain" : "+\(strainText(strainGain)) strain"
+    }
+
+    private var spoken: String {
+        var parts = [name, "\(doneSets) of \(totalSets) working sets done"]
+        if let bpm = recorder.heartRate {
+            var heart = "heart rate \(whole(bpm))"
+            if let zone = zoneText(bpm) { heart += ", \(zone)" }
+            if let average = recorder.averageHeartRate { heart += ", average \(whole(average))" }
+            parts.append(heart)
+        } else if let problem = recorder.problem {
+            parts.append(problem)
+        }
+        parts.append(strainGain < 0.5 ? "under 1 percent strain added" : "\(whole(strainGain)) percent strain added")
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// "Reps left?" with 3+ / 2 / 1 / 0 after a working set ticked with the
+/// circle (no effort logged): one tap logs the effort and runs the
+/// set-by-set check, as rating it in the editor would.
+private struct RepsLeftStrip: View {
+    let onPick: (Int) -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        // One row when it fits; the question above the buttons when not, so
+        // each button stays at least 44 pt wide.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                question
+                buttons
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                question
+                    .padding(.top, 6)
+                buttons
+            }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 4)
+        .padding(.vertical, 4)
+        .background(Theme.card, in: .rect(cornerRadius: 26))
+        .overlay(RoundedRectangle(cornerRadius: 26).stroke(Theme.separator))
+        .shadow(color: Color.black.opacity(0.12), radius: 12, y: 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("How many more reps could you have done?")
+    }
+
+    private var question: some View {
+        Text("Reps left?")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.primaryText)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 6) {
+            ForEach([3, 2, 1, 0], id: \.self) { left in
+                Button { onPick(left) } label: {
+                    Text(left == 3 ? "3+" : "\(left)")
+                        .font(.headline)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.liftingText)
+                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.lifting.opacity(0.12), in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(left == 3 ? "3 or more reps left" : (left == 1 ? "1 rep left" : "\(left) reps left"))
+            }
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Don't log effort")
+        }
+    }
+}
+
+/// Drag the exercises into a new order. The session's per-order data
+/// (targets, set-by-set changes, supersets) moves with them (`applyReorder`).
+private struct ReorderExercisesSheet: View {
+    let session: WorkoutSession
+    /// Old order → new order, for the exercises that moved.
+    let onDone: ([Int: Int]) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [Item] = []
+
+    struct Item: Identifiable, Equatable {
+        var id: Int { order }
+        var order: Int
+        var name: String
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(items) { item in
+                    Text(item.name)
+                }
+                .onMove { from, to in items.move(fromOffsets: from, toOffset: to) }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Reorder exercises")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        onDone(mapping)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .onAppear {
+            items = session.orderedExercises.map { Item(order: $0.order, name: $0.name) }
+        }
+    }
+
+    /// The old orders, sorted, handed out in the new sequence (so orders stay unique).
+    private var mapping: [Int: Int] {
+        let slots = items.map(\.order).sorted()
+        var result: [Int: Int] = [:]
+        for (index, item) in items.enumerated() where slots[index] != item.order {
+            result[item.order] = slots[index]
+        }
+        return result
     }
 }
 

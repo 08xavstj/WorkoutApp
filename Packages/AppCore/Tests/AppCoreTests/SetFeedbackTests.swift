@@ -40,6 +40,10 @@ struct SetFeedbackTests {
         #expect(plan?.message(unit: "kg") == "Matched the plan")
         #expect(plan?.isCaution == false)
         #expect(SetFeedback.verdict(logged: set(60, 8), last: set(60, 8), targetReps: nil, targetRPE: nil) == .matchedLastTime)
+        // Ticked without an effort rating: the reps are a fact, "matched the plan" isn't.
+        let unrated = SetFeedback.verdict(logged: set(60, 8), last: set(60, 8), targetReps: 8, targetRPE: 8)
+        #expect(unrated == .hitTarget(reps: 8))
+        #expect(unrated?.message(unit: "kg") == "8 reps ✓")
         // Nothing to compare with, or nothing logged.
         #expect(SetFeedback.verdict(logged: set(60, 8), last: nil, targetReps: nil, targetRPE: nil) == nil)
         #expect(SetFeedback.verdict(logged: set(55, 10), last: set(60, 8), targetReps: nil, targetRPE: nil) == nil)

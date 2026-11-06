@@ -341,6 +341,16 @@ public struct PlannedExercise: Codable, Sendable, Equatable, Identifiable {
     /// guard (`ExerciseFilter.capLoad`) so live autoregulation can't add the
     /// weight back. Nil when there's no cap. Optional, so older plans decode.
     public var maxLoadKg: Double? = nil
+    /// The reps to aim for on each working set today (`WorkoutPlanner.progression`:
+    /// one more than last time at the same weight, the bottom of the range
+    /// after a step up). Nil = the top of `reps` (no history, a fixed weight).
+    /// Optional, so older plans decode.
+    public var targetReps: Int? = nil
+}
+
+extension PlannedExercise {
+    /// Reps each working set aims for today: `targetReps`, else the top of the range.
+    public var repsToday: Int { targetReps ?? reps.upperBound }
 }
 
 extension PlannedExercise {
@@ -558,12 +568,15 @@ public struct WorkoutPlanner: Sendable {
         if let kind = choice.load {
             if let past = history[choice.id] {
                 let mode = progressionMode(for: choice.id, kind: kind, compound: compound, at: past.lastWeight)
-                planned.load = suggestedLoad(history: past, reps: reps, rpe: setRPE, kind: kind, mode: mode)
+                let today = progression(history: past, reps: reps, rpe: setRPE, kind: kind, mode: mode)
+                planned.load = today?.load
+                planned.targetReps = today?.targetReps
                 if let load = planned.load {
                     planned.note = notes(load: load, history: past, reps: reps, rpe: setRPE, kind: kind, mode: mode)
-                    planned.progressionNote = progressionNote(load: load, history: past, reps: reps, mode: mode, rpe: setRPE)
-                    // Rep progression: today's target goes one past last time (the
-                    // live session pre-fills the top of the range).
+                    planned.progressionNote = progressionNote(load: load, history: past, reps: reps, mode: mode, rpe: setRPE,
+                                                              loadKind: kind)
+                    // Rep progression can go past the top of the range: the range
+                    // stretches to today's target (`targetReps`).
                     if mode == .reps, let target = repTarget(load: load, history: past, reps: reps, rpe: setRPE) {
                         planned.reps = reps.lowerBound...target
                     }
@@ -584,13 +597,14 @@ public struct WorkoutPlanner: Sendable {
         return planned
     }
 
-    /// "+5 lb from last time: you hit 8 reps at RPE 7", "Same weight as last
-    /// time: get 8 reps to move up", or "−10 lb from last time for today's
+    /// "+5 lb from last time: you hit 8 reps at RPE 7", "Same weight, aim
+    /// for 7 reps; it moves up at 8", or "−10 lb from last time for today's
     /// effort". Makes the double progression visible. With rep or set
     /// progression (`ProgressionMode`) the held weight says what to add
-    /// instead. `rpe` is today's target (nil: as last time).
+    /// instead. `rpe` is today's target (nil: as last time); `loadKind` lets
+    /// the note see a big next jump (the top moves up `bigJumpExtraReps`).
     func progressionNote(load: Double, history: ExerciseHistory, reps: ClosedRange<Int>, mode: ProgressionMode = .load,
-                         rpe: Double? = nil) -> String {
+                         rpe: Double? = nil, loadKind: EquipmentKind? = nil) -> String {
         let unit = gym.unit.rawValue
         func fmt(_ v: Double) -> String { v.formatted(.number.precision(.fractionLength(0...2))) }
         let delta = load - history.lastWeight
@@ -610,7 +624,18 @@ public struct WorkoutPlanner: Sendable {
         let today = rpe ?? history.lastRPE ?? 8
         switch mode {
         case .load:
-            return "Same weight as last time: get \(reps.upperBound) reps to move up"
+            // Double progression (`progression`): one more rep at the same weight.
+            guard isHeldAtLastWeight(load: load, history: history, rpe: today) else {
+                let count = min(max(history.lastReps, reps.lowerBound), reps.upperBound)
+                return "Same weight, \(count) reps for today's effort"
+            }
+            var top = reps.upperBound
+            if let kind = loadKind, let next = gym.nextLoad(above: load, on: kind), isBigJump(from: load, to: next) {
+                top += Self.bigJumpExtraReps
+            }
+            let target = max(reps.lowerBound, min(history.lastReps + 1, top))
+            if target >= top { return "Same weight, aim for \(target) reps to move up" }
+            return "Same weight, aim for \(target) reps; it moves up at \(top)"
         case .reps:
             let target = repTarget(load: load, history: history, reps: reps, rpe: today) ?? reps.upperBound
             return "Same weight as last time: aim for \(target) reps; it moves up at \(goal)"
@@ -920,10 +945,11 @@ public struct WorkoutPlanner: Sendable {
     static func rationale(focus: WorkoutFocus, focusReason: String?, minutes: Int, recovery: Int?,
                           rpe: Double, block: TrainingBlock.WeekState?, exercises: [PlannedExercise]) -> String {
         var parts = [rationaleLead(focus: focus, focusReason: focusReason, block: block)]
-        let reserve = ReserveText.text(rpe: rpe)
+        // What the sets actually ask (big and small lifts differ by style), not the session number.
+        let reserve = ReserveText.text(rpes: exercises.map(\.rpe), fallback: rpe)
         if block != nil {
             // The block week sets the reserve; only a low-recovery back-off needs saying.
-            if let recovery, recovery < 67 { parts.append("Eased to \(reserve) for \(recovery)% recovery.") }
+            if let recovery, recovery < 67 { parts.append("Effort eased for \(recovery)% recovery: sets stop with \(reserve).") }
         } else if let recovery {
             let mood = recovery < 34 ? "an easy day" : (recovery < 67 ? "a normal day" : "a day to push")
             parts.append("Recovery \(recovery)%, \(mood): sets stop with \(reserve).")
@@ -1019,45 +1045,95 @@ public struct WorkoutPlanner: Sendable {
     /// reps first, as the ACSM's "1-2 reps over the desired number" rule does.
     static let bigJumpExtraReps = 2
 
-    /// Weight for the top of the rep range at the target RPE, from your best
-    /// estimated 1RM, rounded down to something you can actually load. If you
-    /// reached the top of the range last time at the target effort or easier,
-    /// it moves up one jump (double progression); a jump of over 10% needs two
-    /// extra reps first.
-    ///
-    /// `mode` (`ProgressionMode`; Plotkin et al., PeerJ 2022: load and rep
-    /// progression both work): `.load` is the rule above. `.reps` and `.sets`
-    /// hold the heaviest top weight of the last few sessions
-    /// (`ExerciseHistory.recentHeaviestWeight`), so one easier day doesn't
-    /// lower it for good, and add reps (`repTarget`) or a set
-    /// (`progressedSets`) instead. They move up one jump, whatever its size,
-    /// once that's earned (`earnedLoadStep`): `.reps` at `bigJumpExtraReps`
-    /// past the top of the range, `.sets` also at the top of the range on the
-    /// most sets. A day with a lower effort target than last time (low
-    /// recovery, deload) goes lighter for that day only; the session after an
-    /// easier one goes back to the held weight without a step.
+    /// Today's weight and rep target for a lift with history (`progression`).
+    public struct Progression: Sendable, Equatable {
+        /// In the gym's unit, loadable on this gym.
+        public var load: Double
+        /// The reps to aim for on each working set today.
+        public var targetReps: Int
+    }
+
+    /// Today's weight for a lift with history: `progression(...)?.load`.
     public func suggestedLoad(history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind,
                               mode: ProgressionMode = .load) -> Double? {
+        progression(history: history, reps: reps, rpe: rpe, kind: kind, mode: mode)?.load
+    }
+
+    /// Double progression: keep the weight and add a rep each session until
+    /// the top of the rep range, then add the smallest jump and start again
+    /// at the bottom of the range. The ACSM position stand (Med Sci Sports
+    /// Exerc 2009) adds 2-10% once the target reps are beaten; Plotkin et al.
+    /// (PeerJ 2022) found adding reps grows muscle and strength as well as
+    /// adding load. "One more rep than last time" as the step is an app choice.
+    ///
+    /// `.load` (`ProgressionMode`):
+    /// - last time inside the rep range, at today's effort or easier: same
+    ///   weight, one rep more (82.5 × 6 → 82.5 × 7), capped at the top;
+    /// - at the top: the next weight up, reps back to the bottom of the range.
+    ///   When that's a jump of over 10% (light dumbbells, coarse stacks), the
+    ///   top moves `bigJumpExtraReps` higher first, as the ACSM's "1-2 reps
+    ///   over" rule does;
+    /// - a lower effort target than last time (low recovery, deload), last
+    ///   reps outside the range, or a lighter last session: the weight comes
+    ///   from your best estimated 1RM for the reps at today's reps in reserve
+    ///   (Epley), rounded down to something you can load, never above last
+    ///   time on an easier day.
+    ///
+    /// `.reps` and `.sets` hold the heaviest top weight of the last few
+    /// sessions (`ExerciseHistory.recentHeaviestWeight`), so one easier day
+    /// doesn't lower it for good, and add reps (`repTarget`, up to
+    /// `bigJumpExtraReps` past the top) or a set (`progressedSets`). They move
+    /// up one jump, whatever its size, once that's earned (`earnedLoadStep`).
+    /// A lower effort target than last time goes lighter for that day only;
+    /// the session after an easier one goes back to the held weight without a step.
+    public func progression(history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind,
+                            mode: ProgressionMode = .load) -> Progression? {
         let repsInReserve = max(0, 10 - rpe)
-        let effectiveReps = Double(reps.upperBound) + repsInReserve
-        let target = history.bestEstimatedOneRepMax / (1 + effectiveReps / 30)
-        guard var load = gym.load(atMost: target, on: kind) else { return nil }
+        let lastInRange = min(max(history.lastReps, reps.lowerBound), reps.upperBound)
+        /// The loadable weight for `count` reps at today's reps in reserve.
+        func estimate(_ count: Int) -> Double? {
+            gym.load(atMost: history.bestEstimatedOneRepMax / (1 + (Double(count) + repsInReserve) / 30), on: kind)
+        }
+        // Today's effort target is at least last time's (RPE no higher than the target).
+        let effortHeld = (history.lastRPE ?? rpe) <= rpe + 0.001
         if mode != .load {
-            let held = gym.load(atMost: history.recentHeaviestWeight, on: kind) ?? load
-            guard (history.lastRPE ?? rpe) <= rpe + 0.001 else { return min(load, held) }
-            if !history.lastWasLighter, earnedLoadStep(history, reps: reps, mode: mode),
-               let next = gym.nextLoad(above: held, on: kind) {
-                return next
+            guard let estimated = estimate(lastInRange) else { return nil }
+            let held = gym.load(atMost: history.recentHeaviestWeight, on: kind) ?? estimated
+            guard effortHeld else { return Progression(load: min(estimated, held), targetReps: lastInRange) }
+            if history.lastWasLighter { return Progression(load: held, targetReps: lastInRange) }
+            if earnedLoadStep(history, reps: reps, mode: mode), let next = gym.nextLoad(above: held, on: kind) {
+                return Progression(load: next, targetReps: reps.lowerBound)
             }
-            return held
+            let top = mode == .reps ? reps.upperBound + Self.bigJumpExtraReps : reps.upperBound
+            return Progression(load: held, targetReps: max(reps.lowerBound, min(history.lastReps + 1, top)))
         }
-        if load <= history.lastWeight + 0.001,
-           let next = gym.nextLoad(above: history.lastWeight, on: kind),
-           history.lastReps >= reps.upperBound + (isBigJump(from: history.lastWeight, to: next) ? Self.bigJumpExtraReps : 0),
-           (history.lastRPE ?? rpe) <= rpe {
-            load = next
+        guard effortHeld else {
+            guard let estimated = estimate(lastInRange) else { return nil }
+            // An easier day: never heavier than last time.
+            let cap = gym.load(atMost: history.lastWeight, on: kind) ?? estimated
+            return Progression(load: min(estimated, cap), targetReps: lastInRange)
         }
-        return load
+        // After one easier session: back to the recent top weight, no step for the easy reps.
+        if history.lastWasLighter, let back = gym.load(atMost: history.recentHeaviestWeight, on: kind) {
+            return Progression(load: back, targetReps: lastInRange)
+        }
+        guard let held = gym.load(atMost: history.lastWeight, on: kind) else { return nil }
+        let next = gym.nextLoad(above: history.lastWeight, on: kind)
+        let bigJump = next.map { isBigJump(from: history.lastWeight, to: $0) } ?? false
+        let top = reps.upperBound + (bigJump ? Self.bigJumpExtraReps : 0)
+        if history.lastReps < reps.lowerBound {
+            // Missed the range: a weight you can do the bottom of it with, not above last time.
+            let estimated = estimate(reps.lowerBound) ?? held
+            return Progression(load: min(estimated, held), targetReps: reps.lowerBound)
+        }
+        guard history.lastReps >= top, let next else {
+            return Progression(load: held, targetReps: min(history.lastReps + 1, top))
+        }
+        // Well past the top: the 1RM estimate may say more than one jump.
+        if history.lastReps > top, let estimated = estimate(reps.upperBound), estimated > next + 0.001 {
+            return Progression(load: estimated, targetReps: reps.upperBound)
+        }
+        return Progression(load: next, targetReps: reps.lowerBound)
     }
 
     func isBigJump(from current: Double, to next: Double) -> Bool {

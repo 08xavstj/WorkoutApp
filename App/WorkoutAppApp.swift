@@ -186,6 +186,10 @@ struct RootView: View {
             session: sessions.first(where: \.isActive),
             resume: { if let active = sessions.first(where: \.isActive) { launcher.activeSession = active } }
         ))
+        // Every start resumes a workout in progress instead of a second one (`WorkoutLauncher.running`).
+        .onChange(of: sessions.first(where: \.isActive)?.persistentModelID, initial: true) { _, _ in
+            launcher.running = sessions.first(where: \.isActive)
+        }
         .onOpenURL { url in
             router.open(url)
         }
@@ -544,7 +548,7 @@ private struct ActiveWorkoutBar: View {
                             .lineLimit(1)
                     }
                     TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
-                        Text(Duration.seconds(max(0, context.date.timeIntervalSince(session.startedAt))).formatted(.time(pattern: .hourMinuteSecond)))
+                        Text(workoutElapsedText(context.date.timeIntervalSince(session.startedAt)))
                             .font(placement == .inline ? Font.subheadline.weight(.semibold) : Font.caption)
                             .monospacedDigit()
                             .foregroundStyle(placement == .inline ? Theme.primaryText : Theme.secondaryText)
