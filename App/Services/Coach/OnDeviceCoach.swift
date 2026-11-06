@@ -256,7 +256,7 @@ final class OnDeviceCoach {
     /// (not a guardrail): both SDKs carry a `Refusal` whose `explanation`
     /// asks the model for a sentence (`Response<String>`, async throws). It is
     /// a second model call, so it is only fetched once a refusal is final.
-    static func refusalExplanation(_ error: Error) async -> String? {
+    @concurrent nonisolated static func refusalExplanation(_ error: Error) async -> String? {
         #if TENSILE_IOS27_SDK
         if #available(iOS 27.0, *), let modern = error as? LanguageModelError, case .refusal(let refusal) = modern {
             return (try? await refusal.explanation)?.content
