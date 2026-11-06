@@ -82,6 +82,7 @@ final class RepCounter {
                 counter.receive(user: user, gravity: gravity, at: timestamp)
             }
         }
+        return runID
     }
 
     /// Stops `run` if it is still the current one.
