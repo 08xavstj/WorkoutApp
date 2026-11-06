@@ -86,6 +86,35 @@ public enum CoachIntent {
 
     static let cardioWords: Set<String> = ["run", "running", "ride", "riding", "cycle", "cycling", "bike", "cardio", "swim", "row", "rowing"]
 
+    // MARK: - Questions the app suggests
+
+    /// The prompts offered on the empty Coach screen. Every one of these must
+    /// route through `question(_:)` to a `CoachAnswers` answer: a suggestion
+    /// the app itself makes must never reach the on-device model, which
+    /// declines questions it reads as health advice (`CoachRoutingTests`).
+    public static let suggestedQuestions = [
+        "How should I train today?",
+        "Why is my recovery where it is?",
+        "Plan my next workout",
+        "Am I eating enough for my training?",
+    ]
+
+    /// The follow-up chips shown under a reply; same rule as `suggestedQuestions`.
+    public static let followUpQuestions = [
+        "Make it 30 min",
+        "Swap for a ride",
+        "What should I eat after?",
+        "Make it leg day",
+    ]
+
+    /// What Today's "Ask why" sends to Coach (`ScoresCard`); same rule.
+    public static let askWhyQuestion = "How should I train today, and why?"
+
+    /// Every question the app puts in the user's mouth.
+    public static var allSuggestedQuestions: [String] {
+        suggestedQuestions + followUpQuestions + [askWhyQuestion]
+    }
+
     // MARK: - Questions the app answers itself
 
     /// A question the app can answer from its own numbers, without the

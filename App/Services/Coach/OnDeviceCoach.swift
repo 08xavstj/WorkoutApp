@@ -15,6 +15,12 @@ import AppCore
 /// answer. Apple's guidance for the 3B model is short, specific prompts; the
 /// earlier design wrote the whole day's data into the prompt and got vague or
 /// off-topic answers back.
+///
+/// The model declines anything it reads as health advice, so the prompt uses
+/// training-log vocabulary (`CoachPromptVocabulary`: "readiness score", "rest",
+/// "training load"; condition lines left out) and, when it still declines,
+/// retries once with the facts stripped to training and food lines and the
+/// question prefixed "For my workout log: ". The UI keeps the app's own words.
 final class OnDeviceCoach {
     /// What happened on the last request, for the Coach status sheet.
     struct Diagnostics: Equatable, Sendable {
@@ -25,6 +31,10 @@ final class OnDeviceCoach {
         /// The full error text, exactly as the framework gave it.
         var lastError: String?
         var lastFinishedAt: Date?
+        /// The first attempt was declined and the stripped prompt was tried.
+        var retriedAfterRefusal = false
+        /// The model's own explanation of a final refusal (`Refusal.explanation`), when it gave one.
+        var refusalExplanation: String?
     }
 
     private(set) var diagnostics = Diagnostics()
@@ -85,24 +95,29 @@ final class OnDeviceCoach {
     func openAnswer(to message: String, topic: CoachIntent.Topic, facts: CoachFacts) async throws -> CoachReply {
         let lines = CoachAnswers.factLines(for: message, topic: topic, facts: facts, budget: Self.factBudget)
         let prompt = Self.openPrompt(message, facts: lines, recap: lastExchange)
-        let reply = try await generate(prompt, mode: "open question")
+        let retry = Self.openPrompt(Self.retryQuestion(message), facts: CoachPromptVocabulary.trainingOnly(lines), recap: nil)
+        let reply = try await generate(prompt, retry: retry, mode: "open question")
         lastExchange = (message, reply.answer)
         return reply
     }
 
-    /// Asks the model to say more about an answer the app already gave, so it
+    /// Asks the model to say more about an answer the app already gave: to
+    /// rephrase it and add one practical tip about training or food, so it
     /// paraphrases and explains facts instead of inventing them.
     func expand(question: String, answer: String, topic: CoachIntent.Topic, facts: CoachFacts) async throws -> String {
         let lines = CoachAnswers.factLines(for: question, topic: topic, facts: facts, budget: 600)
         let prompt = Self.expandPrompt(question: question, answer: answer, facts: lines)
-        let reply = try await generate(prompt, mode: "say more")
+        let retry = Self.expandPrompt(question: Self.retryQuestion(question), answer: answer, facts: CoachPromptVocabulary.trainingOnly(lines))
+        let reply = try await generate(prompt, retry: retry, mode: "say more")
         lastExchange = (question, reply.answer)
         return reply.answer
     }
 
     // MARK: - Generation
 
-    private func generate(_ prompt: String, mode: String) async throws -> CoachReply {
+    /// Runs `prompt`; when the model declines it and `retry` is given, runs
+    /// `retry` once (the stripped, training-only prompt) before giving up.
+    private func generate(_ prompt: String, retry: String?, mode: String) async throws -> CoachReply {
         diagnostics = Diagnostics(lastMode: mode, lastPromptCharacters: prompt.count, lastPrompt: prompt, lastError: nil, lastFinishedAt: nil)
         if let unavailable = Self.availabilityMessage {
             diagnostics.lastError = unavailable
@@ -115,10 +130,32 @@ final class OnDeviceCoach {
             diagnostics.lastFinishedAt = .now
             return reply
         } catch {
-            diagnostics.lastError = String(describing: error)
-            diagnostics.lastFinishedAt = .now
-            throw Self.friendly(error)
+            guard Self.isRefusal(error), let retry else {
+                return try await fail(with: error)
+            }
+            Self.log.notice("Coach refusal on first attempt; retrying with training-only facts: \(String(describing: error), privacy: .public)")
+            diagnostics.retriedAfterRefusal = true
+            diagnostics.lastPrompt = prompt + "\n\n--- Declined; retried with ---\n\n" + retry
+            diagnostics.lastPromptCharacters = retry.count
+            do {
+                let reply = try await Self.respond(retry)
+                diagnostics.lastFinishedAt = .now
+                return reply
+            } catch {
+                return try await fail(with: error)
+            }
         }
+    }
+
+    /// Records a final failure in `diagnostics`, with the model's own
+    /// explanation when it declined, and throws the plain-words error.
+    private func fail(with error: Error) async throws -> CoachReply {
+        diagnostics.lastError = String(describing: error)
+        if Self.isRefusal(error) {
+            diagnostics.refusalExplanation = await Self.refusalExplanation(error)
+        }
+        diagnostics.lastFinishedAt = .now
+        throw Self.friendly(error)
     }
 
     /// Guided generation first (a clean answer plus one action); if the
@@ -144,26 +181,42 @@ final class OnDeviceCoach {
 
     // MARK: - Prompts
 
+    /// The question as the retry asks it: training-log vocabulary, prefixed
+    /// "For my workout log: ".
+    static func retryQuestion(_ message: String) -> String {
+        CoachPromptVocabulary.retryQuestionPrefix + (CoachPromptVocabulary.neutral(message) ?? message)
+    }
+
     /// Question first, then the facts, then the ask. Everything is short on
     /// purpose: the 3B model answers specific prompts well and long ones badly.
+    /// The facts and the recap are rewritten into training-log vocabulary.
     static func openPrompt(_ message: String, facts: [String], recap: (question: String, answer: String)?) -> String {
         var parts = ["Question: \(message.prefix(400))"]
         if let recap {
-            parts.append("Earlier you were asked \"\(recap.question.prefix(120))\" and answered \"\(recap.answer.prefix(200))\".")
+            let question = CoachPromptVocabulary.neutral(String(recap.question.prefix(120))) ?? ""
+            let answer = CoachPromptVocabulary.neutral(String(recap.answer.prefix(200))) ?? ""
+            if !question.isEmpty, !answer.isEmpty {
+                parts.append("Earlier you were asked \"\(question)\" and answered \"\(answer)\".")
+            }
         }
-        if !facts.isEmpty {
-            parts.append("Facts:\n" + facts.map { "- \($0)" }.joined(separator: "\n"))
+        let lines = CoachPromptVocabulary.neutral(facts)
+        if !lines.isEmpty {
+            parts.append("Training log:\n" + lines.map { "- \($0)" }.joined(separator: "\n"))
         }
-        parts.append("Answer the question in 2-4 sentences using only the facts. If they don't cover it, say so in one sentence and give one general coaching tip.")
+        parts.append("Reply as a fitness coach, about training and food only, in 2-4 sentences using only the training log. If it doesn't cover the question, say so in one sentence and give one general training tip.")
         return parts.joined(separator: "\n\n")
     }
 
+    /// "Say more": the app's answer, in training-log words, with the ask to
+    /// rephrase it and add one tip; no new numbers.
     static func expandPrompt(question: String, answer: String, facts: [String]) -> String {
-        var parts = ["Question: \(question.prefix(300))", "The app answered from the user's data: \"\(answer.prefix(700))\""]
-        if !facts.isEmpty {
-            parts.append("Facts:\n" + facts.map { "- \($0)" }.joined(separator: "\n"))
+        let neutralAnswer = CoachPromptVocabulary.neutral(String(answer.prefix(700))) ?? String(answer.prefix(700))
+        var parts = ["Question: \(question.prefix(300))", "The training log app answered: \"\(neutralAnswer)\""]
+        let lines = CoachPromptVocabulary.neutral(facts)
+        if !lines.isEmpty {
+            parts.append("Training log:\n" + lines.map { "- \($0)" }.joined(separator: "\n"))
         }
-        parts.append("Explain that answer in 2-4 sentences, in plain words, using only the facts. Do not add new numbers.")
+        parts.append("Rephrase that answer in 2-4 plain sentences and add one practical tip about training or food. Use only the training log; do not add new numbers.")
         return parts.joined(separator: "\n\n")
     }
 
@@ -199,6 +252,22 @@ final class OnDeviceCoach {
         return false
     }
 
+    /// The model's own reason for a refusal, when the error is a `.refusal`
+    /// (not a guardrail): both SDKs carry a `Refusal` whose `explanation`
+    /// asks the model for a sentence (`Response<String>`, async throws). It is
+    /// a second model call, so it is only fetched once a refusal is final.
+    static func refusalExplanation(_ error: Error) async -> String? {
+        #if TENSILE_IOS27_SDK
+        if #available(iOS 27.0, *), let modern = error as? LanguageModelError, case .refusal(let refusal) = modern {
+            return (try? await refusal.explanation)?.content
+        }
+        #endif
+        if let old = error as? LanguageModelSession.GenerationError, case .refusal(let refusal, _) = old {
+            return (try? await refusal.explanation)?.content
+        }
+        return nil
+    }
+
     /// Plain words for the model's errors, instead of an error code. The
     /// underlying description rides along in brackets for the less common
     /// cases, so the user can report what actually happened; every failure
@@ -223,10 +292,10 @@ final class OnDeviceCoach {
         }
         switch generation {
         case .guardrailViolation:
-            return CoachError.declined("Apple's on-device model declined that question; its safety filter is strict about health topics. Try wording it differently.")
+            return CoachError.declined(guardrailMessage)
         case .refusal:
-            // The model itself (not the guardrail) chose not to answer; common with health advice.
-            return CoachError.declined("The on-device model declined to answer that one; it is cautious with health topics. Try asking in a different way, or about one thing at a time. (\(detail))")
+            // The model itself (not the guardrail) chose not to answer, twice: once as asked, once as a workout-log query.
+            return CoachError.declined(refusalMessage + " (\(detail))")
         case .exceededContextWindowSize:
             return CoachError.unavailable("That was more than the on-device coach can handle at once. Try a shorter question, or tap New conversation.")
         case .assetsUnavailable:
@@ -243,6 +312,10 @@ final class OnDeviceCoach {
             return CoachError.unavailable(generic)
         }
     }
+
+    /// Shown only when the app has no data-backed answer to stand in.
+    static let guardrailMessage = "Apple's on-device model declined that question, even reworded as a workout-log query. Try asking about one thing at a time, or ask about your training or food."
+    static let refusalMessage = "Apple's on-device model declined to answer that one, even reworded as a workout-log query. Try asking about one thing at a time, or ask about your training or food."
 }
 
 #if TENSILE_IOS27_SDK
@@ -251,9 +324,9 @@ extension OnDeviceCoach {
     static func friendlyModern(_ error: LanguageModelError, detail: String, generic: String) -> Error {
         switch error {
         case .guardrailViolation:
-            return CoachError.declined("Apple's on-device model declined that question; its safety filter is strict about health topics. Try wording it differently.")
+            return CoachError.declined(guardrailMessage)
         case .refusal:
-            return CoachError.declined("The on-device model declined to answer that one; it is cautious with health topics. Try asking in a different way, or about one thing at a time. (\(detail))")
+            return CoachError.declined(refusalMessage + " (\(detail))")
         case .contextSizeExceeded:
             return CoachError.unavailable("That was more than the on-device coach can handle at once. Try a shorter question, or tap New conversation.")
         case .rateLimited:
@@ -276,7 +349,7 @@ extension OnDeviceCoach {
 /// fixed so the UI never has to parse prose.
 @Generable(description: "A short coaching answer and one optional next step.")
 nonisolated struct CoachReply: Equatable {
-    @Guide(description: "The answer: 2-4 plain sentences, under 80 words, using only the given facts.")
+    @Guide(description: "The answer: 2-4 plain sentences, under 80 words, using only the given training log.")
     var answer: String
     @Guide(description: "One concrete next step in under 15 words, or an empty string if there is none.")
     var oneAction: String
@@ -315,16 +388,12 @@ enum CoachError: LocalizedError {
 enum CoachPrompt {
     // Autonomy-supportive coaching (self-determination theory: Teixeira et al.
     // 2012; Ntoumanis et al. 2021; docs/research/behaviour-change.md rec. 5).
-    /// Instructions for Apple's on-device model, kept under 600 characters and
-    /// about coaching only: Apple's guardrails are strict about medical
-    /// content, so words like "doctor", "illness" or "medication" stay out of
-    /// the instructions (the facts carry medications or labs only when asked).
-    /// Food guidance (20-40 g protein after training) lives in `CoachAnswers`,
+    /// Instructions for Apple's on-device model: a fitness training log
+    /// assistant, under 600 characters. Apple's model declines what it reads
+    /// as medical content, so "health", "recovery", "sleep", "illness" and
+    /// "medication" stay out of the instructions and the fact lines
+    /// (`CoachPromptVocabulary`, tested in AppCore for banned words). Food
+    /// guidance (20-40 g protein after training) lives in `CoachAnswers`,
     /// which answers those questions without the model.
-    static let onDeviceInstructions = """
-    You are a friendly, direct coach in a fitness app. Each message gives a question and a list of facts about the user's day.
-    Answer the question from those facts and general coaching knowledge about training, recovery, sleep and food. Never invent numbers; if the facts don't cover it, say so briefly.
-    Recovery and strain are percentages from 0 to 100. Low recovery means an easy day, not a failure.
-    Keep answers under 80 words, in 2-4 sentences. Say "you could", never "you should" or "you missed".
-    """
+    static let onDeviceInstructions = CoachPromptVocabulary.instructions
 }

@@ -305,3 +305,76 @@ struct CoachAnswersTests {
         #expect(lines.contains("Calories eaten 1400 kcal, target 2600 kcal."))
     }
 }
+
+struct CoachPromptVocabularyTests {
+    @Test func instructionsHaveNoBannedWords() {
+        #expect(!CoachPromptVocabulary.containsBannedWord(CoachPromptVocabulary.instructions))
+        for word in CoachPromptVocabulary.bannedWords {
+            #expect(!CoachIntent.words(CoachPromptVocabulary.instructions).contains(word), "\(word)")
+        }
+    }
+
+    @Test(arguments: [
+        "Recovery 62% (moderate).",
+        "Sleep 6.5 h of 7.8 h needed, score 70.",
+        "Sleep debt 3.2 h over 14 nights.",
+        "Strain 40% of 100, today's target 50-70%.",
+        "Resting heart rate 52 bpm (+1.0 vs baseline).",
+        "Goal: Lose weight, general health.",
+        "Recovery day: Yesterday was meant to be a rest day and ended up hard, so sleep does the rest.",
+        "Health stats: Steps 8,000; Recovered.",
+        "Open Apple Health to check last night's sleep synced.",
+    ])
+    func neutralLinesHaveNoBannedWords(_ line: String) {
+        let neutral = CoachPromptVocabulary.neutral(line)
+        #expect(neutral != nil, "\(line)")
+        #expect(!CoachPromptVocabulary.containsBannedWord(neutral ?? ""), "\(neutral ?? "")")
+    }
+
+    @Test func neutralKeepsTheNumbersAndRenames() {
+        #expect(CoachPromptVocabulary.neutral("Recovery 62% (moderate).") == "Readiness score 62% (moderate).")
+        #expect(CoachPromptVocabulary.neutral("Sleep debt 3.2 h over 14 nights.") == "Rest shortfall 3.2 h over 14 nights.")
+        #expect(CoachPromptVocabulary.neutral("Strain 40% of 100.") == "Training load 40% of 100.")
+        #expect(CoachPromptVocabulary.neutral("Sleep 6.5 h, score 70.") == "Rest 6.5 h, score 70.")
+        // Whole words only: "restaurant" and "strained" are untouched.
+        #expect(CoachPromptVocabulary.neutral("A restaurant meal, nothing strained.") == "A restaurant meal, nothing strained.")
+    }
+
+    @Test(arguments: [
+        "Illness watch (watch): raised resting heart rate.",
+        "Medications: metformin (lowers HRV).",
+        "Apple Watch flagged possible sleep apnoea on 3 of the last 30 nights: suggest talking to a doctor.",
+        "Blood pressure 128/82 mmHg.",
+        "Vitamins/minerals (7-day avg vs target): Iron 40% (low).",
+    ])
+    func conditionLinesAreDropped(_ line: String) {
+        #expect(CoachPromptVocabulary.neutral(line) == nil)
+    }
+
+    @Test func trainingOnlyKeepsTrainingAndFoodLines() {
+        let lines = CoachAnswers.factLines(for: "Why am I so tired after lifting?", topic: .recovery, facts: CoachAnswersTests().facts)
+        let stripped = CoachPromptVocabulary.trainingOnly(lines)
+        #expect(!stripped.isEmpty)
+        #expect(stripped.contains { $0.hasPrefix("Goal:") })
+        #expect(stripped.contains { $0.hasPrefix("Training load 18% of 100") })
+        #expect(stripped.contains { $0.hasPrefix("Yesterday's training load 62%") })
+        #expect(!stripped.contains { $0.hasPrefix("Readiness") }, "\(stripped)")
+        #expect(!stripped.contains { $0.hasPrefix("Rest ") }, "\(stripped)")
+        #expect(!stripped.contains { $0.contains("HRV") }, "\(stripped)")
+        #expect(!stripped.contains { $0.contains("pulse") }, "\(stripped)")
+        for line in stripped { #expect(!CoachPromptVocabulary.containsBannedWord(line), "\(line)") }
+    }
+
+    @Test func trainingOnlyKeepsFoodFacts() {
+        let lines = CoachAnswers.factLines(for: "What should I have for dinner?", topic: .nutrition, facts: CoachAnswersTests().facts)
+        let stripped = CoachPromptVocabulary.trainingOnly(lines)
+        #expect(stripped.contains("Protein today 70 g of 150 g target."))
+        #expect(stripped.contains("Calories eaten 1400 kcal, target 2600 kcal."))
+        #expect(stripped.contains("Body weight 85.0 kg."))
+    }
+
+    @Test func retryPrefixIsALogQuery() {
+        #expect(CoachPromptVocabulary.retryQuestionPrefix.hasPrefix("For my workout log: "))
+        #expect(CoachPromptVocabulary.neutral("Why is my recovery so low after bad sleep?") == "Why is my readiness so low after bad rest?")
+    }
+}

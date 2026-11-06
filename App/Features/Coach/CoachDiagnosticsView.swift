@@ -21,6 +21,15 @@ struct CoachDiagnosticsView: View {
                     row("Kind", diagnostics.lastMode ?? "None yet")
                     row("Prompt length", diagnostics.lastPromptCharacters.map { "\($0) characters" } ?? "–")
                     row("Finished", diagnostics.lastFinishedAt.map { $0.formatted(date: .omitted, time: .standard) } ?? "–")
+                    row("Retried after a refusal", diagnostics.retriedAfterRefusal ? "Yes, with training-only facts" : "No")
+                }
+                if let explanation = diagnostics.refusalExplanation {
+                    Section("Why the model declined (its own words)") {
+                        Text(explanation)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondaryText)
+                            .textSelection(.enabled)
+                    }
                 }
                 Section("Last error") {
                     Text(diagnostics.lastError ?? "None")
@@ -72,7 +81,9 @@ struct CoachDiagnosticsView: View {
             "Last request: \(diagnostics.lastMode ?? "none")",
             "Prompt length: \(diagnostics.lastPromptCharacters.map(String.init) ?? "-")",
             "Error: \(diagnostics.lastError ?? "none")",
+            "Retried after refusal: \(diagnostics.retriedAfterRefusal ? "yes" : "no")",
         ]
+        if let explanation = diagnostics.refusalExplanation { lines.append("Model's explanation: \(explanation)") }
         if let prompt = diagnostics.lastPrompt { lines.append("Prompt:\n\(prompt)") }
         return lines.joined(separator: "\n")
     }

@@ -40,3 +40,34 @@ struct CoachIntentTests {
         #expect(CoachIntent.wantsCardio("Swap for a ride"))
     }
 }
+
+/// Every question the app itself suggests (empty-screen chips, follow-ups,
+/// Today's "Ask why") must be answered from the data, never by the model.
+struct CoachRoutingTests {
+    @Test func everySuggestedQuestionRoutesToAnAnswer() {
+        for text in CoachIntent.allSuggestedQuestions {
+            let question = CoachIntent.question(text)
+            #expect(question != nil, "\(text) would reach the model")
+            guard let question else { continue }
+            // With nothing synced, with everything, and in rest mode: always an answer.
+            #expect(CoachAnswers.answer(for: question, facts: CoachFacts()) != nil, "\(text)")
+            #expect(CoachAnswers.answer(for: question, facts: CoachAnswersTests().facts) != nil, "\(text)")
+            var resting = CoachFacts()
+            resting.restMode = true
+            #expect(CoachAnswers.answer(for: question, facts: resting) != nil, "\(text)")
+        }
+    }
+
+    @Test func theSuggestedListsMatchTheChips() {
+        #expect(CoachIntent.suggestedQuestions.count == 4)
+        #expect(CoachIntent.followUpQuestions.count == 4)
+        #expect(CoachIntent.askWhyQuestion == "How should I train today, and why?")
+        #expect(CoachIntent.question(CoachIntent.askWhyQuestion) == .trainToday)
+    }
+
+    @Test func everyFallbackTopicHasAnAnswer() {
+        for topic in [CoachIntent.Topic.nutrition, .training, .recovery, .general] {
+            #expect(CoachAnswers.fallback(for: topic, facts: CoachFacts()) != nil, "\(topic)")
+        }
+    }
+}

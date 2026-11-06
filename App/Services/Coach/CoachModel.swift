@@ -40,19 +40,11 @@ final class CoachModel {
 
     init() {}
 
-    static let suggestions = [
-        "How should I train today?",
-        "Why is my recovery where it is?",
-        "Plan my next workout",
-        "Am I eating enough for my training?"
-    ]
-
-    static let followUps = [
-        "Make it 30 min",
-        "Swap for a ride",
-        "What should I eat after?",
-        "Make it leg day"
-    ]
+    /// The chips on the empty screen and under replies. They live in AppCore
+    /// (`CoachIntent.suggestedQuestions`) so a test proves each one routes to
+    /// a data answer and never reaches the model.
+    static let suggestions = CoachIntent.suggestedQuestions
+    static let followUps = CoachIntent.followUpQuestions
 
     func newConversation() {
         messages = []
@@ -101,18 +93,22 @@ final class CoachModel {
         guard !trimmed.isEmpty, !isThinking else { return }
         messages.append(ChatMessage(role: .user, text: trimmed))
 
-        // 1. Deterministic: instant, never errors.
-        if let question = CoachIntent.question(trimmed), let answer = CoachAnswers.answer(for: question, facts: facts) {
-            onDevice.remember(question: trimmed, answer: answer.text)
-            diagnostics = onDevice.diagnostics
-            messages.append(ChatMessage(role: .coach, text: answer.text, source: .data, action: answer.action, plan: plan, facts: facts))
-            return
+        // 1. Deterministic: instant, never errors, never the model. A routed
+        // question always gets a data answer; should `answer` ever be nil, the
+        // topic's nearest answer stands in rather than the model being asked.
+        let topic = CoachIntent.topic(trimmed)
+        if let question = CoachIntent.question(trimmed) {
+            if let answer = CoachAnswers.answer(for: question, facts: facts) ?? CoachAnswers.fallback(for: topic, facts: facts) {
+                onDevice.remember(question: trimmed, answer: answer.text)
+                diagnostics = onDevice.diagnostics
+                messages.append(ChatMessage(role: .coach, text: answer.text, source: .data, action: answer.action, plan: plan, facts: facts))
+                return
+            }
         }
 
         // 2. Open question: the model, with a small prompt.
         isThinking = true
         defer { isThinking = false }
-        let topic = CoachIntent.topic(trimmed)
         do {
             let reply = try await onDevice.openAnswer(to: trimmed, topic: topic, facts: facts)
             diagnostics = onDevice.diagnostics
@@ -130,7 +126,10 @@ final class CoachModel {
         }
     }
 
-    /// Asks the model to say more about a data-backed reply, as a new reply under it.
+    /// Asks the model to say more about a data-backed reply, as a new reply
+    /// under it: rephrase the app's answer and add one tip about training or
+    /// food. When the model declines even the stripped retry, the chat gets a
+    /// short coach note (not an error): the data answer above still stands.
     func sayMore(about message: ChatMessage) async {
         guard !isThinking, let index = messages.firstIndex(where: { $0.id == message.id }),
               message.canSayMore, let facts = message.facts else { return }
@@ -145,14 +144,21 @@ final class CoachModel {
             messages.append(ChatMessage(role: .coach, text: text, source: .model, facts: nil, expanded: true))
         } catch {
             diagnostics = onDevice.diagnostics
-            messages.append(ChatMessage(role: .error, text: error.localizedDescription))
+            if OnDeviceCoach.isRefusal(error) {
+                messages.append(ChatMessage(role: .coach, text: Self.sayMoreDeclinedText, source: .data, facts: nil, expanded: true))
+            } else {
+                messages.append(ChatMessage(role: .error, text: error.localizedDescription))
+            }
         }
     }
+
+    /// Under a data answer the model wouldn't expand on.
+    static let sayMoreDeclinedText = "Apple's on-device model declined to add to that one, so the answer above, from your data, is the whole of it. You could ask a follow-up about your training or food."
 
     /// One short sentence before a fallback answer, saying why the model didn't answer.
     static func fallbackLead(for error: Error) -> String {
         if OnDeviceCoach.isRefusal(error) {
-            return "Apple's on-device model declined that one, but here's what your data says:"
+            return "Apple's on-device model declined that one (even reworded as a workout-log query), but here's what your data says:"
         }
         return "The on-device model couldn't take that one, but here's what your data says:"
     }

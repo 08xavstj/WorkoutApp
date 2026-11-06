@@ -503,3 +503,93 @@ public enum CoachAnswers {
         line.count > limit ? String(line.prefix(limit)) + "…" : line
     }
 }
+
+// MARK: - Wording for the on-device model
+
+/// How the app talks to Apple's on-device model, which declines anything it
+/// reads as health advice ("recovery", "sleep debt", "illness", "medication"
+/// all trip it). The user never sees these words: the UI keeps "Recovery",
+/// "Sleep" and "Strain"; only the prompt text is rewritten into training-log
+/// vocabulary, and lines about conditions are left out altogether.
+///
+/// Pure string work, in AppCore so the tests can prove no banned word survives.
+public enum CoachPromptVocabulary {
+    /// Instructions for the model: a fitness training log assistant that
+    /// talks about training and food, never about conditions.
+    public static let instructions = """
+    You are a friendly, direct coach inside a fitness training log app. Each message gives a question and a list of numbers from the user's training log.
+    Reply as a fitness coach about training and food only, using those numbers and general coaching knowledge. Never give advice about conditions or treatments; if asked, say that is outside a training log and give one training tip instead.
+    Readiness and training load are percentages from 0 to 100. Low readiness means an easy session, not a failure. Never invent numbers; if the log doesn't cover it, say so briefly.
+    Keep answers under 80 words, in 2-4 sentences. Say "you could", never "you should" or "you missed".
+    """
+
+    /// Words that must not appear in the prompt (whole words, any case).
+    public static let bannedWords: [String] = [
+        "health", "recovery", "recovered", "symptom", "symptoms", "medication", "medications",
+        "sleep", "illness", "ill", "sick", "doctor", "diagnose", "apnoea", "apnea", "disease",
+    ]
+
+    /// Word-for-word replacements, applied in order (longer phrases first so
+    /// "sleep debt" becomes "rest shortfall" before "sleep" becomes "rest").
+    static let replacements: [(pattern: String, replacement: String)] = [
+        ("Sleep debt", "Rest shortfall"), ("sleep debt", "rest shortfall"),
+        ("Sleep score", "Rest quality"), ("sleep score", "rest quality"),
+        ("Sleep Regularity Index", "Rest regularity index"),
+        ("Sleep", "Rest"), ("sleep", "rest"), ("Slept", "Rested"), ("slept", "rested"), ("asleep", "at rest"),
+        ("Recovery day", "Easy day"), ("recovery day", "easy day"),
+        ("Recovery", "Readiness score"), ("recovery", "readiness"), ("Recovered", "Ready"), ("recovered", "ready"),
+        ("Strain", "Training load"), ("strain", "training load"),
+        ("Resting heart rate", "Morning pulse"), ("resting heart rate", "morning pulse"),
+        ("Heart rate", "Pulse"), ("heart rate", "pulse"),
+        ("Apple Health", "the watch app"), ("Health stats", "Watch stats"), ("Health", "Fitness"), ("health", "fitness"),
+    ]
+
+    /// A fact line is dropped from the prompt when it is about a condition,
+    /// a treatment or a result the model would decline to discuss.
+    static let droppedWords: Set<String> = [
+        "illness", "ill", "sick", "symptom", "symptoms", "medication", "medications", "medicine", "medicines",
+        "doctor", "apnoea", "apnea", "diagnose", "diagnosis", "disease", "pressure", "cholesterol", "glucose",
+        "ferritin", "hba1c", "labs", "lab", "bloods", "pregnant", "pregnancy", "period", "injury", "injured",
+        "pain", "hurt", "hurts", "vitamins", "minerals", "supplement", "supplements",
+    ]
+
+    /// `text` in training-log vocabulary, or nil when the line is about a
+    /// condition and should be left out.
+    public static func neutral(_ text: String) -> String? {
+        let words = Set(CoachIntent.words(text))
+        if !words.isDisjoint(with: droppedWords) { return nil }
+        var result = text
+        for (pattern, replacement) in replacements {
+            result = result.replacingOccurrences(of: "\\b\(pattern)\\b", with: replacement, options: .regularExpression)
+        }
+        return result
+    }
+
+    /// `lines` rewritten with `neutral`, condition lines left out.
+    public static func neutral(_ lines: [String]) -> [String] {
+        lines.compactMap(neutral)
+    }
+
+    /// Starts of the fact lines that are plainly about training and food,
+    /// as `factLines` writes them (after `neutral`): the retry after a
+    /// refusal keeps only these.
+    static let trainingOnlyPrefixes = [
+        "Goal:", "Rest mode", "Training load", "Planned session", "Gym sessions", "No gym", "Protein", "No food logged",
+        "Calories", "Carbs", "Body weight", "Trained today", "Training day", "Easy day", "Rest day", "Make-up day",
+        "Yesterday's training load",
+    ]
+
+    /// The subset of `lines` about training and food only, in training-log
+    /// vocabulary: what the model gets on the retry after it declined.
+    public static func trainingOnly(_ lines: [String]) -> [String] {
+        neutral(lines).filter { line in trainingOnlyPrefixes.contains { line.hasPrefix($0) } }
+    }
+
+    /// The prefix for the retried question, so the model reads it as a log query.
+    public static let retryQuestionPrefix = "For my workout log: "
+
+    /// Whether `text` contains a banned word as a whole word, any case.
+    public static func containsBannedWord(_ text: String) -> Bool {
+        !Set(CoachIntent.words(text)).isDisjoint(with: bannedWords)
+    }
+}
