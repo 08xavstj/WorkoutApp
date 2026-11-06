@@ -315,3 +315,71 @@ Sources checked this round: PubMed 24092765 (Helms 2014 IJSNEM); bjsm.bmj.com/co
 (Morton 2018); JISSN 14:20 (Jäger 2017); PMC4033492 (Helms, Aragon & Fitschen 2014); PMC5596471
 (Kerksick 2017); Phillips & Van Loon 2011 abstract (DOI 10.1080/02640414.2011.619204);
 Henselmans, "Eric Helms & protein: a research review" (blog, not peer reviewed).
+
+## 5. Vitamins page ("What to fix") and the supplements page (November 2026)
+
+### 5.1 Vitamins and minerals: making the page actionable
+
+**What was built.** `Micronutrients` (AppCore) keeps its DRI table (checked against the NIH Office of
+Dietary Supplements fact sheets: iron 8 mg men and women 51+, 18 mg women 19-50; magnesium
+400/420 mg men and 310/320 mg women by age 19-30/31+; calcium 1,000 mg, 1,200 mg for women 51+
+and men 71+; vitamin D 15 µg, 20 µg over 70; zinc 11/8 mg; vitamin C 90/75 mg; vitamin A 900/700 µg
+RAE; potassium 3,400/2,600 mg AI; sodium 1,500 mg AI; B12 2.4 µg; folate 400 µg; selenium 55 µg)
+and adds:
+
+- `foodSources(_:)`: three foods per nutrient with mg/µg per 100 g from USDA FoodData Central (SR
+  Legacy / Foundation Foods, rounded), a realistic maximum portion and, where it matters, a note
+  (non-heme iron with vitamin C; Brazil nuts capped at 10 g because of the 400 µg selenium upper
+  limit). Cronometer uses the same database, so the fixes line up with the log.
+- `fixes(for:)`: the portion that closes the gap to the target, rounded up to 5 g (under 30 g) or
+  10 g and capped at the food's maximum; fixes that close the gap sort first. The page shows the
+  worst nutrient first ("Magnesium 210 / 400 mg: 40 g pumpkin seeds (+220 mg)…").
+- `toFix(_:)` (low findings, worst first), `summaryLine(findings:)` (one line for Today's Up next:
+  "3 low this week: iron, zinc and vitamin D") and `athleteNote(_:sex:focuses:)`.
+- UI: Health › Key measures gets a "Vitamins & minerals · N low this week" row once 4 days are
+  logged; the page is "What to fix" → "Fine" (collapsed) → footer (4-day minimum, 7-day window,
+  Cronometer's database, RDAs as population targets, blood tests for iron/D/B12).
+
+**Athlete needs (not raised in the targets).** The IOC consensus on dietary supplements (Maughan
+et al., Br J Sports Med 2018;52:439-55) and Sim et al. (Eur J Appl Physiol 2019) note that female
+endurance athletes are commonly iron deficient, that indoor and winter training make low vitamin D
+common (Owens, Allison & Close, Sports Med 2018;48(Suppl 1):3-16) and that bone needs calcium with
+vitamin D, especially with low energy availability. The IOC's recommendation is to test (ferritin,
+25(OH)D), not to supplement on intake alone, so the app adds a note for these cases and keeps the
+RDA as the target. Low intake is worded as a reason to check, never as a deficiency.
+
+### 5.2 Supplements: evidence grades for the Supplements page (`SupplementKnowledge`)
+
+Grades follow the IOC 2018 framework and the ISSN position stands; each entry carries 2-6 sources,
+and claims with different evidence get their own grade (ashwagandha is moderate for stress and
+sleep, weak for strength). The UI never says "take X".
+
+| Supplement | Grade | Basis |
+|---|---|---|
+| Creatine monohydrate | strong | Kreider et al., JISSN 2017;14:18 (ISSN position stand); Antonio et al., JISSN 2021;18:13; Delpino et al., Nutrition 2022 meta-analysis; IOC 2018 |
+| Caffeine | strong | Guest et al., JISSN 2021;18:1 (ISSN); Gardiner et al., Sleep Med Rev 2023 (sleep cost); IOC 2018 |
+| Protein powder | strong (when intake < ~1.6 g/kg) | Jäger et al., JISSN 2017;14:20 (ISSN); Morton et al., BJSM 2018;52:376-84 |
+| Beta-alanine | moderate (0.5-10 min efforts) | Trexler et al., JISSN 2015;12:30 (ISSN); Saunders et al., BJSM 2017;51:658-69 (ES 0.18, 40 studies) |
+| Citrulline malate | weak | Trexler et al., Sports Med 2019;49:707-18; Vårvik et al., IJSNEM 2021 (publication bias); Gough et al., EJSS 2021 |
+| Beetroot / nitrate | moderate | Senefeld et al., MSSE 2020;52:2250-61 (d ≈ 0.17, 80 studies); McMahon et al., Sports Med 2017 |
+| Pre-workout blends | moderate (the caffeine) | Harty et al., JISSN 2018;15:41; contamination and proprietary-blend warnings |
+| Electrolytes | moderate for long/hot sessions, none otherwise | Sawka et al., MSSE 2007 (ACSM); Baker, Sports Med 2017 |
+| Ashwagandha | moderate (stress, sleep), weak (strength) | Akhgarjand et al., Phytother Res 2022 (12 RCTs, low certainty); Cheah et al., PLoS One 2021 (SMD −0.59); Bonilla et al., JFMK 2021 (Bayesian meta-analysis); Wankhede et al., JISSN 2015; Ziegenfuss et al., Nutrients 2018 (STAR, maker-funded); Chandrasekhar et al., 2012. Liver injury: Björnsson et al., Liver Int 2020; Philips et al., Pharmaceuticals 2023 (RUCAM probable); Lareb 2023-2025, BfR 2024 and WHO VigiBase signals. Not for pregnancy (banned in Denmark), thyroid disease, or with sedatives |
+| Melatonin | moderate (sleep onset, ~7 min) | Ferracioli-Oda et al., PLoS One 2013; Erland & Saxena, J Clin Sleep Med 2017 (label accuracy) |
+| Glycine | weak | Yamadera et al., Sleep Biol Rhythms 2007; Bannai et al., Front Neurol 2012 (small, maker-run) |
+| Magnesium | weak (sleep), none (performance) unless deficient | Arab et al., Biol Trace Elem Res 2023; NIH ODS; IOC 2018 |
+| Tart cherry | moderate (soreness, strength recovery), weak (sleep) | Hill et al., IJSNEM 2021;31:154-67 (14 trials); Howatson et al., Eur J Nutr 2012 |
+| Collagen / gelatin | weak | Shaw et al., AJCN 2017;105:136-43 (n = 8, surrogate marker); Khatri et al., Amino Acids 2021 (systematic review) |
+| Omega-3 | moderate (health), weak (soreness, performance) | ISSN position stand, JISSN 2025;22:2441775; Lv et al., Front Physiol 2020 (below the clinically important difference) |
+| Vitamin D | moderate if deficient, none otherwise | Owens et al., Sports Med 2018; Zhang et al., PLoS One 2019; Sist et al., JISSN 2023 (no strength/power effect) |
+| Zinc | none unless deficient; weak for cold lozenges | NIH ODS; Hemilä, JRSM Open 2017; IOC 2018 |
+| HMB | weak in trained | Wilson et al., JISSN 2013 (ISSN); Jakubowski et al., Nutrients 2020 (no lean mass or strength effect, young adults) |
+| BCAAs | none (muscle), weak (soreness) | Wolfe, JISSN 2017;14:30; ISSN protein stand 2017 |
+| Testosterone boosters (tribulus, fenugreek) | none | Qureshi et al., J Diet Suppl 2014; Isenmann et al., Int J Sports Med 2023 (fenugreek SMD ≈ 0.3, no muscle outcome); Clemesha et al., World J Mens Health 2020 |
+| Turkesterone / ecdysterone | weak, contamination warning | Isenmann et al., Arch Toxicol 2019 (one trial, underdosed product); HPLC analyses of products (contents far below label; some with anabolic steroids); WADA monitoring list |
+| Multivitamin | none unless diet gaps | USPSTF, JAMA 2022;327:2326-33 ("I" statement; "D" for beta-carotene and vitamin E); link to the vitamins page |
+
+**Not re-verified this round** (cited from memory, wording kept cautious): the exact Isenmann 2019
+underdosing figure (secondary sources give "about 6% of label"); the Lareb/VigiBase case counts
+(12 and 21 in a 2025 newsletter); Bannai 2012 sample size; the Vårvik 2021 and Gough 2021 page
+numbers. The Khatri 2021 paper is a systematic review, not a meta-analysis, and is cited as such.

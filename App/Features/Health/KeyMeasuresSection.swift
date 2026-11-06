@@ -45,6 +45,10 @@ struct KeyMeasuresSection: View {
                     if !stats.isEmpty { Divider() }
                     BodyAgeRow(result: bodyAge)
                 }
+                if !metrics.micronutrients.isEmpty {
+                    if !stats.isEmpty || vitals.bodyAge != nil { Divider() }
+                    MicronutrientsKeyRow(findings: metrics.micronutrients)
+                }
                 footer
             }
             .card()
@@ -103,6 +107,25 @@ private struct BodyAgeRow: View {
             verdict: MetricVerdict("Estimate"),
             hint: "Shows what's moving it",
             destination: BodyAgePage()
+        )
+    }
+}
+
+/// Vitamins and minerals from the food log (`Micronutrients`): how many are
+/// low this week, pushing the "What to fix" page. Shown once 4 days of food
+/// are logged (`Micronutrients.assess` returns nothing before that).
+private struct MicronutrientsKeyRow: View {
+    let findings: [Micronutrients.Finding]
+
+    var body: some View {
+        let low = Micronutrients.toFix(findings).count
+        MetricRow(
+            title: "Vitamins & minerals",
+            value: "\(low)",
+            unit: "low this week",
+            verdict: MetricVerdict(low == 0 ? "Near target" : "Fix in food", color: low == 0 ? Theme.recoveryHigh : Theme.recoveryModerate),
+            hint: "Shows what to fix",
+            destination: MicronutrientsPage()
         )
     }
 }

@@ -43,7 +43,14 @@ public enum Micronutrients {
             }
         }
 
-        /// Daily target (RDA or Adequate Intake) for adults.
+        /// Daily target (RDA or Adequate Intake) for adults, by sex and age
+        /// where they differ: NIH Office of Dietary Supplements fact sheets
+        /// (Iron: 8 mg men and women 51+, 18 mg women 19-50; Magnesium: 400/420 mg
+        /// men, 310/320 mg women by age 19-30/31+; Calcium: 1,000 mg, 1,200 mg
+        /// women 51+ and men 71+; Vitamin D: 15 µg, 20 µg over 70; Zinc 11/8 mg;
+        /// Vitamin C 90/75 mg; Vitamin A 900/700 µg RAE; Potassium 3,400/2,600 mg AI;
+        /// Sodium 1,500 mg AI; B12 2.4 µg; Folate 400 µg DFE; Selenium 55 µg),
+        /// which reproduce the IOM/NASEM DRI tables.
         public func target(_ sex: BiologicalSex, age: Int = 30) -> Double {
             let male = sex == .male
             switch self {
@@ -178,5 +185,185 @@ public enum Micronutrients {
     public static func notes(_ findings: [Finding], area: Area) -> [String] {
         findings.filter { $0.kind == .low && $0.nutrient.areas.contains(area) }
             .map { "\($0.nutrient.name) may be low: it has averaged \(Int($0.percentOfTarget.rounded()))% of target this week." }
+    }
+}
+
+// MARK: - What to fix: food sources and the one-line summary
+
+extension Micronutrients {
+    /// A food that is rich in one nutrient, with its content per 100 g from
+    /// USDA FoodData Central (SR Legacy / Foundation Foods; values rounded).
+    /// Cronometer uses the same database, so the amounts line up with the log.
+    public struct FoodSource: Sendable, Equatable {
+        public var name: String
+        /// Amount of the nutrient (in the nutrient's unit) per 100 g of food.
+        public var perHundredGrams: Double
+        /// The largest portion worth suggesting, in grams (a handful of seeds,
+        /// a plate of spinach), so fixes stay realistic.
+        public var maxGrams: Double
+        /// Short note shown with the food ("non-heme iron: pair with vitamin C").
+        public var note: String?
+        public var source: String { "USDA FoodData Central" }
+    }
+
+    /// One concrete fix: this much of this food adds this much of the nutrient.
+    public struct FoodFix: Sendable, Equatable, Identifiable {
+        public var food: FoodSource
+        public var grams: Double
+        public var amount: Double
+        public var id: String { food.name }
+        /// Whether this portion alone closes the gap to the target.
+        public var closesGap: Bool
+    }
+
+    /// About three foods per nutrient, all from USDA FoodData Central (per 100 g).
+    public static func foodSources(_ nutrient: Nutrient) -> [FoodSource] {
+        switch nutrient {
+        case .magnesium: [
+            // USDA FoodData Central: pumpkin seed kernels, roasted (SR 12016) ~550 mg; almonds (SR 12061) 270 mg; spinach, cooked (SR 11458) 87 mg.
+            FoodSource(name: "pumpkin seeds", perHundredGrams: 550, maxGrams: 40),
+            FoodSource(name: "almonds", perHundredGrams: 270, maxGrams: 50),
+            FoodSource(name: "cooked spinach", perHundredGrams: 87, maxGrams: 150),
+        ]
+        case .iron: [
+            // USDA: beef liver, cooked 6.5 mg; lentils, cooked 3.3 mg; spinach, cooked 3.6 mg (non-heme).
+            FoodSource(name: "beef liver", perHundredGrams: 6.5, maxGrams: 100, note: "heme iron, well absorbed"),
+            FoodSource(name: "cooked lentils", perHundredGrams: 3.3, maxGrams: 250, note: "non-heme: pair with vitamin C, keep tea and coffee an hour away"),
+            FoodSource(name: "cooked spinach", perHundredGrams: 3.6, maxGrams: 150, note: "non-heme: pair with vitamin C"),
+        ]
+        case .vitaminC: [
+            // USDA: red bell pepper, raw 128 mg; kiwifruit 93 mg; broccoli, cooked 65 mg.
+            FoodSource(name: "red pepper", perHundredGrams: 128, maxGrams: 150),
+            FoodSource(name: "kiwi", perHundredGrams: 93, maxGrams: 150),
+            FoodSource(name: "cooked broccoli", perHundredGrams: 65, maxGrams: 200),
+        ]
+        case .vitaminD: [
+            // USDA: Atlantic salmon, cooked ~11 µg; sardines, canned in oil 4.8 µg; whole egg 2.0 µg.
+            // Food rarely covers vitamin D; sun or a supplement usually does (Owens et al., Sports Med 2018).
+            FoodSource(name: "salmon", perHundredGrams: 11, maxGrams: 150),
+            FoodSource(name: "canned sardines", perHundredGrams: 4.8, maxGrams: 120),
+            FoodSource(name: "eggs", perHundredGrams: 2.0, maxGrams: 150),
+        ]
+        case .zinc: [
+            // USDA: beef, ground 85% lean, cooked 6.3 mg; pumpkin seed kernels 7.8 mg; cashews 5.6 mg.
+            FoodSource(name: "lean beef", perHundredGrams: 6.3, maxGrams: 150),
+            FoodSource(name: "pumpkin seeds", perHundredGrams: 7.8, maxGrams: 40),
+            FoodSource(name: "cashews", perHundredGrams: 5.6, maxGrams: 50),
+        ]
+        case .potassium: [
+            // USDA: white beans, cooked 561 mg; potato, baked with skin 535 mg; banana 358 mg.
+            FoodSource(name: "cooked white beans", perHundredGrams: 561, maxGrams: 250),
+            FoodSource(name: "baked potato with skin", perHundredGrams: 535, maxGrams: 300),
+            FoodSource(name: "banana", perHundredGrams: 358, maxGrams: 240),
+        ]
+        case .sodium: [
+            // USDA: green olives, brined 1,556 mg; feta 917 mg; dill pickles 809 mg. Mostly a heavy-sweat-day fix.
+            FoodSource(name: "olives", perHundredGrams: 1556, maxGrams: 60),
+            FoodSource(name: "feta", perHundredGrams: 917, maxGrams: 60),
+            FoodSource(name: "pickles", perHundredGrams: 809, maxGrams: 100),
+        ]
+        case .calcium: [
+            // USDA: cheddar 710 mg; sardines, canned with bones 382 mg; plain low-fat yogurt 183 mg.
+            FoodSource(name: "cheddar", perHundredGrams: 710, maxGrams: 50),
+            FoodSource(name: "canned sardines", perHundredGrams: 382, maxGrams: 120),
+            FoodSource(name: "plain yogurt", perHundredGrams: 183, maxGrams: 300),
+        ]
+        case .vitaminB12: [
+            // USDA: sardines, canned 8.9 µg; beef, cooked 2.6 µg; whole egg 1.1 µg. Plant-based: fortified foods or a supplement (Rogerson, JISSN 2017).
+            FoodSource(name: "canned sardines", perHundredGrams: 8.9, maxGrams: 120),
+            FoodSource(name: "lean beef", perHundredGrams: 2.6, maxGrams: 150),
+            FoodSource(name: "eggs", perHundredGrams: 1.1, maxGrams: 150, note: "plant-based diets need fortified foods or a supplement"),
+        ]
+        case .folate: [
+            // USDA: spinach, raw 194 µg; lentils, cooked 181 µg; asparagus, cooked 149 µg.
+            FoodSource(name: "raw spinach", perHundredGrams: 194, maxGrams: 100),
+            FoodSource(name: "cooked lentils", perHundredGrams: 181, maxGrams: 250),
+            FoodSource(name: "cooked asparagus", perHundredGrams: 149, maxGrams: 150),
+        ]
+        case .vitaminA: [
+            // USDA (RAE): sweet potato, baked 961 µg; carrots, raw 835 µg; spinach, cooked 524 µg.
+            FoodSource(name: "baked sweet potato", perHundredGrams: 961, maxGrams: 200),
+            FoodSource(name: "carrots", perHundredGrams: 835, maxGrams: 150),
+            FoodSource(name: "cooked spinach", perHundredGrams: 524, maxGrams: 150),
+        ]
+        case .selenium: [
+            // USDA: Brazil nuts 1,917 µg (one or two nuts a day; the upper limit is 400 µg); tuna, cooked 108 µg; whole egg 31 µg.
+            FoodSource(name: "Brazil nuts", perHundredGrams: 1917, maxGrams: 10, note: "one or two nuts; more goes over the upper limit"),
+            FoodSource(name: "tuna", perHundredGrams: 108, maxGrams: 150),
+            FoodSource(name: "eggs", perHundredGrams: 31, maxGrams: 150),
+        ]
+        case .fiber: [
+            // USDA: chia seeds 34 g; cooked lentils 7.9 g; raspberries 6.5 g.
+            FoodSource(name: "chia seeds", perHundredGrams: 34, maxGrams: 30),
+            FoodSource(name: "cooked lentils", perHundredGrams: 7.9, maxGrams: 250),
+            FoodSource(name: "raspberries", perHundredGrams: 6.5, maxGrams: 200),
+        ]
+        }
+    }
+
+    /// The portion of each food that would close the gap to the target (rounded
+    /// up to 5 g under 30 g, else 10 g), capped at a realistic serving. Up to
+    /// three fixes, the ones that close the gap first.
+    public static func fixes(for finding: Finding, limit: Int = 3) -> [FoodFix] {
+        let gap = finding.target - finding.average
+        guard gap > 0 else { return [] }
+        let fixes = foodSources(finding.nutrient).map { food -> FoodFix in
+            let exact = gap / food.perHundredGrams * 100
+            let step: Double = exact < 30 ? 5 : 10
+            let grams = min(food.maxGrams, max(step, (exact / step).rounded(.up) * step))
+            let amount = grams * food.perHundredGrams / 100
+            return FoodFix(food: food, grams: grams, amount: amount, closesGap: amount >= gap - 0.0001)
+        }
+        return Array(fixes.sorted { a, b in
+            if a.closesGap != b.closesGap { return a.closesGap }
+            return a.amount > b.amount
+        }.prefix(limit))
+    }
+
+    /// Low findings, worst first: what the page lists under "What to fix".
+    public static func toFix(_ findings: [Finding]) -> [Finding] {
+        findings.filter { $0.kind == .low }.sorted { $0.percentOfTarget < $1.percentOfTarget }
+    }
+
+    /// One line for Today's Up next / Nutrition, or nil when there's nothing to
+    /// show (fewer than 4 logged days). "3 low this week: magnesium, iron and vitamin D".
+    public static func summaryLine(findings: [Finding]) -> String? {
+        guard !findings.isEmpty else { return nil }
+        let low = toFix(findings)
+        guard !low.isEmpty else { return "Vitamins and minerals near target this week" }
+        let names = low.prefix(3).map { finding -> String in
+            let name = finding.nutrient.name
+            return name.prefix(1).lowercased() + name.dropFirst()
+        }
+        let list: String
+        switch names.count {
+        case 1: list = names[0]
+        case 2: list = "\(names[0]) and \(names[1])"
+        default: list = "\(names[0]), \(names[1]) and \(names[2])"
+        }
+        let more = low.count > 3 ? " and \(low.count - 3) more" : ""
+        return "\(low.count) low this week: \(list)\(more)"
+    }
+
+    /// Where evidence suggests athletes need more than the RDA (IOC consensus,
+    /// Maughan et al., Br J Sports Med 2018;52:439-55). Targets are not raised:
+    /// the RDA is a population target and the IOC's advice is to test, not to
+    /// supplement on intake alone.
+    public static func athleteNote(_ nutrient: Nutrient, sex: BiologicalSex, focuses: [Goals.Focus]) -> String? {
+        switch nutrient {
+        case .iron where sex == .female && focuses.contains(.endurance):
+            // Maughan et al. 2018; Sim et al., Eur J Appl Physiol 2019: iron deficiency is common in female endurance athletes.
+            return "Women who train for endurance lose more iron (sweat, foot-strike, periods) and are often low. Worth a ferritin test before any supplement."
+        case .iron where focuses.contains(.endurance):
+            return "Endurance training raises iron losses a little; a ferritin blood test tells you more than intake does (IOC consensus 2018)."
+        case .vitaminD:
+            // Maughan et al. 2018; Owens et al., Sports Med 2018: indoor and winter training raise deficiency risk.
+            return "If you train mostly indoors or it's winter, food won't cover vitamin D; a 25(OH)D blood test settles it (IOC consensus 2018)."
+        case .calcium where sex == .female:
+            // Maughan et al. 2018: low energy availability in women raises bone needs; the IOC notes calcium with vitamin D.
+            return "Bone needs calcium and vitamin D together, especially when eating less than you burn for long stretches (IOC consensus 2018)."
+        default:
+            return nil
+        }
     }
 }

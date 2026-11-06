@@ -222,6 +222,23 @@ private struct NutritionCard: View {
                         .foregroundStyle(Theme.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // Vitamins and minerals this week (`Micronutrients`), once 4 days are logged.
+                if let line = Micronutrients.summaryLine(findings: metrics.micronutrients) {
+                    NavigationLink { MicronutrientsPage() } label: {
+                        HStack(spacing: 6) {
+                            Text(line)
+                                .font(Theme.Typography.context)
+                                .foregroundStyle(Theme.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        .frame(minHeight: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows what to fix in your diet")
+                }
             } else {
                 NoFoodRow(proteinTarget: metrics.proteinTarget)
                 if food?.waterLiters ?? 0 > 0 {

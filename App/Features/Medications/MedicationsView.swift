@@ -60,6 +60,10 @@ struct MedicationsView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    HealthNavigationRow(title: "Supplements", detail: "Research grades and dose checks for what you take, creatine to ashwagandha", icon: "leaf.fill", color: Theme.nutrition) {
+                        SupplementsView(pushed: true)
+                    }
+                    .card()
                     Text("Health effects come from published research and FDA drug labels. They're for training decisions only; never change a medication without your doctor.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)

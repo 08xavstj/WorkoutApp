@@ -664,7 +664,7 @@ final class DailyMetricsModel {
                 fatFreeMassKg: EnergyAvailability.fatFreeMass(bodyMassKg: bodyMassKg, bodyFatPercent: bodyFatPercent)
             )
             if let nutrients = try? await nutrientTask {
-                micronutrients = Micronutrients.assess(averages: nutrients.averages, daysLogged: nutrients.daysLogged, sex: settings.sex)
+                micronutrients = Micronutrients.assess(averages: nutrients.averages, daysLogged: nutrients.daysLogged, sex: settings.sex, age: settings.age)
             }
             let stepResult = try? await stepCounts
             steps = stepResult?.total

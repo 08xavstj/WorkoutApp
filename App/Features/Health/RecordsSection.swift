@@ -79,6 +79,10 @@ struct RecordsSection: View {
                 HealthNavigationRow(title: "Medications", detail: medicationsDetail, icon: "pills.fill") {
                     MedicationsView(pushed: true)
                 }
+                Divider()
+                HealthNavigationRow(title: "Supplements", detail: supplementsDetail, icon: "leaf.fill", color: Theme.nutrition) {
+                    SupplementsView(pushed: true)
+                }
             }
             .card()
         }
@@ -123,6 +127,13 @@ struct RecordsSection: View {
         let dates = ProgressPhotosModel.Pose.allCases.compactMap { photos.latest($0)?.date }
         guard let last = dates.max() else { return "Front and side, kept only in the app" }
         return "Last photo · \(Self.ago(last))"
+    }
+
+    /// Entries in the medications list that the research table recognises (`SupplementKnowledge`).
+    private var supplementsDetail: String {
+        let count = meds.supplements.count
+        guard count > 0 else { return "Research grades and dose checks, creatine to ashwagandha" }
+        return "\(count) in your list · research and dose check"
     }
 
     private var medicationsDetail: String {

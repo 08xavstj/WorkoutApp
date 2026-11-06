@@ -297,3 +297,35 @@ nonisolated enum DrugLabelClient {
         return prefix + "…"
     }
 }
+
+// MARK: - Supplements (SupplementKnowledge)
+
+extension MedicationsModel {
+    struct SupplementMatch: Identifiable {
+        var medication: Medication
+        var entry: SupplementKnowledge.Entry
+        var id: UUID { medication.id }
+    }
+
+    /// Current entries the research table recognises (creatine, ashwagandha…), for `SupplementsView`.
+    var supplements: [SupplementMatch] {
+        medications.filter(\.isActive).compactMap { med in
+            SupplementKnowledge.match(med.name).map { SupplementMatch(medication: med, entry: $0) }
+        }
+    }
+
+    /// The user's entry for a research-table supplement, if they logged one.
+    func supplementEntry(for entry: SupplementKnowledge.Entry) -> Medication? {
+        medications.first { SupplementKnowledge.match($0.name)?.id == entry.id }
+    }
+
+    /// "Add to my list": a Medication entry named after the supplement with
+    /// the trial dose and no reminder times (as needed) until the user adds
+    /// them in Medications. Nothing happens if it's already there.
+    func addSupplement(_ entry: SupplementKnowledge.Entry) {
+        guard supplementEntry(for: entry) == nil else { return }
+        let name = entry.name.components(separatedBy: " (").first ?? entry.name
+        let dose = entry.dose.components(separatedBy: CharacterSet(charactersIn: ",;(")).first?.trimmingCharacters(in: .whitespaces) ?? entry.dose
+        save(Medication(name: name, dose: dose))
+    }
+}

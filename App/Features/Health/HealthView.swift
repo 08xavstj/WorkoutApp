@@ -515,75 +515,189 @@ struct InsightsCard: View {
     }
 }
 
-/// Vitamins and minerals from the food log, 7-day averages vs daily targets.
+/// Vitamins and minerals from the food log: what to fix first (low nutrients,
+/// worst first, each with 2-3 food fixes sized to close the gap), then the
+/// ones that are fine (collapsed), then how to read it. 7-day averages vs
+/// daily targets (`Micronutrients`).
 struct MicronutrientsCard: View {
     let findings: [Micronutrients.Finding]
+    @Environment(UserSettings.self) private var settings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        if findings.isEmpty {
+            emptyCard
+        } else {
+            WhatToFixCard(findings: Micronutrients.toFix(findings), sex: settings.sex, focuses: settings.goals.focuses)
+            FineNutrientsCard(findings: findings.filter { $0.kind != .low })
+            MicronutrientsFooter()
+        }
+    }
+
+    private var emptyCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CardLabel(text: "Vitamins & minerals", color: Theme.nutrition)
+            Text("Log food in your food app for at least 4 days (with Apple Health sync on) to see which vitamins and minerals your meals cover and what to fix.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .card()
+    }
+}
+
+/// Low nutrients, worst first, each with the foods that would close the gap.
+private struct WhatToFixCard: View {
+    let findings: [Micronutrients.Finding]
+    let sex: BiologicalSex
+    let focuses: [Goals.Focus]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                CardLabel(text: "Vitamins & minerals")
+                CardLabel(text: "What to fix", color: Theme.nutrition)
                 Spacer()
                 Text("7-day average")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
             if findings.isEmpty {
-                Text("Log food in your food app for at least 4 days (with Apple Health sync on) to see how your vitamins and minerals compare with daily targets.")
+                Text("Nothing is low this week. Everything your food app shares is at or near its target.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
             ForEach(findings) { finding in
-                row(finding)
+                NutrientFixRow(finding: finding, note: Micronutrients.athleteNote(finding.nutrient, sex: sex, focuses: focuses))
             }
-            if !findings.isEmpty {
-                Text("Targets: US Dietary Reference Intakes (NIH). Only nutrients your food app shares are shown. Food logs undercount supplements unless you log them too.")
-                    .font(.caption2)
+        }
+        .card(tint: Theme.nutrition)
+    }
+}
+
+private struct NutrientFixRow: View {
+    let finding: Micronutrients.Finding
+    let note: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            NutrientAmountLine(finding: finding, color: Theme.recoveryModerate)
+            if let effect = finding.effect {
+                Text(effect)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            ForEach(Micronutrients.fixes(for: finding)) { fix in
+                FoodFixLine(fix: fix, unit: finding.nutrient.unit)
+            }
+            if let note {
+                Text(note)
+                    .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
         }
-        .card()
     }
+}
 
-    private func row(_ finding: Micronutrients.Finding) -> some View {
+/// "40 g pumpkin seeds (+220 mg)", with the food's note when it has one.
+private struct FoodFixLine: View {
+    let fix: Micronutrients.FoodFix
+    let unit: String
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(Int(fix.grams)) g \(fix.food.name) (+\(nutrientAmount(fix.amount)) \(unit))" + (fix.closesGap ? "" : ", part of the gap"))
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                if let note = fix.food.note {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+        } icon: {
+            Image(systemName: "leaf.fill").foregroundStyle(Theme.nutrition)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Name, "210 / 400 mg" and a progress bar toward the target.
+private struct NutrientAmountLine: View {
+    let finding: Micronutrients.Finding
+    let color: Color
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(finding.nutrient.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
                 Spacer()
-                Text("\(amount(finding.average)) / \(amount(finding.target)) \(finding.nutrient.unit)")
+                Text("\(nutrientAmount(finding.average)) / \(nutrientAmount(finding.target)) \(finding.nutrient.unit)")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundStyle(Theme.textColor(for: color(finding)))
+                    .foregroundStyle(Theme.textColor(for: color))
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Theme.track)
                     Capsule()
-                        .fill(color(finding).gradient)
+                        .fill(color.gradient)
                         .frame(width: max(6, geo.size.width * min(1, finding.percentOfTarget / 100)))
                 }
             }
             .frame(height: 6)
             .accessibilityHidden(true)
-            if let effect = finding.effect {
-                Text(effect)
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(finding.nutrient.name), \(Int(finding.percentOfTarget.rounded())) percent of target")
+    }
+}
+
+/// Nutrients at or over target, collapsed; high ones carry their warning.
+private struct FineNutrientsCard: View {
+    let findings: [Micronutrients.Finding]
+    @State private var expanded = false
+
+    var body: some View {
+        if !findings.isEmpty {
+            DisclosureGroup(isExpanded: $expanded) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(findings) { finding in
+                        VStack(alignment: .leading, spacing: 4) {
+                            NutrientAmountLine(finding: finding, color: finding.kind == .high ? Theme.recoveryLow : Theme.recoveryHigh)
+                            if let effect = finding.effect {
+                                Text(effect)
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                Text("Fine (\(findings.count))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
             }
+            .tint(Theme.secondaryText)
+            .card()
         }
     }
+}
 
-    private func color(_ finding: Micronutrients.Finding) -> Color {
-        switch finding.kind {
-        case .low: Theme.recoveryModerate
-        case .ok: Theme.recoveryHigh
-        case .high: Theme.recoveryLow
+/// How to read the page: the data's limits, in plain words.
+private struct MicronutrientsFooter: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Needs at least 4 logged days and averages the last 7, using what your food app (Cronometer) shares with Apple Health and its food database. Only nutrients it shares are shown, and supplements count only if you log them.")
+            Text("Targets are US RDAs and Adequate Intakes for your sex and age (NIH Office of Dietary Supplements): population targets, not a test of you. Low intake is a reason to check, not proof of deficiency; a blood test settles iron, vitamin D and B12. Food amounts come from USDA FoodData Central.")
         }
+        .font(.caption2)
+        .foregroundStyle(Theme.secondaryText)
     }
+}
 
-    private func amount(_ value: Double) -> String {
-        value >= 100 ? "\(Int(value.rounded()))" : value.formatted(.number.precision(.fractionLength(0...1)))
-    }
+/// Whole numbers from 100 up, one decimal below.
+private func nutrientAmount(_ value: Double) -> String {
+    value >= 100 ? "\(Int(value.rounded()))" : value.formatted(.number.precision(.fractionLength(0...1)))
 }

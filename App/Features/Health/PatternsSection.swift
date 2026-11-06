@@ -77,7 +77,8 @@ private struct AlcoholPage: View {
     }
 }
 
-private struct MicronutrientsPage: View {
+/// The "What to fix" page (`MicronutrientsCard`); pushed from Patterns and from Key measures.
+struct MicronutrientsPage: View {
     @Environment(DailyMetricsModel.self) private var metrics
 
     var body: some View {

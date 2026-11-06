@@ -69,6 +69,12 @@ struct LogView: View {
             Button { showingLabs = true } label: {
                 LogRow(title: "Lab results", detail: "Type in results from your report", icon: "testtube.2")
             }
+            // Doses are logged with a Taken button on the Medications page (also Health › Records).
+            NavigationLink {
+                MedicationsView(pushed: true)
+            } label: {
+                LogRow(title: "Medications & supplements", detail: "Tick off today's doses", icon: "pills.fill", opensForm: false)
+            }
         }
     }
 }
