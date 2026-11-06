@@ -323,8 +323,13 @@ public enum LiftGoalProjection {
     /// 95–105 kg by June.", or nil without a line.
     public static func rangeLine(_ projection: Projection, weight: (Double) -> String, month: (Date) -> String) -> String? {
         guard let range = projection.range, projection.status == .onTrend || projection.status == .notOnTrend else { return nil }
-        let low = weight(max(0, range.lowerBound))
+        var low = weight(max(0, range.lowerBound))
         let high = weight(range.upperBound)
+        // "112–140 kg", not "112 kg–140 kg": drop the shared unit from the low end.
+        if let space = high.lastIndex(of: " ") {
+            let unit = String(high[space...])
+            if low.hasSuffix(unit) { low = String(low.dropLast(unit.count)) }
+        }
         var line = "If the last 12 weeks continue: about \(low)–\(high) by \(month(projection.horizon))."
         if projection.widenedForTrainingAge {
             line += " Gains slow with training years, so the lower edge is wider."
