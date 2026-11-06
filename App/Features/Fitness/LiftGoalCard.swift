@@ -113,7 +113,7 @@ struct LiftGoalCard: View {
             }
             // e1RM accuracy about ±3 kg from 3-5RM (watch-features.md 3.6 [B22]).
             DisclosureGroup("About the projection") {
-                Text(evidence)
+                Text(evidence(projection))
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -126,9 +126,12 @@ struct LiftGoalCard: View {
         .card()
     }
 
-    private var evidence: String {
+    private func evidence(_ projection: LiftGoalProjection.Projection?) -> String {
         let accuracy = LiftGoalHistory.weightText(LiftGoalProjection.minimumSpreadKg, unit: unit)
-        return LiftGoalProjection.evidenceNote + " Estimated 1RMs are good to about ±" + accuracy + "."
+        let note = LiftGoalProjection.evidenceNote + " Estimated 1RMs are good to about ±" + accuracy + "."
+        // How the line was adjusted for this lifter goes first (QA round 4: not in the main text).
+        guard let projection, let adjusted = LiftGoalProjection.adjustmentNote(projection) else { return note }
+        return adjusted + " " + note
     }
 }
 
@@ -223,7 +226,7 @@ private struct LiftGoalChart: View {
     }
 }
 
-/// Every lift goal, for Fitness › Progress › Strength; a prompt when there are none.
+/// Every lift goal, for Fitness › Progress › Lift goals; a prompt when there are none.
 struct LiftGoalsSection: View {
     @Environment(UserSettings.self) private var settings
 
@@ -262,15 +265,46 @@ struct LiftGoalsDetailView: View {
     }
 }
 
-/// The goal cards for one exercise, for its progress page (nothing without a goal).
-struct LiftGoalProgressSection: View {
-    let exerciseID: String
+/// One line that opens Fitness › Progress › Lift goals, so the goal cards
+/// live on one page only (QA round 4). With an exercise, only when it has a
+/// goal ("Goal: 115 kg"); without, the first goal or "Set a target lift".
+struct LiftGoalsLink: View {
+    var exerciseID: String?
     @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
 
     var body: some View {
-        ForEach(settings.goals.liftGoals.filter { $0.exerciseID == exerciseID }) { goal in
-            LiftGoalCard(goal: goal)
+        let all = settings.goals.liftGoals
+        let goals = exerciseID.map { id in all.filter { $0.exerciseID == id } } ?? all
+        if exerciseID == nil || !goals.isEmpty {
+            NavigationLink {
+                LiftGoalsDetailView()
+            } label: {
+                HStack(spacing: 10) {
+                    Label(text(goals), systemImage: "flag.checkered")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
+                }
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .card()
+            .accessibilityHint("Shows your lift goals and where the trend is heading")
         }
+    }
+
+    private func text(_ goals: [LiftGoal]) -> String {
+        guard let first = goals.first else { return "Lift goals: set a target lift" }
+        let target = LiftGoalHistory.targetText(first, unit: gym.liftingUnit)
+        if exerciseID != nil { return "Goal: \(target)" }
+        return goals.count > 1 ? "Lift goals (\(goals.count)) · \(first.name) \(target)" : "Lift goal · \(first.name) \(target)"
     }
 }
 
@@ -339,14 +373,8 @@ enum LiftGoalReview {
             } else {
                 value = "Target \(target)"
             }
-            var detail = LiftGoalHistory.headline(projection, unit: unit)
-            // The projected range gives the line a number to go on.
-            if let range = LiftGoalHistory.rangeLine(projection, unit: unit) {
-                detail += " " + range
-            }
-            if let open = LiftGoalProjection.openAlternative(projection, month: { LiftGoalHistory.monthText($0) }) {
-                detail += " " + open
-            }
+            // The headline only; the range and its notes are on the goal card.
+            let detail = LiftGoalHistory.headline(projection, unit: unit)
             return Line(id: "lift-\(goal.id.uuidString)", title: "\(goal.name) goal", value: value, detail: detail)
         }
     }

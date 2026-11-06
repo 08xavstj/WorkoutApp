@@ -95,7 +95,7 @@ struct MovementBreaksTests {
         // Hours before getting up don't count as sitting.
         #expect(MovementBreaks.assess(hourlySteps: steps, mealTimes: [], now: at(8, 5), wake: at(7), calendar: utc) == nil)
         // Default wake is 7:00, so 7 and 8 count at 9:05.
-        let later = hours([7: 0, 8: 0])
+        let later = hours([7: 30, 8: 20])
         #expect(MovementBreaks.assess(hourlySteps: later, mealTimes: [], now: at(9, 5), calendar: utc) == .sedentary(hours: 2))
         // Nothing after 22:00.
         let evening = hours([20: 0, 21: 0])
@@ -112,9 +112,26 @@ struct MovementBreaksTests {
         #expect(MovementBreaks.assess(hourlySteps: walked, mealTimes: [meal], now: at(13, 40), calendar: utc) == nil)
         // Too long after the meal (Buffey 2022: within 60-90 min): back to the sitting rule (hours 11-13).
         #expect(MovementBreaks.assess(hourlySteps: steps, mealTimes: [meal], now: at(14, 30), calendar: utc) == .sedentary(hours: 3))
-        // Hours with no step data count as still.
-        let gaps = hours([7: 500, 8: 500, 9: 500])
+        // Hours with no step data count as still, up to the newest hour with steps.
+        let gaps = hours([7: 500, 8: 500, 9: 500, 11: 30])
         #expect(MovementBreaks.assess(hourlySteps: gaps, mealTimes: [], now: at(12, 5), calendar: utc) == .sedentary(hours: 2))
+    }
+
+    /// Steps that stop syncing aren't sitting (round-4 bug: missing hours
+    /// counted as zero, so a watch left on the charger nagged).
+    @Test func stalledStepDataGivesNoNudge() {
+        // Newest steps in the 9:00 hour, now 12:05: over 90 min old.
+        let stalled = hours([7: 500, 8: 500, 9: 500])
+        #expect(MovementBreaks.assess(hourlySteps: stalled, mealTimes: [], now: at(12, 5), calendar: utc) == nil)
+        #expect(MovementBreaks.assess(hourlySteps: stalled, mealTimes: [at(11, 40)], now: at(12, 5), calendar: utc) == nil)
+        // No step sample since waking.
+        #expect(MovementBreaks.assess(hourlySteps: hours([6: 400]), mealTimes: [], now: at(10, 5), wake: at(7), calendar: utc) == nil)
+        // The run stops at the newest hour with steps: 10:00 data, now 11:20 (80 min old),
+        // so only the 9 and 10 hours count, not the unknown 11 hour.
+        let recent = hours([8: 900, 9: 40, 10: 30])
+        #expect(MovementBreaks.assess(hourlySteps: recent, mealTimes: [], now: at(11, 20), calendar: utc) == .sedentary(hours: 2))
+        let recentShort = hours([8: 900, 9: 600, 10: 30])
+        #expect(MovementBreaks.assess(hourlySteps: recentShort, mealTimes: [], now: at(11, 20), calendar: utc) == nil)
     }
 
     @Test func sedentaryBreaksFollowTheGoal() {
@@ -122,7 +139,7 @@ struct MovementBreaksTests {
         #expect(MovementBreaks.sedentaryBreaksOn(goals: Goals(weight: .lose, focuses: [.muscle])))
         #expect(MovementBreaks.sedentaryBreaksOn(goals: Goals(weight: .maintain, focuses: [.health])))
         #expect(!MovementBreaks.sedentaryBreaksOn(goals: Goals(weight: .gain, focuses: [.muscle, .strength])))
-        let steps = hours([10: 0, 11: 0])
+        let steps = hours([10: 20, 11: 10])
         let lifter = Goals(weight: .maintain, focuses: [.strength])
         #expect(MovementBreaks.assess(hourlySteps: steps, mealTimes: [], now: at(12, 10), goals: lifter, calendar: utc) == nil)
         // The post-meal walk still applies to lifters.

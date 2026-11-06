@@ -16,7 +16,7 @@ extension VitalsModel {
         }
         var stat = Stat(
             id: "strengthDays", category: .activity, title: "Strength days", icon: "dumbbell.fill",
-            value: "\(count)", unit: "this week",
+            value: "\(count)", unit: "last 7 days",
             status: met ? "Goal reached" : "\(StrengthDays.weeklyTarget - count) more to reach 2",
             tone: met ? .good : .neutral,
             gauge: min(1, Double(count) / Double(StrengthDays.weeklyTarget)),

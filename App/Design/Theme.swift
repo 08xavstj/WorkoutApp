@@ -11,6 +11,14 @@ enum Theme {
     static let cardRaised = adaptive(light: 0xEEF1F6, dark: 0x22222A)
     static let separator = adaptive(light: 0xE3E6EC, dark: 0x2A2A33)
     static let track = adaptive(light: 0xEDEFF4, dark: 0x26262E)
+    /// A planned, not-yet-done marker (the week's day dots). `track` is too
+    /// faint for a mark that carries meaning; WCAG 2.2 1.4.11 asks 3:1 for
+    /// non-text UI. Light: about 3.1:1 on `card`; dark: about 3.4:1 on `card`.
+    static let pendingMark = adaptive(light: 0x8E939E, dark: 0x6C6C78)
+    /// Neutral icons on a tinted badge (Log rows). Lighter than
+    /// `secondaryText` in dark mode so a grey glyph stays clear on its own
+    /// grey badge on a dark card (about 10.9:1 on `card`); unchanged in light.
+    static let neutralIcon = adaptive(light: 0x5C626E, dark: 0xC9C9D3)
     /// Untrained muscles on the body map.
     static let bodyNeutral = adaptive(light: 0xD5DAE1, dark: 0x3A3A44)
     static let ink = adaptive(light: 0x111827, dark: 0xF5F5F7)

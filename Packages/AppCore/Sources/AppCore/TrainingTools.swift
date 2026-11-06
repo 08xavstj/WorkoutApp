@@ -222,6 +222,7 @@ public enum LiftProgress {
 /// but isn't the best way to raise VO₂ max (Storoschuk et al., Sports Med 2025).
 public enum CardioFitness {
     public struct Result: Sendable, Equatable {
+        /// The newest reading.
         public var latest: Double
         /// FRIEND registry median for your age and sex.
         public var median: Double
@@ -243,10 +244,13 @@ public enum CardioFitness {
         let earlier = sorted.filter {
             $0.date >= last.date.addingTimeInterval(-70 * day) && $0.date <= last.date.addingTimeInterval(-42 * day)
         }.map(\.value)
-        let latest = recent.reduce(0, +) / Double(recent.count)
+        // The headline is the newest reading, the same number Health shows;
+        // the plateau check still compares 2-week means.
+        let latest = last.value
+        let recentMean = recent.reduce(0, +) / Double(recent.count)
         var change: Double?
         if !earlier.isEmpty {
-            change = latest - earlier.reduce(0, +) / Double(earlier.count)
+            change = recentMean - earlier.reduce(0, +) / Double(earlier.count)
         }
         let median = Biomarkers.medianVO2Max(age: age, sex: sex)
         return Result(

@@ -440,7 +440,8 @@ struct BodyAgeCard: View {
                 let nearAge = abs(gap) <= BodyAge.uncertaintyYears
                 let direction = younger ? "younger" : "older"
                 if nearAge {
-                    Text("About your age")
+                    // Leans the way the factors add up, without claiming more than the margin allows.
+                    Text(gap == 0 ? "About your age" : "Likely a little \(direction)")
                         .font(.headline)
                         .foregroundStyle(Theme.primaryText)
                 } else {
@@ -451,11 +452,11 @@ struct BodyAgeCard: View {
                     .font(.headline)
                     .foregroundStyle(tone)
                 }
-                Text(nearAge ? "You're \(result.age)" : "than your age (\(result.age))")
+                Text(nearAge ? "Within the ±\(BodyAge.uncertaintyYears)-year margin of your age (\(result.age))" : "than your age (\(result.age))")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                 // Whole years with a ±5-year range: no composite "age" is validated finer than that.
-                Text("Likely \(result.rangeLabel)")
+                Text("Body age \(result.rangeLabel)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
                 Text(Self.leverLine(result, younger: younger, nearAge: nearAge))
@@ -473,7 +474,7 @@ extension BodyAgeCard {
             let added = top.years.formatted(.number.precision(.fractionLength(1)))
             return "\(top.name) adds the most (+\(added) y)."
         }
-        return younger && !nearAge ? "Nothing here is adding years." : "Nothing here is adding years; it's about your age."
+        return younger ? "Nothing here is adding years." : "Nothing here is adding years; it's about your age."
     }
 }
 

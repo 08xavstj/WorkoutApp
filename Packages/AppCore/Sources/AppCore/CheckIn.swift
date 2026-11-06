@@ -599,6 +599,22 @@ public enum CheckInInsights {
         }
     }
 
+    /// Factor names that are about alcohol (the check-in factors and the
+    /// alcohol card's findings in `merged`).
+    public static let alcoholFactors: Set<String> = ["Any alcohol", "2+ drinks"]
+
+    /// The progress items not already answered by a pattern, so the list
+    /// never says "Any alcohol 4/7 days" under "HRV 6% lower after any
+    /// alcohol". While an alcohol pattern is shown, "2+ drinks" is dropped
+    /// too: it's the same habit, measured more strictly.
+    public static func uncovered(_ progress: [FactorProgress], by insights: [Insight]) -> [FactorProgress] {
+        let shown = Set(insights.map(\.factor))
+        let alcoholShown = !shown.isDisjoint(with: alcoholFactors)
+        return progress.filter { item in
+            !shown.contains(item.name) && !(alcoholShown && alcoholFactors.contains(item.name))
+        }
+    }
+
     /// The habits (not mood chips) that have been seen at least once and are
     /// still short of 7 days each way, closest first.
     public static func progress(_ days: [CheckInDay], minimumDays: Int = 7) -> [FactorProgress] {

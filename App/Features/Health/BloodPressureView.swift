@@ -58,8 +58,9 @@ struct BloodPressureView: View {
             .navigationTitle("Blood pressure")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Done on the leading side, so the title stays centred with Add on the right.
                 if !pushed {
-                    ToolbarItem(placement: .confirmationAction) {
+                    ToolbarItem(placement: .cancellationAction) {
                         Button("Done") { dismiss() }
                     }
                 }
@@ -155,7 +156,6 @@ struct BloodPressureView: View {
                 CardLabel(text: "Readings", color: Theme.heart)
                     .padding(.bottom, 8)
                 ForEach(readings.prefix(40)) { reading in
-                    let category = HomeBloodPressure.category(systolic: reading.systolic, diastolic: reading.diastolic)
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(reading.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
@@ -169,14 +169,14 @@ struct BloodPressureView: View {
                         Text("\(Int(reading.systolic.rounded()))/\(Int(reading.diastolic.rounded()))")
                             .font(.headline)
                             .monospacedDigit()
-                            .foregroundStyle(Self.color(for: category))
+                            // One reading has no category (ACC/AHA classify the average), so no colour.
+                            .foregroundStyle(Theme.primaryText)
                     }
                     .padding(.vertical, 8)
                     .overlay(alignment: .bottom) {
                         Rectangle().fill(Theme.separator).frame(height: 0.5)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityValue(category.rawValue)
                 }
             }
             .card()

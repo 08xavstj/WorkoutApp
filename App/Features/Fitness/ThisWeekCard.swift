@@ -178,7 +178,7 @@ private struct PlanDots: View {
                 let isDone = done.contains(day.weekday)
                 VStack(spacing: 4) {
                     Circle()
-                        .fill(isDone ? Theme.recoveryHigh : Theme.track)
+                        .fill(isDone ? Theme.recoveryHigh : Theme.pendingMark)
                         .frame(width: 14, height: 14)
                         .overlay {
                             if day.weekday == today && !isDone {
@@ -228,7 +228,7 @@ private struct FlexibleWeekRow: View {
             HStack(spacing: 8) {
                 ForEach(0..<max(progress.target, 0), id: \.self) { index in
                     Circle()
-                        .fill(index < progress.done ? Theme.recoveryHigh : Theme.track)
+                        .fill(index < progress.done ? Theme.recoveryHigh : Theme.pendingMark)
                         .frame(width: 14, height: 14)
                 }
             }

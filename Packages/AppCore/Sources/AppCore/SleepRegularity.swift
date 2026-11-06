@@ -192,6 +192,17 @@ public enum SleepDebt {
         public var extraMinutesPerNight: Int?
         public var paybackNights: Int?
 
+        /// "Caught up" only at zero, so a 36-minute debt never reads as
+        /// caught up on one screen and "Under 1 h" on another.
+        public var isCaughtUp: Bool { hours <= 0 }
+
+        /// The level label shared by every screen: "Caught up" at zero,
+        /// "Under 1 h" below an hour, else Low / Moderate / High.
+        public var statusLabel: String {
+            if isCaughtUp { return "Caught up" }
+            return level == .none ? "Under 1\u{00A0}h" : level.rawValue
+        }
+
         public var plan: String? {
             guard let extra = extraMinutesPerNight, let nights = paybackNights else { return nil }
             return "Sleep about \(extra) min more for \(nights) night\(nights == 1 ? "" : "s"): go to bed earlier rather than sleeping in, so your wake time stays regular."

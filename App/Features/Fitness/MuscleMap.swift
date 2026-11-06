@@ -10,6 +10,8 @@ final class MuscleModel {
     /// Hard sets per muscle since Monday (`MuscleCoverage.setsThisWeek`), for
     /// the coverage-driven focus; `states[].weeklySets` is the rolling 7 days.
     private(set) var weekSets: [Muscle: Double] = [:]
+    /// Lifting hard sets per muscle last Monday to Sunday, for the weekly review.
+    private(set) var lastWeekSets: [Muscle: Double] = [:]
     /// Working sets from the last few weeks, with what the per-muscle volume
     /// rule needs (`VolumeProgression.summarize`: sets done, effort, reps).
     private(set) var loggedSets: [VolumeProgression.LoggedSet] = []
@@ -42,8 +44,12 @@ final class MuscleModel {
         }
         deload = DeloadAdvisor.evaluate(lifts, hrvBelowNormal: hrvBelowNormal, now: now)
         let cutoff = now.addingTimeInterval(-10 * 86_400)
+        let thisWeek = WeeklyPlan.weekStart(containing: now)
+        let lastWeek = Calendar.current.date(byAdding: .day, value: -7, to: thisWeek) ?? thisWeek
+        // Back to last Monday too, so the review's last-week sets are complete.
+        let setsFrom = min(cutoff, lastWeek)
         var sets: [MuscleRecovery.WorkSet] = []
-        for session in sessions where session.startedAt >= cutoff {
+        for session in sessions where session.startedAt >= setsFrom {
             for exercise in session.exercises {
                 guard let info = library.exercise(id: exercise.exerciseID) else { continue }
                 // A drop, rest-pause or myo-rep set is one effortful set for fatigue and,
@@ -82,8 +88,9 @@ final class MuscleModel {
                 }
             }
         }
-        states = MuscleRecovery.evaluate(sets: sets, cardio: cardio, now: now)
-        weekSets = MuscleCoverage.setsThisWeek(sets, weekStart: WeeklyPlan.weekStart(containing: now), now: now)
+        states = MuscleRecovery.evaluate(sets: sets.filter { $0.date >= cutoff }, cardio: cardio, now: now)
+        weekSets = MuscleCoverage.setsThisWeek(sets, weekStart: thisWeek, now: now)
+        lastWeekSets = MuscleCoverage.setsThisWeek(sets, weekStart: lastWeek, now: thisWeek.addingTimeInterval(-1))
         recentCardio = easyCardio
         hasRefreshed = true
     }

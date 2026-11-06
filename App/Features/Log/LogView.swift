@@ -144,7 +144,7 @@ private struct LogRow: View {
     let title: String
     let detail: String
     let icon: String
-    var color: Color = Theme.secondaryText
+    var color: Color = Theme.neutralIcon
     /// Opens a sheet (shows "+"); pushes otherwise (the list adds a chevron).
     var opensForm = true
     @ScaledMetric(relativeTo: .body) private var badgeSize: CGFloat = 34

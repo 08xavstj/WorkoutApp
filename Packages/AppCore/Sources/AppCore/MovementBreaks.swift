@@ -52,6 +52,9 @@ public enum MovementBreaks {
     /// Nudges stop this late (minutes after midnight) so nobody is told to
     /// walk at bedtime.
     public static let quietFromMinutes = 22 * 60
+    /// Step data older than this (or none since waking) means the timeline
+    /// has stopped, not that you have: no nudge. App choice.
+    public static let staleDataLimit: TimeInterval = 90 * 60
     /// Without a wake time, waking hours start here.
     public static let defaultWakeMinutes = 7 * 60
 
@@ -77,7 +80,8 @@ public enum MovementBreaks {
     ///
     /// - Parameters:
     ///   - hourlySteps: today's step timeline, one entry per clock hour (hours
-    ///     with no data may be missing and count as zero).
+    ///     with no data may be missing and count as zero, up to the newest
+    ///     hour with steps).
     ///   - mealTimes: times meals were logged today (timed dietary samples).
     ///   - wake: when the user got up today, if known.
     public static func assess(
@@ -95,6 +99,12 @@ public enum MovementBreaks {
         guard now >= wakeTime else { return nil }
 
         let steps = hourlySteps.filter { calendar.isDate($0.start, inSameDayAs: now) }.sorted { $0.start < $1.start }
+        // Missing hours only mean "still" while the steps keep syncing: with no
+        // step sample since waking, or the newest over 90 min old (watch off,
+        // phone left behind, sync stalled), say nothing rather than nag.
+        guard let newest = steps.last(where: { $0.steps > 0 && $0.start.addingTimeInterval(3600) > wakeTime }),
+              now.timeIntervalSince(min(now, newest.start.addingTimeInterval(3600))) <= staleDataLimit
+        else { return nil }
 
         // Post-meal walk: the latest meal inside the window, with little walking since.
         if let meal = mealTimes.filter({ $0 <= now && now.timeIntervalSince($0) <= postMealWindow }).max() {
@@ -107,7 +117,9 @@ public enum MovementBreaks {
         guard sedentaryBreaksOn(goals: goals) else { return nil }
         // Sedentary: the run of complete waking hours under the floor ending now.
         // Start of the current clock hour (components, not `date(bySetting:)`, which can move forward).
-        var hour = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: now)) ?? now
+        // Hours after the newest sample aren't known yet, so the run stops there.
+        let currentHour = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: now)) ?? now
+        var hour = min(currentHour, newest.start.addingTimeInterval(3600))
         var run = 0
         while true {
             guard let previous = calendar.date(byAdding: .hour, value: -1, to: hour), previous >= wakeTime else { break }

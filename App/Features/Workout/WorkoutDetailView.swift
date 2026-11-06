@@ -173,7 +173,10 @@ private struct HeartRateSourcesSection: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             } else {
-                MergedHeartRateRow(merged: merged, linkedWorkout: linkedWorkout, linkedSource: linkedWorkoutSource)
+                // With one source and nothing linked, its own row below says it all.
+                if merged.sourceNames.count != 1 || !merged.disagreements.isEmpty || linkedWorkoutSource != nil {
+                    MergedHeartRateRow(merged: merged, linkedWorkout: linkedWorkout, linkedSource: linkedWorkoutSource)
+                }
                 WorkoutZonesRow(minutes: zoneMinutes)
                 ForEach(sources) { source in
                     if let summary = HeartRateComparison.summary(source.samples) {
@@ -209,10 +212,20 @@ private struct HeartRateSourcesSection: View {
         } header: {
             Text("Heart rate sources")
         } footer: {
-            Text("Some watches (like Garmin) send heart rate to Apple Health only when their app syncs, sometimes only as a summary for strength workouts. Open your watch's app, then come back here.")
+            // Only when no source has near minute-by-minute readings (a sparse or missing sync).
+            if loaded, !hasPerMinuteSource {
+                Text("Some watches (like Garmin) send heart rate to Apple Health only when their app syncs, sometimes only as a summary for strength workouts. Open your watch's app, then come back here.")
+            }
         }
         .listRowBackground(Theme.card)
         .task(id: reload) { await load() }
+    }
+
+    /// A source with at least one reading every two minutes of the workout
+    /// (an app choice for "per-minute", not a published cut-off).
+    private var hasPerMinuteSource: Bool {
+        let minutes = end.timeIntervalSince(start) / 60
+        return sources.contains { Double($0.samples.count) >= max(2, minutes / 2) }
     }
 
     private func load() async {
@@ -327,9 +340,12 @@ private struct MergedHeartRateRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(mergedText)
-                .font(.subheadline)
-                .foregroundStyle(Theme.primaryText)
+            // One source is already named on its own row below; say it once.
+            if let mergedText {
+                Text(mergedText)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+            }
             if let disagreementText {
                 Text(disagreementText)
                     .font(.caption)
@@ -344,11 +360,11 @@ private struct MergedHeartRateRow: View {
         .padding(.vertical, 4)
     }
 
-    private var mergedText: String {
+    private var mergedText: String? {
         let names = merged.sourceNames
         switch names.count {
         case 0: return "Heart rate: no usable readings"
-        case 1: return "Heart rate: from \(names[0])"
+        case 1: return nil
         default:
             let summary = HeartRateComparison.summary(merged.samples)
             let stats = summary.map { " · avg \(whole($0.average)), max \(whole($0.maximum))" } ?? ""

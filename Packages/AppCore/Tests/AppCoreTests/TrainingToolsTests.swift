@@ -94,6 +94,12 @@ struct CardioFitnessTests {
         #expect((result.change ?? 0) > 2)
     }
 
+    /// The headline is the newest reading (as on Health), not a 2-week mean.
+    @Test func latestIsTheNewestReading() throws {
+        let result = try #require(CardioFitness.assess(series(from: 42, to: 47, days: 80), age: 30, sex: .male))
+        #expect(abs(result.latest - 47) < 0.001)
+    }
+
     @Test func shortHistoryHasNoTrend() throws {
         let result = try #require(CardioFitness.assess(series(from: 45, to: 46, days: 10), age: 30, sex: .male))
         #expect(result.change == nil)

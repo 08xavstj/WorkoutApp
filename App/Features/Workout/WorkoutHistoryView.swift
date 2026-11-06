@@ -88,7 +88,10 @@ private struct SessionRow: View {
                 Label(Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)), systemImage: "clock")
                 Label("\(session.effortSets.count) sets", systemImage: "square.stack.3d.up")
                 // "Volume" so the number isn't read as a body weight next to a scale icon.
-                Label("Volume \(unit.format(session.totalVolumeKg)) \(unit.rawValue)", systemImage: "scalemass")
+                // Whole units, on one line, so the row never stacks.
+                Label("Volume \(Int(unit.display(session.totalVolumeKg).rounded()).formatted()) \(unit.rawValue)", systemImage: "scalemass")
+                    .lineLimit(1)
+                    .fixedSize()
                 if let source = session.linkedWorkoutSource {
                     Label(source, systemImage: "applewatch")
                         .lineLimit(1)

@@ -150,6 +150,35 @@ struct RecoveryCalculatorTests {
         #expect(early.score == population.score)
     }
 
+    /// A few points off your usual is normal, not "lowering" (round-4 bug:
+    /// 97 after a usual 99 read as sleep pulling recovery down).
+    @Test func smallSleepChangesAreNeutral() throws {
+        let tonight = DailyVitals(date: today, hrvMilliseconds: 60, restingHeartRate: 55)
+        let usual = Array(repeating: 99, count: 30)
+        let slight = try #require(calculator.score(today: tonight, history: history, sleepScore: 97,
+                                                   sleepScoreHistory: usual))
+        let sleep = try #require(slight.contributors.first { $0.id == "sleep" })
+        #expect(sleep.effect == .neutral)
+        #expect(sleep.note == RecoveryCalculator.withinNormalNote)
+
+        let clear = try #require(calculator.score(today: tonight, history: history, sleepScore: 85,
+                                                  sleepScoreHistory: usual))
+        #expect(clear.contributors.first { $0.id == "sleep" }?.effect == .lowers)
+        #expect(RecoveryCalculator.sleepEffect(change: -7.9, z: -2) == .neutral)
+        #expect(RecoveryCalculator.sleepEffect(change: 8, z: 1) == .raises)
+    }
+
+    @Test func detailsUseMinusSignsAndUnits() throws {
+        let tonight = DailyVitals(date: today, hrvMilliseconds: 57, restingHeartRate: 56)
+        let result = try #require(calculator.score(today: tonight, history: history, sleepScore: nil))
+        let hrv = try #require(result.contributors.first { $0.id == "hrv" })
+        #expect(hrv.detail.contains("\u{2212}"))
+        #expect(!hrv.detail.contains("-"))
+        let rhr = try #require(result.contributors.first { $0.id == "rhr" })
+        #expect(rhr.detail.contains("bpm vs your usual"))
+        #expect(rhr.detail.hasSuffix(" bpm"))
+    }
+
     @Test func sleepingHeartRateReplacesHealthKitOnlyWithEnoughNights() throws {
         var sleeping: [Date: Double] = [:]
         for day in 0...14 {
@@ -361,6 +390,23 @@ struct SleepCalculatorTests {
         #expect(abs(SleepCalculator.regularityScore(sri: 67) - 17.0 / 35) < 0.001)
         #expect(SleepCalculator.regularityScore(sri: 50) == 0)
         #expect(SleepCalculator.regularityScore(sri: 30) == 0)
+    }
+
+    /// Full marks at need, a gentle slope to 7 h, a steeper one below it
+    /// (Watson 2015: 7 h minimum).
+    @Test func durationFallsFasterUnderSevenHours() {
+        let hour = 3600.0
+        let need = 7.5 * hour
+        #expect(SleepCalculator.durationScore(asleep: 8 * hour, need: need) == 1)
+        #expect(SleepCalculator.durationScore(asleep: need, need: need) == 1)
+        #expect(abs(SleepCalculator.durationScore(asleep: 7 * hour, need: need) - 0.9) < 0.001)
+        #expect(abs(SleepCalculator.durationScore(asleep: 6 * hour, need: need) - 0.55) < 0.001)
+        #expect(SleepCalculator.durationScore(asleep: 4 * hour, need: need) == 0)
+        // 6 h 59 m vs 7 h 30 m no longer score the same.
+        let short = SleepCalculator.durationScore(asleep: 7 * hour - 60, need: need)
+        #expect(short < 0.9)
+        // A need under 7 h: every hour short is below the minimum.
+        #expect(abs(SleepCalculator.durationScore(asleep: 5.5 * hour, need: 6.5 * hour) - 0.65) < 0.001)
     }
 
     /// 0-1 awakenings good, 4+ poor (Ohayon 2017).

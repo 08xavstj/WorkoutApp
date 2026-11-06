@@ -106,7 +106,8 @@ public enum MuscleRecovery {
         public var muscle: Muscle
         /// 0 (just hammered) ... 100 (fully recovered).
         public var recovery: Double
-        /// Hard sets in the last 7 days (helper muscles count half).
+        /// Lifting hard sets in the last 7 days (helper muscles count half;
+        /// cardio adds fatigue but no sets).
         public var weeklySets: Double
         public var lastTrained: Date?
         public var id: Muscle { muscle }
@@ -144,11 +145,14 @@ public enum MuscleRecovery {
         var last: [Muscle: Date] = [:]
         let weekAgo = now.addingTimeInterval(-7 * 86_400)
 
-        func add(_ muscle: Muscle, weight: Double, at date: Date) {
+        func add(_ muscle: Muscle, weight: Double, at date: Date, isLiftingSet: Bool = true) {
             guard date <= now else { return }
             let hours = now.timeIntervalSince(date) / 3600
             fatigue[muscle, default: 0] += fatiguePerSet * weight * exp(-hours / muscle.recoveryHours)
-            if date >= weekAgo { weekly[muscle, default: 0] += weight }
+            // Only lifting sets count toward the weekly hard sets: the 10-20 band
+            // (Schoenfeld et al. 2017) counts resistance sets, so a run tires the
+            // legs but doesn't fill their weekly volume.
+            if isLiftingSet, date >= weekAgo { weekly[muscle, default: 0] += weight }
             if last[muscle].map({ date > $0 }) ?? true { last[muscle] = date }
         }
 
@@ -172,7 +176,7 @@ public enum MuscleRecovery {
             case .other: []
             }
             for muscle in muscles {
-                add(muscle, weight: units * 0.5, at: session.end)
+                add(muscle, weight: units * 0.5, at: session.end, isLiftingSet: false)
             }
         }
 

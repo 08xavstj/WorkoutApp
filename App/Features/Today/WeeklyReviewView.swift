@@ -152,8 +152,14 @@ struct WeeklyReviewView: View {
             // Training days (gym sessions, or watch workouts at 35%+ strain), the
             // same count as Fitness › This week and the consistency score.
             let days = record.done == 1 ? "training day" : "training days"
-            return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done) \(days) (\(record.planned) planned)",
-                              detail: kept ? "On plan: \(Consistency.sessionsNeeded(planned: record.planned)) or more counts as a kept week." : "A lighter week than planned. This week starts fresh.")
+            let difference = record.done - record.planned
+            let versusPlan = switch difference {
+            case 0: "As planned"
+            case 1...: "\(difference) more than planned"
+            default: "\(-difference) fewer than planned"
+            }
+            return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done) \(days)",
+                              detail: kept ? versusPlan + " · week kept" : "A lighter week than planned. This week starts fresh.")
         }
         return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done)", detail: "No plan last week to compare with.")
     }
@@ -169,8 +175,8 @@ struct WeeklyReviewView: View {
         let calendar = Calendar.current
         let trained = Set(trainingDays.map { calendar.startOfDay(for: $0) })
         let active = week.filter { trained.contains(calendar.startOfDay(for: $0.date)) }.count
-        var detail = "\(active) of \(values.count) were training days."
-        if let target = metrics.targetStrain { detail += " Today's range is \(strainRangeText(target))." }
+        // Last week only: today's target range belongs on Today, not in this review.
+        let detail = "\(active) of \(values.count) were training days."
         return ReviewLine(id: "strain", title: "Average day strain, last 7 days", value: strainText(average), detail: detail)
     }
 
@@ -178,7 +184,12 @@ struct WeeklyReviewView: View {
         let debt = metrics.sleepDebt
         let regularity = metrics.sleepConsistency
         guard debt != nil || regularity != nil else { return nil }
-        let value = debt.map { $0.level == .none ? "Caught up" : "\(SleepText.hours($0.hours)) behind" } ?? "No debt data"
+        // The same rule as Health: "Caught up" only at zero; a debt under an hour says so.
+        let value = debt.map { debt -> String in
+            guard debt.hours > 0 else { return "Caught up" }
+            let behind = SleepText.hours(debt.hours) + " behind"
+            return debt.level == .none ? behind + " (under 1 h)" : behind
+        } ?? "No debt data"
         let detail = regularity.map { "Regularity \($0)/100 over the last week" + ($0 >= 70 ? ", a regular pattern." : "; a steadier wake time helps more than extra hours (Windred 2024).") }
         return ReviewLine(id: "sleep", title: "Sleep debt, 14 nights", value: value, detail: detail)
     }
@@ -194,24 +205,32 @@ struct WeeklyReviewView: View {
                           detail: "Normal \(whole(trend.normalRange.lowerBound))–\(whole(trend.normalRange.upperBound)) ms, so " + status)
     }
 
+    /// Lifting hard sets per muscle last Monday to Sunday
+    /// (`MuscleModel.lastWeekSets`, the same count as Fitness › Muscles; cardio
+    /// adds fatigue, not sets).
     private var setsLine: ReviewLine? {
-        let worked = muscles.states.values.filter { $0.weeklySets >= 0.5 }.sorted { $0.weeklySets > $1.weeklySets }
+        let worked = muscles.lastWeekSets.filter { $0.value >= 0.5 }.sorted { $0.value > $1.value }
         guard !worked.isEmpty else { return nil }
         // Top 3 only, so the value fits on a line or two without an odd wrap.
-        let top = worked.prefix(3).map { "\($0.muscle.name) \($0.weeklySets.formatted(.number.precision(.fractionLength(0))))" }
+        let top = worked.prefix(3).map { "\($0.key.name) \(Int($0.value.rounded()))" }
         var parts: [String] = []
         if worked.count > 3 { parts.append("Plus \(worked.count - 3) more.") }
-        let over = worked.filter { $0.weeklySets > 20 }.count
-        if over > 0 { parts.append("\(over) above 20.") }
-        // With a block, its week's band (`VolumeProgression.Target.band`);
+        // With a block, each muscle's band for this week (`VolumeProgression.Target.band`);
         // without, the general 10-20 range (Schoenfeld et al., J Sports Sci 2017).
-        let bands = (store.volumeTargets(muscles: muscles)?.targets ?? []).map(\.band)
+        let targets = store.volumeTargets(muscles: muscles)
+        let bands = (targets?.targets ?? []).map(\.band)
+        let over = worked.filter { entry in
+            let upper = targets?.target(for: entry.key).map { Double($0.band.upperBound) } ?? MuscleCoverage.productiveRange.upperBound
+            return entry.value.rounded() > upper
+        }.count
         if let low = bands.map(\.lowerBound).min(), let high = bands.map(\.upperBound).max() {
             parts.append(low == high ? "This week's target is \(low) sets per muscle." : "This week's target is \(low)-\(high) sets per muscle.")
+            if over > 0 { parts.append(over == 1 ? "1 muscle was above it." : "\(over) muscles were above it.") }
         } else {
             parts.append("About 10-20 a week is the productive range.")
+            if over > 0 { parts.append(over == 1 ? "1 muscle was above 20." : "\(over) muscles were above 20.") }
         }
-        return ReviewLine(id: "sets", title: "Hard sets per muscle, 7 days", value: top.joined(separator: " · "),
+        return ReviewLine(id: "sets", title: "Hard sets per muscle, last week", value: top.joined(separator: " · "),
                           detail: parts.joined(separator: " "))
     }
 

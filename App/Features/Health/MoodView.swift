@@ -146,7 +146,7 @@ private struct MoodEntryRow: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.primaryText)
                     Spacer()
-                    Text(sample.kind == .daily ? "Whole day" : sample.date.formatted(date: .omitted, time: .shortened))
+                    Text(timeText)
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -158,6 +158,12 @@ private struct MoodEntryRow: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// The time, or "Whole day"; today's day isn't over, so its daily mood is "Today so far".
+    private var timeText: String {
+        guard sample.kind == .daily else { return sample.date.formatted(date: .omitted, time: .shortened) }
+        return Calendar.current.isDateInToday(sample.date) ? "Today so far" : "Whole day"
     }
 
     /// "Happy, calm · Training, friends" with Apple's names made readable.

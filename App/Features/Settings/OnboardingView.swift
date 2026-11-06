@@ -54,11 +54,8 @@ struct OnboardingView: View {
                 Task { await allowHealth() }
             } label: {
                 Text("Connect Apple Health")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(OnboardingPrimaryButtonStyle())
             .disabled(isRequesting)
             Text("On the next screen, tap **Turn On All** at the top, then **Allow**. iOS keeps Allow greyed out until you turn something on.")
                 .font(.footnote)
@@ -141,11 +138,8 @@ private struct OnboardingSetupPage: View {
         .safeAreaInset(edge: .bottom) {
             Button(action: finish) {
                 Text(anyDone ? "Continue" : "Skip for now")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(OnboardingPrimaryButtonStyle())
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
             .background(Theme.background)
@@ -225,5 +219,22 @@ private struct AppMark: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The app's primary button: white text on the strain gradient capsule, as
+/// on Log's Start workout (`Theme.strainButtonColors`), not a flat tint.
+private struct OnboardingPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.vertical, 6)
+            .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
+            .contentShape(.capsule)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.5)
     }
 }

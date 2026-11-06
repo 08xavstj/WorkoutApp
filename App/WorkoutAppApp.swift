@@ -356,6 +356,14 @@ struct RootView: View {
         vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil))
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
+        // The nightly HRV series (`BiologyModel`) here too, not only when Health
+        // opens, so Today's HRV tile has its history page from the first refresh.
+        // It reads 90 nights, so at most every 30 minutes (Health still refreshes it on open).
+        if biology.hrvSeries.isEmpty || lastBiologyRefresh.map({ Date.now.timeIntervalSince($0) > 30 * 60 }) ?? true {
+            await biology.refresh(health: health, settings: settings, manualHRV: manualHRV, proteinTarget: metrics.proteinTarget)
+            lastBiologyRefresh = .now
+        }
+        vitals.setHRVSeries(biology.hrvSeries)
         checkIns.recordSleepScore(metrics.sleep?.score)
         // Mood patterns (builder A): each day's strain, your usual training strain and sleep need.
         checkIns.recordContext(dayStrains: metrics.weekStrain.map { (date: $0.date, strain: $0.strain) },
@@ -631,3 +639,6 @@ private struct ReminderReactions: ViewModifier {
             }
     }
 }
+
+/// When `refreshMetrics` last re-read the 90-night HRV series.
+@MainActor private var lastBiologyRefresh: Date?

@@ -48,6 +48,9 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           # Light mode, like the default app look.
           xcrun simctl ui "$UDID" appearance light
+          # The status bar shows the demo clock (`DemoHealth.pinnedNow`, 8:10),
+          # so the screenshots don't say 14:32 above "8:10 this morning".
+          xcrun simctl status_bar "$UDID" override --time 08:10 --batteryState charged --batteryLevel 100 || true
 
       - name: Capture screens
         run: |

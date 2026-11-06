@@ -87,3 +87,20 @@ struct CheckInTests {
         #expect(CheckInInsights.daysUntilReady(days) == 12)
     }
 }
+
+struct CheckInProgressFilterTests {
+    let progress = [
+        CheckInInsights.FactorProgress(name: "Any alcohol", daysWith: 4, daysWithout: 9, needed: 7),
+        CheckInInsights.FactorProgress(name: "2+ drinks", daysWith: 2, daysWithout: 9, needed: 7),
+        CheckInInsights.FactorProgress(name: "Late caffeine", daysWith: 3, daysWithout: 9, needed: 7),
+    ]
+
+    /// "HRV 6% lower after any alcohol" and "Still collecting: Any alcohol 4/7" never show together.
+    @Test func progressCoveredByAPatternIsDropped() {
+        let alcohol = CheckInInsights.Insight(factor: "Any alcohol", outcome: .hrv, percentChange: -6,
+                                              daysWith: 8, daysWithout: 20, isGood: false)
+        let left = CheckInInsights.uncovered(progress, by: [alcohol])
+        #expect(left.map(\.name) == ["Late caffeine"])
+        #expect(CheckInInsights.uncovered(progress, by: []).count == 3)
+    }
+}

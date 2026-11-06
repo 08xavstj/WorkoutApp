@@ -37,7 +37,10 @@ struct PatternsSection: View {
 
     private var insightsDetail: String {
         let count = checkIns.insights.count
-        if count > 0 { return "\(count) pattern\(count == 1 ? "" : "s") from your check-ins" }
+        // Alcohol patterns can come from Health's drinks log as well as the check-ins.
+        let usesDrinks = checkIns.insights.contains { CheckInInsights.alcoholFactors.contains($0.factor) }
+        let source = usesDrinks ? "from your check-ins and drinks log" : "from your check-ins"
+        if count > 0 { return "\(count) pattern\(count == 1 ? "" : "s") \(source)" }
         let days = checkIns.daysUntilInsights
         return days > 0 ? "Check in for \(days) more day\(days == 1 ? "" : "s")" : "No clear patterns yet"
     }

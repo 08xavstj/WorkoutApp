@@ -129,6 +129,17 @@ struct CardioFitnessNormTests {
         #expect(CardioFitness.nudge(for: falling) != nil)
     }
 
+    /// The shown change (one decimal) and the direction agree: +0.49 is
+    /// shown as +0.5, so it counts as rising, not "flat".
+    @Test func roundedChangeMatchesTheDirection() throws {
+        let edge = try #require(CardioFitness.trend(series(early: 45, late: 45.49), now: now))
+        #expect(edge.change == 0.5)
+        #expect(edge.direction == .rising)
+        let small = try #require(CardioFitness.trend(series(early: 45, late: 45.44), now: now))
+        #expect(small.change == 0.4)
+        #expect(small.direction == .flat)
+    }
+
     @Test func trendNeedsBothEndsOfTheWindow() throws {
         let onlyRecent = try #require(CardioFitness.trend(series(early: nil, late: 45), now: now))
         #expect(onlyRecent.direction == .unknown)

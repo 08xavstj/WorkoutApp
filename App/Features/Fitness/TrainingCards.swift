@@ -37,9 +37,12 @@ struct WeeklySetsCard: View {
             HStack {
                 CardLabel(text: sinceMonday ? "Hard sets since Monday" : "Hard sets, last 7 days", color: Theme.lifting)
                 Spacer()
-                Text(Self.targetChip(week?.targets ?? []))
+                // The block week sits with the target, so the Muscles page needs no separate target list.
+                Text(Self.targetChip(week?.targets ?? [], blockWeek: sinceMonday ? plans.blockWeek : nil))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.recoveryHighText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             if !anyTrained {
                 Text(sinceMonday ? "Log a gym session and each muscle's sets since Monday show here."
@@ -65,13 +68,16 @@ struct WeeklySetsCard: View {
         .card()
     }
 
-    /// "Target 8-10" from this week's per-muscle bands, the same numbers as
-    /// "Set targets this week" (`VolumeProgression.Target.band`); "Target
+    /// "Week 1 of 6 · Target 8-10" from this week's per-muscle bands
+    /// (`VolumeProgression.Target.band`) and the block week; "Target
     /// 10-20" without a block (Schoenfeld et al. 2017).
-    private static func targetChip(_ targets: [VolumeProgression.Target]) -> String {
+    private static func targetChip(_ targets: [VolumeProgression.Target], blockWeek: TrainingBlock.WeekState? = nil) -> String {
         let bands = targets.filter { shown.contains($0.muscle) }.map(\.band)
         guard let low = bands.map(\.lowerBound).min(), let high = bands.map(\.upperBound).max() else { return "Target 10-20" }
-        return low == high ? "Target \(low)" : "Target \(low)-\(high)"
+        let target = low == high ? "Target \(low)" : "Target \(low)-\(high)"
+        guard let blockWeek else { return target }
+        let week = blockWeek.isDeload ? "Deload week" : "Week \(blockWeek.week) of \(blockWeek.length)"
+        return week + " · " + target
     }
 
     /// What a bar is measured against: this block week's band for that
@@ -282,7 +288,8 @@ struct WeeklyMinutesCard: View {
                     .font(.largeTitle.weight(.bold))
                     .fontDesign(.rounded)
                     .foregroundStyle(Theme.primaryText)
-                Text("of \(WeeklyActivityBand.target(for: metrics.goals)) in the last 7 days")
+                // A band, not a cap: "522 of 300" read like a target overshot.
+                Text("min, last 7 days · aim \(WeeklyActivityBand.floorMinutes)–\(WeeklyActivityBand.bestMinutes)+")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -416,11 +423,13 @@ struct CardioFitnessCard: View {
         }
     }
 
-    /// "+1.2 over 90 days, rising" / "flat over 90 days" / "needs 90 days of readings"
+    /// "+1.2 vs 2 months ago, rising" / "Flat vs 2 months ago" / "needs 90 days of readings"
+    /// (`CardioFitness.trend`: the last 30 days against the first 30 of 90).
     private func trendText(_ trend: CardioFitness.Trend?) -> String {
         guard let trend, let change = trend.change else { return "Needs readings across 90 days" }
+        guard trend.direction != .flat else { return "Flat vs 2 months ago" }
         let amount = "\(change >= 0 ? "+" : "−")\(abs(change).formatted(.number.precision(.fractionLength(1))))"
-        return "\(amount) over 90 days, \(trend.direction.rawValue)"
+        return "\(amount) vs 2 months ago, \(trend.direction.rawValue)"
     }
 
     /// The last 90 days of readings.

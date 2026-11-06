@@ -159,7 +159,7 @@ private struct ProfileSettingsSection: View {
     }
 
     private var weightRow: some View {
-        LabeledContent("Weight\(source("weight"))") {
+        LabeledContent {
             HStack(spacing: 4) {
                 TextField(settings.weightUnit.rawValue, value: Binding(
                     get: { (settings.weightUnit.display(settings.weightKg) * 10).rounded() / 10 },
@@ -171,6 +171,10 @@ private struct ProfileSettingsSection: View {
                     .disabled(locked("weight"))
                 Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
             }
+        } label: {
+            Text("Weight\(source("weight"))")
+            // Health › Weight shows the smoothed trend, so the two can differ a little.
+            Text("Latest scale reading, not the trend")
         }
     }
 }
@@ -284,23 +288,6 @@ private struct RemindersSettingsSection: View {
         )
     }
 
-    private var creatineOn: Binding<Bool> {
-        Binding(
-            get: { meds.creatineReminderOn },
-            set: { meds.setCreatineReminder(on: $0) }
-        )
-    }
-
-    private var creatineTime: Binding<Date> {
-        Binding(
-            get: { Reminders.fireDate(day: .now, minutes: meds.creatineMinutes) ?? .now },
-            set: { date in
-                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
-                meds.setCreatineReminder(on: true, minutes: (parts.hour ?? 0) * 60 + (parts.minute ?? 0))
-            }
-        )
-    }
-
     var body: some View {
         @Bindable var settings = settings
         Section {
@@ -313,22 +300,31 @@ private struct RemindersSettingsSection: View {
                 DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
             }
             workoutRows
-            Toggle(isOn: creatineOn) {
-                Text("Daily creatine")
-                Text("With a Taken button")
-            }
-            if meds.creatineReminderOn {
-                DatePicker("Creatine time", selection: creatineTime, displayedComponents: .hourAndMinute)
-            }
-            // The list itself is Health › Records › Medications (ux-audit.md 4.3).
-            NavigationLink("Medications & supplements") {
+            // Dose reminders, creatine included, are set on each entry in the list
+            // (Health › Records › Medications; ux-audit.md 4.3), so they live in one place.
+            NavigationLink {
                 MedicationsView(pushed: true)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Medications & supplements")
+                    Text(medsDetail)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.secondaryText)
+                }
             }
         } header: {
             Text("Reminders")
         } footer: {
             Text("Today's doses also show on your Lock Screen.")
         }
+    }
+
+    /// "Creatine at 8:00 AM · dose reminders", or what the list is for.
+    private var medsDetail: String {
+        guard meds.creatineReminderOn, let time = Reminders.fireDate(day: .now, minutes: meds.creatineMinutes) else {
+            return "Dose reminders with a Taken button"
+        }
+        return "Creatine at \(time.formatted(date: .omitted, time: .shortened)) · dose reminders"
     }
 
     @ViewBuilder

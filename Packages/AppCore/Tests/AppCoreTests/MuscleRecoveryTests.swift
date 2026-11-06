@@ -49,5 +49,7 @@ struct MuscleRecoveryTests {
         let quads = try #require(MuscleRecovery.evaluate(sets: [], cardio: [run], now: now)[.quadriceps])
         #expect(quads.recovery < 100)
         #expect(quads.recovery > 60)
+        // A run is fatigue, not hard sets: the weekly volume counts lifting only.
+        #expect(quads.weeklySets == 0)
     }
 }

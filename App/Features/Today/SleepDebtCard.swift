@@ -110,7 +110,7 @@ struct LastNightSleepSheet: View {
         if let debt = metrics.sleepDebt {
             VStack(alignment: .leading, spacing: 8) {
                 CardLabel(text: "Sleep debt · 14 nights", color: Theme.sleep)
-                Text(debt.level == .none ? "Caught up" : SleepText.hours(debt.hours))
+                Text(debt.isCaughtUp ? "Caught up" : SleepText.hours(debt.hours))
                     .font(.title2.weight(.bold))
                     .foregroundStyle(Theme.primaryText)
                 if let plan = debt.plan {

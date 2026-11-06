@@ -103,7 +103,8 @@ final class TodayHabits {
         let day = metrics.proteinTarget.map { " (\(whole($0)) g across the day)" } ?? ""
         switch result {
         case .noMealTimes:
-            return "Your food app doesn't send meal times, so meals can't be told apart. Aim for at least \(whole(weight * ProteinMeals.gramsPerKgPerMeal)) g at each of \(ProteinMeals.targetMeals) meals\(day)."
+            // Without meal times the meals can't be told apart, so just the aim.
+            return "Aim for at least \(whole(weight * ProteinMeals.gramsPerKgPerMeal)) g protein at each of \(ProteinMeals.targetMeals) meals."
         case .meals(let meals, goodMeals: let good, perMealTarget: let target):
             return "\(good) of \(ProteinMeals.targetMeals) meals with \(whole(target)) g+ protein. \(meals.count) meal\(meals.count == 1 ? "" : "s") logged today. At least \(whole(target)) g at each of \(ProteinMeals.targetMeals) meals\(day) builds the most muscle."
         }
@@ -134,7 +135,9 @@ final class TodayHabits {
     /// are one meal, as `ProteinMeals` groups them).
     private func updateMovementNudge(hourlySteps: [MovementBreaks.HourSteps], energyEntries: [DatedValue], metrics: DailyMetricsModel) {
         let meals = ProteinMeals.meals(energyEntries.map { (date: $0.date, grams: $0.value) }).map(\.time)
-        let nudge = MovementBreaks.assess(hourlySteps: hourlySteps, mealTimes: meals, wake: metrics.sleep?.wakeTime, goals: metrics.goals)
+        // Demo mode uses the demo's clock (8:10), where its step data ends.
+        let nudge = MovementBreaks.assess(hourlySteps: hourlySteps, mealTimes: meals, now: DemoHealth.active?.now ?? .now,
+                                          wake: metrics.sleep?.wakeTime, goals: metrics.goals)
         let today = Dose.dayKey(Calendar.current.startOfDay(for: .now))
         guard let nudge else {
             movementNudge = nil

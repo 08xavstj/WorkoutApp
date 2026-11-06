@@ -235,7 +235,7 @@ final class CheckInStore {
         alcoholFindings = AlcoholEffect.compare(alcoholNights)
         insights = CheckInInsights.merged(CheckInInsights.analyze(days), alcohol: alcoholFindings)
         daysUntilInsights = CheckInInsights.daysUntilReady(days)
-        habitProgress = CheckInInsights.progress(days)
+        habitProgress = CheckInInsights.uncovered(CheckInInsights.progress(days), by: insights)
         alcoholNightsLogged = alcoholNights.count
     }
 

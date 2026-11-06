@@ -335,25 +335,18 @@ private struct MacroBars: View {
     }
 }
 
-/// "Protein 145 g · Carbs about 163 g (at least 148) · Fat at least 52 g",
-/// the same targets the bars fill to, and one line when protein was
-/// lowered to fit the calories (`MacroSplit`; Helms 2014; Morton 2018).
+/// One line when protein was lowered to fit the calories (`MacroSplit`;
+/// Helms 2014; Morton 2018). The targets themselves are on the bars above,
+/// so they aren't repeated as text (QA round 4).
 private struct MacroTargetsLine: View {
     @Environment(DailyMetricsModel.self) private var metrics
 
     var body: some View {
-        if let split = metrics.macroSplit {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(split.summaryLine)
-                    .font(Theme.Typography.context)
-                    .foregroundStyle(Theme.secondaryText)
-                if let note = split.capNote {
-                    Text(note)
-                        .font(Theme.Typography.context)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
+        if let note = metrics.macroSplit?.capNote {
+            Text(note)
+                .font(Theme.Typography.context)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

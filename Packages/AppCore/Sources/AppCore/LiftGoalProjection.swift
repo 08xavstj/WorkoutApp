@@ -379,7 +379,8 @@ public enum LiftGoalProjection {
             return soon ? "At your last 12 weeks' rate, \(target) could come within weeks; past \(endText) is too far to say more."
                 : "At your last 12 weeks' rate, \(target) comes into range from about \(month(from))."
         case .possible:
-            return "At your last 12 weeks' rate, \(target) is possible by \(month(projection.horizon)), but the trend line gets there later."
+            // Only the band's upper edge reaches it; say that without "possible, but later".
+            return "\(target) is inside the likely range by \(month(projection.horizon)), though the middle of the trend falls just short."
         case .notOnTrend:
             return "\(target) isn't on the current trend by \(month(projection.horizon))."
         }
@@ -397,14 +398,21 @@ public enum LiftGoalProjection {
             let unit = String(high[space...])
             if low.hasSuffix(unit) { low = String(low.dropLast(unit.count)) }
         }
-        var line = "If the last 12 weeks continue: likely \(low)–\(high) by \(month(projection.horizon)) (a rough 2-in-3 range)."
+        return "If the last 12 weeks continue: likely \(low)–\(high) by \(month(projection.horizon)) (a rough 2-in-3 range)."
+    }
+
+    /// How the line was adjusted for this lifter (a capped rate, a wider low
+    /// edge), for "About the projection" rather than the card's main text.
+    /// Nil when nothing was adjusted.
+    public static func adjustmentNote(_ projection: Projection) -> String? {
+        var parts: [String] = []
         if projection.slopeCapped {
-            line += " Your recent rate was faster than lifters at your level usually keep up, so the line uses the typical pace for your level instead."
+            parts.append("Your recent rate was faster than lifters at your level usually keep up, so the line uses the typical pace for your level instead.")
         }
         if projection.widenedForTrainingAge {
-            line += " Progress usually slows, so the low end is more likely."
+            parts.append("Progress usually slows, so the low end is more likely.")
         }
-        return line
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     /// The open alternative to a specific target (Swann 2021 [E14]).

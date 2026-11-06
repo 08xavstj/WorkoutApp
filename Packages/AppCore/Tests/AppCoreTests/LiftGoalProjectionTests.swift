@@ -90,8 +90,12 @@ struct LiftGoalProjectionTests {
         #expect(advanced.widenedForTrainingAge)
         #expect(!novice.widenedForTrainingAge)
         #expect(LiftGoalProjection.lowerEdgeFactor(.intermediate) == 1.5)
+        // The adjustment is told in "About the projection", not the range line (QA round 4).
+        let note = try #require(LiftGoalProjection.adjustmentNote(advanced))
+        #expect(note == "Progress usually slows, so the low end is more likely.")
+        #expect(LiftGoalProjection.adjustmentNote(novice) == nil)
         let line = try #require(LiftGoalProjection.rangeLine(advanced, weight: kg, month: month))
-        #expect(line.hasSuffix(" Progress usually slows, so the low end is more likely."))
+        #expect(line.hasSuffix("(a rough 2-in-3 range)."))
     }
 
     @Test func slopeIsCappedByTrainingStatus() throws {
@@ -109,8 +113,8 @@ struct LiftGoalProjectionTests {
         #expect(range.upperBound < 125)
         #expect(LiftGoalProjection.maximumGainFraction(.intermediate) == 0.20)
         #expect(LiftGoalProjection.maximumGainFraction(nil) == 0.40)
-        let line = try #require(LiftGoalProjection.rangeLine(advanced, weight: kg, month: month))
-        #expect(line.contains("faster than lifters at your level usually keep up"))
+        let note = try #require(LiftGoalProjection.adjustmentNote(advanced))
+        #expect(note.contains("faster than lifters at your level usually keep up"))
         // 117 kg intermediate bench: never more than +20% (about 140 kg) on the line by 6 months.
         let bench = [9.0, 6, 3, 0].enumerated().map { LiftGoalProjection.Sample(date: now.addingTimeInterval(-$1 * week), kg: 99 + 6 * Double($0)) }
         let projected = LiftGoalProjection.project(samples: bench, targetKg: 150, trainingStatus: .intermediate, now: now)
@@ -134,8 +138,10 @@ struct LiftGoalProjectionTests {
 
     @Test func cappedRateSaysWhatTheLineUses() throws {
         let advanced = LiftGoalProjection.project(samples: samples([91, 94, 97, 100]), targetKg: 110, trainingStatus: .advanced, now: now)
+        let note = try #require(LiftGoalProjection.adjustmentNote(advanced))
+        #expect(note.contains("so the line uses the typical pace for your level instead."))
         let line = try #require(LiftGoalProjection.rangeLine(advanced, weight: kg, month: month))
-        #expect(line.contains("so the line uses the typical pace for your level instead."))
+        #expect(!line.contains("typical pace"))
     }
 
     @Test func notOnTheCurrentTrend() {
@@ -165,7 +171,7 @@ struct LiftGoalProjectionTests {
         #expect(projection.reachFrom != nil)
         #expect(projection.reachLine == nil)
         #expect(LiftGoalProjection.headline(projection, weight: kg, month: month, now: now)
-                == "At your last 12 weeks' rate, 110 kg is possible by M8, but the trend line gets there later.")
+                == "110 kg is inside the likely range by M8, though the middle of the trend falls just short.")
         #expect(LiftGoalProjection.openAlternative(projection, month: month) == "Or keep it open: see how far you get by M8.")
         #expect(LiftGoalProjection.rangeLine(projection, weight: kg, month: month) != nil)
     }

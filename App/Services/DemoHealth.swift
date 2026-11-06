@@ -179,19 +179,30 @@ nonisolated final class DemoHealth: Sendable {
         cardioByDay = Dictionary(grouping: cardio, by: \.daysAgo)
 
         // Nights: in bed about 22:50 (later on Friday and Saturday), up about
-        // 6:45 (later at the weekend); last night a little short.
+        // 6:45 (later at the weekend). Monday and Wednesday nights run short
+        // (about 6-6.5 h asleep), about 4 nights in 10 have a second waking,
+        // and last night was a little short with two, so sleep scores spread
+        // over ~75-100 instead of all sitting near 100.
         var nights: [Int: Night] = [:]
         for daysAgo in 0...Self.historyDays {
             let morning = at(daysAgo, 0)
             let weekday = calendar.component(.weekday, from: morning) // 1 = Sunday
             let lateNight = weekday == 7 || weekday == 1 // the evenings before were Friday and Saturday
-            let bedMinutes = daysAgo == 0 ? -40 : -70 + 25 * Self.noise(daysAgo, 10) + (lateNight ? 45 : 0)
-            let wakeMinutes = daysAgo == 0 ? 6 * 60 + 40 : 6 * 60 + 45 + 20 * Self.noise(daysAgo, 11) + (lateNight ? 60 : 0)
+            let shortNight = daysAgo > 0 && (weekday == 3 || weekday == 5) // Tuesday and Thursday mornings
+            // Split up so the type checker stays quick.
+            let shortBed: Double = shortNight ? 50 + 15 * Self.noise(daysAgo, 16) : 0
+            let shortWake: Double = shortNight ? 10 : 0
+            let usualBed: Double = -70 + 25 * Self.noise(daysAgo, 10) + (lateNight ? 45 : 0)
+            let usualWake: Double = 6 * 60 + 45 + 20 * Self.noise(daysAgo, 11) + (lateNight ? 60 : 0)
+            let bedMinutes: Double = daysAgo == 0 ? -40 : usualBed + shortBed
+            let wakeMinutes: Double = daysAgo == 0 ? 6 * 60 + 40 : usualWake - shortWake
             let bedtime = morning.addingTimeInterval(bedMinutes * 60)
             let wake = morning.addingTimeInterval(wakeMinutes * 60)
             let asleepAt = bedtime.addingTimeInterval(14 * 60)
+            let secondWaking = daysAgo == 0 || Self.noise(daysAgo, 13) > 0.2
             nights[daysAgo] = Night(daysAgo: daysAgo, bedtime: bedtime, asleepAt: asleepAt, wake: wake,
-                                    samples: Self.stages(bed: bedtime, asleep: asleepAt, wake: wake, seed: daysAgo))
+                                    samples: Self.stages(bed: bedtime, asleep: asleepAt, wake: wake, seed: daysAgo,
+                                                         secondWaking: secondWaking))
         }
         self.nights = nights
     }
@@ -232,14 +243,17 @@ nonisolated final class DemoHealth: Sendable {
     }
 
     /// Stages for one night in ~90-minute cycles: more deep sleep early, more
-    /// REM late, one short waking around 3 am.
-    private static func stages(bed: Date, asleep: Date, wake: Date, seed: Int) -> [SleepSample] {
+    /// REM late, one short waking around 3 am and, on some nights, a second
+    /// one around 5 am.
+    private static func stages(bed: Date, asleep: Date, wake: Date, seed: Int, secondWaking: Bool) -> [SleepSample] {
         var result = [SleepSample(stage: .inBed, start: bed, end: wake.addingTimeInterval(4 * 60))]
         result.append(SleepSample(stage: .awake, start: bed, end: asleep))
         var time = asleep
         var cycle = 0
         let wakingAt = asleep.addingTimeInterval(3.4 * 3600 + 900 * noise(seed, 12))
+        let secondWakingAt = asleep.addingTimeInterval(5.6 * 3600 + 600 * noise(seed, 14))
         var hadWaking = false
+        var hadSecondWaking = !secondWaking
         while time < wake && cycle < 8 {
             let plan: [(SleepStage, Double)] = [
                 (.core, 22), (.deep, max(6, 38 - Double(cycle) * 9)), (.core, 18), (.rem, 10 + Double(cycle) * 7)
@@ -254,6 +268,11 @@ nonisolated final class DemoHealth: Sendable {
                     result.append(SleepSample(stage: .awake, start: time, end: back))
                     time = back
                     hadWaking = true
+                } else if hadWaking, !hadSecondWaking, time >= secondWakingAt, time < wake.addingTimeInterval(-20 * 60) {
+                    let back = min(wake, time.addingTimeInterval((9 + 3 * noise(seed, 15)) * 60))
+                    result.append(SleepSample(stage: .awake, start: time, end: back))
+                    time = back
+                    hadSecondWaking = true
                 }
             }
             cycle += 1

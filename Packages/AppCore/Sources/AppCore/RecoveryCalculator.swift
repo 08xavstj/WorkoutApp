@@ -257,7 +257,7 @@ public struct RecoveryCalculator: Sendable {
             let hrvEffect = Self.hrvEffect(changePercent: changePercent, z: z)
             contributors.append(RecoveryContributor(
                 id: "hrv", name: "Last night's HRV",
-                detail: "\(Int(hrv.rounded())) ms, \(change >= 0 ? "+" : "")\(change)% vs your usual \(Int(exp(mean).rounded())) ms",
+                detail: "\(Int(hrv.rounded())) ms, \(Self.signed(change))% vs your usual \(Int(exp(mean).rounded())) ms",
                 note: hrvEffect == .neutral ? Self.withinNormalNote : nil,
                 effect: hrvEffect, weight: hrvWeight * abs(Self.clampZ(z))
             ))
@@ -279,7 +279,7 @@ public struct RecoveryCalculator: Sendable {
             }
             contributors.append(RecoveryContributor(
                 id: "rhr", name: restingHeartRateSource.label,
-                detail: "\(Int(rhr.rounded())) bpm, \(difference >= 0 ? "+" : "")\(difference) vs your usual \(Int(mean.rounded()))",
+                detail: "\(Int(rhr.rounded())) bpm, \(Self.signed(difference)) bpm vs your usual \(Int(mean.rounded())) bpm",
                 note: note,
                 effect: shownEffect, weight: restingHeartRateWeight * abs(Self.clampZ(z))
             ))
@@ -291,7 +291,9 @@ public struct RecoveryCalculator: Sendable {
             let z = (Double(sleepScore) - sleepBase.mean) / sleepBase.sd
             combined += sleepWeight * Self.clampZ(z)
             weightUsed += sleepWeight
-            sleepEffect = Self.effect(z)
+            // Worded with the notable-change limit, like HRV and RHR, so a
+            // 97 after a usual 99 doesn't read as "lowering".
+            sleepEffect = Self.sleepEffect(change: Double(sleepScore) - sleepBase.mean, z: z)
             sleepBaselineNights = sleepBase.nights
             let detail = sleepBase.nights > 0
                 ? "Score \(sleepScore), vs your usual \(Int(sleepBase.mean.rounded()))"
@@ -299,6 +301,7 @@ public struct RecoveryCalculator: Sendable {
             contributors.append(RecoveryContributor(
                 id: "sleep", name: "Sleep",
                 detail: detail,
+                note: sleepEffect == .neutral ? Self.withinNormalNote : nil,
                 effect: sleepEffect, weight: sleepWeight * abs(Self.clampZ(z))
             ))
         }
@@ -387,6 +390,11 @@ public struct RecoveryCalculator: Sendable {
         return (mean, max(sd, 6), recent.count)
     }
 
+    /// "+3", "0" or "−4" (a real minus sign, not a hyphen).
+    static func signed(_ value: Int) -> String {
+        value > 0 ? "+\(value)" : (value < 0 ? "\u{2212}\(-value)" : "0")
+    }
+
     static func clampZ(_ z: Double) -> Double { min(3, max(-3, z)) }
 
     /// When a resting (or sleeping) heart rate change is worth mentioning:
@@ -401,6 +409,12 @@ public struct RecoveryCalculator: Sendable {
     /// swings a lot, and the 7-day trend, not one night, is the validated
     /// signal (Plews et al., Eur J Appl Physiol 2012; Buchheit 2014).
     public static let notableHRVDropPercent = -15.0
+    /// When a sleep score change is worth mentioning: at least this many
+    /// points from your usual. App choice, not a validated cut-off: no study
+    /// sets a meaningful sleep-score change, and night-to-night sleep varies
+    /// a lot within a person (Bei et al., Sleep Med Rev 2016, systematic
+    /// review), so only changes this large are flagged.
+    public static let notableSleepScoreChange = 8.0
     /// Shown under a reading inside the limits above.
     public static let withinNormalNote = "Within your normal day-to-day range."
 
@@ -410,6 +424,14 @@ public struct RecoveryCalculator: Sendable {
         if change > notableRHRChangeBpm { return .lowers }
         if change < -notableRHRChangeBpm { return .raises }
         return .neutral
+    }
+
+    /// How last night's sleep score reads: normal unless it is at least
+    /// `notableSleepScoreChange` points from your usual and a clear change
+    /// for you (more than a third of your normal night-to-night swing).
+    public static func sleepEffect(change: Double, z: Double) -> RecoveryContributor.Effect {
+        guard abs(change) >= notableSleepScoreChange else { return .neutral }
+        return effect(z)
     }
 
     /// How last night's HRV reads: a drop past the limit lowers recovery; a

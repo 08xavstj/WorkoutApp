@@ -226,7 +226,7 @@ extension CardioFitness {
     }
 
     /// The 90-day trend: the last 30 days against the first 30 days of the
-    /// window. Rising or falling from `meaningfulChange` (0.5 ml/kg/min; watch
+    /// window (about 2 months apart). Rising or falling from `meaningfulChange` (0.5 ml/kg/min; watch
     /// estimates move by about 1). Nil without any reading in the window.
     public static func trend(_ points: [DayValue], now: Date = .now) -> Trend? {
         let day = 86_400.0
@@ -238,7 +238,8 @@ extension CardioFitness {
         guard !early.isEmpty, !late.isEmpty else {
             return Trend(direction: .unknown, change: nil, latest: last.value, readings: window.count)
         }
-        let change = late.reduce(0, +) / Double(late.count) - early.reduce(0, +) / Double(early.count)
+        // Rounded to the 0.1 shown, so "+0.5" never reads as flat.
+        let change = ((late.reduce(0, +) / Double(late.count) - early.reduce(0, +) / Double(early.count)) * 10).rounded() / 10
         let direction: TrendDirection = change >= meaningfulChange ? .rising : (change <= -meaningfulChange ? .falling : .flat)
         return Trend(direction: direction, change: change, latest: last.value, readings: window.count)
     }

@@ -271,7 +271,14 @@ final class VitalsModel {
         stress = derived.stressToday
         intensityMinutes = derived.intensityWeek
         restingHeartRateHistory = rhrSeries
-        sleepingHeartRateHistory = derived.sleepingHeartRateByNight
+        // 30 nights of sleeping heart rate from the nightly cache the recovery
+        // baseline also fills (`nightlySleepingHeartRate`), so the history isn't
+        // cut to the 14 days of per-minute heart rate read here; this refresh's
+        // own nights win where both have one.
+        var sleepingByNight = await health.nightlySleepingHeartRate(nights: Array(nights.suffix(30)))
+        for night in derived.sleepingHeartRateByNight { sleepingByNight[night.date] = night.value }
+        let sleepingSeries = sleepingByNight.map { DatedValue(date: $0.key, value: $0.value) }.sorted { $0.date < $1.date }
+        sleepingHeartRateHistory = sleepingSeries
 
         var result: [Stat] = []
         func fmt(_ value: Double, _ digits: Int = 0) -> String { value.formatted(.number.precision(.fractionLength(digits))) }
@@ -291,12 +298,12 @@ final class VitalsModel {
                 id: "sleepingHR", category: .heart, title: "Sleeping heart rate", icon: "bed.double.fill",
                 value: fmt(sleeping.average), unit: "bpm",
                 status: "Lowest last night \(fmt(sleeping.lowest))", tone: .neutral,
-                series: derived.sleepingHeartRateByNight,
+                series: sleepingSeries,
                 footnote: "Average while asleep last night"
             ))
         } else {
             result.append(Stat(id: "sleepingHR", category: .heart, title: "Sleeping heart rate", icon: "bed.double.fill", unit: "bpm",
-                               series: derived.sleepingHeartRateByNight))
+                               series: sleepingSeries))
         }
         result.append(makeStat("walkingHR", .heart, "Walking heart rate", "figure.walk", series: get(try? await walkingHR), unit: "bpm", digits: 0))
 
@@ -445,7 +452,7 @@ final class VitalsModel {
         let intensity = derived.intensityWeek
         result.append(Stat(
             id: "intensity", category: .activity, title: "Intensity minutes", icon: "bolt.heart.fill",
-            value: "\(intensity.total)", unit: "this week",
+            value: "\(intensity.total)", unit: "last 7 days",
             status: intensity.total >= IntensityMinutes.weeklyGoal ? "Goal reached" : "\(IntensityMinutes.weeklyGoal - intensity.total) to go",
             tone: intensity.total >= IntensityMinutes.weeklyGoal ? .good : .neutral,
             gauge: min(1, Double(intensity.total) / Double(IntensityMinutes.weeklyGoal)),
@@ -499,11 +506,18 @@ final class VitalsModel {
         // one reading, so a single latest value gets no category.
         let homeCheck = HomeBloodPressure.weekCheck(cuff.map(\.asCore), asOf: now)
         if let avgS = homeCheck.systolic, let avgD = homeCheck.diastolic, let category = homeCheck.category {
+            // Until the check has its 12 readings the category is provisional
+            // ("so far"), as on the blood pressure page.
+            let complete = homeCheck.isReliable
+            let used = min(homeCheck.readingsUsed, HomeBloodPressure.recommendedReadings)
             var bp = Stat(
                 id: "bp", category: .body, title: "Blood pressure", icon: "waveform.path.ecg.rectangle",
                 value: "\(fmt(avgS))/\(fmt(avgD))", unit: "mmHg",
-                status: category.rawValue, tone: category == .normal ? .good : .caution, series: sys,
-                footnote: "Average of your home readings over the last 7 days."
+                status: complete ? category.rawValue : "\(category.rawValue) so far",
+                tone: complete ? (category == .normal ? .good : .caution) : .neutral, series: sys,
+                footnote: complete
+                    ? "7-day average of your home readings."
+                    : "7-day average so far: \(used) of \(HomeBloodPressure.recommendedReadings) readings."
             )
             bp.secondary = dia
             bp.secondaryLabel = "Diastolic"
@@ -557,8 +571,8 @@ final class VitalsModel {
         var debtStat = Stat(
             id: "sleepDebt", category: .sleep, title: "Sleep debt", icon: "hourglass",
             value: currentDebt.map { Duration.seconds($0.hours * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
-            // "Caught up" only at zero; a small debt reads "Under 1 h" (level .none is < 1 h).
-            unit: "", status: currentDebt.map { $0.level != .none ? $0.level.rawValue : ($0.hours > 0 ? "Under 1 h" : "Caught up") },
+            // "Caught up" only at zero; a small debt reads "Under 1 h" (`SleepDebt.Result.statusLabel`).
+            unit: "", status: currentDebt.map(\.statusLabel),
             tone: (currentDebt?.hours ?? 0) < 3 ? .good : .caution,
             gauge: currentDebt.map { min(1, $0.hours / 10) },
             series: debtSeries,
@@ -977,7 +991,7 @@ extension VitalsModel {
             stat.status = "2-hour anchor reached"
             stat.tone = .good
         } else {
-            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to go (2 h target)"
+            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to go (2\u{00A0}h target)"
             stat.tone = .neutral
         }
         stat.footnote = "About 2 hours a day is the anchor (Burns 2023; evidence is observational)."

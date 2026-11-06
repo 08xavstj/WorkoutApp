@@ -8,7 +8,8 @@ import Foundation
 ///
 /// - Need: 8 h by default. Adults need 7 h or more (Watson et al., Sleep 2015,
 ///   AASM/SRS consensus); no study ties extra need to the previous day's
-///   training load, so strain doesn't change it.
+///   training load, so strain doesn't change it. Full marks at your need,
+///   falling faster under 7 h (`durationScore`, the slopes are the app's).
 /// - Efficiency: 85% or more is good sleep quality and under 74% is poor
 ///   (Ohayon et al., Sleep Health 2017, National Sleep Foundation), so it gets
 ///   full marks from 85% and none at 70%.
@@ -46,6 +47,20 @@ public struct SleepCalculator: Sendable {
         case 40..<60: 0.35
         default: 0.30
         }
+    }
+
+    /// Duration marks: full at your need, minus 0.2 per hour short down to
+    /// 7 h and 0.35 per hour short below 7 h (so 6 h with a 7.5 h need is
+    /// 0.55 and under about 4.5 h is none). Adults need 7 h or more and less
+    /// is linked with poorer health and performance (Watson et al., Sleep
+    /// 2015, AASM/SRS consensus), so time under 7 h costs more; the slopes
+    /// are the app's choice.
+    public static func durationScore(asleep: TimeInterval, need: TimeInterval) -> Double {
+        guard need > 0 else { return 1 }
+        let minimum = 7.0 * 3600
+        let shortAboveMinimum = max(0, need - max(asleep, minimum)) / 3600
+        let shortBelowMinimum = max(0, min(need, minimum) - asleep) / 3600
+        return min(1, max(0, 1 - 0.2 * shortAboveMinimum - 0.35 * shortBelowMinimum))
     }
 
     /// Interruption marks: 0-1 awakenings over 5 min is good, 4+ is poor
@@ -161,7 +176,7 @@ public struct SleepCalculator: Sendable {
         }.filter { $0.1.timeIntervalSince($0.0) >= minimumInterruption }.count
         let need = sleepNeed(previousDayStrain: previousDayStrain)
 
-        let durationScore = min(1, asleep / need)
+        let durationScore = Self.durationScore(asleep: asleep, need: need)
         let rawEfficiency = inBed > 0 ? min(1, asleep / inBed) : 0
         // Full marks from 85%, none at 70% (Ohayon et al., Sleep Health 2017: ≥ 85% good, < 74% poor).
         let efficiency = min(1, max(0, (rawEfficiency - 0.70) / 0.15))

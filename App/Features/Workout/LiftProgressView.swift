@@ -46,7 +46,7 @@ struct LiftProgressView: View {
                 } else {
                     summary(points)
                     chartCard(points)
-                    LiftGoalProgressSection(exerciseID: exerciseID)
+                    LiftGoalsLink(exerciseID: exerciseID)
                     sessionList(points)
                     Text("Estimated 1RM is the most you could lift once, worked out from your best set and how many reps you had left (Epley formula with RPE). It's a way to compare sessions, not a test.")
                         .font(.caption)
@@ -108,12 +108,17 @@ struct LiftProgressView: View {
         value.formatted(.number.precision(.fractionLength(0...1)))
     }
 
+    /// Whole units for estimates, which are only good to a few kg ("133", not "129.8").
+    private func wholeText(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0)))
+    }
+
     private func summary(_ points: [LiftProgress.Point]) -> some View {
         let best = points.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax }
         let first = points.first?.estimatedOneRepMax ?? 0
         let last = points.last?.estimatedOneRepMax ?? 0
         let change = first > 0 ? (last / first - 1) * 100 : 0
-        let bestItem = item("Best e1RM", best.map { "\(number($0.estimatedOneRepMax)) \(unit.rawValue)" } ?? "–", spoken: "Best estimated one-rep max")
+        let bestItem = item("Best est. 1RM", best.map { "\(wholeText($0.estimatedOneRepMax)) \(unit.rawValue)" } ?? "–", spoken: "Best estimated one-rep max")
         let sessionsItem = item("Sessions", "\(points.count)")
         let changeItem = item("Since first", points.count > 1 ? "\(change >= 0 ? "+" : "")\(Int(change.rounded()))%" : "–")
         let prItem = item("PRs", "\(points.filter(\.isPR).count)", spoken: "Personal records")
@@ -169,7 +174,7 @@ struct LiftProgressView: View {
             }
             .pickerStyle(.segmented)
             if let selectedDate, let point = nearest(selectedDate, in: points) {
-                Text("\(point.date.formatted(date: .abbreviated, time: .omitted)): \(number(point.bestWeight)) \(unit.rawValue) × \(point.bestReps) · e1RM \(number(point.estimatedOneRepMax)) · volume \(number(point.volume))")
+                Text("\(point.date.formatted(date: .abbreviated, time: .omitted)): \(number(point.bestWeight)) \(unit.rawValue) × \(point.bestReps) · est. 1RM \(wholeText(point.estimatedOneRepMax)) \(unit.rawValue) · volume \(wholeText(point.volume))")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
             } else {
@@ -200,12 +205,20 @@ struct LiftProgressView: View {
                 }
             }
             .chartYScale(domain: .automatic(includesZero: showVolume))
+            // Room at both ends so the last date label isn't clipped.
+            .chartXScale(range: .plotDimension(padding: 12))
             .chartXSelection(value: $selectedDate)
             .frame(height: 220)
             if !showVolume {
-                Label("Diamonds are personal records", systemImage: "diamond.fill")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
+                // The icon in the PR markers' colour, so the legend matches the chart.
+                Label {
+                    Text("Diamonds are personal records")
+                        .foregroundStyle(Theme.secondaryText)
+                } icon: {
+                    Image(systemName: "diamond.fill")
+                        .foregroundStyle(Theme.strain)
+                }
+                .font(.caption)
             }
         }
         .card()
@@ -229,11 +242,17 @@ struct LiftProgressView: View {
                     if point.isPR {
                         Chip(text: "PR", color: Theme.strain)
                     }
-                    Text(number(point.estimatedOneRepMax))
-                        .font(.headline)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.primaryText)
-                        .accessibilityLabel("Estimated one rep max \(number(point.estimatedOneRepMax)) \(unit.rawValue)")
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("\(wholeText(point.estimatedOneRepMax)) \(unit.rawValue)")
+                            .font(.headline)
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.primaryText)
+                        Text("est. 1RM")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Estimated one rep max \(wholeText(point.estimatedOneRepMax)) \(unit.rawValue)")
                 }
                 .padding(.vertical, 8)
                 .overlay(alignment: .bottom) {

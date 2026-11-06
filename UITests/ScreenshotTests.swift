@@ -130,6 +130,13 @@ final class ScreenshotTests: XCTestCase {
                 capture(app, "workout-detail", pages: 2)
                 if tap(app, ["lift-progress-link", "Progress"], name: "Workout detail progress") {
                     capture(app, "lift-progress", pages: 2)
+                    // "Goal: 115 kg ›" only shows when this lift has a goal, so no MISSING note without one.
+                    if let goal = find(app, "Goal: ", type: .any, wait: 2) {
+                        goal.tap()
+                        sleep(2)
+                        capture(app, "lift-progress-goal", pages: 1)
+                        back(app)
+                    }
                     back(app)
                 }
                 back(app)
@@ -242,12 +249,15 @@ final class ScreenshotTests: XCTestCase {
             capture(app, "settings-rpe-guide", pages: 1)
             dismissSheet(app)
         }
-        dismissSheet(app)
+        // Settings and any sheet still open on it (Gym equipment, Goals) close
+        // here, so the next tour starts from the tab bar, not from Settings.
+        closeAllSheets(app)
     }
 
     /// The builder from Today's start button, its pain page, then a live
     /// workout with three sets ticked off.
     private func tourWorkout(_ app: XCUIApplication) {
+        closeAllSheets(app)
         openTab(app, "Today")
         var opened = tap(app, ["Start Upper", "Start workout"], name: "Today start button")
         if !opened {
@@ -484,6 +494,17 @@ final class ScreenshotTests: XCTestCase {
         let top = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1))
         top.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
         sleep(1)
+    }
+
+    /// Closes sheets one by one until the tab bar can be tapped again
+    /// (at most 6 tries; notes it if something is still covering it).
+    private func closeAllSheets(_ app: XCUIApplication) {
+        let today = app.tabBars.buttons["Today"]
+        for _ in 0..<6 {
+            if today.exists && today.isHittable { return }
+            dismissSheet(app)
+        }
+        if !(today.exists && today.isHittable) { note("STILL COVERED: the tab bar after closing sheets") }
     }
 
     private func note(_ line: String) {
