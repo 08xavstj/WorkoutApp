@@ -116,7 +116,9 @@ public enum BedtimeWindow {
             }
         }
         let repayment = min(maxRepaymentMinutes, max(0, sleepDebt?.extraMinutesPerNight ?? 0))
-        let start = wake.addingTimeInterval(-(need * 3600 + Double(repayment) * 60))
+        let exactStart = wake.addingTimeInterval(-(need * 3600 + Double(repayment) * 60))
+        // Down to 5 minutes ("21:50", not "21:53"): a little earlier, never later (display choice).
+        let start = Date(timeIntervalSinceReferenceDate: (exactStart.timeIntervalSinceReferenceDate / 300).rounded(.down) * 300)
         let end = start.addingTimeInterval(TimeInterval(windowMinutes * 60))
         var note: String?
         if let regularity, regularity < lowRegularity {

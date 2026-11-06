@@ -35,19 +35,10 @@ struct GoalsView: View {
     var body: some View {
         SheetNavigationStack(isSheet: !pushed) {
             Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Suggested: \(suggestion.title)")
-                            .font(.headline)
-                        Text(suggestionReason)
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    Button("Use suggestion") {
-                        let liftGoals = goals.liftGoals // The suggestion is about body weight; keep the lift goals.
-                        goals = suggestion
-                        goals.liftGoals = liftGoals
-                    }
+                // First time: the suggestion leads. Once goals are saved it moves to the
+                // end, and only shows when it differs from the chosen weight goal.
+                if !settings.goalsSet {
+                    suggestionSection
                 }
 
                 Section {
@@ -98,6 +89,10 @@ struct GoalsView: View {
                 // Long-term lift targets with a projected range (`LiftGoalProjection`).
                 LiftGoalsFormSection(goals: $goals.liftGoals)
 
+                if settings.goalsSet, suggestion.weight != goals.weight {
+                    suggestionSection
+                }
+
                 Section("Your plan") {
                     LabeledContent("Goal", value: goals.title)
                     if let target = calorieTarget {
@@ -144,6 +139,24 @@ struct GoalsView: View {
                 if !options.contains(goals.weeklyRatePercent), let first = options.dropFirst().first ?? options.first {
                     goals.weeklyRatePercent = first
                 }
+            }
+        }
+    }
+
+    /// "Suggested: Maintain weight" from body composition, and a button to use it.
+    private var suggestionSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Suggested: \(suggestion.title)")
+                    .font(.headline)
+                Text(suggestionReason + " A starting point, not a rule.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Button("Use suggestion") {
+                let liftGoals = goals.liftGoals // The suggestion is about body weight; keep the lift goals.
+                goals = suggestion
+                goals.liftGoals = liftGoals
             }
         }
     }

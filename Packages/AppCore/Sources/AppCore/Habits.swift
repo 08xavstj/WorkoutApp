@@ -49,12 +49,17 @@ public enum CaffeineTiming {
         }.sorted()
         guard !fromNoon.isEmpty else { return defaultBedtimeMinutes }
         let median = fromNoon[fromNoon.count / 2]
-        return median + 12 * 60
+        // To the nearest 5 minutes: "11:05 pm", not "11:03 pm" (display choice;
+        // night-to-night onset varies far more than that).
+        return Int((Double(median) / 5).rounded()) * 5 + 12 * 60
     }
 
     /// Latest time for a dose, in minutes after midnight on the same day.
+    /// Rounded down to 5 minutes ("2:25 pm", not "2:29 pm"): a little earlier,
+    /// never later, than the model's figure (display choice).
     public static func cutoffMinutes(bedtimeMinutes: Int, mg: Double) -> Int {
-        max(0, bedtimeMinutes - Int((hoursBeforeBed(mg: mg) * 60).rounded()))
+        let exact = bedtimeMinutes - Int((hoursBeforeBed(mg: mg) * 60).rounded())
+        return max(0, Int((Double(exact) / 5).rounded(.down)) * 5)
     }
 
     /// e.g. "2:12 pm"

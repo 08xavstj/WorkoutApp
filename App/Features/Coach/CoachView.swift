@@ -125,7 +125,7 @@ struct CoachView: View {
                                 value: recovery.isCalibrated ? "\(recovery.score)% · \(RecoveryWording.label(for: recovery.status))" : "\(recovery.score)%")
                 }
                 if let strain = metrics.strain {
-                    let target = metrics.targetStrain.map { " / " + strainRangeText($0) } ?? ""
+                    let target = metrics.targetStrain.map { " · target " + strainRangeText($0) } ?? ""
                     ContextChip(color: Theme.strain, label: "Strain", value: "\(strainText(strain.strain))\(target)")
                 }
                 if let protein = metrics.nutritionToday?.proteinGrams {
@@ -139,6 +139,7 @@ struct CoachView: View {
             }
         }
         .scrollIndicators(.hidden)
+        .edgeToEdgeChips()
     }
 
     private var emptyState: some View {
@@ -173,7 +174,7 @@ struct CoachView: View {
     private var followUps: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                ForEach(CoachModel.followUps, id: \.self) { text in
+                ForEach(CoachIntent.followUps(after: coach.messages.last { $0.role == .coach }?.question), id: \.self) { text in
                     Button {
                         Task { await send(text) }
                     } label: {
@@ -191,6 +192,7 @@ struct CoachView: View {
             }
         }
         .scrollIndicators(.hidden)
+        .edgeToEdgeChips()
     }
 
     private var inputBar: some View {
@@ -425,8 +427,8 @@ extension CoachView {
             lines.append("Cutting with high sleep debt: " + cut.message)
         }
         if let trend = CardioFitness.trend(vitals.vo2MaxHistory.map { DayValue(date: $0.date, value: $0.value) }) {
-            let fitnessAge = CardioFitness.fitnessAge(vo2Max: trend.latest, sex: settings.sex)
-            lines.append("VO₂ max \(trend.latest.formatted(.number.precision(.fractionLength(1)))) ml/kg/min, 90-day trend \(trend.direction.rawValue); fitness age about \(fitnessAge) ±\(CardioFitness.watchUncertaintyYears) (one measure, Loe 2013)." + (CardioFitness.nudge(for: trend).map { " " + $0 } ?? ""))
+            let fitnessAge = CardioFitness.fitnessAge(vo2Max: trend.latest, age: settings.age, sex: settings.sex)
+            lines.append("VO₂ max \(trend.latest.formatted(.number.precision(.fractionLength(1)))) ml/kg/min, 90-day trend \(trend.direction.rawValue); fitness age about \(fitnessAge) ±\(CardioFitness.watchUncertaintyYears) (one measure, FRIEND norms)." + (CardioFitness.nudge(for: trend).map { " " + $0 } ?? ""))
         }
         if settings.isRestMode {
             lines.append("REST MODE is on (the user is sick or resting): no strain target; suggest rest, sleep, fluids and at most easy walking, not workouts.")
@@ -554,6 +556,18 @@ private struct ModelStatusBanner: View {
         .padding(14)
         .background(Theme.recoveryModerate.opacity(0.12), in: .rect(cornerRadius: 16))
         .accessibilityElement(children: .combine)
+    }
+}
+
+private extension View {
+    /// A horizontal chip row that runs to the screen edges instead of being
+    /// cut at the page's 16-pt margin, with its first chip still aligned to
+    /// the margin and the chip shadows left unclipped.
+    func edgeToEdgeChips() -> some View {
+        self
+            .contentMargins(.horizontal, 16, for: .scrollContent)
+            .scrollClipDisabled()
+            .padding(.horizontal, -16)
     }
 }
 

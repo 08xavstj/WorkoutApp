@@ -22,9 +22,12 @@ struct PatternsSection: View {
                 HealthNavigationRow(title: "Alcohol and your sleep", detail: alcoholDetail, icon: "wineglass.fill") {
                     AlcoholPage()
                 }
-                Divider()
-                HealthNavigationRow(title: "Vitamins & minerals", detail: micronutrientsDetail, icon: "leaf.fill", color: Theme.nutrition) {
-                    MicronutrientsPage()
+                // Key measures carries Vitamins & minerals once there are 4 days of food logs.
+                if metrics.micronutrients.isEmpty {
+                    Divider()
+                    HealthNavigationRow(title: "Vitamins & minerals", detail: micronutrientsDetail, icon: "leaf.fill", color: Theme.nutrition) {
+                        MicronutrientsPage()
+                    }
                 }
                 // Garmin help is under Settings › Data sources (ux-audit.md 4.3, B5).
             }

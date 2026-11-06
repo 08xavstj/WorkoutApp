@@ -261,12 +261,21 @@ nonisolated final class DemoHealth: Sendable {
     func hrv(_ daysAgo: Int) -> Double {
         if daysAgo == 0 { return 43 }
         let afterLifting = sessionsByDay[daysAgo + 1] != nil
-        return 47 + 5.5 * Self.noise(daysAgo, 30) - (afterLifting ? 2 : 0)
+        // Drinks the evening before lower overnight HRV and raise heart rate
+        // (Pietilä et al., JMIR Ment Health 2018, dose-dependent).
+        return 47 + 5.5 * Self.noise(daysAgo, 30) - (afterLifting ? 2 : 0) - (drankEvening(daysAgo + 1) ? 4 : 0)
     }
 
-    /// Resting heart rate: about 54 bpm, 56 this morning.
+    /// Resting heart rate: about 54 bpm, 56 this morning; +2 after drinks.
     func restingHeartRate(_ daysAgo: Int) -> Double {
-        daysAgo == 0 ? 56 : 54 + 1.8 * Self.noise(daysAgo, 31)
+        daysAgo == 0 ? 56 : 54 + 1.8 * Self.noise(daysAgo, 31) + (drankEvening(daysAgo + 1) ? 2 : 0)
+    }
+
+    /// Two drinks on Friday and Saturday evenings, skipping every third (the
+    /// same rule as the drink entries in `timedSamples`).
+    func drankEvening(_ daysAgo: Int) -> Bool {
+        let weekday = calendar.component(.weekday, from: day(daysAgo))
+        return (weekday == 6 || weekday == 7) && daysAgo % 3 != 0
     }
 
     func nightlyVitals(days: Int, endingOn day: Date) -> [DailyVitals] {
@@ -467,8 +476,14 @@ nonisolated final class DemoHealth: Sendable {
         case .bmi: return daysAgo % 5 == 3 ? nil : bodyMass(daysAgo) / ((heightCm / 100) * (heightCm / 100))
         case .leanMass: return daysAgo % 7 == 1 ? bodyMass(daysAgo) * (1 - bodyFat(daysAgo)) : nil
         case .height: return heightCm
-        case .systolic: return daysAgo % 3 == 0 ? 121 + 4 * n : nil
-        case .diastolic: return daysAgo % 3 == 0 ? 77 + 3 * n : nil
+        // The day's mean of the cuff readings taken by now, so Health's daily
+        // value and the readings list agree (none before the 7:30 reading).
+        case .systolic:
+            let readings = bloodPressurePairs(daysAgo)
+            return readings.isEmpty ? nil : readings.map(\.systolic).reduce(0, +) / Double(readings.count)
+        case .diastolic:
+            let readings = bloodPressurePairs(daysAgo)
+            return readings.isEmpty ? nil : readings.map(\.diastolic).reduce(0, +) / Double(readings.count)
         default:
             guard spread(metric) == .meals else { return nil }
             let entries = timedSamples(metric, from: day(daysAgo), to: day(daysAgo).addingTimeInterval(86_400), clip: false)
@@ -595,8 +610,7 @@ nonisolated final class DemoHealth: Sendable {
                 result.append(DatedValue(date: base.addingTimeInterval((7 * 60 + 45) * 60), value: 95))
                 result.append(DatedValue(date: base.addingTimeInterval((13 * 60 + 20) * 60), value: 80))
             case .alcoholicDrinks:
-                let weekday = calendar.component(.weekday, from: base)
-                if (weekday == 6 || weekday == 7) && daysAgo % 3 != 0 {
+                if drankEvening(daysAgo) {
                     result.append(DatedValue(date: base.addingTimeInterval((20 * 60 + 30) * 60), value: 2))
                 }
             default:
@@ -631,21 +645,45 @@ nonisolated final class DemoHealth: Sendable {
 
     // MARK: Records
 
-    /// Home cuff readings every third morning, newest first.
-    func bloodPressureReadings(days: Int) -> [BloodPressureReading] {
-        (0..<min(days, historyDays)).compactMap { daysAgo -> BloodPressureReading? in
-            guard let systolic = dayValue(.systolic, daysAgo), let diastolic = dayValue(.diastolic, daysAgo) else { return nil }
-            let date = day(daysAgo).addingTimeInterval((7 * 60 + 30) * 60)
+    /// The cuff readings of one day, taken by now: a full 7-day home check
+    /// this week (morning 7:30 and evening 21:00, as ESH 2021 asks), and
+    /// every third morning before that. Rounded like a cuff.
+    func bloodPressurePairs(_ daysAgo: Int) -> [(date: Date, systolic: Double, diastolic: Double)] {
+        guard daysAgo >= 0, daysAgo <= historyDays else { return [] }
+        let n = Self.noise(daysAgo, 50 + Metric.systolic.hashSalt)
+        let m = Self.noise(daysAgo, 50 + Metric.diastolic.hashSalt)
+        var times: [Double] = []
+        if daysAgo < 7 {
+            times = [7 * 60 + 30, 21 * 60]
+        } else if daysAgo % 3 == 0 {
+            times = [7 * 60 + 30]
+        }
+        return times.enumerated().compactMap { index, minutes -> (date: Date, systolic: Double, diastolic: Double)? in
+            let date = day(daysAgo).addingTimeInterval(minutes * 60)
             guard date <= now else { return nil }
-            return BloodPressureReading(id: Self.uuid(5000 + daysAgo), date: date, systolic: systolic.rounded(),
-                                        diastolic: diastolic.rounded(), source: "Blood pressure cuff", arm: "Left")
+            let evening = index == 1
+            return (date: date, systolic: (121 + 4 * n + (evening ? 3 : 0)).rounded(), diastolic: (76 + 2.5 * m + (evening ? 1 : 0)).rounded())
         }
     }
 
-    /// Mild, partly cloudy weather in place of the forecast (no network in demo mode).
+    /// Home cuff readings, newest first.
+    func bloodPressureReadings(days: Int) -> [BloodPressureReading] {
+        (0..<min(days, historyDays)).flatMap { daysAgo -> [BloodPressureReading] in
+            let readings = bloodPressurePairs(daysAgo).enumerated().map { index, reading in
+                BloodPressureReading(id: Self.uuid(5000 + daysAgo * 2 + index), date: reading.date, systolic: reading.systolic,
+                                     diastolic: reading.diastolic, source: "Blood pressure cuff", arm: "Left")
+            }
+            return Array(readings.reversed())
+        }
+    }
+
+    /// A partly cloudy November day in Lisbon in place of the forecast (no
+    /// network in demo mode): about 12° in the morning, a high of 18°.
     func conditions(latitude: Double, longitude: Double) -> Conditions {
-        Conditions(latitude: latitude, longitude: longitude, fetched: now, temperature: 19, feelsLike: 18,
-                   humidity: 62, weatherCode: 2, isDay: true, high: 22, low: 14, uvIndexMax: 5,
+        let hour = calendar.component(.hour, from: now)
+        let temperature: Double = hour < 10 ? 12 : (hour < 17 ? 17 : 14)
+        return Conditions(latitude: latitude, longitude: longitude, fetched: now, temperature: temperature, feelsLike: temperature - 1,
+                   humidity: 72, weatherCode: 2, isDay: true, high: 18, low: 11, uvIndexMax: 3,
                    precipitationChance: 10, sunrise: today.addingTimeInterval((7 * 60 + 15) * 60),
                    sunset: today.addingTimeInterval((18 * 60 + 5) * 60), daylightHours: 10.8, usAQI: 28)
     }

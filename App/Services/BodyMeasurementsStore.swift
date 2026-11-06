@@ -98,7 +98,13 @@ final class BodyMeasurementsStore {
     // MARK: Grip
 
     var gripEntries: [GripEntry] { saved.grip.sorted { $0.date < $1.date } }
-    var latestGrip: GripEntry? { gripEntries.last }
+    /// The best hand on the latest test day (grip norms use the stronger,
+    /// usually dominant, hand: Dodds et al., PLoS One 2014).
+    var latestGrip: GripEntry? {
+        guard let last = gripEntries.last else { return nil }
+        let day = Calendar.current.startOfDay(for: last.date)
+        return gripEntries.filter { Calendar.current.startOfDay(for: $0.date) == day }.max { $0.kilograms < $1.kilograms }
+    }
 
     func addGrip(kilograms: Double, hand: GripStrength.Hand, date: Date = .now) {
         guard kilograms > 2, kilograms < 150 else { return }

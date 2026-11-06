@@ -32,6 +32,7 @@ struct ScoresCard: View {
         .sheet(item: $sheet, onDismiss: { openPendingBuilder() }) { which in
             sheetContent(which)
                 .presentationDetents([.medium, .large])
+                .presentationBackground(Theme.background)
         }
     }
 

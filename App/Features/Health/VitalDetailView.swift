@@ -122,7 +122,8 @@ struct VitalDetailView: View {
                     Chip(text: normalText, color: Theme.secondaryText)
                 }
             }
-            if band == nil, !isWindows, hasHistory {
+            // Hidden for weekly-ish readings (VO₂ max), where "N more days" never arrives on time.
+            if band == nil, !isWindows, hasHistory, !isSparse {
                 Text("Your normal range appears in \(bandDaysLeft) more day\(bandDaysLeft == 1 ? "" : "s"): it's built from 2+ weeks of readings, not counting the latest week.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
@@ -140,6 +141,12 @@ struct VitalDetailView: View {
     }
 
     private var bandDaysLeft: Int { PersonalBaseline.daysUntilReady(dayValues) }
+
+    /// Fewer than 15 readings in the last 30 days (VO₂ max comes every few days).
+    private var isSparse: Bool {
+        let monthAgo = Date.now.addingTimeInterval(-30 * 86_400)
+        return stat.series.filter { $0.date >= monthAgo }.count < 15
+    }
 
     /// 7-day rolling average, for the days in the chosen range.
     private var rolling: [DatedValue] {
@@ -282,10 +289,30 @@ struct VitalDetailView: View {
         }
     }
 
+    /// The y range: bars from zero; lines from the data (with the band,
+    /// average, goal and second line), padded and at least a sensible span
+    /// for the unit, so a line isn't squashed by an area filled from zero
+    /// nor noise blown up into a zig-zag (`ChartScale`).
+    private var yDomain: ClosedRange<Double> {
+        var values = points.map(\.value) + secondaryPoints.map(\.value) + rolling.map(\.value)
+        if let band { values += [band.low, band.high] }
+        if let goal = stat.goal { values.append(goal) }
+        if stat.chart == .bars {
+            let top = (values.max() ?? 1) * 1.1
+            return 0...max(top, 1)
+        }
+        let typical = average ?? values.first ?? 0
+        let span = stat.isHours ? 2 : ChartScale.minimumSpan(unit: stat.unit, typical: typical)
+        return ChartScale.domain(values, minimumSpan: span) ?? 0...1
+    }
+
     private var valuesChart: some View {
-        Chart {
-            if let range = stat.normalRange {
-                RectangleMark(yStart: .value("Typical low", range.lowerBound), yEnd: .value("Typical high", range.upperBound))
+        let scale = yDomain
+        return Chart {
+            // The typical range, cut to what's on screen.
+            if let range = stat.normalRange, range.upperBound > scale.lowerBound, range.lowerBound < scale.upperBound {
+                RectangleMark(yStart: .value("Typical low", max(range.lowerBound, scale.lowerBound)),
+                              yEnd: .value("Typical high", min(range.upperBound, scale.upperBound)))
                     .foregroundStyle(Theme.recoveryHigh.opacity(0.06))
             }
             if let band {
@@ -300,7 +327,7 @@ struct VitalDetailView: View {
                         .opacity(selectedDate == nil || isSelected(point.date) ? 1 : 0.4)
                 } else {
                     if stat.secondary.isEmpty {
-                        AreaMark(x: .value("Day", point.date, unit: .day), y: .value(stat.title, point.value))
+                        AreaMark(x: .value("Day", point.date, unit: .day), yStart: .value("Floor", scale.lowerBound), yEnd: .value(stat.title, point.value))
                             .foregroundStyle(LinearGradient(colors: [main.opacity(0.25), main.opacity(0)], startPoint: .top, endPoint: .bottom))
                             .interpolationMethod(.monotone)
                     }
@@ -351,6 +378,9 @@ struct VitalDetailView: View {
                         Text("Goal \(number(goal))")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Theme.recoveryHighText)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Theme.card.opacity(0.9), in: .capsule)
                     }
             }
             if let average {
@@ -371,8 +401,8 @@ struct VitalDetailView: View {
                     .foregroundStyle(Theme.secondaryText.opacity(0.35))
             }
         }
-        .chartYScale(domain: .automatic(includesZero: stat.chart == .bars))
-        .chartXScale(domain: rangeStart...rangeEnd)
+        .chartYScale(domain: scale)
+        .chartXScale(domain: rangeStart...rangeEnd, range: .plotDimension(endPadding: 12))
         .chartXAxis {
             AxisMarks(values: .stride(by: xStride)) { _ in
                 AxisGridLine()

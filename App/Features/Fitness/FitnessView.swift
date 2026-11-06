@@ -419,12 +419,12 @@ private struct FitnessProgressCard: View {
         let thisWeek = StrengthDays.lastSevenDays(finished.map(\.startedAt))
         let target = StrengthDays.weeklyTarget
         let met = thisWeek >= target
-        let verdict = MetricVerdict(met ? "Goal reached" : "\(target - thisWeek) more this week", color: met ? Theme.recoveryHigh : Theme.lifting)
+        let verdict = MetricVerdict(met ? "Goal reached" : "\(target - thisWeek) more to go", color: met ? Theme.recoveryHigh : Theme.lifting)
         return MetricRow(
             title: "Strength",
             value: "\(thisWeek)",
-            unit: "of \(target)+ days",
-            spokenUnit: "of \(target) or more days in the last 7",
+            unit: "days · goal \(target)+",
+            spokenUnit: "days in the last 7, goal \(target) or more",
             verdict: verdict,
             hint: "Shows strength days, the health minimum and strength for health",
             destination: StrengthDetailView()

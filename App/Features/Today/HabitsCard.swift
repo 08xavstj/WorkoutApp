@@ -49,7 +49,10 @@ final class TodayHabits {
         return nil
     }
 
-    func caffeine(metrics: DailyMetricsModel, checkIns: CheckInStore) -> Caffeine {
+    /// - Parameter trainingMinutes: today's planned session start (minutes
+    ///   after midnight), so a session after the pre-workout cut-off gets
+    ///   "choose a caffeine-free pre-workout" instead of a time that's passed.
+    func caffeine(metrics: DailyMetricsModel, checkIns: CheckInStore, trainingMinutes: Int? = nil) -> Caffeine {
         let bedtime = CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes)
         let coffee = CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: 100)
         let preWorkout = CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: 200)
@@ -63,10 +66,18 @@ final class TodayHabits {
                 cutoffMinutes: coffee
             )
         }
+        // A 200 mg pre-workout needs about 13 h before bed (Gardiner 2023, as above).
+        let preWorkoutLine: String
+        if let trainingMinutes, trainingMinutes > preWorkout {
+            let time = CaffeineTiming.clockText(trainingMinutes)
+            preWorkoutLine = "Training at \(time): choose a caffeine-free pre-workout."
+        } else {
+            preWorkoutLine = "Pre-workout by \(CaffeineTiming.clockText(preWorkout))."
+        }
         return Caffeine(
             isLate: false,
             title: "Last coffee by \(CaffeineTiming.clockText(coffee))",
-            detail: "Pre-workout by \(CaffeineTiming.clockText(preWorkout)), for your usual \(bed) bedtime. Caffeine closer to bed cut sleep by about 45 minutes in studies.",
+            detail: preWorkoutLine + " For your usual \(bed) bedtime; caffeine closer to bed cut sleep by about 45 minutes in studies.",
             cutoffMinutes: coffee
         )
     }

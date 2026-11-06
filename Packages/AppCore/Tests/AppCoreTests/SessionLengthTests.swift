@@ -87,7 +87,8 @@ struct SessionLengthTests {
         #expect(!plan.rationale.isEmpty)
         #expect(plan.rationale.contains("Pull Day based on what you've trained recently"))
         #expect(plan.rationale.contains("Recovery 50%"))
-        #expect(plan.rationale.contains("effort 7.5/10"))
+        // Effort is said as reps in reserve, like the sets (RPE 7.5 = 2-3 in reserve).
+        #expect(plan.rationale.contains("2-3 in reserve"))
         #expect(plan.rationale.contains("45 min"))
         let week3 = TrainingBlock.weekState(3, style: .balanced, length: 5)
         let blocked = planner.plan(focus: .legs, minutes: 60, recovery: 90, history: [:], block: week3)

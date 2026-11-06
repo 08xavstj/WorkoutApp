@@ -185,7 +185,7 @@ struct MuscleMapCard: View {
 
     enum Mode: String, CaseIterable, Identifiable {
         case recovery = "Rest status"
-        case volume = "This week"
+        case volume = "Last 7 days"
         var id: String { rawValue }
     }
 
@@ -233,6 +233,9 @@ struct MuscleMapCard: View {
         case .recovery:
             // Grey = not trained recently; green = trained and ready again.
             guard state.lastTrained != nil else { return Theme.bodyNeutral }
+            // Overworked (`MuscleRecovery.State.isOverworked`, recovery under 60) is
+            // named in red below, so it's painted red too, not amber.
+            if state.isOverworked { return Theme.recoveryLow }
             if state.recovery >= 99 { return Theme.recoveryHigh }
             switch state.status {
             case .fresh: return Theme.recoveryHigh
@@ -255,7 +258,7 @@ struct MuscleMapCard: View {
         guard !trained.isEmpty else { return "Body map: no muscles trained recently." }
         let parts = trained.map { state in
             mode == .recovery
-                ? "\(state.muscle.name) \(state.recovery >= 99 ? "ready" : (state.status == .fatigued ? "tired" : "recovering"))"
+                ? "\(state.muscle.name) \(state.recovery >= 99 ? "ready" : (state.status == .fatigued || state.isOverworked ? "tired" : "recovering"))"
                 : "\(state.muscle.name) \(state.weeklySets.formatted(.number.precision(.fractionLength(0...1)))) sets"
         }
         return "Body map: " + parts.joined(separator: ", ")
@@ -293,7 +296,7 @@ struct MuscleMapCard: View {
             if !overworked.isEmpty {
                 row("exclamationmark.triangle.fill", Theme.recoveryLow,
                     "Overworked: \(overworked.map(\.muscle.name).joined(separator: ", "))",
-                    "Over 20 hard sets (sets taken close to failure) this week and not recovered. Give them 2-3 days or cut volume; more sets past this point add fatigue, not muscle.")
+                    "Over 20 hard sets (sets taken close to failure) in the last 7 days and not recovered. Give them 2-3 days or cut volume; more sets past this point add fatigue, not muscle.")
             }
             if !resting.isEmpty {
                 row("hourglass", Theme.recoveryModerate, "Still recovering",
@@ -303,9 +306,9 @@ struct MuscleMapCard: View {
                     }.joined(separator: " · "))
             }
             if mode == .volume, !under.isEmpty, !all.allSatisfy({ $0.lastTrained == nil }) {
-                row("arrow.up.circle.fill", Theme.oxygen, "Could use more this week",
+                row("arrow.up.circle.fill", Theme.oxygen, "Could use more",
                     under.map { "\($0.muscle.name) \($0.weeklySets.formatted(.number.precision(.fractionLength(0...1))))" }.joined(separator: " · ")
-                    + ". Aim for 10-20 hard sets per muscle a week.")
+                    + " in the last 7 days. Aim for 10-20 hard sets per muscle a week.")
             }
         }
     }

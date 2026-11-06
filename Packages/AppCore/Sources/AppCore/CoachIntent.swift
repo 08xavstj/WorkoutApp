@@ -209,9 +209,43 @@ public enum CoachIntent {
     /// What Today's "Ask why" sends to Coach (`ScoresCard`); same rule.
     public static let askWhyQuestion = "How should I train today, and why?"
 
+    /// Follow-ups that fit a recovery or sleep answer.
+    static let recoveryFollowUps = ["How did I sleep?", "What's my HRV?", "Should I rest today?", "How should I train today?"]
+    /// Follow-ups that fit a food or body-weight answer.
+    static let nutritionFollowUps = ["Am I eating enough for my training?", "What should I eat after?", "How many calories did I burn today?", "What do I weigh?"]
+    /// Follow-ups that fit a reading about the day's activity or a past session.
+    static let activityFollowUps = ["What's my strain?", "How many steps today?", "How should I train today?", "Plan my next workout"]
+
+    /// The chips under a reply, chosen by what the reply answered: workout
+    /// tweaks under a plan, sleep and HRV under a recovery answer, food under
+    /// a food answer. A model reply (nil) gets the opening suggestions.
+    public static func followUps(after question: Question?) -> [String] {
+        let pool: [String]
+        switch question {
+        case .planWorkout, .trainToday, .cardioSwap:
+            pool = followUpQuestions
+        case .whyRecovery, .sleep, .hrv, .restingHeartRate, .shouldRest:
+            pool = recoveryFollowUps + ["Why is my recovery where it is?"]
+        case .eatingEnough, .eatAfter, .energyBurned, .bodyWeight:
+            pool = nutritionFollowUps
+        case .strain, .steps, .vo2Max, .lastWorkout, .restBetweenSets:
+            pool = activityFollowUps
+        case nil:
+            pool = suggestedQuestions
+        }
+        // Workout tweaks ("Make it 30 min") are plan questions themselves, so
+        // they stay under a plan; elsewhere the question just asked is dropped.
+        let others = pool.filter { text in
+            guard let question, pool != followUpQuestions else { return true }
+            return Self.question(text) != question
+        }
+        return Array(others.prefix(4))
+    }
+
     /// Every question the app puts in the user's mouth.
     public static var allSuggestedQuestions: [String] {
         suggestedQuestions + followUpQuestions + [askWhyQuestion]
+            + recoveryFollowUps + ["Why is my recovery where it is?"] + nutritionFollowUps + activityFollowUps
     }
 
     // MARK: - Questions the app answers itself

@@ -21,16 +21,9 @@ struct AlcoholLogView: View {
 
     var body: some View {
         Form {
+            // One day control (a Yesterday/Today switch and a date picker did the same job).
             Section {
-                Picker("Day", selection: $day) {
-                    Text("Yesterday").tag(calendar.startOfDay(for: calendar.date(byAdding: .day, value: -1, to: .now) ?? .now))
-                    Text("Today").tag(calendar.startOfDay(for: .now))
-                    if !isTodayOrYesterday {
-                        Text(day.formatted(.dateTime.weekday(.abbreviated).day().month())).tag(day)
-                    }
-                }
-                .pickerStyle(.segmented)
-                DatePicker("Other day", selection: Binding(get: { day }, set: { day = calendar.startOfDay(for: $0) }),
+                DatePicker("Day", selection: Binding(get: { day }, set: { day = calendar.startOfDay(for: $0) }),
                            in: ...Date.now, displayedComponents: .date)
             }
 
@@ -53,7 +46,7 @@ struct AlcoholLogView: View {
                         .font(.headline)
                 }
             } header: {
-                Text(day.formatted(.dateTime.weekday(.wide).day().month()))
+                Text(dayTitle)
             } footer: {
                 if !entries.isEmpty {
                     Text("\(total.formatted(.number.precision(.fractionLength(1)))) standard drinks. One standard drink is 14 g of alcohol: 12 oz of 5% beer, 5 oz of 12% wine or 1.5 oz of 40% spirits (NIAAA).")
@@ -68,7 +61,8 @@ struct AlcoholLogView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background)
-        .navigationTitle("Alcohol")
+        // "Drinks", as on the Log row that opens it.
+        .navigationTitle("Drinks")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingAdd) {
             AddDrinkSheet { entry in update { $0.append(entry) } }
@@ -76,8 +70,11 @@ struct AlcoholLogView: View {
         }
     }
 
-    private var isTodayOrYesterday: Bool {
-        calendar.isDateInToday(day) || calendar.isDateInYesterday(day)
+    /// "Today", "Yesterday" or "Monday 3 November", so the list says which day it is.
+    private var dayTitle: String {
+        if calendar.isDateInToday(day) { return "Today" }
+        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        return day.formatted(.dateTime.weekday(.wide).day().month())
     }
 
     private func update(_ change: (inout [AlcoholEntry]) -> Void) {

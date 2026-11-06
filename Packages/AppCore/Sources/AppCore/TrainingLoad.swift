@@ -123,12 +123,49 @@ public enum Biomarkers {
         return medians[lower] + (medians[upper] - medians[lower]) * fraction
     }
 
+    /// "Fitness age": the age whose FRIEND median VO₂ max (`medianVO2Max`)
+    /// matches yours, found by running the same median line backwards (the
+    /// wearable fitness age of Nes et al., Med Sci Sports Exerc 2011, on the
+    /// FRIEND reference so every VO₂ max screen uses one set of norms).
+    /// Outside 25-75 the end decades' slopes are extended, and the result is
+    /// clamped to 18-90. With `age`, a value at or above your own age's median
+    /// never gives a fitness age above your age (the medians are flat under 25
+    /// and over 75, where running the line backwards is ambiguous), and one
+    /// below it never gives an age under yours.
+    public static func fitnessAge(vo2Max: Double, age: Int? = nil, sex: BiologicalSex) -> Double {
+        let medians = friendMedians[sex] ?? friendMedians[.male]!
+        // Decade midpoints 25, 35, ... 75; medians fall with age.
+        var found: Double
+        if vo2Max >= medians[0] {
+            let slope = (medians[0] - medians[1]) / 10
+            found = 25 - (vo2Max - medians[0]) / slope
+        } else if vo2Max <= medians[medians.count - 1] {
+            let last = medians.count - 1
+            let slope = (medians[last - 1] - medians[last]) / 10
+            found = 25 + Double(last) * 10 + (medians[last] - vo2Max) / slope
+        } else {
+            found = 75
+            for index in 0..<(medians.count - 1) where vo2Max <= medians[index] && vo2Max > medians[index + 1] {
+                let fraction = (medians[index] - vo2Max) / (medians[index] - medians[index + 1])
+                found = 25 + (Double(index) + fraction) * 10
+            }
+        }
+        if let age {
+            let own = medianVO2Max(age: age, sex: sex)
+            found = vo2Max >= own ? min(found, Double(age)) : max(found, Double(age))
+        }
+        return min(90, max(18, found))
+    }
+
+    /// The bottom of the "Good" band, as a share of the median (`vo2MaxLabel`).
+    public static let goodVO2MaxFraction = 0.95
+
     /// VO₂ max compared with people your age and sex: around the FRIEND
     /// median is "Good". The band widths (80/95/110/125% of the median) are
     /// the app's choice. Watch VO₂ max is an estimate.
     public static func vo2MaxLabel(_ value: Double, age: Int, sex: BiologicalSex) -> String {
         let median = medianVO2Max(age: age, sex: sex)
-        let cut = [0.8, 0.95, 1.1, 1.25].map { $0 * median }
+        let cut = [0.8, goodVO2MaxFraction, 1.1, 1.25].map { $0 * median }
         switch value {
         case ..<cut[0]: return "Poor"
         case ..<cut[1]: return "Fair"

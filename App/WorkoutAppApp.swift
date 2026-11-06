@@ -191,7 +191,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $router.showHRVEntry) {
             HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $router.showMedications) {
             MedicationsView()

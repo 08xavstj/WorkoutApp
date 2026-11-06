@@ -217,23 +217,28 @@ public struct RecoveryCalculator: Sendable {
             combined += hrvTrendWeight * Self.clampZ(z)
             weightUsed += hrvTrendWeight
             let rangeText = "\(Int(exp(mean - swc).rounded()))-\(Int(exp(mean + swc).rounded())) ms"
-            let averageText = "Your 7-day average (\(Int(exp(rolling).rounded())) ms)"
+            let averageText = "7-day average \(Int(exp(rolling).rounded())) ms"
             let trendDetail: String
+            let trendNote: String?
             let trendEffect: RecoveryContributor.Effect
             switch status {
             case .below:
-                trendDetail = "\(averageText) is below your normal range (\(rangeText)): a sign to train easier, so recovery stays in the easy-day band today."
+                trendDetail = "\(averageText), below your normal \(rangeText)"
+                trendNote = "A sign to train easier, so recovery stays in the easy-day band today."
                 trendEffect = .lowers
             case .above:
-                trendDetail = "\(averageText) is above your normal range (\(rangeText))."
+                trendDetail = "\(averageText), above your normal \(rangeText)"
+                trendNote = nil
                 trendEffect = .raises
             case .within:
-                trendDetail = "\(averageText) is within your normal range (\(rangeText)), so recovery stays in the moderate band."
+                trendDetail = "\(averageText), within your normal \(rangeText)"
+                trendNote = "So recovery stays in the moderate band."
                 trendEffect = .neutral
             }
             contributors.append(RecoveryContributor(
                 id: "hrvTrend", name: "7-day HRV",
                 detail: trendDetail,
+                note: trendNote,
                 effect: trendEffect,
                 weight: hrvTrendWeight * abs(Self.clampZ(z))
             ))
@@ -248,7 +253,7 @@ public struct RecoveryCalculator: Sendable {
             let change = Int(((hrv / exp(mean) - 1) * 100).rounded())
             contributors.append(RecoveryContributor(
                 id: "hrv", name: "Last night's HRV",
-                detail: "\(Int(hrv.rounded())) ms, \(change >= 0 ? "+" : "")\(change)% vs your usual \(Int(exp(mean).rounded())) ms.",
+                detail: "\(Int(hrv.rounded())) ms, \(change >= 0 ? "+" : "")\(change)% vs your usual \(Int(exp(mean).rounded())) ms",
                 effect: Self.effect(z), weight: hrvWeight * abs(Self.clampZ(z))
             ))
         }
@@ -261,7 +266,8 @@ public struct RecoveryCalculator: Sendable {
             let difference = Int((rhr - mean).rounded())
             contributors.append(RecoveryContributor(
                 id: "rhr", name: restingHeartRateSource.label,
-                detail: "\(Int(rhr.rounded())) bpm, \(difference >= 0 ? "+" : "")\(difference) vs your usual \(Int(mean.rounded())). Higher than usual often means stress, alcohol, illness or hard training.",
+                detail: "\(Int(rhr.rounded())) bpm, \(difference >= 0 ? "+" : "")\(difference) vs your usual \(Int(mean.rounded()))",
+                note: difference > 0 ? "Higher than usual often means stress, alcohol, illness or hard training." : nil,
                 effect: rhrEffect, weight: restingHeartRateWeight * abs(Self.clampZ(z))
             ))
         }
@@ -275,8 +281,8 @@ public struct RecoveryCalculator: Sendable {
             sleepEffect = Self.effect(z)
             sleepBaselineNights = sleepBase.nights
             let detail = sleepBase.nights > 0
-                ? "Sleep score \(sleepScore), vs your usual \(Int(sleepBase.mean.rounded()))."
-                : "Sleep score \(sleepScore) of 100."
+                ? "Score \(sleepScore), vs your usual \(Int(sleepBase.mean.rounded()))"
+                : "Score \(sleepScore) of 100"
             contributors.append(RecoveryContributor(
                 id: "sleep", name: "Sleep",
                 detail: detail,
@@ -439,16 +445,29 @@ public struct RecoveryContributor: Sendable, Equatable, Identifiable {
 
     public var id: String
     public var name: String
+    /// The reading itself, short and without a final period, so it can sit
+    /// inside a sentence ("sleeping heart rate (53 bpm, +2 vs your usual 51)").
     public var detail: String
+    /// An optional explanatory sentence shown under the reading, kept apart so
+    /// the coach doesn't paste it into the middle of a list.
+    public var note: String?
     public var effect: Effect
     /// How much it moved the score (for ordering); 0 for context-only items.
     public var weight: Double
 
-    public init(id: String, name: String, detail: String, effect: Effect, weight: Double = 0) {
+    public init(id: String, name: String, detail: String, note: String? = nil, effect: Effect, weight: Double = 0) {
         self.id = id
         self.name = name
         self.detail = detail
+        self.note = note
         self.effect = effect
         self.weight = weight
+    }
+
+    /// Detail and note as full sentences, for a list row or VoiceOver.
+    public var explanation: String {
+        let reading = detail.hasSuffix(".") ? detail : detail + "."
+        guard let note, !note.isEmpty else { return reading }
+        return reading + " " + note
     }
 }

@@ -20,9 +20,10 @@ public enum RPEScale {
         Level(rpe: 10, repsLeft: "0", title: "Max effort", feel: "No more reps possible, and you couldn't have added weight."),
         Level(rpe: 9.5, repsLeft: "0", title: "Near max", feel: "No more reps, but you could have added a little weight."),
         Level(rpe: 9, repsLeft: "1", title: "Very hard", feel: "One more rep was possible. Bar speed slows a lot."),
-        Level(rpe: 8.5, repsLeft: "1-2", title: "Hard", feel: "Definitely one more, maybe two."),
+        // Half steps get a "+" so no two rows read the same.
+        Level(rpe: 8.5, repsLeft: "1-2", title: "Hard+", feel: "Definitely one more, maybe two."),
         Level(rpe: 8, repsLeft: "2", title: "Hard", feel: "Two more reps in the tank. The typical working-set target."),
-        Level(rpe: 7.5, repsLeft: "2-3", title: "Challenging", feel: "Definitely two more, maybe three."),
+        Level(rpe: 7.5, repsLeft: "2-3", title: "Challenging+", feel: "Definitely two more, maybe three."),
         Level(rpe: 7, repsLeft: "3", title: "Challenging", feel: "Three more reps possible. Fast, controlled reps."),
         Level(rpe: 6, repsLeft: "4", title: "Moderate", feel: "Four more reps. Good for technique and lighter days."),
         Level(rpe: 5, repsLeft: "5+", title: "Easy", feel: "Warm-up weight; could do many more."),

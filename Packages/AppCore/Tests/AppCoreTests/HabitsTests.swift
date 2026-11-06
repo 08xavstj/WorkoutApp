@@ -11,9 +11,10 @@ struct CaffeineTimingTests {
 
     @Test func cutoffsBeforeBed() {
         // Linear by dose (Gardiner 2023): 100 mg → 8.52 h (511 min), 220 mg → 13.32 h (799 min).
-        // 11 pm bedtime: coffee by 2:29 pm, pre-workout by 9:41 am.
-        #expect(CaffeineTiming.cutoffMinutes(bedtimeMinutes: 23 * 60, mg: 100) == 23 * 60 - 511)
-        #expect(CaffeineTiming.cutoffMinutes(bedtimeMinutes: 23 * 60, mg: 220) == 23 * 60 - 799)
+        // 11 pm bedtime: coffee by 2:29 pm, pre-workout by 9:41 am, shown rounded down
+        // to 5 minutes (QA round 1): 2:25 pm and 9:40 am.
+        #expect(CaffeineTiming.cutoffMinutes(bedtimeMinutes: 23 * 60, mg: 100) == 14 * 60 + 25)
+        #expect(CaffeineTiming.cutoffMinutes(bedtimeMinutes: 23 * 60, mg: 220) == 9 * 60 + 40)
         #expect(CaffeineTiming.isTooLate(minutes: 15 * 60, mg: 95, bedtimeMinutes: 23 * 60))
         #expect(!CaffeineTiming.isTooLate(minutes: 13 * 60, mg: 95, bedtimeMinutes: 23 * 60))
     }
@@ -36,6 +37,15 @@ struct CaffeineTimingTests {
         // 23:30, 00:30, 00:00 → median midnight = 1440 minutes.
         #expect(CaffeineTiming.usualBedtimeMinutes(onsets, calendar: utc) == 24 * 60)
         #expect(CaffeineTiming.usualBedtimeMinutes([], calendar: utc) == CaffeineTiming.defaultBedtimeMinutes)
+    }
+
+    @Test func usualBedtimeRoundsToFiveMinutes() {
+        let base = utc.date(from: DateComponents(year: 2027, month: 1, day: 4, hour: 23, minute: 3))!
+        // 23:03 → 23:05 on screen.
+        #expect(CaffeineTiming.usualBedtimeMinutes([base], calendar: utc) == 23 * 60 + 5)
+        let late = utc.date(from: DateComponents(year: 2027, month: 1, day: 5, hour: 0, minute: 52))!
+        // 00:52 → 00:50, still after midnight (1490).
+        #expect(CaffeineTiming.usualBedtimeMinutes([late], calendar: utc) == 24 * 60 + 50)
     }
 }
 

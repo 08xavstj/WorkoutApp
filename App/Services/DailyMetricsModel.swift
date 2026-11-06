@@ -38,6 +38,8 @@ final class DailyMetricsModel {
     private(set) var respiratoryRate: Double?
     private(set) var yesterdayStrain: Double?
     private(set) var weekStrain: [DayStrain] = []
+    /// The 7 completed days before today (today's partial day left out), for the weekly review.
+    private(set) var completedWeekStrain: [DayStrain] = []
     /// What your training days usually reach over the last 4 weeks (nil while calibrating).
     private(set) var usualTrainingStrain: Double?
     /// Days in the last 4 weeks with a workout or logged session and strain 35%+
@@ -678,6 +680,7 @@ final class DailyMetricsModel {
             strain = todayResult
             yesterdayStrain = days.first { calendar.isDate($0.0, inSameDayAs: yesterday) }?.1.strain
             weekStrain = days.suffix(7).map { DayStrain(date: $0.0, strain: $0.1.strain) }
+            completedWeekStrain = days.dropLast().suffix(7).map { DayStrain(date: $0.0, strain: $0.1.strain) }
             usualTrainingStrain = StrainCalculator.usualTrainingStrain(days.dropLast().map(\.1.strain))
             // A workout (or logged session) and strain at least 35%, not strain alone (`TrainingDayPlanner.isWatchTrainingDay`).
             let sessionDays = Set(sessions.map { calendar.startOfDay(for: $0.start) })
@@ -802,7 +805,8 @@ final class DailyMetricsModel {
                 fatFreeMassKg: EnergyAvailability.fatFreeMass(bodyMassKg: bodyMassKg, bodyFatPercent: bodyFatPercent)
             )
             if let nutrients = try? await nutrientTask {
-                micronutrients = Micronutrients.assess(averages: nutrients.averages, daysLogged: nutrients.daysLogged, sex: settings.sex, age: settings.age)
+                micronutrients = Micronutrients.assess(averages: nutrients.averages, supplements: SupplementNutrients.dailyAverages(now: now),
+                                                       daysLogged: nutrients.daysLogged, sex: settings.sex, age: settings.age)
             }
             let stepResult = try? await stepCounts
             steps = stepResult?.total

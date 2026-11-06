@@ -18,6 +18,16 @@ struct BedtimeWindowTests {
         SleepDebt.compute(nightlyHours: nightlyHours, needHours: 8)
     }
 
+    @Test func startRoundsDownToFiveMinutes() throws {
+        // Need 7.5 h, 13 min to repay, up at 6:30 → 22:47, shown as 22:45 (QA round 1).
+        var debt = try #require(makeDebt([6, 6, 6, 6, 6]))
+        debt.extraMinutesPerNight = 13
+        let window = try #require(BedtimeWindow.compute(
+            sleepNeedHours: 7.5, sleepDebt: debt, usualWakeMinutes: 6 * 60 + 30, regularity: 85,
+            now: date(hour: 20), calendar: calendar))
+        #expect(window.start == date(hour: 22, minute: 45))
+    }
+
     @Test func worksBackFromWakeNeedAndRepayment() throws {
         // Need 8 h, 40 min to repay, up at 6:30 → 21:50–22:20 (the roadmap's example).
         var debt = try #require(makeDebt([6, 6, 6, 6, 6]))

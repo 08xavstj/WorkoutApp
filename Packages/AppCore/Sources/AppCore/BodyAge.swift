@@ -7,14 +7,16 @@ import Foundation
 /// asked for a range rather than a point).
 ///
 /// How each factor turns into years:
-/// - Fitness (VO₂ max) is the biggest. "Fitness age": the age at which an
-///   average healthy person has your VO₂ max, using the HUNT3 reference data
-///   (Loe et al., PLoS One 2013: 3,816 healthy adults; VO₂ max falls about
-///   3.5 mL/kg/min a decade to 50, faster after). Average VO₂ max is taken as
-///   falling about 0.40 ml/kg/min a year for men (54.4 at 25) and 0.30 for
-///   women (43.0 at 25). The non-exercise fitness model is Nes et al., Med Sci
-///   Sports Exerc 2011; Nes 2014 is the mortality follow-up. It counts at 60 %
-///   weight because the other factors overlap with it (the 60% is the app's choice).
+/// - Fitness (VO₂ max) is the biggest. "Fitness age": the age whose median
+///   VO₂ max matches yours, on the FRIEND registry medians (Kaminsky et al.,
+///   Mayo Clin Proc 2015; `Biomarkers.fitnessAge`), the same reference the
+///   "Good"/"Fair" label uses, so a "Good" VO₂ max can't add years. The
+///   fitness-age idea is Nes et al., Med Sci Sports Exerc 2011; Nes 2014 is
+///   the mortality follow-up. Within the "Good" band below the median
+///   (95-100% of it) it adds nothing: watch VO₂ max is off by ~10%, so that
+///   gap is noise (app choice). Below the band, years count from the band's
+///   edge so the factor has no jump. It counts at 60% weight because the
+///   other factors overlap with it (the 60% is the app's choice).
 /// - Mortality hazards from the other studies become years with the Gompertz
 ///   rule that the risk of dying doubles about every 8 years:
 ///   years = 8 × log2(hazard ratio) ("effective age", Spiegelhalter, BMC Med
@@ -92,6 +94,10 @@ public enum BodyAge {
         }
     }
 
+    /// Factors the estimate can use: fitness, resting heart rate, sleep, steps
+    /// and one body-composition measure.
+    public static let factorSlots = 5
+
     public static func confidence(_ inputs: Inputs, factorCount: Int) -> (Confidence, reason: String) {
         var level: Confidence = factorCount >= 5 ? .high : (factorCount >= 3 ? .medium : .low)
         var reasons: [String] = []
@@ -106,7 +112,7 @@ public enum BodyAge {
             if level == .high { level = .medium }
             reasons.append("body fat/BMI is \(days / 30) months old")
         }
-        if factorCount < 5 { reasons.append("\(factorCount) of 6 factors measured") }
+        if factorCount < 5 { reasons.append("\(factorCount) of \(factorSlots) factors measured") }
         guard !reasons.isEmpty else { return (level, "Based on recent readings for most factors.") }
         let joined = reasons.joined(separator: "; ")
         let reason = joined.prefix(1).uppercased() + String(joined.dropFirst()) + "."
@@ -138,6 +144,10 @@ public enum BodyAge {
         public var difference: Double { bodyAge - Double(age) }
         /// Body age as a whole number.
         public var years: Int { Int(bodyAge.rounded()) }
+        /// The factor adding the most years, if any adds 0.05 years or more (shown as at least +0.1 y).
+        public var topAgeingFactor: Factor? {
+            factors.filter { $0.years >= 0.05 }.max { $0.years < $1.years }
+        }
         /// The ±5-year range around the estimate, never below 18.
         public var range: ClosedRange<Int> {
             max(18, years - BodyAge.uncertaintyYears)...(years + BodyAge.uncertaintyYears)
@@ -154,11 +164,22 @@ public enum BodyAge {
         let age = Double(inputs.age)
 
         if let vo2 = inputs.vo2Max, vo2 > 10 {
-            let (atTwentyFive, perYear) = inputs.sex == .male ? (54.4, 0.40) : (43.0, 0.30)
-            let fitnessAge = 25 + (atTwentyFive - vo2) / perYear
-            let years = clamp((fitnessAge - age) * 0.6, -12, 12)
-            factors.append(Factor(name: "Fitness (VO₂ max)", years: years,
-                                  detail: "VO₂ max \(format(vo2)) is typical of a \(Int(max(18, fitnessAge).rounded()))-year-old"))
+            let median = Biomarkers.medianVO2Max(age: inputs.age, sex: inputs.sex)
+            let goodFloor = Biomarkers.goodVO2MaxFraction * median
+            let fitnessAge = Biomarkers.fitnessAge(vo2Max: vo2, age: inputs.age, sex: inputs.sex)
+            let years: Double
+            if vo2 >= median {
+                years = clamp((fitnessAge - age) * 0.6, -12, 0)
+            } else if vo2 >= goodFloor {
+                years = 0
+            } else {
+                let edgeAge = Biomarkers.fitnessAge(vo2Max: goodFloor, age: inputs.age, sex: inputs.sex)
+                years = clamp((fitnessAge - edgeAge) * 0.6, 0, 12)
+            }
+            let detail = abs(years) < 0.05
+                ? "VO₂ max \(format(vo2)), about typical for your age (\(format(median)))"
+                : "VO₂ max \(format(vo2)) is typical of a \(Int(fitnessAge.rounded()))-year-old"
+            factors.append(Factor(name: "Fitness (VO₂ max)", years: years, detail: detail))
         }
         if let rhr = inputs.restingHeartRate, rhr > 30 {
             let years = clamp(gompertzYears(hazard: pow(1.09, (rhr - 60) / 10)), -2, 4)

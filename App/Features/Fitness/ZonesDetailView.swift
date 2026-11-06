@@ -16,7 +16,9 @@ struct ZonesDetailView: View {
 private struct ZonesCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
 
-    private let names = ["Easy", "Light", "Aerobic", "Threshold", "Max"]
+    /// Plain effort words, easiest first; the band below zone 1 isn't a zone
+    /// and has no name of its own, so the words never clash.
+    static let names = ["Very light", "Light", "Moderate", "Hard", "Max"]
 
     /// Heart-rate range for zone 1-5 (50-60%, ... 90-100% of heart-rate reserve).
     private func bpmRange(_ index: Int) -> String? {
@@ -37,8 +39,8 @@ private struct ZonesCard: View {
         }
         if metrics.todaysHeartRateReadings > 0 {
             return metrics.todaysLightMinutes >= 1
-                ? "Your heart rate today stayed below zone 1, in the light band. Lifting often does: the effort is in the muscles, not the heart."
-                : "Your heart rate today stayed below the light band."
+                ? "Your heart rate today stayed below zone 1 (30–50% of reserve). Lifting often does: the effort is in the muscles, not the heart."
+                : "Your heart rate today stayed under 30% of your reserve, close to resting."
         }
         guard let strain = metrics.strain, strain.strain > 0 else { return nil }
         if strain.movementMinutes > 0 || strain.liftingLoad > 0 {
@@ -47,7 +49,7 @@ private struct ZonesCard: View {
         return nil
     }
 
-    /// "Light 96–120 bpm" for the band below zone 1 (30-50% of reserve).
+    /// "96–120 bpm" for the band below zone 1 (30-50% of reserve).
     private var lightRange: String? {
         guard let profile = metrics.heartRateProfile else { return nil }
         let low = profile.heartRate(atReserve: HeartRateProfile.lightBand.lowerBound)
@@ -73,12 +75,23 @@ private struct ZonesCard: View {
             if metrics.todaysLightMinutes >= 1 {
                 LightBandRow(minutes: metrics.todaysLightMinutes, range: lightRange)
             }
-            HStack(alignment: .bottom, spacing: 12) {
-                ForEach(0..<5, id: \.self) { index in
-                    zoneColumn(index, minutes: index < minutes.count ? minutes[index] : 0, peak: peak)
+            if total == 0 {
+                // No zone time: one line of ranges instead of five empty bars.
+                if let line = rangesLine {
+                    Text(line)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                HStack(alignment: .bottom, spacing: 12) {
+                    ForEach(0..<5, id: \.self) { index in
+                        zoneColumn(index, minutes: index < minutes.count ? minutes[index] : 0, peak: peak)
+                    }
                 }
             }
-            if metrics.heartRateProfile != nil {
+            if total > 0, metrics.heartRateProfile != nil {
                 // Axis caption for the ranges under each bar (ux-audit.md 4.7).
                 Text("bpm")
                     .font(.caption2.weight(.semibold))
@@ -88,6 +101,12 @@ private struct ZonesCard: View {
             }
         }
         .card()
+    }
+
+    /// "Z1 120–135 · Z2 135–150 · … bpm", for a day with no zone time.
+    private var rangesLine: String? {
+        let parts = (0..<5).compactMap { index in bpmRange(index).map { "Z\(index + 1) \($0)" } }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ") + " bpm"
     }
 
     private func zoneColumn(_ index: Int, minutes: Double, peak: Double) -> some View {
@@ -106,7 +125,7 @@ private struct ZonesCard: View {
             Text("Z\(index + 1)")
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(Theme.primaryText)
-            Text(names[index])
+            Text(Self.names[index])
                 .font(.caption2)
                 .foregroundStyle(Theme.secondaryText)
                 .lineLimit(1)
@@ -135,7 +154,7 @@ private struct LightBandRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Light, below zone 1")
+                Text("Below zone 1")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
                 Text(range.map { "30–50% of reserve · \($0)" } ?? "30–50% of reserve")
@@ -162,7 +181,7 @@ private struct ZonesAboutCard: View {
             // max heart rate from Tanaka et al., J Am Coll Cardiol 2001, unless
             // measured or learned (`HeartRateProfile`, `ObservedMaxHeartRate`).
             // Light band 30-50% HRR: strain's 30% floor (ACSM's Guidelines, 10th ed. 2018) up to zone 1.
-            Text("Each zone is a share of your heart-rate reserve, the gap between your resting and maximum heart rate (Karvonen et al. 1957): zone 1 is 50–60%, up to zone 5 at 90–100%. Below zone 1, 30–50% is light effort: it still adds strain.")
+            Text("Each zone is a share of your heart-rate reserve, the gap between your resting and maximum heart rate (Karvonen et al. 1957): zone 1 (very light) is 50–60%, up to zone 5 (max) at 90–100%. Time at 30–50%, below zone 1, still adds strain.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)

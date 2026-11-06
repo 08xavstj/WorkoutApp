@@ -72,10 +72,16 @@ struct ThisWeekCard: View {
             Spacer()
             if consistency.plannedWeeks > 0 {
                 // Green when most weeks were kept, otherwise plain grey: never red.
-                Chip(text: consistency.label, color: consistency.score >= Consistency.keptFraction ? Theme.recoveryHigh : Theme.secondaryText)
+                Chip(text: Self.chipText(consistency.label), color: consistency.score >= Consistency.keptFraction ? Theme.recoveryHigh : Theme.secondaryText)
                     .accessibilityLabel("Consistency: \(consistency.label) on plan")
             }
         }
+    }
+
+    /// "4 of 4 weeks kept" rather than a bare "4 of 4 weeks"; other labels
+    /// ("Getting going") as they are.
+    private static func chipText(_ label: String) -> String {
+        label.hasSuffix(" weeks") || label.hasSuffix(" week") ? label + " kept" : label
     }
 
     private var noPlan: some View {
@@ -187,10 +193,21 @@ private struct PlanDots: View {
                 .accessibilityLabel("\(WeeklyPlan.weekdayName(day.weekday)): \(isDone ? "done" : "planned")")
             }
             Spacer(minLength: 0)
-            Text("\(min(sessionsDone, days.count)) of \(days.count) done")
+            Text(summary)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
+                .multilineTextAlignment(.trailing)
         }
+    }
+
+    /// "2 of 4 done · +2 other workouts": the count matches the ticked dots;
+    /// training on days that weren't planned is named separately.
+    private var summary: String {
+        let plannedDone = days.filter { done.contains($0.weekday) }.count
+        let other = max(0, sessionsDone - plannedDone)
+        let base = "\(plannedDone) of \(days.count) done"
+        guard other > 0 else { return base }
+        return base + " · +\(other) other workout" + (other == 1 ? "" : "s")
     }
 }
 

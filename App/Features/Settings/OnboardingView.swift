@@ -187,7 +187,7 @@ private struct OnboardingSetupRow: View {
         HStack(spacing: 12) {
             Image(systemName: isDone ? "checkmark.circle.fill" : systemImage)
                 .font(.title3)
-                .foregroundStyle(Theme.secondaryText)
+                .foregroundStyle(isDone ? Theme.recoveryHigh : Theme.secondaryText)
                 .frame(width: iconWidth)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)

@@ -5,6 +5,9 @@ import SwiftUI
 /// (used by the Sleep and Recovery detail sheets).
 struct EvidenceDisclosure: View {
     let points: [String]
+    /// The row's label, "Evidence" unless the points are about something else
+    /// (e.g. "About this number").
+    var title = "Evidence"
     @State private var expanded = false
 
     var body: some View {
@@ -20,7 +23,7 @@ struct EvidenceDisclosure: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 6)
         } label: {
-            Label("Evidence", systemImage: "info.circle")
+            Label(title, systemImage: "info.circle")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
         }

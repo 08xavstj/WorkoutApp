@@ -86,7 +86,7 @@ final class OnDeviceCoach {
     /// question still knows what was just said.
     func remember(question: String, answer: String) {
         lastExchange = (question, answer)
-        diagnostics = Diagnostics(lastMode: "from your data (no model)", lastPromptCharacters: 0, lastPrompt: nil,
+        diagnostics = Diagnostics(lastMode: "from your data (no model)", lastPromptCharacters: nil, lastPrompt: nil,
                                   lastError: nil, lastFinishedAt: .now)
     }
 

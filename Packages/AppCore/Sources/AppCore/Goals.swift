@@ -46,8 +46,12 @@ public struct Goals: Codable, Sendable, Equatable {
     /// Losing fat while building muscle ("recomposition").
     public var isRecomp: Bool { weight == .lose && focuses.contains(.muscle) }
 
+    /// "Maintain weight, build muscle & get stronger": every chosen focus is named.
     public var title: String {
-        if isRecomp { return "Lose fat, build muscle" }
+        if isRecomp {
+            let others = focuses.filter { $0 != .muscle }.map(\.label).joined(separator: " & ").lowercased()
+            return others.isEmpty ? "Lose fat, build muscle" : "Lose fat, build muscle & \(others)"
+        }
         let weightPart: String = switch weight {
         case .lose: "Lose weight"
         case .maintain: "Maintain weight"
@@ -343,14 +347,25 @@ public enum GoalPlanner {
     }
 
     /// A starting suggestion from body composition (the user can change it).
+    ///
+    /// The cut-offs sit near the ends of the "healthy" body-fat ranges that
+    /// Gallagher et al. derived from BMI cut-offs (Am J Clin Nutr 2000; ages
+    /// 20-59: men about 8-21%, women about 21-33%): above 22% (men) or 32%
+    /// (women) suggests losing, below 12% or 20% suggests gaining. The exact
+    /// numbers, and BMI 27 / 20 when there's no body-fat reading (WHO's
+    /// overweight line is 25), are the app's choice, not tested thresholds,
+    /// and the screen says it's only a starting point.
+    public static let highBodyFatPercent: (male: Double, female: Double) = (22, 32)
+    public static let lowBodyFatPercent: (male: Double, female: Double) = (12, 20)
+
     public static func suggest(bodyFatPercent: Double?, bmi: Double?, sex: BiologicalSex) -> Goals {
         let highFat: Bool = {
-            if let fat = bodyFatPercent { return fat > (sex == .male ? 22 : 32) }
+            if let fat = bodyFatPercent { return fat > (sex == .male ? highBodyFatPercent.male : highBodyFatPercent.female) }
             if let bmi { return bmi >= 27 }
             return false
         }()
         let lowFat: Bool = {
-            if let fat = bodyFatPercent { return fat < (sex == .male ? 12 : 20) }
+            if let fat = bodyFatPercent { return fat < (sex == .male ? lowBodyFatPercent.male : lowBodyFatPercent.female) }
             if let bmi { return bmi < 20 }
             return false
         }()

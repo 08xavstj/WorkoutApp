@@ -24,7 +24,7 @@ struct HRVEntrySheet: View {
                 } footer: {
                     Text(source == "Camera"
                          ? "Measured with your phone's camera just now."
-                         : "Use last night's average from your watch's app (on Garmin: Garmin Connect → HRV Status). Enter it each morning for the most accurate recovery.")
+                         : "Use last night's average from your watch's app (on Garmin: Garmin Connect › HRV Status). Enter it each morning for the most accurate recovery.")
                 }
                 Section {
                     Button {
@@ -46,6 +46,9 @@ struct HRVEntrySheet: View {
                     }
                 }
             }
+            // Opaque at every detent: a part-height sheet is see-through glass by default.
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
             .navigationTitle("Overnight HRV")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -73,6 +76,7 @@ struct HRVEntrySheet: View {
                 }
             }
         }
+        .presentationBackground(Theme.background)
     }
 
     private func save() {

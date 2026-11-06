@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 import AppCore
 
 /// Health › Patterns › "Mood": the 14-day average with a sparkline, pushing a
@@ -33,8 +34,8 @@ struct MoodRow: View {
 
     private var verdict: MetricVerdict? {
         let days = MoodHistory.dailyValence(recent).count
-        guard days > 0 else { return MetricVerdict("Log a mood in a check-in") }
-        return MetricVerdict("14-day average · \(days) day\(days == 1 ? "" : "s")")
+        guard days > 0, let average else { return MetricVerdict("Log a mood in a check-in") }
+        return MetricVerdict("Mostly \(MoodScale.word(valence: average).lowercased()) · \(days) day\(days == 1 ? "" : "s")")
     }
 }
 
@@ -44,6 +45,7 @@ struct MoodView: View {
 
     var body: some View {
         HealthDetailPage(title: "Mood") {
+            MoodChartCard(samples: checkIns.moods)
             MoodListCard(samples: checkIns.moods)
             Text("From Apple Health (any app that logs State of Mind) and your check-ins. Short sleep reliably lowers mood (Palmer et al. 2024, 154 experiments) and exercise lifts it (Heissel et al. 2023); when your own data shows those links, they appear under What affects you. Tracking mood by itself has weak evidence of helping; its value here is as a signal.")
                 .font(Theme.Typography.context)
@@ -52,8 +54,57 @@ struct MoodView: View {
     }
 }
 
+/// The daily mood over 30 days, low to high.
+private struct MoodChartCard: View {
+    let samples: [MoodSample]
+
+    private var points: [DatedValue] {
+        MoodHistory.dailyValence(samples).map { DatedValue(date: $0.day, value: $0.valence) }
+    }
+
+    var body: some View {
+        if points.count > 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                CardLabel(text: "Daily mood")
+                Chart(points) { point in
+                    LineMark(x: .value("Day", point.date, unit: .day), y: .value("Mood", point.value))
+                        .foregroundStyle(Theme.recoveryHigh)
+                        .interpolationMethod(.monotone)
+                    PointMark(x: .value("Day", point.date, unit: .day), y: .value("Mood", point.value))
+                        .foregroundStyle(Theme.recoveryHigh)
+                        .symbolSize(18)
+                }
+                // Valence runs from -1 (very unpleasant) to 1 (very pleasant).
+                .chartYScale(domain: -1...1)
+                .chartYAxis {
+                    AxisMarks(values: [-1, 0, 1]) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let number = value.as(Double.self) {
+                                Text(number < 0 ? "Low" : (number > 0 ? "Good" : "OK"))
+                            }
+                        }
+                    }
+                }
+                .chartXScale(range: .plotDimension(endPadding: 12))
+                .frame(height: 150)
+                .accessibilityLabel("Daily mood over the last 30 days")
+            }
+            .card()
+        }
+    }
+}
+
 private struct MoodListCard: View {
     let samples: [MoodSample]
+
+    /// Entries grouped by day, newest day first.
+    private var days: [(day: Date, samples: [MoodSample])] {
+        let grouped = Dictionary(grouping: samples) { Calendar.current.startOfDay(for: $0.date) }
+        return grouped.keys.sorted(by: >).map { day in
+            (day: day, samples: (grouped[day] ?? []).sorted { $0.date > $1.date })
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -63,8 +114,15 @@ private struct MoodListCard: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
-            ForEach(samples.sorted { $0.date > $1.date }) { sample in
-                MoodEntryRow(sample: sample)
+            ForEach(days, id: \.day) { entry in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(entry.day, format: .dateTime.weekday(.wide).day().month(.abbreviated))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                    ForEach(entry.samples) { sample in
+                        MoodEntryRow(sample: sample)
+                    }
+                }
             }
         }
         .card()
@@ -87,7 +145,7 @@ private struct MoodEntryRow: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.primaryText)
                     Spacer()
-                    Text(sample.date, format: dateFormat)
+                    Text(sample.kind == .daily ? "Whole day" : sample.date.formatted(date: .omitted, time: .shortened))
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -101,18 +159,11 @@ private struct MoodEntryRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Daily moods show the day; momentary ones the time too.
-    private var dateFormat: Date.FormatStyle {
-        let day = Date.FormatStyle.dateTime.weekday(.abbreviated).day().month(.abbreviated)
-        return sample.kind == .daily ? day : day.hour().minute()
-    }
-
     /// "Happy, calm · Training, friends" with Apple's names made readable.
     private var detail: String {
         var parts: [String] = []
         if !sample.labels.isEmpty { parts.append(sample.labels.map(MoodScale.readable).joined(separator: ", ")) }
         if !sample.associations.isEmpty { parts.append(sample.associations.map(MoodScale.readable).joined(separator: ", ")) }
-        if sample.kind == .momentary { parts.append("In the moment") }
         return parts.joined(separator: " · ")
     }
 

@@ -28,7 +28,7 @@ struct MedicationsView: View {
                     if !meds.notes.isEmpty {
                         MedicationNotesCard(notes: meds.notes)
                     }
-                    SectionTitle(text: "Medications & supplements")
+                    SectionTitle(text: "Your list")
                     if let health, health.isAvailable {
                         HealthMedicationsRow(connected: meds.isHealthConnected) {
                             Task { await meds.connectHealth(health) }
@@ -75,7 +75,8 @@ struct MedicationsView: View {
                 TopGlow(colors: [Theme.Wash.rose, Theme.Wash.lavender, Theme.Wash.sky])
             }
             .background(Theme.background)
-            .navigationTitle("Medications")
+            // One name everywhere: Settings, Health › Records and this title.
+            .navigationTitle("Medications & supplements")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !pushed {
@@ -198,7 +199,9 @@ private struct MedicationRow: View {
                 Text(medication.times.isEmpty ? "As needed" : medication.times.map(timeText).joined(separator: ", "))
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
-                if let drug {
+                // The matched drug, only when it adds something ("Atorvastatin" for
+                // "Lipitor"); "Creatine (supplement)" under "Creatine" just repeats it.
+                if let drug, !drug.name.localizedCaseInsensitiveContains(medication.name.trimmingCharacters(in: .whitespaces)) {
                     Chip(text: drug.name, color: Theme.sleep)
                 }
             }

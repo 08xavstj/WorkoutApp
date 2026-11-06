@@ -386,6 +386,9 @@ public struct PlannedWorkout: Codable, Sendable, Equatable {
     public var blockWeek: TrainingBlock.WeekState? = nil
     /// Why this session today, in one or two short sentences (`WorkoutPlanner.rationale`).
     public var rationale: String = ""
+    /// The start of `rationale` that names the focus, its muscles and the block
+    /// week (`WorkoutPlanner.rationaleLead`). Optional so saved plans still decode.
+    public var rationaleLead: String? = nil
     /// How long the session should take (`WorkoutPlanner.estimatedMinutes`,
     /// with the planner's rest style and warm-up). Nil for plans made
     /// without the planner.
@@ -405,6 +408,13 @@ public struct PlannedWorkout: Codable, Sendable, Equatable {
 
     /// Working sets across the session.
     public var totalSets: Int { exercises.reduce(0) { $0 + $1.sets } }
+
+    /// `rationale` without its lead, for a screen that already shows the
+    /// title, the muscles and the block week (the workout builder).
+    public var rationaleDetail: String {
+        guard let lead = rationaleLead, !lead.isEmpty, rationale.hasPrefix(lead) else { return rationale }
+        return rationale.dropFirst(lead.count).trimmingCharacters(in: .whitespaces)
+    }
 }
 
 public struct WorkoutPlanner: Sendable {
@@ -755,6 +765,7 @@ public struct WorkoutPlanner: Sendable {
         workout.blockWeek = block
         workout.rationale = Self.rationale(focus: focus, focusReason: focusReason, minutes: minutes, recovery: recovery,
                                            rpe: rpe, block: block, exercises: exercises)
+        workout.rationaleLead = Self.rationaleLead(focus: focus, focusReason: focusReason, block: block)
         workout.estimatedMinutes = Self.estimatedMinutes(exercises, style: style, warmUpMinutes: warmUpMinutes)
         return workout
     }
@@ -894,21 +905,30 @@ public struct WorkoutPlanner: Sendable {
         return compound ? (minutes <= 30 ? 3 : 4) : 3
     }
 
+    /// The focus and its muscles, and the block week: the part of the
+    /// rationale a screen showing those already can leave out.
+    static func rationaleLead(focus: WorkoutFocus, focusReason: String?, block: TrainingBlock.WeekState?) -> String {
+        let why = focusReason.map { " \($0)" } ?? ""
+        var parts = ["\(focus.title)\(why): \(focus.muscles.lowercased())."]
+        if let block { parts.append("\(block.label).") }
+        return parts.joined(separator: " ")
+    }
+
     /// Why this session today: the focus and its muscles, the effort from
-    /// recovery (and the block week), then what the time bought.
+    /// recovery (and the block week), then what the time bought. Effort is
+    /// said as reps in reserve, the same words the sets use ("3-4 in reserve").
     static func rationale(focus: WorkoutFocus, focusReason: String?, minutes: Int, recovery: Int?,
                           rpe: Double, block: TrainingBlock.WeekState?, exercises: [PlannedExercise]) -> String {
-        var parts: [String] = []
-        let why = focusReason.map { " \($0)" } ?? ""
-        parts.append("\(focus.title)\(why): \(focus.muscles.lowercased()).")
-        let effort = "effort \(rpe.formatted())/10"
-        if let block {
-            parts.append("\(block.label): \(effort)" + (recovery.map { $0 < 67 ? ", eased for \($0)% recovery." : "." } ?? "."))
+        var parts = [rationaleLead(focus: focus, focusReason: focusReason, block: block)]
+        let reserve = ReserveText.text(rpe: rpe)
+        if block != nil {
+            // The block week sets the reserve; only a low-recovery back-off needs saying.
+            if let recovery, recovery < 67 { parts.append("Eased to \(reserve) for \(recovery)% recovery.") }
         } else if let recovery {
             let mood = recovery < 34 ? "an easy day" : (recovery < 67 ? "a normal day" : "a day to push")
-            parts.append("Recovery \(recovery)%, \(mood): \(effort).")
+            parts.append("Recovery \(recovery)%, \(mood): sets stop with \(reserve).")
         } else {
-            parts.append("No recovery score yet, so a moderate \(effort).")
+            parts.append("No recovery score yet, so a moderate effort: \(reserve).")
         }
         // Counts after `fit`, so the line never promises sets the time didn't allow.
         let sets = exercises.reduce(0) { $0 + $1.sets }

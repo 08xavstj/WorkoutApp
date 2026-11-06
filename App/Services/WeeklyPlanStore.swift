@@ -269,10 +269,11 @@ final class WeeklyPlanStore {
         return WeekRecord.make(plan: plan, trainingDays: Self.trainingDays(sessions: sessions, extra: liftingExtra(extra, now: now))).done
     }
 
-    /// Weekdays this week that had a session.
+    /// Weekdays this week that had a session. The same training days as
+    /// `sessionsDone` (`liftingExtra`), so the dots and the count agree.
     func doneWeekdays(sessions: [WorkoutSession], extra: Set<Date> = [], now: Date = .now) -> Set<Int> {
         let plan = self.plan(containing: now) ?? WeeklyPlan(weekStart: WeeklyPlan.weekStart(containing: now))
-        return plan.doneWeekdays(trainingDays: Self.trainingDays(sessions: sessions, extra: extra))
+        return plan.doneWeekdays(trainingDays: Self.trainingDays(sessions: sessions, extra: liftingExtra(extra, now: now)))
     }
 
     /// Planned and done counts for every saved week.

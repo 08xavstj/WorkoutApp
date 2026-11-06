@@ -73,7 +73,7 @@ struct WorkoutBuilderView: View {
                             ContentUnavailableView(
                                 "Nothing fits this focus",
                                 systemImage: "dumbbell",
-                                description: Text("No exercises match this focus with your equipment. Pick another focus, or add equipment under Gym equipment (top right).")
+                                description: Text("No exercises match this focus with your equipment. Pick another focus, or add equipment under Gym (top right).")
                             )
                         } else {
                             summaryCard(plan)
@@ -106,12 +106,10 @@ struct WorkoutBuilderView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                // A word, not a dumbbell icon: the icon read as "add exercise".
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingGym = true
-                    } label: {
-                        Label("Gym equipment", systemImage: "dumbbell")
-                    }
+                    Button("Gym") { showingGym = true }
+                        .accessibilityLabel("Gym equipment")
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -131,7 +129,16 @@ struct WorkoutBuilderView: View {
                 .disabled(plan?.exercises.isEmpty ?? true)
                 .opacity((plan?.exercises.isEmpty ?? true) ? 0.5 : 1)
                 .padding(.horizontal)
+                .padding(.top, 28)
                 .padding(.bottom, 8)
+                // The plan fades out behind the button instead of showing through around it.
+                .background {
+                    LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0),
+                                           .init(color: Theme.background, location: 0.45)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea(edges: .bottom)
+                        .allowsHitTesting(false)
+                }
             }
             // A push inside this sheet's stack, never a sheet on a sheet (ux-audit 4.1 rule 5).
             .navigationDestination(isPresented: $showingGym) {
@@ -398,18 +405,22 @@ struct WorkoutBuilderView: View {
         .buttonStyle(.plain)
     }
 
+    /// Columns for a row of equal-width chips: fewer at accessibility text sizes.
+    private func chipColumns(_ count: Int) -> [GridItem] {
+        let columns = dynamicTypeSize.isAccessibilitySize ? max(2, count / 2) : count
+        return Array(repeating: GridItem(.flexible(), spacing: 8), count: columns)
+    }
+
+    /// Every focus in view at once (it used to scroll, hiding Lower and Full body).
     private var focusPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             CardLabel(text: "Focus")
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    SelectChip(title: "Auto", isSelected: focus == nil) { focus = nil }
-                    ForEach(WorkoutFocus.allCases) { option in
-                        SelectChip(title: option.shortTitle, isSelected: focus == option) { focus = option }
-                    }
+            LazyVGrid(columns: chipColumns(4), spacing: 8) {
+                SelectChip(title: "Auto", isSelected: focus == nil, fillsWidth: true) { focus = nil }
+                ForEach(WorkoutFocus.allCases) { option in
+                    SelectChip(title: option.shortTitle, isSelected: focus == option, fillsWidth: true) { focus = option }
                 }
             }
-            .scrollIndicators(.hidden)
             Text(focus == nil ? "Auto picks \(resolvedFocus.title.lowercased()) \(autoReason)." : resolvedFocus.muscles)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
@@ -422,15 +433,14 @@ struct WorkoutBuilderView: View {
     /// Sports Med 2021).
     private var durationPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
-            CardLabel(text: "Time")
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(durations, id: \.self) { value in
-                        SelectChip(title: "\(value) min", isSelected: minutes == value) { minutes = value }
-                    }
+            CardLabel(text: "Time (min)")
+            // Six equal chips in one row, none cut off.
+            LazyVGrid(columns: chipColumns(durations.count), spacing: 8) {
+                ForEach(durations, id: \.self) { value in
+                    SelectChip(title: "\(value)", isSelected: minutes == value, fillsWidth: true,
+                               spokenTitle: "\(value) minutes") { minutes = value }
                 }
             }
-            .scrollIndicators(.hidden)
             if minutes < 30 {
                 Text("Short on time: fewer sets, then paired exercises (A1/A2) with one rest after both.")
                     .font(.caption)
@@ -450,12 +460,12 @@ struct WorkoutBuilderView: View {
             Text(plan.title)
                 .font(.title.weight(.bold))
                 .foregroundStyle(Theme.primaryText)
-            planStats(minutes: estimated, rpe: plan.targetRPE, gain: gain)
+            planStats(minutes: estimated, rpe: plan.targetRPE, landsAt: landsAt)
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
                 let line: String = inRange
-                    ? "Lands you around \(strainText(landsAt)) strain, inside today's range (\(strainRangeText(target)))."
-                    : "Lands you around \(strainText(landsAt)) strain. Today's range: \(strainRangeText(target))."
+                    ? "Inside today's strain range (\(strainRangeText(target)))."
+                    : "Today's strain range: \(strainRangeText(target))."
                 Text(line)
                     .font(.subheadline)
                     .foregroundStyle(inRange ? Theme.recoveryHighText : Theme.secondaryText)
@@ -470,12 +480,14 @@ struct WorkoutBuilderView: View {
     /// Why this session today (`PlannedWorkout.rationale`).
     @ViewBuilder
     private func whyLine(_ plan: PlannedWorkout) -> some View {
-        if !plan.rationale.isEmpty {
+        // Without the title, muscles and block week: the card shows those already.
+        let detail = plan.rationaleDetail
+        if !detail.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Why this session")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
-                Text(plan.rationale)
+                Text(detail)
                     .font(.subheadline)
                     .foregroundStyle(Theme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -503,14 +515,17 @@ struct WorkoutBuilderView: View {
 
     /// Time, effort and strain side by side; stacked at accessibility text
     /// sizes so none is cut off (ux-audit.md 4.8, P22).
-    private func planStats(minutes: Int, rpe: Double, gain: Double) -> some View {
+    /// Effort is reps in reserve, the same words the sets use; strain is
+    /// where today's total lands after the session, not the gain.
+    private func planStats(minutes: Int, rpe: Double, landsAt: Double) -> some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 18))
+        let reserve = ReserveText.text(rpe: rpe).replacingOccurrences(of: " in reserve", with: "")
         return layout {
             StatView(label: "Time", value: "~\(minutes) min")
-            StatView(label: "Effort", value: "\(rpe.formatted())/10")
-            StatView(label: "Strain", value: "≈+\(strainText(gain))", color: Theme.strainTextColor)
+            StatView(label: "In reserve", value: reserve)
+            StatView(label: "Strain after", value: "≈\(strainText(landsAt))", color: Theme.strainTextColor)
         }
     }
 
@@ -609,14 +624,21 @@ struct TimeSaverCard: View {
 struct SelectChip: View {
     let title: String
     let isSelected: Bool
+    /// Stretches to its grid column, for a row of equal chips.
+    var fillsWidth = false
+    /// What VoiceOver says, when the title alone is terse ("45" → "45 minutes").
+    var spokenTitle: String? = nil
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 14)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, fillsWidth ? 6 : 14)
                 .padding(.vertical, 9)
+                .frame(maxWidth: fillsWidth ? CGFloat.infinity : nil)
                 .foregroundStyle(isSelected ? Theme.card : Theme.primaryText)
                 .background(isSelected ? Theme.ink : Theme.card, in: .capsule)
                 .shadow(color: Color.black.opacity(isSelected ? 0 : 0.06), radius: 6, y: 2)
@@ -624,6 +646,7 @@ struct SelectChip: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(spokenTitle ?? title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
@@ -876,7 +899,7 @@ struct PainLogView: View {
 
     var body: some View {
         Form {
-            PainQuestions(pains: $draft)
+            PainQuestions(pains: $draft, header: "Where?")
             Section("Where the rule comes from") {
                 Text(PainGuard.sourceText)
                     .font(.footnote)

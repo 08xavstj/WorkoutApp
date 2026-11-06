@@ -197,6 +197,20 @@ public enum LabMarkers {
         marker(id: markerID)?.units.first { $0.unit.lowercased() == unit.lowercased() }?.athleteLow
     }
 
+    /// When the lab's own range and the guideline line disagree, says both
+    /// instead of only the lab's flag. Vitamin D is the case that matters:
+    /// many labs flag under 30 ng/mL (Endocrine Society 2011), while the IOM
+    /// (2011) found 20 ng/mL (50 nmol/L) covers bone health for nearly
+    /// everyone, and the Endocrine Society's 2024 guideline dropped its 30
+    /// target. Nil when they agree or the marker has no such split.
+    public static func guidelineNote(markerID: String, value: Double, unit: String, labLow: Double?) -> String? {
+        guard markerID == "vitaminD", let labLow, value < labLow,
+              let line = marker(id: markerID)?.units.first(where: { $0.unit.lowercased() == unit.lowercased() })?.range(for: .male).low,
+              value >= line else { return nil }
+        let lineText = line.formatted(.number.precision(.fractionLength(0...1)))
+        return "Below the lab's range; above the \(lineText) \(unit) IOM line. Guidelines differ."
+    }
+
     /// A second line for people who train, shown next to the lab status: a
     /// result inside the lab range can still be low for an athlete (ferritin:
     /// Sim et al., Eur J Appl Physiol 2019). Nil when nothing applies.

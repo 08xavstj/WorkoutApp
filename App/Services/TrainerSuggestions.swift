@@ -10,8 +10,12 @@ enum TrainerSuggestions {
         var id: String { option.id }
     }
 
+    /// With a session planned today (`planned`), that session (its focus and
+    /// length) comes first, so the Strain sheet agrees with Today's Start
+    /// button; the best-fitting easy cardio follows.
     @MainActor
-    static func make(metrics: DailyMetricsModel, settings: UserSettings, sessions: [WorkoutSession]) -> [Suggestion] {
+    static func make(metrics: DailyMetricsModel, settings: UserSettings, sessions: [WorkoutSession],
+                     planned: PlannedDay? = nil) -> [Suggestion] {
         let planner = StrainPlanner()
         let focus = WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))
         let rpe = WorkoutPlanner.targetRPE(recovery: metrics.recoveryForTraining)
@@ -31,9 +35,20 @@ enum TrainerSuggestions {
                 load: planner.cardioLoad(minutes: Double(minutes), reserveFraction: 0.65, profile: profile)
             ))
         }
+        if let planned {
+            options.append(StrainPlanner.Option(
+                id: "planned-\(planned.minutes)", kind: .strength, title: planned.focus.title,
+                detail: "\(planned.minutes) min · Planned today", minutes: Double(planned.minutes),
+                load: planner.liftingLoad(minutes: Double(planned.minutes), rpe: rpe)
+            ))
+        }
         let current = metrics.strain?.strain ?? 0
         let target = metrics.targetStrain ?? StrainCalculator.targetStrain(forRecovery: 50)
         let ranked = planner.rank(options, current: current, target: target)
+        if let planned, let plannedOption = ranked.first(where: { $0.id.hasPrefix("planned-") }) {
+            let cardio = ranked.first { $0.kind == .cardio }.map { [Suggestion(option: $0, focus: nil, minutes: Int($0.minutes))] } ?? []
+            return [Suggestion(option: plannedOption, focus: planned.focus, minutes: planned.minutes)] + cardio
+        }
         let bestStrength = ranked.first { $0.kind == .strength }
         let bestCardio = ranked.first { $0.kind == .cardio }
         return ranked

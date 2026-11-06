@@ -9,7 +9,7 @@ struct GarminHelpView: View {
         HealthDetailPage(title: "Using a Garmin") {
             VStack(alignment: .leading, spacing: 8) {
                 CardLabel(text: "Turn on sharing")
-                Text("In Garmin Connect, open More → Settings → Connected Apps → Apple Health and turn sharing on.")
+                Text("In Garmin Connect, open More › Settings › Connected Apps › Apple Health and turn sharing on.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -21,7 +21,7 @@ struct GarminHelpView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Body Battery, Garmin stress and HRV stay in Garmin Connect, so stress here is estimated from heart rate and HRV can be added by hand in the Log tab under Overnight HRV.")
+                Text("Body Battery, stress and HRV stay in Garmin Connect. Tensile estimates stress from heart rate; type HRV under Log › Overnight HRV.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)

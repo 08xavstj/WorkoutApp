@@ -33,7 +33,7 @@ struct CoachDiagnosticsView: View {
                 }
                 Section("Last error") {
                     Text(diagnostics.lastError ?? "None")
-                        .font(.footnote.monospaced())
+                        .font(diagnostics.lastError == nil ? .body : .footnote.monospaced())
                         .foregroundStyle(diagnostics.lastError == nil ? Theme.secondaryText : Theme.recoveryLow)
                         .textSelection(.enabled)
                 }

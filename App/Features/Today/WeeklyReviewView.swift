@@ -55,7 +55,8 @@ struct WeeklyReviewView: View {
                     Button("Later") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Confirm") { confirm() }
+                    Button("Save changes") { confirm() }
+                        .accessibilityHint("Saves this week's three changes to your plan")
                 }
             }
             .task { load() }
@@ -103,7 +104,7 @@ struct WeeklyReviewView: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
             } else {
-                Text("No training days yet. Confirm saves the changes; the days can come later.")
+                Text("No training days yet. Save changes keeps the three changes; the days can come later.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -148,18 +149,27 @@ struct WeeklyReviewView: View {
         let record = lastWeekRecord
         if record.planned > 0 {
             let kept = Consistency.weekKept(planned: record.planned, done: record.done)
-            return ReviewLine(id: "sessions", title: "Sessions", value: "\(record.done) of \(record.planned)",
+            // Training days (gym sessions, or watch workouts at 35%+ strain), the
+            // same count as Fitness › This week and the consistency score.
+            let days = record.done == 1 ? "training day" : "training days"
+            return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done) \(days) (\(record.planned) planned)",
                               detail: kept ? "On plan: \(Consistency.sessionsNeeded(planned: record.planned)) or more counts as a kept week." : "A lighter week than planned. This week starts fresh.")
         }
         return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done)", detail: "No plan last week to compare with.")
     }
 
+    /// The 7 completed days before today (today isn't over, so its strain
+    /// would pull the average down), with training days counted the same way
+    /// as everywhere else (`WeeklyPlanStore.trainingDays`).
     private var strainLine: ReviewLine? {
-        let values = metrics.weekStrain.map(\.strain)
+        let week = metrics.completedWeekStrain
+        let values = week.map(\.strain)
         guard !values.isEmpty else { return nil }
         let average = values.reduce(0, +) / Double(values.count)
-        let active = values.filter { $0 >= 25 }.count
-        var detail = "\(active) of \(values.count) days at 25% or more (a training day)."
+        let calendar = Calendar.current
+        let trained = Set(trainingDays.map { calendar.startOfDay(for: $0) })
+        let active = week.filter { trained.contains(calendar.startOfDay(for: $0.date)) }.count
+        var detail = "\(active) of \(values.count) were training days."
         if let target = metrics.targetStrain { detail += " Today's range is \(strainRangeText(target))." }
         return ReviewLine(id: "strain", title: "Average day strain, last 7 days", value: strainText(average), detail: detail)
     }
@@ -202,7 +212,7 @@ struct WeeklyReviewView: View {
 
     private var caloriesLine: ReviewLine? {
         guard !settings.hideCalories, let maintenance = metrics.maintenance, let target = metrics.calorieTarget else { return nil }
-        return ReviewLine(id: "calories", title: "Calories, average of logged days", value: "\(whole(maintenance.averageIntake)) vs \(whole(target)) target",
+        return ReviewLine(id: "calories", title: "Calories, average of logged days", value: "\(whole(maintenance.averageIntake).formatted()) vs \(whole(target).formatted()) target",
                           detail: "From \(maintenance.loggedDays) fully logged days in the last 4 weeks; the weekly average is what moves weight.")
     }
 

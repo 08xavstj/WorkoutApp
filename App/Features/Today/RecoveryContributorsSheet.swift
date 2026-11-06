@@ -41,10 +41,9 @@ struct RecoveryContributorsSheet: View {
                         }
                         .card()
                     }
+                    // Which HRV measure this is: useful, but jargon, so folded away.
                     if let metric = metrics.hrvMetric {
-                        Text(metrics.hrvMetricNote ?? metric)
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
+                        EvidenceDisclosure(points: [metrics.hrvMetricNote ?? metric], title: "About this number")
                     }
                     Text("The 0-100 score is the app's own summary of these inputs; your 7-day HRV trend is the part research backs.")
                         .font(.caption)
@@ -83,14 +82,14 @@ private struct ContributorRow: View {
                 Text(item.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
-                Text(item.detail)
+                Text(item.explanation)
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.name), \(label). \(item.detail)")
+        .accessibilityLabel("\(item.name), \(label). \(item.explanation)")
     }
 
     private var icon: String {

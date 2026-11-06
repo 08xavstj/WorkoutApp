@@ -17,7 +17,8 @@ enum HealthMonitorTiles {
     static let priority: [[String]] = [
         ["temperature"],              // sleeping wrist temperature vs your usual
         ["spo2"],                     // blood oxygen
-        ["steps"],                    // steps vs the personal goal (StepGoal)
+        // Steps left out: a goal, not a sign that something is off today
+        // (it lives on Health › Activity and in Up next).
         ["hrr", "walkingHR"],         // heart rate recovery, else walking heart rate
         ["daylight"],                 // time in daylight (Apple Watch)
         ["breathingDisturbances"],    // nightly breathing disturbances (Builder B)
@@ -60,17 +61,22 @@ enum HealthMonitorTiles {
 }
 
 /// A `MetricTile` built from a `VitalsModel.Stat`, in the stat's category
-/// colours, with its status as the pill.
+/// colours, with its status as the pill. "Normal" is always green, as on the
+/// fixed tiles, and "°C vs usual" moves into the title so the unit stays on
+/// one line.
 struct HealthMonitorStatTile: View {
     let stat: VitalsModel.Stat
 
     var body: some View {
         let colors = VitalTile.colors(for: stat.category)
+        let vsUsual = stat.unit.hasSuffix(" vs usual")
         MetricTile(
-            title: stat.title,
+            title: vsUsual ? "Temperature vs usual" : stat.title,
             value: stat.value,
-            unit: stat.unit,
-            status: stat.status.map { MetricTile.Status(text: $0, color: VitalTile.color(for: stat.tone)) },
+            unit: vsUsual ? String(stat.unit.dropLast(" vs usual".count)) : stat.unit,
+            status: stat.status.map { text in
+                MetricTile.Status(text: text, color: text == "Normal" ? Theme.recoveryHigh : VitalTile.color(for: stat.tone))
+            },
             gauge: stat.gauge,
             color: colors.last ?? Theme.oxygen,
             lightColor: colors.first

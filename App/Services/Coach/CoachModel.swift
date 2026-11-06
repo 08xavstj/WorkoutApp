@@ -24,6 +24,9 @@ final class CoachModel {
         var facts: CoachFacts?
         /// "Say more" was used (or isn't offered) for this reply.
         var expanded = false
+        /// The question a data reply answered, for choosing follow-up chips;
+        /// nil for a model reply.
+        var question: CoachIntent.Question?
 
         /// A data-backed reply the model can be asked to explain.
         var canSayMore: Bool { role == .coach && source == .data && facts != nil && !expanded }
@@ -99,7 +102,7 @@ final class CoachModel {
         if let question = CoachIntent.question(trimmed), let answer = CoachAnswers.answer(for: question, facts: facts) {
             onDevice.remember(question: trimmed, answer: answer.text)
             diagnostics = onDevice.diagnostics
-            messages.append(ChatMessage(role: .coach, text: answer.text, source: .data, action: answer.action, plan: plan, facts: facts))
+            messages.append(ChatMessage(role: .coach, text: answer.text, source: .data, action: answer.action, plan: plan, facts: facts, question: question))
             return
         }
 
@@ -118,7 +121,7 @@ final class CoachModel {
             if let fallback = CoachAnswers.fallback(for: trimmed, facts: facts) {
                 let lead = Self.fallbackLead(for: error)
                 messages.append(ChatMessage(role: .coach, text: lead + " " + fallback.text, source: .data,
-                                            action: fallback.action, plan: plan, facts: facts, expanded: true))
+                                            action: fallback.action, plan: plan, facts: facts, expanded: true, question: fallback.question))
             } else {
                 messages.append(ChatMessage(role: .error, text: error.localizedDescription))
             }
@@ -140,11 +143,11 @@ final class CoachModel {
             let text = try await onDevice.expand(question: question, answer: message.text,
                                                  topic: CoachIntent.topic(question), facts: facts)
             diagnostics = onDevice.diagnostics
-            messages.append(ChatMessage(role: .coach, text: text, source: .model, facts: nil, expanded: true))
+            messages.append(ChatMessage(role: .coach, text: text, source: .model, facts: nil, expanded: true, question: message.question))
         } catch {
             diagnostics = onDevice.diagnostics
             if OnDeviceCoach.isRefusal(error) {
-                messages.append(ChatMessage(role: .coach, text: Self.sayMoreDeclinedText, source: .data, facts: nil, expanded: true))
+                messages.append(ChatMessage(role: .coach, text: Self.sayMoreDeclinedText, source: .data, facts: nil, expanded: true, question: message.question))
             } else {
                 messages.append(ChatMessage(role: .error, text: error.localizedDescription))
             }

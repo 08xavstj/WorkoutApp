@@ -26,6 +26,7 @@ struct WorkoutHistoryView: View {
                 NavigationLink(value: session) {
                     SessionRow(session: session, unit: gym.liftingUnit)
                 }
+                .accessibilityIdentifier("history-session") // UI tests (ScreenshotTests)
             }
             .onDelete { pendingDelete = $0 }
             .listRowBackground(Theme.card)

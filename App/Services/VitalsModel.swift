@@ -54,6 +54,8 @@ final class VitalsModel {
         var defaultDays = 30
         /// Unit for one day's value when it differs from the headline (e.g. "min" vs "this week").
         var historyUnit: String?
+        /// Shown instead of "No data" when there is history but nothing today (water).
+        var emptyText: String?
     }
 
     private(set) var stats: [Stat] = []
@@ -396,7 +398,7 @@ final class VitalsModel {
         stepStat.goal = stepGoal
         if let today = latestToday(stepSeries) {
             stepStat.gauge = min(1, today.value / stepGoal)
-            stepStat.status = today.value >= stepGoal ? "Goal reached" : "\(fmt(stepGoal - today.value)) to your \(fmt(stepGoal)) goal"
+            stepStat.status = today.value >= stepGoal ? "Goal reached" : "\(fmt(stepGoal - today.value)) to go"
             stepStat.tone = today.value >= stepGoal ? .good : .neutral
         } else {
             stepStat.value = stepSeries.isEmpty ? nil : "0"
@@ -455,18 +457,29 @@ final class VitalsModel {
         ))
         let bmiSeries = get(try? await bmi)
         result.append(makeStat("bmi", .body, "BMI", "figure.stand", series: bmiSeries, unit: "", digits: 1,
-                           status: { $0 < 18.5 ? "Under" : ($0 < 25 ? "Healthy" : ($0 < 30 ? "Over" : "High")) }))
+                           status: { $0 < 18.5 ? "Underweight range" : ($0 < 25 ? "Healthy range" : ($0 < 30 ? "Overweight range" : "Obesity range")) }))
         let leanSeries = get(try? await lean).map { DatedValue(date: $0.date, value: unit.display($0.value)) }
         result.append(makeStat("lean", .body, "Lean mass", "figure.strengthtraining.traditional", series: leanSeries, unit: unit.rawValue, digits: 1))
         let sys = get(try? await systolic)
         let dia = get(try? await diastolic)
-        if let s = sys.last, let d = dia.last {
-            // ACC/AHA 2017 categories.
-            let status = s.value >= 130 || d.value >= 80 ? "High" : (s.value >= 120 ? "Elevated" : "Normal")
+        // The same 7-day home check the blood pressure page shows: ACC/AHA
+        // (2017; AHA/ACC 2025) classify from an average of home readings, not
+        // one reading, so a single latest value gets no category.
+        let homeCheck = HomeBloodPressure.weekCheck(cuff.map(\.asCore), asOf: now)
+        if let avgS = homeCheck.systolic, let avgD = homeCheck.diastolic, let category = homeCheck.category {
+            var bp = Stat(
+                id: "bp", category: .body, title: "Blood pressure", icon: "waveform.path.ecg.rectangle",
+                value: "\(fmt(avgS))/\(fmt(avgD))", unit: "mmHg",
+                status: "\(category.rawValue) · 7-day average", tone: category == .normal ? .good : .caution, series: sys
+            )
+            bp.secondary = dia
+            bp.secondaryLabel = "Diastolic"
+            result.append(bp)
+        } else if let s = sys.last, let d = dia.last {
             var bp = Stat(
                 id: "bp", category: .body, title: "Blood pressure", icon: "waveform.path.ecg.rectangle",
                 value: "\(fmt(s.value))/\(fmt(d.value))", unit: "mmHg",
-                status: status, tone: status == "Normal" ? .good : .caution, series: sys
+                status: "Latest · not a home average", tone: .neutral, series: sys
             )
             bp.secondary = dia
             bp.secondaryLabel = "Diastolic"
@@ -481,15 +494,17 @@ final class VitalsModel {
         let lastWeek = nights.filter { $0.date > weekStartNight }.map(\.hoursAsleep)
         let averageSleep: Double? = lastWeek.isEmpty ? nil : lastWeek.reduce(0, +) / Double(lastWeek.count)
         var sleepStat = Stat(
-            id: "sleepAverage", category: .sleep, title: "Sleep, 7-night average", icon: "bed.double.fill",
+            id: "sleepAverage", category: .sleep, title: "Avg sleep (7 nights)", icon: "bed.double.fill",
             value: averageSleep.map { Duration.seconds($0 * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
-            unit: "", status: averageSleep.map { $0 >= 7 ? "Enough" : "Short" }, tone: (averageSleep ?? 8) >= 7 ? .good : .caution,
+            // Against your sleep need (Settings), with 10% slack, as on Today and the sleep sheet.
+            unit: "", status: averageSleep.map { $0 >= settings.sleepNeedHours * 0.9 ? "Enough" : "Short" },
+            tone: (averageSleep ?? 24) >= settings.sleepNeedHours * 0.9 ? .good : .caution,
             gauge: averageSleep.map { min(1, $0 / 9) },
             series: nights.map { DatedValue(date: $0.date, value: $0.hoursAsleep) }
         )
         sleepStat.chart = .bars
         sleepStat.isHours = true
-        sleepStat.goal = 7
+        sleepStat.goal = settings.sleepNeedHours
         sleepStat.defaultDays = 7
         sleepStat.nights = nights
         result.append(sleepStat)
@@ -520,7 +535,7 @@ final class VitalsModel {
         var consistencyStat = Stat(
             id: "consistency", category: .sleep, title: "Sleep consistency", icon: "clock.arrow.circlepath",
             value: sleepConsistency.map { "\($0)" }, unit: "/ 100",
-            status: sleepSpreadMinutes.map { "Bed & wake times vary ~\(Int($0.rounded())) min" },
+            status: sleepSpreadMinutes.map { "Times vary ~\(Int($0.rounded())) min" },
             tone: (sleepConsistency ?? 100) >= 70 ? .good : .caution,
             gauge: sleepConsistency.map { Double($0) / 100 },
             footnote: "Sleep Regularity Index over the last week. It's 15% of your sleep score."
@@ -706,7 +721,7 @@ final class VitalsModel {
             stat.about = "Everything that isn't fat: muscle, bone, organs and water."
             stat.defaultDays = 90
         case "bp":
-            stat.about = "Top line systolic, bottom line diastolic. Under 120/80 is normal, 120-129 over less than 80 is elevated, and 130/80 or higher is high (ACC/AHA 2017 guideline)."
+            stat.about = "Top line systolic, bottom line diastolic. Under 120/80 is normal, 120-129 over less than 80 is elevated, and 130/80 or higher is high (ACC/AHA 2017 guideline). Those categories are for an average of home readings, so the headline is your 7-day home average; a single reading isn't classified."
             stat.defaultDays = 90
         case "water":
             stat.chart = .bars
@@ -766,15 +781,31 @@ final class VitalsModel {
         if today(series) == nil {
             result.value = series.isEmpty ? nil : "0"
         }
+        if id == "water", today(series) == nil {
+            // Nothing logged yet isn't "0 L drunk".
+            result.value = nil
+            result.emptyText = "Not logged today"
+        }
         let earlier = series.dropLast().suffix(14).map(\.value)
         if let value = today(series)?.value, !earlier.isEmpty {
             let average = earlier.reduce(0, +) / Double(earlier.count)
-            result.status = value >= average ? "Above average" : "Below average"
-            result.tone = value >= average ? .good : .neutral
             result.gauge = min(1, value / max(average * 1.5, 0.001))
+            // Health gives whole-day totals, so a morning total can't be
+            // compared with full earlier days: no verdict until the evening.
+            if Calendar.current.component(.hour, from: .now) < Self.dayTotalVerdictHour {
+                result.status = "So far today"
+                result.tone = .neutral
+            } else {
+                result.status = value >= average ? "Above average" : "Below average"
+                result.tone = value >= average ? .good : .neutral
+            }
         }
         return result
     }
+
+    /// The hour from which today's running total is compared with the 14-day
+    /// average of full days (app choice: most of the day's activity is in by 6 pm).
+    static let dayTotalVerdictHour = 18
 
     // MARK: - Heart-rate derived
 
@@ -909,7 +940,7 @@ extension VitalsModel {
             stat.status = "2-hour anchor reached"
             stat.tone = .good
         } else {
-            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to the 2-hour anchor"
+            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to 2 h"
             stat.tone = .neutral
         }
         stat.footnote = "About 2 hours a day is the anchor (Burns 2023; evidence is observational)."

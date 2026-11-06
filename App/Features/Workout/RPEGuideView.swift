@@ -65,6 +65,9 @@ struct RPEGuideView: View {
                     Text("Sources")
                 }
             }
+            // Opaque at the medium detent (a part-height sheet is see-through glass by default).
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
             .navigationTitle("RPE guide")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -73,6 +76,7 @@ struct RPEGuideView: View {
                 }
             }
         }
+        .presentationBackground(Theme.background)
     }
 
     /// One RPE level: number badge, title, reps left and how it feels.

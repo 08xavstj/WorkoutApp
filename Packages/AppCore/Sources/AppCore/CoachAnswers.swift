@@ -318,13 +318,13 @@ public enum CoachAnswers {
         let raises = scored.filter { $0.effect == .raises }.sorted { $0.weight > $1.weight }
         let context = f.recoveryContributors.filter { $0.weight <= 0 && $0.effect == .lowers }
         if !lowers.isEmpty {
-            lines.append("Pulling it down: " + lowers.prefix(3).map { "\($0.name.lowercased()) (\($0.detail))" }.joined(separator: "; ") + ".")
+            lines.append("Pulling it down: " + lowers.prefix(3).map { "\(inSentence($0.name)) (\(inSentence(withoutFinalPeriod($0.detail))))" }.joined(separator: "; ") + ".")
         }
         if !raises.isEmpty {
-            lines.append("Helping: " + raises.prefix(2).map { "\($0.name.lowercased()) (\($0.detail))" }.joined(separator: "; ") + ".")
+            lines.append("Helping: " + raises.prefix(2).map { "\(inSentence($0.name)) (\(inSentence(withoutFinalPeriod($0.detail))))" }.joined(separator: "; ") + ".")
         }
         if !context.isEmpty {
-            lines.append("Also worth knowing: " + context.prefix(3).map { "\($0.name.lowercased()): \(withoutFinalPeriod($0.detail))" }.joined(separator: "; ") + ".")
+            lines.append("Also worth knowing: " + context.prefix(3).map { "\(inSentence($0.name)): \(inSentence(withoutFinalPeriod($0.detail)))" }.joined(separator: "; ") + ".")
         }
         if lowers.isEmpty && raises.isEmpty {
             var inputs: [String] = []
@@ -734,6 +734,17 @@ public enum CoachAnswers {
 
     static func withoutFinalPeriod(_ text: String) -> String {
         text.hasSuffix(".") ? String(text.dropLast()) : text
+    }
+
+    /// A label as it reads mid-sentence: only the first letter is lowered, and
+    /// not at all when the first word is an acronym ("HRV", "VO2"), so
+    /// "Last night's HRV" becomes "last night's HRV", never "last night's hrv".
+    static func inSentence(_ label: String) -> String {
+        guard let first = label.first, first.isUppercase else { return label }
+        let firstWord = label.prefix { !$0.isWhitespace }
+        let letters = firstWord.filter(\.isLetter)
+        if letters.count >= 2, letters.allSatisfy(\.isUppercase) { return label }
+        return first.lowercased() + label.dropFirst()
     }
 
     static func shortened(_ line: String, _ limit: Int) -> String {

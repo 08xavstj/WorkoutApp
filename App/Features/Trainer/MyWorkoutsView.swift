@@ -86,17 +86,38 @@ struct MyWorkoutsView: View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(spacing: 12))
             : AnyLayout(HStackLayout(spacing: 12))
-        return layout {
-            bigButton("New workout", icon: "plus", colors: [Theme.lifting, Theme.sleep]) {
-                editing = EditorRequest(template: nil)
+        // One primary action (HIG: one prominent button per view): New workout is
+        // filled; Quick start, an empty workout, is the plain secondary one.
+        return VStack(alignment: .leading, spacing: 8) {
+            layout {
+                bigButton("New workout", icon: "plus", colors: [Theme.lifting, Theme.sleep]) {
+                    editing = EditorRequest(template: nil)
+                }
+                quickStartButton
             }
-            // The deep strain gradient keeps white text readable (raw strain
-            // orange was 2.6:1; Theme "Deep gradients for buttons with white text").
-            bigButton("Empty workout", icon: "dumbbell.fill", colors: Theme.strainButtonColors) {
-                launcher.startEmpty(in: modelContext)
-                onStart?()
-            }
+            Text("Quick start opens an empty workout; add exercises as you go.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var quickStartButton: some View {
+        Button {
+            launcher.startEmpty(in: modelContext)
+            onStart?()
+        } label: {
+            Label("Quick start", systemImage: "bolt.fill")
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(Theme.card, in: .capsule)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Starts an empty workout")
     }
 
     private func start(_ template: WorkoutTemplate) {

@@ -56,6 +56,7 @@ struct TodayView: View {
             .sheet(isPresented: $showingHRVEntry) {
                 HRVEntrySheet(existing: hrvReadings.first { Calendar.current.isDateInToday($0.date) })
                     .presentationDetents([.medium])
+                    .presentationBackground(Theme.background)
             }
             .task(id: habitsKey) { await loadHabits() }
             .modifier(WeeklyReviewReminderSync())
@@ -238,6 +239,7 @@ private struct NutritionCard: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint("Shows what to fix in your diet")
+                    .accessibilityIdentifier("today-vitamins") // UI tests (ScreenshotTests)
                 }
             } else {
                 NoFoodRow(proteinTarget: metrics.proteinTarget)
@@ -254,6 +256,7 @@ private struct NutritionCard: View {
         .sheet(isPresented: $showingDetails) {
             CalorieDetailsSheet()
                 .presentationDetents([.medium, .large])
+                .presentationBackground(Theme.background)
         }
     }
 
@@ -553,6 +556,7 @@ private struct WaterColumn: View {
         .sheet(isPresented: $showingWater) {
             WaterDetailsSheet()
                 .presentationDetents([.medium, .large])
+                .presentationBackground(Theme.background)
         }
     }
 }
@@ -665,6 +669,16 @@ private struct CalorieDetailsSheet: View {
                     )
                 }
                 if let summary = metrics.calories {
+                    // The numbers first, then where they come from.
+                    Section {
+                        if let target = metrics.calorieTarget {
+                            row("Daily target", target, bold: true)
+                        }
+                        row("Burned so far", summary.burnedSoFar)
+                        row("Eaten today", summary.eaten ?? 0)
+                    } header: {
+                        Text("Today")
+                    }
                     Section {
                         Text(metrics.maintenance.map { "Your maintenance is \(whole($0.maintenance).formatted()) kcal, worked out from \($0.loggedDays) fully logged days of food and your weight trend." }
                              ?? "Maintenance is estimated from your watch until there are 14 fully logged days of food and enough weigh-ins.")
@@ -742,10 +756,6 @@ private struct CalorieDetailsSheet: View {
                                 .font(.footnote)
                                 .foregroundStyle(Theme.secondaryText)
                         }
-                        if let target = metrics.calorieTarget {
-                            row("Daily target", target, bold: true)
-                        }
-                        row("Eaten today", summary.eaten ?? 0)
                     } header: {
                         Text("Your real maintenance")
                     } footer: {
@@ -753,6 +763,9 @@ private struct CalorieDetailsSheet: View {
                     }
                 }
             }
+            // Opaque, so the Today page doesn't show through at the medium detent.
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
             .navigationTitle("Calories")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -837,17 +850,35 @@ private struct HealthMonitor: View {
     @Environment(VitalsModel.self) private var vitals
     @Environment(AppRouter.self) private var router
     @State private var selected: VitalsModel.Stat?
+    /// Last night's sleep or what moved recovery, for the sleep and HRV tiles.
+    @State private var detail: MonitorDetail?
     /// Expanded by default: the user asked for more than four measures.
     @AppStorage("healthMonitorExpanded") private var expanded = true
+
+    private enum MonitorDetail: String, Identifiable {
+        case lastNight, recovery
+        var id: String { rawValue }
+    }
+
+    /// When a tile says "Normal" rather than "Higher/Lower than usual", and
+    /// what the header counts. App choices, not validated cut-offs: day-to-day
+    /// resting heart rate moves a few bpm and single-morning HRV moves a lot
+    /// without meaning anything (Buchheit, Front Physiol 2014; Plews et al.,
+    /// Eur J Appl Physiol 2012), so only changes beyond these are flagged.
+    static let restingHeartRateLimit = 5.0 // bpm either way from your normal
+    static let hrvDropLimit = -15.0 // % below your normal
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HealthMonitorHeader(verdict: summary)
             TileGrid {
-                opens("rhr") { rhrTile }
-                hrvTile
+                opens(heartRateStatID) { rhrTile }
+                hrvTileButton
                 opens("respiration") { respiratoryTile }
-                opens("sleepAverage") { sleepTile }
+                Button { detail = .lastNight } label: { sleepTile }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows last night's sleep")
+                    .accessibilityIdentifier("tile-sleepLastNight") // UI tests (ScreenshotTests)
                 ForEach(extras) { stat in
                     opens(stat.id) { HealthMonitorStatTile(stat: stat) }
                 }
@@ -860,8 +891,25 @@ private struct HealthMonitor: View {
         .sheet(item: $selected) { stat in
             VitalDetailView(stat: stat, colors: VitalTile.colors(for: stat.category))
                 .presentationDetents([.medium, .large])
+                .presentationBackground(Theme.background)
+        }
+        .sheet(item: $detail) { which in
+            Group {
+                switch which {
+                case .lastNight: LastNightSleepSheet()
+                case .recovery: RecoveryContributorsSheet()
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationBackground(Theme.background)
         }
     }
+
+    /// The tile shows the app's sleeping heart rate once recovery uses it
+    /// (`restingHeartRateSource`), so it opens that history, not Apple
+    /// Health's resting heart rate.
+    private var usesSleepingHeartRate: Bool { metrics.restingHeartRateSource == .sleeping }
+    private var heartRateStatID: String { usesSleepingHeartRate ? "sleepingHR" : "rhr" }
 
     /// Makes a tile open the same history view as on Health, when that stat exists.
     @ViewBuilder
@@ -876,6 +924,23 @@ private struct HealthMonitor: View {
         }
     }
 
+    /// HRV opens its history when Health has one, else what moved recovery
+    /// (HRV against your normal). Not wrapped while it shows its own
+    /// "Add HRV" / "Edit" button, so the two taps don't clash.
+    @ViewBuilder
+    private var hrvTileButton: some View {
+        if hrvActionTitle != nil {
+            hrvTile
+        } else if vitals.stat("hrv") != nil {
+            opens("hrv") { hrvTile }
+        } else {
+            Button { detail = .recovery } label: { hrvTile }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows what moved recovery")
+                .accessibilityIdentifier("tile-hrv") // UI tests (ScreenshotTests)
+        }
+    }
+
     /// The extra tiles with data today, in `HealthMonitorTiles.priority`
     /// order; none when collapsed.
     private var extras: [VitalsModel.Stat] {
@@ -885,12 +950,13 @@ private struct HealthMonitor: View {
 
     /// Everything on this card that's outside your normal today, the extra
     /// tiles included (`HealthMonitorTiles.flaggedIDs`; steps and the other
-    /// goals never count).
+    /// goals never count). Same limits as the tiles, so a tile that says
+    /// "Higher/Lower than usual" is always counted.
     private var summary: MetricVerdict? {
         guard let recovery = metrics.recovery, recovery.isCalibrated else { return nil }
         let flags = [
-            (recovery.hrvChangePercent ?? 0) < -15,
-            (recovery.restingHeartRateChange ?? 0) > 5,
+            (recovery.hrvChangePercent ?? 0) < Self.hrvDropLimit,
+            abs(recovery.restingHeartRateChange ?? 0) > Self.restingHeartRateLimit,
             metrics.respiratoryRate.map { !(12...20).contains($0) } ?? false,
             metrics.sleep.map { $0.asleep < $0.need * 0.9 } ?? false,
         ].filter { $0 }.count + HealthMonitorTiles.flagCount(extras)
@@ -904,17 +970,22 @@ private struct HealthMonitor: View {
         return min(1, max(0, (value - (mean - 2 * sd)) / (4 * sd)))
     }
 
+    /// "Normal" in one tone (green) on every tile, fixed and extra.
+    private static let normal = MetricTile.Status(text: "Normal", color: Theme.recoveryHigh)
+
     private var rhrTile: some View {
         let change = metrics.recovery?.restingHeartRateChange
+        let limit = Self.restingHeartRateLimit
         return MetricTile(
-            title: "Resting heart rate",
+            title: usesSleepingHeartRate ? "Sleeping heart rate" : "Resting heart rate",
             value: metrics.restingHeartRate.map { "\(whole($0.rounded()))" },
             unit: "bpm",
             spokenUnit: "beats per minute",
             status: change.map { delta -> MetricTile.Status in
-                delta <= 0
-                    ? MetricTile.Status(text: "Below normal", icon: "arrow.down", color: Theme.recoveryHigh)
-                    : MetricTile.Status(text: "Above normal", icon: "arrow.up", color: delta > 5 ? Theme.recoveryModerate : Theme.secondaryText)
+                if abs(delta) <= limit { return Self.normal }
+                return delta > 0
+                    ? MetricTile.Status(text: "Higher than usual", icon: "arrow.up", color: Theme.recoveryModerate)
+                    : MetricTile.Status(text: "Lower than usual", icon: "arrow.down", color: Theme.recoveryModerate)
             },
             gauge: position(metrics.restingHeartRate, mean: metrics.baseline?.meanRHR, sd: metrics.baseline?.sdRHR),
             color: Theme.heart,
@@ -922,23 +993,28 @@ private struct HealthMonitor: View {
         )
     }
 
+    private var hrvActionTitle: String? {
+        metrics.hrv == nil ? "Add HRV" : (metrics.hrvIsManual ? "Edit" : nil)
+    }
+
     private var hrvTile: some View {
         let change = metrics.recovery?.hrvChangePercent
         let logValue = metrics.hrv.map { log($0) }
+        let limit = Self.hrvDropLimit
         return MetricTile(
             title: "HRV",
             value: metrics.hrv.map { "\(whole($0.rounded()))" },
             unit: "ms",
             spokenUnit: "milliseconds",
             status: change.map { delta -> MetricTile.Status in
-                delta >= 0
-                    ? MetricTile.Status(text: "Above normal", icon: "arrow.up", color: Theme.recoveryHigh)
-                    : MetricTile.Status(text: "Below normal", icon: "arrow.down", color: delta < -15 ? Theme.recoveryModerate : Theme.secondaryText)
+                delta >= limit
+                    ? Self.normal
+                    : MetricTile.Status(text: "Lower than usual", icon: "arrow.down", color: Theme.recoveryModerate)
             },
             gauge: position(logValue, mean: metrics.baseline?.meanLogHRV, sd: metrics.baseline?.sdLogHRV),
             color: Theme.recoveryHigh,
             lightColor: Theme.recoveryHighLight,
-            actionTitle: metrics.hrv == nil ? "Add HRV" : (metrics.hrvIsManual ? "Edit" : nil),
+            actionTitle: hrvActionTitle,
             onAction: onEnterHRV
         )
     }
@@ -952,7 +1028,7 @@ private struct HealthMonitor: View {
             unit: "/min",
             spokenUnit: "breaths per minute",
             status: rate.map { _ -> MetricTile.Status in
-                normal ? MetricTile.Status(text: "Normal") : MetricTile.Status(text: "Unusual", color: Theme.recoveryModerate)
+                normal ? Self.normal : MetricTile.Status(text: "Unusual", color: Theme.recoveryModerate)
             },
             gauge: rate.map { min(1, max(0, ($0 - 8) / 16)) },
             color: Theme.oxygen,
@@ -960,14 +1036,16 @@ private struct HealthMonitor: View {
         )
     }
 
+    /// Last night, against your sleep need (Settings), the same numbers the
+    /// sleep sheet it opens shows.
     private var sleepTile: some View {
         let sleep = metrics.sleep
         return MetricTile(
-            title: "Sleep",
+            title: "Sleep, last night",
             value: sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
             status: sleep.map { night -> MetricTile.Status in
                 night.asleep >= night.need * 0.9
-                    ? MetricTile.Status(text: "Normal")
+                    ? Self.normal
                     : MetricTile.Status(text: "Short", color: Theme.recoveryModerate)
             },
             gauge: sleep.map { min(1, $0.asleep / max($0.need * 1.3, 1)) },

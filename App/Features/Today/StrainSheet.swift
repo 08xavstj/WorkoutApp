@@ -48,6 +48,7 @@ private struct StrainGoalCard: View {
 
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
+    @Environment(WeeklyPlanStore.self) private var plans
 
     var body: some View {
         if let target = metrics.targetStrain {
@@ -69,12 +70,13 @@ private struct StrainGoalCard: View {
     private func content(target: ClosedRange<Double>) -> some View {
         let current = metrics.strain?.strain ?? 0
         let status = StrainPlanner().status(current: current, target: target)
-        let suggestions = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions)
+        let suggestions = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions, planned: plannedToday)
         return VStack(alignment: .leading, spacing: 16) {
             HStack {
                 CardLabel(text: "Today's range")
                 Spacer()
-                StrainStatusChip(status: status)
+                // Before any activity, "Not started" rather than "Below range" at 7 am.
+                StrainStatusChip(status: status, notStarted: current < 0.5 && metrics.activities.isEmpty)
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(strainText(current))
@@ -113,6 +115,20 @@ private struct StrainGoalCard: View {
         .card()
     }
 
+    /// Today's planned session, unless one was already done today or the
+    /// plan says rest, at the length Today's Start button offers (the short
+    /// version on an easy day), so the options list it first.
+    private var plannedToday: PlannedDay? {
+        guard metrics.dayGuidance?.isRestDay != true, var today = plans.todayPlan() else { return nil }
+        let weekday = Calendar.current.component(.weekday, from: .now)
+        let done = plans.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
+        guard !done.contains(weekday) else { return nil }
+        if metrics.dayGuidance?.kind == .easyTraining {
+            today.minutes = min(today.shortVersionMinutes, today.minutes)
+        }
+        return today
+    }
+
     /// Shown when Apple Watch exercise minutes filled gaps in heart rate
     /// (`StrainCalculator.movementReserveFraction`).
     private var movementNote: String? {
@@ -138,8 +154,18 @@ private struct StrainGoalCard: View {
 /// "In range" / "Below range" / "Above range" (ux-audit.md 4.7).
 private struct StrainStatusChip: View {
     let status: StrainPlanner.Status
+    var notStarted = false
 
     var body: some View {
+        if notStarted {
+            Chip(text: "Not started", color: Theme.secondaryText)
+        } else {
+            statusChip
+        }
+    }
+
+    @ViewBuilder
+    private var statusChip: some View {
         switch status {
         case .below:
             Chip(text: "Below range", color: Theme.secondaryText)

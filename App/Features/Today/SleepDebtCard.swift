@@ -75,11 +75,11 @@ struct LastNightSleepSheet: View {
             row("Woke up", "\(sleep.interruptions) time\(sleep.interruptions == 1 ? "" : "s")", detail: "Awake 5 minutes or more.")
             if let regularity = metrics.sleepConsistency {
                 // UK Biobank median about 81; the benefit sat in the top quintiles, ~85+ (Windred 2024).
-                row("Regularity", "\(regularity) / 100", detail: "Sleep Regularity Index over the last week. " + SleepRegularity.indexNote(regularity))
+                row("Regularity, 7 nights", "\(regularity) / 100", detail: SleepRegularity.indexNote(regularity))
             }
             if let shift = SleepMidpointShift.current(metrics.sleepNights) {
                 // Social jet lag: weekday vs weekend sleep midpoint, 1-hour target (Phillips 2017).
-                row("Weekend shift", shift.text, detail: shift.note + " Target: within about 1 hour (\(shift.weekdayNights) weekday and \(shift.weekendNights) weekend nights).")
+                row("Weekend shift", shift.text, detail: shift.note)
             }
         }
         .card()

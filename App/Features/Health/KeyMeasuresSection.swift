@@ -130,7 +130,7 @@ private struct MicronutrientsKeyRow: View {
             title: "Vitamins & minerals",
             value: "\(low)",
             unit: "low this week",
-            verdict: MetricVerdict(low == 0 ? "Near target" : "Fix in food", color: low == 0 ? Theme.recoveryHigh : Theme.recoveryModerate),
+            verdict: MetricVerdict(low == 0 ? "Near target" : "See what to fix", color: low == 0 ? Theme.recoveryHigh : Theme.recoveryModerate),
             hint: "Shows what to fix",
             destination: MicronutrientsPage()
         )

@@ -75,18 +75,47 @@ struct LiftGoalProjectionTests {
     }
 
     @Test func advancedLiftersGetAWiderLowerEdge() throws {
-        let novice = LiftGoalProjection.project(samples: samples([91, 94, 97, 100]), targetKg: 110, trainingStatus: .novice, now: now)
-        let advanced = LiftGoalProjection.project(samples: samples([91, 94, 97, 100]), targetKg: 110, trainingStatus: .advanced, now: now)
+        // A slow trend (+0.2 kg a week, about 5% in 6 months) under every
+        // training-status ceiling, so only the band's lower edge differs.
+        // (Before QA round 1 this used +1 kg a week, which advanced lifters
+        // now have capped; see `slopeIsCappedByTrainingStatus`.)
+        let slow = samples([97.6, 98.2, 98.8, 99.4])
+        let novice = LiftGoalProjection.project(samples: slow, targetKg: 110, trainingStatus: .novice, now: now)
+        let advanced = LiftGoalProjection.project(samples: slow, targetKg: 110, trainingStatus: .advanced, now: now)
         let noviceRange = try #require(novice.range)
         let advancedRange = try #require(advanced.range)
-        #expect(abs(advancedRange.lowerBound - 97.91) < 0.01)
-        #expect(advancedRange.upperBound == noviceRange.upperBound)
-        #expect(advanced.reachFrom == novice.reachFrom)
-        // The lower edge no longer reaches 110 kg within 6 months.
-        #expect(advanced.reachBy == nil)
+        #expect(!novice.slopeCapped && !advanced.slopeCapped)
+        #expect(advancedRange.lowerBound < noviceRange.lowerBound)
+        #expect(abs(advancedRange.upperBound - noviceRange.upperBound) < 1e-9)
         #expect(advanced.widenedForTrainingAge)
         #expect(!novice.widenedForTrainingAge)
         #expect(LiftGoalProjection.lowerEdgeFactor(.intermediate) == 1.5)
+        let line = try #require(LiftGoalProjection.rangeLine(advanced, weight: kg, month: month))
+        #expect(line.hasSuffix(" Progress usually slows, so the low end is more likely."))
+    }
+
+    @Test func slopeIsCappedByTrainingStatus() throws {
+        // +1 kg a week from 100 kg is 26% in 6 months: under the untrained/novice
+        // ceiling (40%, ACSM 2009), over the advanced one (10%).
+        let fast = samples([91, 94, 97, 100])
+        let novice = LiftGoalProjection.project(samples: fast, targetKg: 110, trainingStatus: .novice, now: now)
+        let advanced = LiftGoalProjection.project(samples: fast, targetKg: 110, trainingStatus: .advanced, now: now)
+        #expect(!novice.slopeCapped)
+        #expect(advanced.slopeCapped)
+        let fit = try #require(advanced.fit)
+        #expect(abs(fit.slopePerWeek - 100 * 0.10 / 26) < 1e-9)
+        // The line now reaches 110 kg only at the 6-month mark, not after 10 weeks.
+        let range = try #require(advanced.range)
+        #expect(range.upperBound < 125)
+        #expect(LiftGoalProjection.maximumGainFraction(.intermediate) == 0.20)
+        #expect(LiftGoalProjection.maximumGainFraction(nil) == 0.40)
+        let line = try #require(LiftGoalProjection.rangeLine(advanced, weight: kg, month: month))
+        #expect(line.contains("faster than lifters at your level usually keep up"))
+        // 117 kg intermediate bench: never more than +20% (about 140 kg) on the line by 6 months.
+        let bench = [9.0, 6, 3, 0].enumerated().map { LiftGoalProjection.Sample(date: now.addingTimeInterval(-$1 * week), kg: 99 + 6 * Double($0)) }
+        let projected = LiftGoalProjection.project(samples: bench, targetKg: 150, trainingStatus: .intermediate, now: now)
+        let benchFit = try #require(projected.fit)
+        #expect(benchFit.value(weeksAhead: 26) <= benchFit.intercept + 117 * 0.20 + 1e-9)
     }
 
     @Test func notOnTheCurrentTrend() {

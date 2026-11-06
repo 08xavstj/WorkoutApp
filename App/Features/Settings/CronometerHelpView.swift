@@ -9,7 +9,7 @@ struct CronometerHelpView: View {
         HealthDetailPage(title: "Using Cronometer") {
             HelpCard(title: "Turn on sharing", lines: [
                 "In Cronometer, open its settings, find Apple Health under connected apps and devices, and turn on exporting nutrition.",
-                "In Apple Health, tap your profile picture → Apps → Cronometer, and check it can write Energy Consumed, Protein, Carbohydrates, Fat, Fiber and Water.",
+                "In Apple Health, tap your profile picture › Apps › Cronometer, and check it can write Energy Consumed, Protein, Carbohydrates, Fat, Fiber and Water.",
                 "In Tensile, allow reading the same types: Settings › Data sources › Ask for Apple Health access.",
             ])
             HelpCard(title: "What Tensile gets", lines: [

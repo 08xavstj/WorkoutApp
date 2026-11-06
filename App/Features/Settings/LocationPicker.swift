@@ -18,6 +18,19 @@ struct LocationPicker: View {
     var body: some View {
         SheetNavigationStack(isSheet: !pushed) {
             List {
+                // Where you are now comes first, with Remove right under it.
+                if settings.hasLocation {
+                    Section {
+                        LabeledContent("Current city", value: settings.placeName)
+                        Button("Remove location", role: .destructive) {
+                            settings.placeName = ""
+                            settings.latitude = 0
+                            settings.longitude = 0
+                            Task { await conditions.refresh(settings: settings, force: true) }
+                            dismiss()
+                        }
+                    }
+                }
                 Section {
                     Button {
                         Task { await useCurrentLocation() }
@@ -52,19 +65,6 @@ struct LocationPicker: View {
                     }
                 } header: {
                     if !results.isEmpty { Text("Results") }
-                }
-                if settings.hasLocation {
-                    Section {
-                        Button("Remove location", role: .destructive) {
-                            settings.placeName = ""
-                            settings.latitude = 0
-                            settings.longitude = 0
-                            Task { await conditions.refresh(settings: settings, force: true) }
-                            dismiss()
-                        }
-                    } footer: {
-                        Text("Current: \(settings.placeName)")
-                    }
                 }
             }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search for your city")

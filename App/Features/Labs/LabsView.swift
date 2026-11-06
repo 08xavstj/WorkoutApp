@@ -34,13 +34,15 @@ struct LabsView: View {
                         emptyState
                     }
                     ForEach(panels) { panel in
-                        SectionTitle(text: panel.name)
+                        // One date for the panel goes in its header, so rows don't truncate.
+                        let sharedDay = Self.sharedDay(panel.results)
+                        SectionTitle(text: panel.name, trailing: sharedDay.map(LabsView.dayText))
                         VStack(spacing: 0) {
                             ForEach(panel.results) { result in
                                 NavigationLink {
                                     LabMarkerDetailView(key: result.groupKey)
                                 } label: {
-                                    LabRow(result: result, history: labs.history(for: result.groupKey))
+                                    LabRow(result: result, history: labs.history(for: result.groupKey), showsDate: sharedDay == nil)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -71,6 +73,19 @@ struct LabsView: View {
         }
     }
 
+    /// "Sep 22", with the year only when it isn't this year.
+    static func dayText(_ date: Date) -> String {
+        Calendar.current.isDate(date, equalTo: .now, toGranularity: .year)
+            ? date.formatted(.dateTime.month(.abbreviated).day())
+            : date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    /// The day every result in a panel was taken, or nil when they differ.
+    private static func sharedDay(_ results: [LabResult]) -> Date? {
+        let days = Set(results.map { Calendar.current.startOfDay(for: $0.date) })
+        return days.count == 1 ? days.first : nil
+    }
+
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Track blood tests over time: cholesterol, HbA1c, ferritin, vitamin D, thyroid, testosterone, kidney and liver markers. Type results in from your report.")
@@ -92,6 +107,12 @@ struct LabsView: View {
 private struct LabRow: View {
     let result: LabResult
     let history: [LabResult]
+    var showsDate = true
+
+    /// The lab's flag and the guideline disagree (vitamin D 20-30 ng/mL).
+    private var guidelineNote: String? {
+        result.markerID.flatMap { LabMarkers.guidelineNote(markerID: $0, value: result.value, unit: result.unit, labLow: result.referenceLow) }
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -99,11 +120,11 @@ private struct LabRow: View {
                 Text(result.name)
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
-                Text([result.rangeText.map { "Range \($0)" }, result.date.formatted(date: .abbreviated, time: .omitted)]
+                Text([result.rangeText.map { "Range \($0)" }, showsDate ? LabsView.dayText(result.date) : nil]
                     .compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
@@ -112,9 +133,14 @@ private struct LabRow: View {
                     .monospacedDigit()
                     .foregroundStyle(Theme.primaryText)
                 if let status = result.status {
-                    Text(status.rawValue)
+                    Text(guidelineNote == nil ? status.rawValue : "Below lab range")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(LabStatusColor.color(status))
+                }
+                if guidelineNote != nil {
+                    Text("Above IOM line")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
                 }
             }
             Image(systemName: "chevron.right")
@@ -165,6 +191,13 @@ struct LabMarkerDetailView: View {
                     }
                     if let status = latest.status {
                         Chip(text: status.rawValue + (latest.rangeText.map { " · range \($0)" } ?? ""), color: LabStatusColor.color(status))
+                    }
+                    // Lab flag and guideline disagree (vitamin D 20-30 ng/mL): say both.
+                    if let note = LabMarkers.guidelineNote(markerID: key, value: latest.value, unit: latest.unit, labLow: latest.referenceLow) {
+                        Text(note)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     // A second line for people who train (e.g. ferritin under 30 µg/L), inside the lab range or not.
                     if let note = LabMarkers.trainingNote(markerID: key, value: latest.value, unit: latest.unit) {

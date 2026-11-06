@@ -55,6 +55,17 @@ enum LiftGoalHistory {
         return goal.name
     }
 
+    /// "125 kg" or "1.5 × body weight": the target without the lift's name.
+    static func targetText(_ goal: LiftGoal, unit: WeightUnit) -> String {
+        if let multiple = goal.bodyweightMultiple, multiple > 0 {
+            return "\(multiple.formatted(.number.precision(.fractionLength(0...2)))) × body weight"
+        }
+        if let target = goal.targetKg {
+            return weightText(target, unit: unit)
+        }
+        return goal.name
+    }
+
     static func headline(_ projection: LiftGoalProjection.Projection, unit: WeightUnit) -> String {
         LiftGoalProjection.headline(projection, weight: { weightText($0, unit: unit) }, month: { monthText($0) })
     }
@@ -128,7 +139,7 @@ private struct LiftGoalStatusChip: View {
     var body: some View {
         switch status {
         case .reached: Chip(text: "Reached", color: Theme.recoveryHigh)
-        case .onTrend: Chip(text: "On the current trend", color: Theme.lifting)
+        case .onTrend: Chip(text: "On the current trend", color: Theme.recoveryHigh)
         case .possible: Chip(text: "Possible", color: Theme.secondaryText)
         case .notOnTrend: Chip(text: "Open", color: Theme.secondaryText)
         case .needsMoreData: Chip(text: "Building history", color: Theme.secondaryText)
@@ -193,6 +204,13 @@ private struct LiftGoalChart: View {
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
         }
         .chartYScale(domain: .automatic(includesZero: false))
+        // Every other month, dropping labels that would collide, so the last one isn't clipped.
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .month, count: 2)) { _ in
+                AxisGridLine()
+                AxisValueLabel(format: .dateTime.month(.abbreviated), collisionResolution: .greedy)
+            }
+        }
         .frame(height: 180)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Estimated one-rep max over the last 12 weeks, with the projected range and the target line")
@@ -228,6 +246,16 @@ struct LiftGoalsSection: View {
     }
 }
 
+/// Fitness › Progress › Lift goals: every goal card on its own page, so the
+/// row opens the goals rather than the whole Strength page.
+struct LiftGoalsDetailView: View {
+    var body: some View {
+        FitnessDetailPage(title: "Lift goals") {
+            LiftGoalsSection()
+        }
+    }
+}
+
 /// The goal cards for one exercise, for its progress page (nothing without a goal).
 struct LiftGoalProgressSection: View {
     let exerciseID: String
@@ -255,21 +283,28 @@ struct LiftGoalsMetricRow: View {
                                        trainingStatus: metrics.trainingStatus)
         }
         let percent = projection?.progress.map { "\(Int(($0 * 100).rounded()))%" }
-        let unitText = first.map { "of " + LiftGoalHistory.title($0, unit: gym.liftingUnit) } ?? "Set a target lift"
+        // Short pieces so nothing truncates: the lift in the title, the target in the unit.
+        let unitText = first.map { "of " + LiftGoalHistory.targetText($0, unit: gym.liftingUnit) } ?? "Set a target lift"
+        let title: String
+        if let first {
+            title = goals.count > 1 ? "Lift goals (\(goals.count)) · \(first.name)" : "\(first.name) goal"
+        } else {
+            title = "Lift goal"
+        }
         return MetricRow(
-            title: goals.count > 1 ? "Lift goals (\(goals.count))" : "Lift goal",
+            title: title,
             value: percent,
             unit: unitText,
             verdict: verdict(projection?.status),
             hint: "Shows your lift goals and where the trend is heading",
-            destination: StrengthDetailView()
+            destination: LiftGoalsDetailView()
         )
     }
 
     private func verdict(_ status: LiftGoalProjection.Status?) -> MetricVerdict? {
         switch status {
         case .reached: MetricVerdict("Reached", color: Theme.recoveryHigh)
-        case .onTrend: MetricVerdict("On the current trend", color: Theme.lifting)
+        case .onTrend: MetricVerdict("On the current trend", color: Theme.recoveryHigh)
         default: nil
         }
     }

@@ -10,6 +10,35 @@ struct BodyAgeTests {
         #expect(result.factors.first?.name == "Fitness (VO₂ max)")
     }
 
+    @Test func aGoodVO2MaxNeverAddsYears() throws {
+        // One reference (FRIEND) for the label and the fitness age: "Good" or
+        // better can't make the body age older.
+        for sex in BiologicalSex.allCases {
+            for age in stride(from: 18, through: 90, by: 3) {
+                let median = Biomarkers.medianVO2Max(age: age, sex: sex)
+                for share in [0.95, 0.97, 1.0, 1.05, 1.09, 1.2, 1.4] {
+                    let vo2 = median * share
+                    let label = Biomarkers.vo2MaxLabel(vo2, age: age, sex: sex)
+                    #expect(label != "Poor" && label != "Fair")
+                    let result = try #require(BodyAge.estimate(BodyAge.Inputs(age: age, sex: sex, vo2Max: vo2, restingHeartRate: 60)))
+                    let fitness = try #require(result.factors.first { $0.name == "Fitness (VO₂ max)" })
+                    #expect(fitness.years <= 0, "\(sex) \(age) \(share)")
+                }
+            }
+        }
+    }
+
+    @Test func aFairVO2MaxAddsYearsWithoutAJump() throws {
+        let median = Biomarkers.medianVO2Max(age: 40, sex: .male)
+        func years(_ share: Double) throws -> Double {
+            let result = try #require(BodyAge.estimate(BodyAge.Inputs(age: 40, sex: .male, vo2Max: median * share, restingHeartRate: 60)))
+            return try #require(result.factors.first { $0.name == "Fitness (VO₂ max)" }).years
+        }
+        #expect(try years(0.94) > 0)
+        #expect(try years(0.94) < 1)
+        #expect(try years(0.75) > years(0.85))
+    }
+
     @Test func poorFitnessMakesYouOlderButIsCapped() throws {
         let inputs = BodyAge.Inputs(age: 30, sex: .male, vo2Max: 32, restingHeartRate: 80, dailySteps: 3_000, bmi: 32)
         let result = try #require(BodyAge.estimate(inputs))
@@ -65,14 +94,16 @@ struct BodyAgeTests {
     }
 
     @Test func wholeYearsWithAFiveYearRange() throws {
-        // Fit 30-year-old: −3.9 (VO₂ max) − 1.0 (RHR) − 1.8 (steps) ≈ 23.3 → 23, shown as "about 23 (18–28)".
+        // Fit 30-year-old: −7.2 (VO₂ max 55 is far above the FRIEND median of
+        // 45.2, a fitness age of 18) − 1.0 (RHR) − 1.8 (steps) ≈ 20.0, shown as
+        // "about 20 (18–25)". (It was 23 on the higher HUNT3 means.)
         let inputs = BodyAge.Inputs(age: 30, sex: .male, vo2Max: 55, restingHeartRate: 50, sleepHours: 7.5, dailySteps: 11_000)
         let result = try #require(BodyAge.estimate(inputs))
-        #expect(result.bodyAge == 23)
+        #expect(result.bodyAge == 20)
         #expect(result.bodyAge == result.bodyAge.rounded())
-        #expect(result.years == 23)
-        #expect(result.range == 18...28)
-        #expect(result.rangeLabel == "about 23 (18–28)")
+        #expect(result.years == 20)
+        #expect(result.range == 18...25)
+        #expect(result.rangeLabel == "about 20 (18–25)")
         #expect(BodyAge.uncertaintyYears == 5)
         // The range never dips below 18.
         let young = try #require(BodyAge.estimate(BodyAge.Inputs(age: 20, sex: .male, vo2Max: 60, restingHeartRate: 45, dailySteps: 12_000)))

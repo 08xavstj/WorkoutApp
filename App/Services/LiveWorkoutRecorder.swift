@@ -27,6 +27,16 @@ final class LiveWorkoutRecorder: NSObject {
     /// left over from a different session is discarded first, so its start
     /// time is never saved with this workout.
     func start(at start: Date) async {
+        // Demo mode never starts a real workout session (it brings up the
+        // system's "Health and Fitness Data" notice); it shows a steady
+        // made-up heart rate instead.
+        guard !DemoMode.isOn else {
+            sessionStart = start
+            heartRate = 124
+            averageHeartRate = 116
+            maximumHeartRate = 148
+            return
+        }
         guard HKHealthStore.isHealthDataAvailable() else { return }
         if isRecording {
             if sessionStart == start { return }
@@ -55,7 +65,14 @@ final class LiveWorkoutRecorder: NSObject {
             isRecording = true
             problem = nil
         } catch {
-            problem = "Live heart rate isn't available: \(error.localizedDescription)"
+            // A plain next step instead of HealthKit's raw "Not authorized".
+            let code = (error as NSError).code
+            let denied = (error as NSError).domain == HKErrorDomain
+                && (code == HKError.Code.errorAuthorizationDenied.rawValue
+                    || code == HKError.Code.errorAuthorizationNotDetermined.rawValue)
+            problem = denied
+                ? "Allow heart rate in Settings › Health › Tensile"
+                : "Live heart rate isn't available right now"
             workoutSession = nil
             builder = nil
         }

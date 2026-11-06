@@ -641,6 +641,8 @@ struct MetricTile: View {
             VerticalRangeGauge(value: gauge, color: color, lightColor: lightColor)
                 .frame(height: 78)
         }
+        // Fills its grid row so tiles side by side are the same height.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .card()
         .modifier(TileAccessibility(isCombined: actionTitle == nil || onAction == nil, label: spokenLabel))
     }
@@ -754,9 +756,14 @@ struct Sparkline: View {
     let values: [DatedValue]
     let color: Color
     var showsArea = true
+    /// The smallest y span, so a tiny change isn't drawn as a cliff
+    /// (`ChartScale`); nil uses 10% of the typical value.
+    var minimumSpan: Double? = nil
 
     var body: some View {
         let average = values.isEmpty ? nil : values.map(\.value).reduce(0, +) / Double(values.count)
+        let span = minimumSpan ?? ChartScale.minimumSpan(unit: "", typical: average ?? 0)
+        let domain = ChartScale.domain(values.map(\.value), minimumSpan: span) ?? 0...1
         Chart {
             if let average, values.count > 1 {
                 RuleMark(y: .value("Average", average))
@@ -765,7 +772,8 @@ struct Sparkline: View {
             }
             ForEach(values) { point in
                 if showsArea {
-                    AreaMark(x: .value("Date", point.date), y: .value("Value", point.value))
+                    // From the bottom of the visible range, not from zero.
+                    AreaMark(x: .value("Date", point.date), yStart: .value("Floor", domain.lowerBound), yEnd: .value("Value", point.value))
                         .foregroundStyle(LinearGradient(colors: [color.opacity(0.32), color.opacity(0)], startPoint: .top, endPoint: .bottom))
                         .interpolationMethod(.catmullRom)
                 }
@@ -787,7 +795,7 @@ struct Sparkline: View {
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
-        .chartYScale(domain: .automatic(includesZero: false))
+        .chartYScale(domain: domain)
         .accessibilityHidden(true)
     }
 }

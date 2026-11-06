@@ -59,6 +59,9 @@ struct FinishWorkoutSheet: View {
                     Text(errorMessage).foregroundStyle(Theme.recoveryLowText)
                 }
             }
+            // Opaque at the medium detent (a part-height sheet is see-through glass by default).
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
             .navigationTitle("Finish workout")
             // Effort already rated on the Apple Watch (`WatchSync`) pre-fills the slider.
             .task { if let rated = session.sessionRPE { rpe = Double(max(1, min(10, rated))) } }
@@ -98,6 +101,7 @@ struct FinishWorkoutSheet: View {
                 Button("Cancel", role: .cancel) {}
             }
         }
+        .presentationBackground(Theme.background)
     }
 
     /// "Workout effort (1–10)" and the rating; stacked at accessibility text

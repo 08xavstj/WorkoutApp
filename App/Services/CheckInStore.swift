@@ -92,14 +92,15 @@ final class CheckInStore {
         for morning in saved.mornings.values where morning.day >= start {
             guard let mood = morning.mood else { continue }
             samples.append(MoodSample(
-                date: morning.day.addingTimeInterval(8 * 3600), valence: MoodScale.valence(mood: mood), kind: .daily,
+                // The check-in has no clock time: 8 am, never later than now.
+                date: min(Date.now, morning.day.addingTimeInterval(8 * 3600)), valence: MoodScale.valence(mood: mood), kind: .daily,
                 labels: morning.feelings ?? [], associations: morning.associations ?? [], fromThisApp: true
             ))
         }
         for evening in saved.evenings.values where evening.day >= start {
             guard let valence = evening.eveningValence else { continue }
             samples.append(MoodSample(
-                date: evening.day.addingTimeInterval(21 * 3600), valence: valence, kind: .momentary,
+                date: min(Date.now, evening.day.addingTimeInterval(21 * 3600)), valence: valence, kind: .momentary,
                 labels: evening.feelings ?? [], associations: evening.associations ?? [], fromThisApp: true
             ))
         }

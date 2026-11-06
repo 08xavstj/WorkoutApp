@@ -70,7 +70,10 @@ struct WaistCard: View {
     let goals: Goals?
     let openHistory: (VitalsModel.Stat) -> Void
     @State private var value: Double?
-    @State private var unit: LengthUnit = Locale.current.measurementSystem == .metric ? .centimeters : .inches
+    /// Follows the app's weight unit (kg → cm, lb → in), not the phone's region.
+    @State private var unit: LengthUnit = .centimeters
+    @State private var unitChosen = false
+    @Environment(UserSettings.self) private var settings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 90
     @ScaledMetric(relativeTo: .body) private var pickerWidth: CGFloat = 110
@@ -102,6 +105,11 @@ struct WaistCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(tint: Theme.nutrition)
+        .onAppear {
+            guard !unitChosen else { return }
+            unitChosen = true
+            unit = settings.weightUnit == .pounds ? .inches : .centimeters
+        }
     }
 
     private var entryRow: some View {
@@ -109,7 +117,7 @@ struct WaistCard: View {
         let stacked = dynamicTypeSize.isAccessibilitySize
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
         return layout {
-            TextField(unit == .centimeters ? "84" : "33", value: $value, format: .number.precision(.fractionLength(0...1)))
+            TextField(unit == .centimeters ? "cm" : "in", value: $value, format: .number.precision(.fractionLength(0...1)))
                 .keyboardType(.decimalPad)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: fieldWidth)

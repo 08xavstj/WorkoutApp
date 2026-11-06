@@ -64,9 +64,12 @@ struct RecordsSection: View {
                 HealthNavigationRow(title: "Lab results", detail: labsDetail, icon: "testtube.2") {
                     LabsView(pushed: true)
                 }
-                Divider()
-                HealthNavigationRow(title: "Blood pressure", detail: bloodPressureDetail, icon: "heart.text.square", color: Theme.heart) {
-                    BloodPressureView(pushed: true)
+                // Key measures lists blood pressure once there's a reading; here only until then.
+                if vitals.stat("bp")?.value == nil {
+                    Divider()
+                    HealthNavigationRow(title: "Blood pressure", detail: bloodPressureDetail, icon: "heart.text.square", color: Theme.heart) {
+                        BloodPressureView(pushed: true)
+                    }
                 }
                 Divider()
                 HealthNavigationRow(title: "Body measurements", detail: measurementsDetail, icon: "ruler") {
@@ -77,7 +80,7 @@ struct RecordsSection: View {
                     ProgressPhotosPage()
                 }
                 Divider()
-                HealthNavigationRow(title: "Medications", detail: medicationsDetail, icon: "pills.fill") {
+                HealthNavigationRow(title: "Medications & supplements", detail: medicationsDetail, icon: "pills.fill") {
                     MedicationsView(pushed: true)
                 }
                 Divider()
@@ -106,11 +109,9 @@ struct RecordsSection: View {
         return "\(summary) · \(Self.ago(last))"
     }
 
+    /// Shown only before the first reading (Key measures carries the 7-day average after that).
     private var bloodPressureDetail: String {
-        guard let bp = vitals.stat("bp"), let value = bp.value, let last = bp.series.last else {
-            return "Cuff readings and the 7-day home check"
-        }
-        return "\(value) mmHg · \(Self.ago(last.date))"
+        "Cuff readings and the 7-day home check"
     }
 
     private var measurementsDetail: String {

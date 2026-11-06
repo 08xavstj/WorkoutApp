@@ -85,6 +85,30 @@ public enum LiftGoalProjection {
         }
     }
 
+    /// The most a lift is projected to gain over the 6-month horizon, as a
+    /// share of today's e1RM, by training status. From the ACSM position
+    /// stand's typical strength gains: about 40% in untrained, 20% in
+    /// moderately trained, 16% in trained, 10% in advanced lifters
+    /// (Ratamess et al., ACSM Position Stand, Med Sci Sports Exerc
+    /// 2009;41:687–708, after Kraemer & Ratamess 2004). Those figures span
+    /// studies of 4 weeks to 2 years, so the evidence for a weekly rate is
+    /// coarse: using them as a 6-month ceiling is an app choice, there to stop
+    /// a fast few weeks becoming "+50 kg by spring". Novice (under 6
+    /// consistent months) and unknown status count as untrained, intermediate
+    /// as moderately trained.
+    public static func maximumGainFraction(_ status: TrainingStatus?) -> Double {
+        switch status {
+        case .intermediate: 0.20
+        case .advanced: 0.10
+        default: 0.40
+        }
+    }
+
+    /// The steepest line the projection draws, kg a week, from `reference` kg.
+    public static func maximumSlopePerWeek(reference: Double, status: TrainingStatus?) -> Double {
+        max(0, reference) * maximumGainFraction(status) / maximumWeeksAhead
+    }
+
     // MARK: Series
 
     public struct Sample: Sendable, Equatable, Identifiable {
@@ -226,6 +250,9 @@ public enum LiftGoalProjection {
         public var recent: [Sample]
         /// True when the lower edge is widened for training status.
         public var widenedForTrainingAge: Bool
+        /// True when the trend was steeper than `maximumSlopePerWeek` and
+        /// the line was drawn at that ceiling instead.
+        public var slopeCapped = false
 
         /// Latest e1RM as a share of the target (0...1).
         public var progress: Double? {
@@ -254,7 +281,14 @@ public enum LiftGoalProjection {
             projection.status = .reached
             return projection
         }
-        guard let line = fit(samples, now: now) else { return projection }
+        guard var capped = fit(samples, now: now) else { return projection }
+        // No faster than typical gains for this training level (`maximumGainFraction`).
+        let ceiling = maximumSlopePerWeek(reference: latest ?? capped.intercept, status: trainingStatus)
+        if capped.slopePerWeek > ceiling {
+            capped.slopePerWeek = ceiling
+            projection.slopeCapped = true
+        }
+        let line = capped
         projection.fit = line
 
         let horizonWeeks = horizon.timeIntervalSince(now) / week
@@ -325,11 +359,11 @@ public enum LiftGoalProjection {
             let soon = from.timeIntervalSince(now) <= nowDays * 86_400
             if let by = projection.reachBy {
                 let byText = month(by)
-                return soon ? "At your last 12 weeks' rate, \(target) is within range now and likely by \(byText)."
+                return soon ? "At your last 12 weeks' rate, \(target) could come within weeks and is likely by \(byText)."
                     : "At your last 12 weeks' rate, \(target) falls between \(month(from)) and \(byText)."
             }
             let endText = month(projection.horizon)
-            return soon ? "At your last 12 weeks' rate, \(target) is within range now; past \(endText) is too far to say more."
+            return soon ? "At your last 12 weeks' rate, \(target) could come within weeks; past \(endText) is too far to say more."
                 : "At your last 12 weeks' rate, \(target) comes into range from about \(month(from))."
         case .possible:
             return "At your last 12 weeks' rate, \(target) is possible by \(month(projection.horizon)), but the trend line gets there later."
@@ -351,8 +385,11 @@ public enum LiftGoalProjection {
             if low.hasSuffix(unit) { low = String(low.dropLast(unit.count)) }
         }
         var line = "If the last 12 weeks continue: likely \(low)–\(high) by \(month(projection.horizon)) (a rough 2-in-3 range)."
+        if projection.slopeCapped {
+            line += " Your recent rate was faster than lifters at your level usually keep up, so the line is drawn at that pace."
+        }
         if projection.widenedForTrainingAge {
-            line += " Gains slow with training years, so the lower edge is wider."
+            line += " Progress usually slows, so the low end is more likely."
         }
         return line
     }
@@ -368,5 +405,5 @@ public enum LiftGoalProjection {
     }
 
     /// The note under the chart.
-    public static let evidenceNote = "The projection is arithmetic, not a forecast: a straight line through your last 12 weeks of estimated 1RMs (sets of 10 reps or fewer). The band is a rough 2-in-3 range for the session-to-session spread, wider further ahead; it's \"on trend\" only when the line itself reaches the target. It stops at 6 months because gains usually slow. Setting goals helps people train more (McEwan 2016 meta-analysis), but specific goals that feel out of reach can backfire (Swann 2021), so treat the target as a direction, not a test."
+    public static let evidenceNote = "The projection is arithmetic, not a forecast: a straight line through your last 12 weeks of estimated 1RMs (sets of 10 reps or fewer). The band is a rough 2-in-3 range for the session-to-session spread, wider further ahead; it's \"on trend\" only when the line itself reaches the target. It's never steeper than typical gains for your training level (ACSM 2009), and it stops at 6 months because gains usually slow. Setting goals helps people train more (McEwan 2016 meta-analysis), but specific goals that feel out of reach can backfire (Swann 2021), so treat the target as a direction, not a test."
 }

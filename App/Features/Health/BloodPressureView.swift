@@ -98,7 +98,10 @@ struct BloodPressureView: View {
 
     private var weekCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            CardLabel(text: "7-day home check", color: Theme.heart)
+            CardLabel(text: check.isReliable || check.readingsUsed == 0
+                      ? "7-day home check"
+                      : "Check in progress (\(min(check.readingsUsed, HomeBloodPressure.recommendedReadings)) of \(HomeBloodPressure.recommendedReadings))",
+                      color: Theme.heart)
             if let systolic = check.systolic, let diastolic = check.diastolic, let category = check.category {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("\(Int(systolic.rounded()))/\(Int(diastolic.rounded()))")
@@ -106,15 +109,19 @@ struct BloodPressureView: View {
                         .fontDesign(.rounded)
                         .monospacedDigit()
                         .foregroundStyle(Theme.primaryText)
-                    Text("mmHg average")
+                    Text(check.isReliable ? "mmHg average" : "mmHg so far")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
                 }
-                Chip(text: category.rawValue, color: Self.color(for: category))
-                Text(HomeBloodPressure.advice(category))
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+                // A category from a few readings would be a guess: it shows once the
+                // check has its 12 readings (`HomeBloodPressure.recommendedReadings`).
+                if check.isReliable {
+                    Chip(text: category.rawValue, color: Self.color(for: category))
+                    Text(HomeBloodPressure.advice(category))
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 ProgressView(value: Double(min(check.readingsUsed, HomeBloodPressure.recommendedReadings)),
                              total: Double(HomeBloodPressure.recommendedReadings))
                     .tint(Theme.heart)

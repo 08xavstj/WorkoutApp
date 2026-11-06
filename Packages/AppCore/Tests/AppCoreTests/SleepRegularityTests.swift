@@ -172,8 +172,10 @@ struct MidpointShiftTests {
 
     @Test func indexNoteBandsFollowWindred() {
         // UK Biobank median about 81; benefit from about 85 (Windred 2024).
-        #expect(SleepRegularity.indexNote(90).contains("where the benefit is"))
-        #expect(SleepRegularity.indexNote(80).hasPrefix("80: about typical"))
-        #expect(SleepRegularity.indexNote(70).hasPrefix("70: below typical"))
+        // Plain wording (QA round 1): "92 of 100: above the 85 linked to better health (typical is 81)".
+        #expect(SleepRegularity.indexNote(92).hasPrefix("92 of 100: above the 85 linked to better health (typical is 81"))
+        #expect(SleepRegularity.indexNote(85).hasPrefix("85 of 100: at the 85"))
+        #expect(SleepRegularity.indexNote(80).hasPrefix("80 of 100: about typical"))
+        #expect(SleepRegularity.indexNote(70).hasPrefix("70 of 100: below typical"))
     }
 }

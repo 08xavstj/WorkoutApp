@@ -171,8 +171,10 @@ public enum StepGoal {
 extension CardioFitness {
     /// The average VO₂ max by age and sex from the HUNT3 reference data (Loe
     /// et al., PLoS One 2013: 3,816 healthy adults): about 54.4 ml/kg/min at 25
-    /// for men falling 0.40 a year, 43.0 and 0.30 for women. The same decline
-    /// line `BodyAge` uses for its fitness factor.
+    /// for men falling 0.40 a year, 43.0 and 0.30 for women. Kept for
+    /// reference only: the app's norms, fitness age and body age all use the
+    /// FRIEND medians (`Biomarkers.medianVO2Max`), so the "Good" label and the
+    /// fitness age can't disagree (HUNT means run about 6 higher).
     public static func normLine(sex: BiologicalSex) -> (atTwentyFive: Double, perYear: Double) {
         sex == .male ? (54.4, 0.40) : (43.0, 0.30)
     }
@@ -183,14 +185,13 @@ extension CardioFitness {
         return max(15, line.atTwentyFive - line.perYear * (Double(age) - 25))
     }
 
-    /// "Fitness age": the age at which the average person has your VO₂ max
-    /// (the honest wearable fitness age, after Nes et al., Med Sci Sports
-    /// Exerc 2011 and Loe 2013), clamped to 18–90. It is an estimate from one
-    /// measure, so show it with `watchUncertaintyYears`.
-    public static func fitnessAge(vo2Max: Double, sex: BiologicalSex) -> Int {
-        let line = normLine(sex: sex)
-        let age = 25 + (line.atTwentyFive - vo2Max) / line.perYear
-        return Int(min(90, max(18, age)).rounded())
+    /// "Fitness age": the age whose FRIEND median VO₂ max matches yours
+    /// (`Biomarkers.fitnessAge`; Kaminsky et al., Mayo Clin Proc 2015; after
+    /// Nes et al., Med Sci Sports Exerc 2011), clamped to 18–90. With your age,
+    /// a VO₂ max at or above your age's median never reads older than you. It
+    /// is an estimate from one measure, so show it with `watchUncertaintyYears`.
+    public static func fitnessAge(vo2Max: Double, age: Int? = nil, sex: BiologicalSex) -> Int {
+        Int(Biomarkers.fitnessAge(vo2Max: vo2Max, age: age, sex: sex).rounded())
     }
 
     /// Half-width of the fitness-age range when VO₂ max is a watch estimate:

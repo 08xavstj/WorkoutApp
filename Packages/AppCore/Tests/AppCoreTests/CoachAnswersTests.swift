@@ -156,7 +156,7 @@ struct CoachAnswersTests {
     @Test func whyRecoveryListsContributors() {
         let answer = CoachAnswers.whyRecovery(facts)!
         #expect(answer.text.hasPrefix("Recovery is 55%: normal."))
-        #expect(answer.text.contains("Pulling it down: hrv (48 ms, 5% under your baseline)."))
+        #expect(answer.text.contains("Pulling it down: HRV (48 ms, 5% under your baseline)."))
         #expect(answer.text.contains("Helping: sleep (7.6 h, close to your need)."))
     }
 
@@ -273,12 +273,33 @@ struct CoachAnswersTests {
         #expect(CoachAnswers.fallback(for: "What's a good warm-up song?", facts: facts) == nil)
     }
 
+    @Test func whyRecoveryReadsAsSentences() {
+        var f = facts
+        f.recoveryContributors = [
+            RecoveryContributor(id: "rhr", name: "Sleeping heart rate", detail: "53 bpm, +2 vs your usual 51",
+                                note: "Higher than usual often means stress, alcohol, illness or hard training.", effect: .lowers, weight: 3),
+            RecoveryContributor(id: "hrv", name: "Last night's HRV", detail: "43 ms, -5% vs your usual 45 ms", effect: .lowers, weight: 2),
+            RecoveryContributor(id: "sleep", name: "Sleep", detail: "Score 92 of 100", effect: .raises, weight: 2),
+        ]
+        let text = CoachAnswers.whyRecovery(f)!.text
+        #expect(text.contains("Pulling it down: sleeping heart rate (53 bpm, +2 vs your usual 51); last night's HRV (43 ms, -5% vs your usual 45 ms)."))
+        #expect(text.contains("Helping: sleep (score 92 of 100)."))
+        #expect(!text.contains("Higher than usual"))
+        #expect(!text.contains(".)"))
+    }
+
+    @Test func contributorExplanationJoinsTheNote() {
+        let item = RecoveryContributor(id: "rhr", name: "RHR", detail: "53 bpm", note: "Higher than usual.", effect: .lowers)
+        #expect(item.explanation == "53 bpm. Higher than usual.")
+        #expect(RecoveryContributor(id: "x", name: "X", detail: "Fine.", effect: .neutral).explanation == "Fine.")
+    }
+
     @Test func whyRecoveryKeepsContextOutOfTheReasons() {
         var f = facts
         f.recoveryContributors.append(RecoveryContributor(id: "sleepDebt", name: "Sleep debt", detail: "4.0 h behind your need.", effect: .lowers))
         f.recoveryContributors.append(RecoveryContributor(id: "alcohol", name: "Alcohol", detail: "2 drinks last night.", effect: .lowers))
         let answer = CoachAnswers.whyRecovery(f)!
-        #expect(answer.text.contains("Pulling it down: hrv (48 ms, 5% under your baseline)."))
+        #expect(answer.text.contains("Pulling it down: HRV (48 ms, 5% under your baseline)."))
         #expect(answer.text.contains("Also worth knowing: sleep debt: 4.0 h behind your need; alcohol: 2 drinks last night."))
     }
 

@@ -35,6 +35,8 @@ struct LogView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
+            // A solid edge under the title, so rows don't smear over the Start gradient.
+            .scrollEdgeEffectStyle(.hard, for: .top)
             .background(alignment: .top) {
                 TopGlow(colors: [Theme.Wash.rose, Theme.Wash.peach, Theme.Wash.butter])
             }
@@ -47,8 +49,9 @@ struct LogView: View {
     }
 
     /// Daily logs first (HRV, drinks), then weekly, monthly, yearly.
+    /// No "Log" header: the screen's title already says it.
     private var logSection: some View {
-        Section("Log") {
+        Section {
             Button { router.showHRVEntry = true } label: {
                 LogRow(title: "Overnight HRV", detail: "Type it or measure with the camera", icon: "waveform.path.ecg")
             }

@@ -84,7 +84,7 @@ enum DemoData {
 
     /// Lose weight slowly while building muscle and strength, with two lift goals.
     static func goals(_ demo: DemoHealth) -> Goals {
-        let bench = LiftGoal(exerciseID: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", targetKg: 125,
+        let bench = LiftGoal(exerciseID: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", targetKg: 100,
                              targetDate: demo.day(-120))
         let squat = LiftGoal(exerciseID: "Barbell_Squat", name: "Back Squat", bodyweightMultiple: 2)
         return Goals(weight: .lose, weeklyRatePercent: 0.5, focuses: [.muscle, .strength], targetWeightKg: 78,
@@ -146,7 +146,19 @@ enum DemoData {
             evening.caffeineMg = 175
             evening.drinks = demo.dayValue(.alcoholicDrinks, daysAgo).map { Int($0) } ?? 0
             evening.stress = 2 + (DemoHealth.noise(daysAgo, 83) > 0.4 ? 1 : 0)
-            evening.mood = 4
+            // A seeded mix of evenings (mostly good, a few stressed or tired
+            // ones after drinks or a long day), with words, like a real log.
+            let roll = DemoHealth.noise(daysAgo, 84)
+            let mood = roll > 0.35 ? 5 : (roll > -0.45 ? 4 : (roll > -0.8 ? 3 : 2))
+            evening.mood = mood
+            let feelings: [MoodFeeling] = switch mood {
+            case 5: [.happy, .content]
+            case 4: roll > 0 ? [.calm] : [.content, .grateful]
+            case 3: [.drained]
+            default: [.stressed, .anxious]
+            }
+            evening.feelings = feelings.map(\.rawValue)
+            evening.associations = (mood >= 4 ? [MoodAssociation.fitness, .friends] : [.work]).map(\.rawValue)
             store.save(evening)
         }
         PainLogStore.shared.log([PainReport(area: .knee, level: 4, worseAfterTraining: true,
@@ -164,8 +176,13 @@ enum DemoData {
             Medication(name: "Cetirizine", dose: "10 mg", startDate: demo.day(20), notes: "As needed for hay fever"),
         ]
         MedicationStore.save(medications)
-        for dose in MedicationStore.doses(on: demo.now) where dose.time < demo.now && dose.name == "Creatine" {
-            MedicationStore.markTaken(dose.id, at: dose.time)
+        // Every daily supplement taken on time for the last two weeks (one
+        // missed magnesium), so the vitamins page counts them.
+        for daysAgo in 0..<14 {
+            for dose in MedicationStore.doses(on: demo.day(daysAgo)) where dose.time < demo.now {
+                if dose.name == "Magnesium" && daysAgo == 5 { continue }
+                MedicationStore.markTaken(dose.id, at: dose.time.addingTimeInterval(4 * 60))
+            }
         }
     }
 
@@ -176,14 +193,14 @@ enum DemoData {
         store.addWaist(centimeters: 89, date: demo.day(62))
         store.addWaist(centimeters: 87.5, date: demo.day(33))
         store.addWaist(centimeters: 86, date: demo.day(4))
+        // The dominant hand only, as grip norms use (Dodds et al. 2014).
         store.addGrip(kilograms: 47, hand: .right, date: demo.day(40))
-        store.addGrip(kilograms: 44, hand: .left, date: demo.day(40))
     }
 
     private static func seedLabs(_ demo: DemoHealth) {
         let date = demo.day(45)
         LabsModel().add([
-            LabResult(name: "LDL cholesterol", markerID: "ldl", value: 112, unit: "mg/dL", referenceHigh: 130, date: date, panel: "Lipids"),
+            LabResult(name: "LDL cholesterol", markerID: "ldl", value: 112, unit: "mg/dL", referenceHigh: 100, date: date, panel: "Lipids"),
             LabResult(name: "HDL cholesterol", markerID: "hdl", value: 52, unit: "mg/dL", referenceLow: 40, date: date, panel: "Lipids"),
             LabResult(name: "HbA1c", markerID: "hba1c", value: 5.3, unit: "%", referenceHigh: 5.7, date: date, panel: "Blood sugar"),
             LabResult(name: "Ferritin", markerID: "ferritin", value: 110, unit: "ng/mL", referenceLow: 30, referenceHigh: 400,
@@ -196,7 +213,8 @@ enum DemoData {
     // MARK: Workouts
 
     /// One lift in the demo sessions: sets × reps, a starting weight that
-    /// rises a little each session, rounded to what the gym can load.
+    /// rises a little each session, rounded down to what the gym can load, so
+    /// bench goes up 2.5 kg every 2-3 weeks with flat weeks between.
     private struct Lift {
         let id: String
         let name: String
@@ -213,18 +231,18 @@ enum DemoData {
     }
 
     private static let upperLifts = [
-        Lift(id: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", sets: 4, reps: 6, startKg: 77.5, stepKg: 1.25, roundKg: 2.5, warmUp: true),
-        Lift(id: "Bent_Over_Barbell_Row", name: "Barbell Row", sets: 3, reps: 8, startKg: 60, stepKg: 1.25, roundKg: 2.5),
-        Lift(id: "Dumbbell_Shoulder_Press", name: "Dumbbell Shoulder Press", sets: 3, reps: 10, startKg: 20, stepKg: 0.5, roundKg: 2),
+        Lift(id: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", sets: 4, reps: 6, startKg: 77.5, stepKg: 0.5, roundKg: 2.5, warmUp: true),
+        Lift(id: "Bent_Over_Barbell_Row", name: "Barbell Row", sets: 3, reps: 8, startKg: 60, stepKg: 0.5, roundKg: 2.5),
+        Lift(id: "Dumbbell_Shoulder_Press", name: "Dumbbell Shoulder Press", sets: 3, reps: 10, startKg: 20, stepKg: 0.2, roundKg: 2),
         Lift(id: "Wide-Grip_Lat_Pulldown", name: "Lat Pulldown", sets: 3, reps: 10, startKg: 55, stepKg: 0.5, roundKg: 5),
         Lift(id: "Side_Lateral_Raise", name: "Lateral Raise", sets: 3, reps: 15, startKg: 8, stepKg: 0.2, roundKg: 2),
         Lift(id: "Triceps_Pushdown_-_Rope_Attachment", name: "Rope Pushdown", sets: 3, reps: 12, startKg: 25, stepKg: 0.4, roundKg: 5),
     ]
 
     private static let lowerLifts = [
-        Lift(id: "Barbell_Squat", name: "Back Squat", sets: 4, reps: 5, startKg: 100, stepKg: 1.7, roundKg: 2.5, warmUp: true),
-        Lift(id: "Romanian_Deadlift", name: "Romanian Deadlift", sets: 3, reps: 8, startKg: 80, stepKg: 1.25, roundKg: 2.5),
-        Lift(id: "Leg_Press", name: "Leg Press", sets: 3, reps: 10, startKg: 120, stepKg: 2.5, roundKg: 5),
+        Lift(id: "Barbell_Squat", name: "Back Squat", sets: 4, reps: 5, startKg: 100, stepKg: 0.6, roundKg: 2.5, warmUp: true),
+        Lift(id: "Romanian_Deadlift", name: "Romanian Deadlift", sets: 3, reps: 8, startKg: 80, stepKg: 0.5, roundKg: 2.5),
+        Lift(id: "Leg_Press", name: "Leg Press", sets: 3, reps: 10, startKg: 120, stepKg: 1, roundKg: 5),
         Lift(id: "Seated_Leg_Curl", name: "Seated Leg Curl", sets: 3, reps: 12, startKg: 40, stepKg: 0.5, roundKg: 5),
         Lift(id: "Standing_Calf_Raises", name: "Standing Calf Raise", sets: 3, reps: 12, startKg: 70, stepKg: 1, roundKg: 5),
         Lift(id: "Cable_Crunch", name: "Cable Crunch", sets: 3, reps: 15, startKg: 35, stepKg: 0.4, roundKg: 5),
@@ -239,7 +257,8 @@ enum DemoData {
         for planned in demo.sessions.sorted(by: { $0.start < $1.start }) {
             let index = count[planned.focus, default: 0]
             count[planned.focus] = index + 1
-            let session = WorkoutSession(name: planned.focus == .upper ? "Upper Body" : "Lower Body", startedAt: planned.start)
+            // The same names as the saved workout ("Upper A") and the plan ("Upper").
+            let session = WorkoutSession(name: planned.focus == .upper ? "Upper A" : "Lower A", startedAt: planned.start)
             session.endedAt = planned.end
             session.sessionRPE = planned.rpe
             session.savedToHealth = true

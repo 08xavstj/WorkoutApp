@@ -18,6 +18,15 @@ final class ScreenshotTests: XCTestCase {
 
     override func setUp() async throws {
         continueAfterFailure = true
+        // Alerts that appear while the tour runs (notifications, the Health
+        // and Fitness Data notice) are answered as soon as the app is touched.
+        addUIInterruptionMonitor(withDescription: "System alerts") { alert in
+            for label in ["Allow", "OK", "Allow While Using App", "Continue", "Not Now"] where alert.buttons[label].exists {
+                alert.buttons[label].tap()
+                return true
+            }
+            return false
+        }
     }
 
     func testCaptureMainScreens() throws {
@@ -57,7 +66,7 @@ final class ScreenshotTests: XCTestCase {
                 dismissSheet(app)
             }
         }
-        for tile in ["rhr", "respiration", "sleepAverage"] {
+        for tile in ["rhr", "sleepingHR", "hrv", "respiration", "sleepLastNight"] {
             if tap(app, ["tile-\(tile)"], name: "Today \(tile) tile") {
                 capture(app, "today-tile-\(tile)", pages: 1)
                 dismissSheet(app)
@@ -70,7 +79,7 @@ final class ScreenshotTests: XCTestCase {
         }
         openTab(app, "Today")
         // The vitamins line under the macros pushes the micronutrients page.
-        if tap(app, ["Shows what to fix in your diet", "Vitamins"], name: "Today vitamins line") {
+        if tap(app, ["today-vitamins", "Vitamins and minerals", "Shows what to fix in your diet"], name: "Today vitamins line") {
             capture(app, "today-micronutrients", pages: 2)
             back(app)
         }
@@ -95,7 +104,7 @@ final class ScreenshotTests: XCTestCase {
             ("metric-Cardio fitness (VO₂ max)", "cardio-fitness"),
             ("metric-Strength", "strength"),
             ("metric-Muscles", "muscles"),
-            ("metric-Lift goals (2)", "lift-goals"),
+            ("metric-Lift goals (2) · Bench Press", "lift-goals"),
         ]
         for page in pages {
             openTab(app, "Fitness")
@@ -117,7 +126,7 @@ final class ScreenshotTests: XCTestCase {
         openTab(app, "Fitness")
         if tap(app, ["Workout history", "History"], name: "Fitness history") {
             capture(app, "history", pages: 1)
-            if tapFirstCell(app, name: "History first session") {
+            if tap(app, ["history-session"], name: "History first session", scroll: false) || tapFirstCell(app, name: "History first session") {
                 capture(app, "workout-detail", pages: 2)
                 if tap(app, ["Progress"], name: "Workout detail progress") {
                     capture(app, "lift-progress", pages: 2)
@@ -159,7 +168,8 @@ final class ScreenshotTests: XCTestCase {
             (["row-Body", "Body"], "category-body"),
             (["row-Breathing & temperature", "Breathing & temperature"], "category-breathing"),
             (["row-Lab results", "Lab results"], "labs"),
-            (["row-Blood pressure"], "blood-pressure"),
+            // Key measures carries blood pressure once there's a reading; Records until then.
+            (["metric-Blood pressure", "row-Blood pressure"], "blood-pressure"),
             (["row-Body measurements", "Body measurements"], "body-measurements"),
             (["row-Progress photos", "Progress photos"], "progress-photos"),
             (["row-Medications", "Medications"], "medications"),
@@ -207,7 +217,8 @@ final class ScreenshotTests: XCTestCase {
     private func tourSettings(_ app: XCUIApplication) {
         openTab(app, "Today")
         guard tap(app, ["Settings"], name: "Settings button", scroll: false) else { return }
-        capture(app, "settings", pages: 4)
+        // Reminders, Data sources, Appearance and About are sections of this page.
+        capture(app, "settings", pages: 7)
         let pages: [(keys: [String], name: String)] = [
             (["Goals"], "goals"),
             (["Gym equipment"], "gym"),
@@ -252,15 +263,21 @@ final class ScreenshotTests: XCTestCase {
         sleep(3)
         dismissSystemAlerts()
         capture(app, "active-workout", pages: 1)
-        for set in 1...3 {
-            if tap(app, ["Mark "], name: "Tick set \(set)") {
+        // One warm-up, then two working sets (the first "Mark" buttons are warm-ups).
+        let ticks: [(keys: [String], name: String)] = [
+            (["Mark warm-up set"], "Tick warm-up"),
+            (["Mark set 1 done", "Mark set "], "Tick set 1"),
+            (["Mark set 2 done", "Mark set "], "Tick set 2"),
+        ]
+        for tick in ticks {
+            if tap(app, tick.keys, name: tick.name) {
                 sleep(1)
                 // A rest timer may cover the list; the next set is still found by label.
             }
         }
         sleep(1)
         capture(app, "active-workout-sets", pages: 2)
-        if tap(app, ["Workout options"], name: "Workout options", scroll: false) {
+        if tap(app, ["workout-options", "Workout options"], name: "Workout options", scroll: false) {
             capture(app, "active-workout-menu", pages: 1)
             if !tap(app, ["Minimize"], name: "Minimize workout", scroll: false) { dismissSheet(app) }
         }
@@ -313,14 +330,16 @@ final class ScreenshotTests: XCTestCase {
         return app
     }
 
-    /// Taps "Allow" (or OK) on any system alert, e.g. the notification permission.
+    /// Taps "Allow" (or OK) on any system alert or notice, e.g. the
+    /// notification permission or the "Health and Fitness Data" notice,
+    /// which isn't always an `alerts` element.
     private func dismissSystemAlerts() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let labels = ["Allow", "OK", "Allow While Using App", "Continue"]
         for _ in 0..<3 {
             let alert = springboard.alerts.firstMatch
-            guard alert.exists else { return }
-            let buttons = ["Allow", "OK", "Allow While Using App", "Continue"]
-            guard let button = buttons.map({ alert.buttons[$0] }).first(where: { $0.exists }) else { return }
+            let scope: XCUIElement = alert.exists ? alert : springboard
+            guard let button = labels.map({ scope.buttons[$0] }).first(where: { $0.exists && $0.isHittable }) else { return }
             button.tap()
             sleep(1)
         }
@@ -447,16 +466,21 @@ final class ScreenshotTests: XCTestCase {
     /// moving (at most `pages` shots). `app.debugDescription` can't tell: it
     /// changes on every read (element addresses, the clock).
     private func capture(_ app: XCUIApplication, _ name: String, pages: Int) {
+        // Late alerts (the workout session's Health notice) come a moment after a screen opens.
+        dismissSystemAlerts()
+        sleep(1)
         dismissSystemAlerts()
         attach("\(name)-0")
         guard pages > 1 else { return }
         var previous = scrollPosition(app)
         for page in 1..<pages {
-            app.swipeUp(velocity: .slow)
+            // Swipe the page's own scroller (a sheet's Form, not the tab behind it).
+            (mainScrollContainer(app) ?? app).swipeUp(velocity: .slow)
             sleep(1)
             let current = scrollPosition(app)
             if current == previous { break }
             previous = current
+            dismissSystemAlerts()
             attach("\(name)-\(page)")
         }
     }
@@ -464,26 +488,36 @@ final class ScreenshotTests: XCTestCase {
     /// Where the page's content sits: the label and position of the first text
     /// in the frontmost full-height scroll view or list. The same after a swipe
     /// means the page is at its end.
+    /// Every full-height scroller counts, so a sheet's Form that moves is seen
+    /// even when the page behind it (also in the tree) stays still.
     private func scrollPosition(_ app: XCUIApplication) -> String {
-        let container: XCUIElement = mainScrollContainer(app) ?? app
-        let text = container.staticTexts.firstMatch
-        guard text.exists else { return "" }
-        let frame = text.frame
-        return "\(text.label)|\(Int(frame.minX.rounded())),\(Int(frame.minY.rounded()))"
+        let containers = scrollContainers(app)
+        let scopes: [XCUIElement] = containers.isEmpty ? [app] : containers
+        return scopes.map { container -> String in
+            let text = container.staticTexts.firstMatch
+            guard text.exists else { return "" }
+            let frame = text.frame
+            return "\(text.label)|\(Int(frame.minX.rounded())),\(Int(frame.minY.rounded()))"
+        }.joined(separator: ";")
     }
 
     /// The page's own scroller: taller than half the window and covering its
     /// centre (so horizontal chip rows don't count). The last one in the tree
     /// is the frontmost, e.g. a sheet's list over the tab behind it.
     private func mainScrollContainer(_ app: XCUIApplication) -> XCUIElement? {
+        scrollContainers(app).last
+    }
+
+    /// Scrollers taller than half the window that cover its centre, in tree order.
+    private func scrollContainers(_ app: XCUIApplication) -> [XCUIElement] {
         let types: [XCUIElement.ElementType] = [.scrollView, .collectionView, .table]
         let predicate = NSPredicate(format: "elementType IN %@", types.map { NSNumber(value: $0.rawValue) } as NSArray)
         let window = app.windows.firstMatch.frame
         let centre = CGPoint(x: window.midX, y: window.midY)
         let candidates = app.descendants(matching: .any).matching(predicate).allElementsBoundByIndex
-        return candidates.last { element in
+        return candidates.filter { element in
             let frame = element.frame
-            return frame.height > window.height / 2 && frame.contains(centre)
+            return frame.height > window.height / 2 && frame.contains(centre) && element.isHittable
         }
     }
 

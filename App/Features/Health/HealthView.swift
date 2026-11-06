@@ -124,7 +124,8 @@ struct HRVBaselineCard: View {
             HStack {
                 CardLabel(text: "HRV baseline")
                 Spacer()
-                Text("90 days")
+                // Geometric mean of 90 nights; the coach and Recovery use a 30-night baseline.
+                Text("90-day average")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -152,9 +153,12 @@ struct HRVBaselineCard: View {
                 .foregroundStyle(Theme.secondaryText)
             Spacer()
             if let change = biology.hrvChangePercent {
+                // Neutral while the 7-day average is in your normal range, so an
+                // amber arrow never sits next to a green "in range".
+                let inRange = metrics.recovery?.hrvTrend?.status == .within
                 Chip(
                     text: "\(change >= 0 ? "↑" : "↓") \(whole(abs(change).rounded()))% vs last month",
-                    color: change >= 0 ? Theme.recoveryHigh : Theme.recoveryModerate
+                    color: inRange ? Theme.secondaryText : (change >= 0 ? Theme.recoveryHigh : Theme.recoveryModerate)
                 )
             }
         }
@@ -179,7 +183,16 @@ private struct HRVBaselineChart: View {
     let series: [DatedValue]
     let trend: RecoveryCalculator.HRVTrend?
 
+    /// From the data (and band and baseline), padded, at least 10 ms tall:
+    /// an area from zero flattens 40-50 ms into a straight line (`ChartScale`).
+    private var domain: ClosedRange<Double> {
+        var values = series.map(\.value) + [baseline]
+        if let trend { values += [trend.normalRange.lowerBound, trend.normalRange.upperBound] }
+        return ChartScale.domain(values, minimumSpan: ChartScale.minimumSpan(unit: "ms", typical: baseline)) ?? 0...100
+    }
+
     var body: some View {
+        let scale = domain
         Chart {
             if let trend {
                 RectangleMark(
@@ -191,13 +204,8 @@ private struct HRVBaselineChart: View {
             RuleMark(y: .value("Baseline", baseline))
                 .foregroundStyle(Theme.secondaryText.opacity(0.5))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                .annotation(position: .top, alignment: .leading) {
-                    Text("Baseline \(whole(baseline.rounded()))")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.secondaryText)
-                }
             ForEach(series) { point in
-                AreaMark(x: .value("Date", point.date), y: .value("HRV", point.value))
+                AreaMark(x: .value("Date", point.date), yStart: .value("Floor", scale.lowerBound), yEnd: .value("HRV", point.value))
                     .foregroundStyle(LinearGradient(colors: [Theme.recoveryHigh.opacity(0.3), Theme.oxygen.opacity(0.0)], startPoint: .top, endPoint: .bottom))
                     .interpolationMethod(.catmullRom)
                 LineMark(x: .value("Date", point.date), y: .value("HRV", point.value))
@@ -205,9 +213,22 @@ private struct HRVBaselineChart: View {
                     .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.catmullRom)
             }
+            // Drawn last, on a capsule, so the line never runs through the label.
+            RuleMark(y: .value("Baseline", baseline))
+                .foregroundStyle(.clear)
+                .annotation(position: .top, alignment: .leading) {
+                    Text("Baseline \(whole(baseline.rounded()))")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.card.opacity(0.9), in: .capsule)
+                }
         }
-        .chartYScale(domain: .automatic(includesZero: false))
+        .chartYScale(domain: scale)
         .chartYAxis(.hidden)
+        // Room after the last day so the last month label isn't cut off.
+        .chartXScale(range: .plotDimension(endPadding: 18))
         .chartXAxis {
             AxisMarks(values: .stride(by: .month)) { _ in
                 AxisValueLabel(format: .dateTime.month(.abbreviated))
@@ -271,7 +292,8 @@ struct VitalTile: View {
                 Text(status)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textColor(for: Self.color(for: stat.tone)))
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
             trendVisual(main: main)
@@ -296,7 +318,7 @@ struct VitalTile: View {
                     .lineLimit(1)
             }
         } else {
-            Text("No data")
+            Text(stat.emptyText ?? "No data")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -305,7 +327,9 @@ struct VitalTile: View {
     @ViewBuilder
     private func trendVisual(main: Color) -> some View {
         if stat.series.count > 1 {
-            Sparkline(values: Array(stat.series.suffix(30)), color: main)
+            let recent = Array(stat.series.suffix(30))
+            let typical = recent.map(\.value).reduce(0, +) / Double(max(1, recent.count))
+            Sparkline(values: recent, color: main, minimumSpan: ChartScale.minimumSpan(unit: stat.unit, typical: typical))
                 .frame(height: 34)
         } else if let gauge = stat.gauge {
             GeometryReader { geo in
@@ -334,9 +358,10 @@ struct BodyAgeCard: View {
             HStack {
                 CardLabel(text: "Body age")
                 Spacer()
-                Text(result?.confidence.label ?? "Estimate")
+                // How many inputs it has, not a "confidence" verdict next to a ±5-year range.
+                Text(result.map { "\($0.factors.count) of \(BodyAge.factorSlots) factors" } ?? "Estimate")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(result?.confidence == .high ? Theme.recoveryHighText : Theme.secondaryText)
+                    .foregroundStyle(Theme.secondaryText)
             }
             if let result {
                 summary(result)
@@ -348,7 +373,7 @@ struct BodyAgeCard: View {
                         FactorRow(factor: factor)
                     }
                 }
-                Text("\(result.confidence.label): \(result.confidenceReason) Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. Shown as whole years with a ±\(BodyAge.uncertaintyYears)-year range because only the parts, not the sum, have been tested in studies. An estimate, not a medical test.")
+                Text("\(result.confidenceReason) Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. Shown as whole years with a ±\(BodyAge.uncertaintyYears)-year range because only the parts, not the sum, have been tested in studies. An estimate, not a medical test.")
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
             } else {
@@ -406,11 +431,22 @@ struct BodyAgeCard: View {
                 Text("Likely \(result.rangeLabel)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
-                Text(nearAge || !younger ? "Fitness, sleep and steps are the quickest ways to bring this down." : "Your fitness, sleep and steps look better than typical for your age.")
+                Text(Self.leverLine(result, younger: younger, nearAge: nearAge))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
         }
+    }
+}
+
+extension BodyAgeCard {
+    /// Names the factor adding the most years instead of a generic tip.
+    static func leverLine(_ result: BodyAge.Result, younger: Bool, nearAge: Bool) -> String {
+        if let top = result.topAgeingFactor {
+            let added = top.years.formatted(.number.precision(.fractionLength(1)))
+            return "\(top.name) adds the most (+\(added) y)."
+        }
+        return younger && !nearAge ? "Nothing here is adding years." : "Nothing here is adding years; it's about your age."
     }
 }
 
@@ -421,7 +457,13 @@ private struct FactorRow: View {
     @ScaledMetric(relativeTo: .subheadline) private var valueWidth: CGFloat = 56
 
     private var helps: Bool { factor.years <= 0 }
-    private var color: Color { helps ? Theme.recoveryHigh : Theme.recoveryModerate }
+    /// Under a twentieth of a year shows as "0 y" in grey, with no bar.
+    private var isZero: Bool { abs(factor.years) < 0.05 }
+    private var color: Color { isZero ? Theme.secondaryText : (helps ? Theme.recoveryHigh : Theme.recoveryModerate) }
+    private var yearsText: String {
+        if isZero { return "0 y" }
+        return "\(helps ? "−" : "+")\(abs(factor.years).formatted(.number.precision(.fractionLength(1)))) y"
+    }
 
     var body: some View {
         // Name beside the bar normally; above it at accessibility sizes.
@@ -439,7 +481,7 @@ private struct FactorRow: View {
             if !stacked { Spacer(minLength: 8) }
             HStack(spacing: 10) {
                 bar
-                Text("\(helps ? "−" : "+")\(abs(factor.years).formatted(.number.precision(.fractionLength(1)))) y")
+                Text(yearsText)
                     .font(.subheadline.weight(.bold))
                     .monospacedDigit()
                     .foregroundStyle(Theme.textColor(for: color))
@@ -457,10 +499,12 @@ private struct FactorRow: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Theme.track).frame(height: 6)
                 Rectangle().fill(Theme.secondaryText.opacity(0.4)).frame(width: 1.5, height: 12).offset(x: half - 0.75)
-                Capsule()
-                    .fill(LinearGradient(colors: helps ? [Theme.recoveryHighLight, color] : [Theme.recoveryModerateLight, color], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(4, length), height: 6)
-                    .offset(x: helps ? half - max(4, length) : half)
+                if !isZero {
+                    Capsule()
+                        .fill(LinearGradient(colors: helps ? [Theme.recoveryHighLight, color] : [Theme.recoveryModerateLight, color], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(4, length), height: 6)
+                        .offset(x: helps ? half - max(4, length) : half)
+                }
             }
             .frame(height: 12)
             .frame(maxHeight: .infinity)
@@ -495,7 +539,7 @@ struct InsightsCard: View {
             if insights.isEmpty {
                 Text(daysLeft > 0
                      ? "Do the morning and evening check-ins for \(daysLeft) more day\(daysLeft == 1 ? "" : "s") and your personal patterns appear here: what lowers your HRV, raises your resting heart rate or hurts your sleep."
-                     : "No clear patterns yet. Keep checking in; patterns need a few days with and without each habit.")
+                     : "No clear patterns yet. Each habit needs at least 7 check-in days with it and 7 without (drinks, late caffeine, a late workout), plus that morning's HRV or sleep.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -538,7 +582,8 @@ struct MicronutrientsCard: View {
             emptyCard
         } else {
             WhatToFixCard(findings: Micronutrients.toFix(findings), sex: settings.sex, focuses: settings.goals.focuses)
-            FineNutrientsCard(findings: findings.filter { $0.kind != .low })
+            TooHighNutrientsCard(findings: Micronutrients.tooHigh(findings))
+            FineNutrientsCard(findings: findings.filter { $0.kind == .ok })
             MicronutrientsFooter()
         }
     }
@@ -585,6 +630,7 @@ private struct WhatToFixCard: View {
 private struct NutrientFixRow: View {
     let finding: Micronutrients.Finding
     let note: String?
+    @Environment(LabsModel.self) private var labs
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -597,11 +643,94 @@ private struct NutrientFixRow: View {
             ForEach(Micronutrients.fixes(for: finding)) { fix in
                 FoodFixLine(fix: fix, unit: finding.nutrient.unit)
             }
-            if let note {
+            NutrientContextLines(finding: finding)
+            // With a blood test on file, the test line replaces "a test settles it".
+            if let note, NutrientContextLines.latestLab(for: finding.nutrient, in: labs) == nil {
                 Text(note)
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
+        }
+    }
+}
+
+/// Under a nutrient: what supplements add (or that doses aren't marked yet)
+/// and the latest blood test for it, e.g. "Your Sep 22 test: 24 ng/mL".
+private struct NutrientContextLines: View {
+    let finding: Micronutrients.Finding
+    @Environment(MedicationsModel.self) private var medications
+    @Environment(LabsModel.self) private var labs
+
+    static func latestLab(for nutrient: Micronutrients.Nutrient, in labs: LabsModel) -> LabResult? {
+        guard let id = nutrient.labMarkerID else { return nil }
+        return labs.latest.first { $0.groupKey == id }
+    }
+
+    var body: some View {
+        let listed = SupplementNutrients.listed(for: finding.nutrient, in: medications.medications)
+        let names = listed.map { [$0.name, $0.dose].filter { !$0.isEmpty }.joined(separator: " ") }.joined(separator: ", ")
+        let source = names.isEmpty ? "supplements" : names
+        VStack(alignment: .leading, spacing: 4) {
+            if finding.fromSupplements > 0 {
+                line("pills.fill", "Includes \(nutrientAmount(finding.fromSupplements)) \(finding.nutrient.unit) a day from \(source)")
+            } else if !names.isEmpty {
+                line("pills", "You take \(names): mark doses in Log to count them")
+            }
+            if let lab = Self.latestLab(for: finding.nutrient, in: labs) {
+                line("drop.fill", labText(lab))
+            }
+        }
+    }
+
+    private func labText(_ lab: LabResult) -> String {
+        let value = lab.value.formatted(.number.precision(.fractionLength(0...1)))
+        let date = lab.date.formatted(.dateTime.month(.abbreviated).day())
+        var text = "Your \(date) test: \(value) \(lab.unit)"
+        if let markerID = lab.markerID,
+           let note = LabMarkers.guidelineNote(markerID: markerID, value: lab.value, unit: lab.unit, labLow: lab.referenceLow) {
+            text += ". " + note
+        } else if let status = lab.status {
+            text += " (\(status.rawValue.lowercased()))"
+        }
+        return text
+    }
+
+    private func line(_ icon: String, _ text: String) -> some View {
+        Label {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: icon).foregroundStyle(Theme.secondaryText)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Nutrients over their upper limit, each with its warning; kept apart from
+/// "Fine" so a red sodium line never sits under a green heading.
+private struct TooHighNutrientsCard: View {
+    let findings: [Micronutrients.Finding]
+
+    var body: some View {
+        if !findings.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                CardLabel(text: "Too high", color: Theme.recoveryLow)
+                ForEach(findings) { finding in
+                    VStack(alignment: .leading, spacing: 4) {
+                        NutrientAmountLine(finding: finding, color: Theme.recoveryLow)
+                        if let effect = finding.effect {
+                            Text(effect)
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        NutrientContextLines(finding: finding)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .card()
         }
     }
 }
@@ -663,7 +792,7 @@ private struct NutrientAmountLine: View {
     }
 }
 
-/// Nutrients at or over target, collapsed; high ones carry their warning.
+/// Nutrients near or over target but under the upper limit, collapsed.
 private struct FineNutrientsCard: View {
     let findings: [Micronutrients.Finding]
     @State private var expanded = false
@@ -674,12 +803,8 @@ private struct FineNutrientsCard: View {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(findings) { finding in
                         VStack(alignment: .leading, spacing: 4) {
-                            NutrientAmountLine(finding: finding, color: finding.kind == .high ? Theme.recoveryLow : Theme.recoveryHigh)
-                            if let effect = finding.effect {
-                                Text(effect)
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondaryText)
-                            }
+                            NutrientAmountLine(finding: finding, color: Theme.recoveryHigh)
+                            NutrientContextLines(finding: finding)
                         }
                     }
                 }
@@ -699,8 +824,8 @@ private struct FineNutrientsCard: View {
 private struct MicronutrientsFooter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Needs at least 4 logged days and averages the last 7, using what your food app (Cronometer) shares with Apple Health and its food database. Only nutrients it shares are shown, and supplements count only if you log them.")
-            Text("Targets are US RDAs and Adequate Intakes for your sex and age (NIH Office of Dietary Supplements): population targets, not a test of you. Low intake is a reason to check, not proof of deficiency; a blood test settles iron, vitamin D and B12. Food amounts come from USDA FoodData Central.")
+            Text("Needs at least 4 logged days and averages the last 7, using what your food app (Cronometer) shares with Apple Health and its food database. Only nutrients it shares are shown. Supplements in your list count on days you mark them taken.")
+            Text("Targets are US RDAs and Adequate Intakes for your sex and age (NIH Office of Dietary Supplements): population targets, not a test of you. Low intake is a reason to check, not proof of deficiency; a blood test (ferritin, vitamin D, B12) tells you more than intake. Food amounts come from USDA FoodData Central.")
         }
         .font(.caption2)
         .foregroundStyle(Theme.secondaryText)

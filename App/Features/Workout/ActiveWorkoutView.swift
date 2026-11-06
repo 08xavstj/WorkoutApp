@@ -33,7 +33,10 @@ struct ActiveWorkoutView: View {
     @State private var savedTemplate = false
     /// Exercise order → superset group for this session (`SupersetRegistry`).
     @State private var supersetGroups: [Int: Int] = [:]
-    @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 52
+    /// The set to bring to the middle of the screen once a set is ticked.
+    @State private var scrollTarget: PersistentIdentifier?
+    /// The elapsed time in the pinned header; scales with Dynamic Type.
+    @ScaledMetric(relativeTo: .title2) private var timerSize: CGFloat = 24
     /// Strain number inside the ring; scales with Dynamic Type (ux-audit W5).
     @ScaledMetric(relativeTo: .title2) private var ringValueSize: CGFloat = 26
     /// At accessibility text sizes the strain ring goes under the timer
@@ -43,56 +46,51 @@ struct ActiveWorkoutView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    headerBar
-                    titleBlock
-                    LiveHeartRateBar(recorder: recorder, profile: metrics.heartRateProfile)
-                    // Reads the shared timer each second, so +15s / Skip on the
-                    // Lock Screen show up here too.
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        if let ends = RestTimerStore.endsAt {
-                            RestTimerPill(endsAt: ends, length: RestTimerStore.length) { change in
-                                if let change {
-                                    RestTimerStore.adjust(by: change)
-                                } else {
-                                    RestTimerStore.stop()
-                                }
-                                Task { await WorkoutLiveActivity.refresh() }
-                                WatchSync.shared.update(from: session) // Apple Watch rest timer
+                ScrollViewReader { proxy in
+                    workoutContent
+                        // A ticked set brings the next one (and its editor) to the
+                        // middle of the screen, so you don't scroll between sets.
+                        .onChange(of: scrollTarget) { _, target in
+                            guard let target else { return }
+                            Task {
+                                // Let a newly opened exercise card lay out first.
+                                try? await Task.sleep(for: .milliseconds(250))
+                                withAnimation { proxy.scrollTo(target, anchor: .center) }
+                                scrollTarget = nil
                             }
                         }
+                }
+            }
+            // Elapsed time and Finish stay pinned at the top, with the PR banner
+            // under them, wherever you've scrolled to.
+            .safeAreaBar(edge: .top, spacing: 0) {
+                VStack(spacing: 6) {
+                    headerBar
+                    if let recordBanner {
+                        RecordBannerView(banner: recordBanner) { self.recordBanner = nil }
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    // Movement warm-up before the first lift (`WarmUpStore`); the Watch
-                    // mirrors the current step and can advance it (`WatchSync`).
-                    WarmUpPhaseCard(sessionStart: session.startedAt) {
-                        WatchSync.shared.update(from: session)
-                    }
-                    ForEach(session.orderedExercises) { exercise in
-                        exerciseCard(exercise)
-                    }
-                    Button {
-                        showingPicker = true
-                    } label: {
-                        Label("Add exercise", systemImage: "plus")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Theme.card, in: .capsule)
-                            .overlay(Capsule().strokeBorder(Theme.separator))
-                    }
-                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 32)
-                .lockedToScreenWidth()
+                .padding(.bottom, 6)
             }
-            // The PR banner sits over the top of the screen, wherever you've scrolled to.
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if let recordBanner {
-                    RecordBannerView(banner: recordBanner) { self.recordBanner = nil }
+            // The rest timer stays at the bottom, in thumb reach. It reads the shared
+            // timer each second, so +15s / Skip on the Lock Screen show up here too.
+            .safeAreaBar(edge: .bottom, spacing: 0) {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    if let ends = RestTimerStore.endsAt {
+                        RestTimerPill(endsAt: ends, length: RestTimerStore.length) { change in
+                            if let change {
+                                RestTimerStore.adjust(by: change)
+                            } else {
+                                RestTimerStore.stop()
+                            }
+                            Task { await WorkoutLiveActivity.refresh() }
+                            WatchSync.shared.update(from: session) // Apple Watch rest timer
+                        }
                         .padding(.horizontal)
-                        .padding(.top, 4)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .padding(.bottom, 8)
+                    }
                 }
             }
             .scrollIndicators(.hidden)
@@ -205,8 +203,40 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    /// The scrolling part: name and strain, heart rate, the movement warm-up and the exercises.
+    private var workoutContent: some View {
+        VStack(spacing: 16) {
+            titleBlock
+            LiveHeartRateBar(recorder: recorder, profile: metrics.heartRateProfile)
+            // Movement warm-up before the first lift (`WarmUpStore`); the Watch
+            // mirrors the current step and can advance it (`WatchSync`).
+            WarmUpPhaseCard(sessionStart: session.startedAt) {
+                WatchSync.shared.update(from: session)
+            }
+            ForEach(session.orderedExercises) { exercise in
+                exerciseCard(exercise)
+            }
+            Button {
+                showingPicker = true
+            } label: {
+                Label("Add exercise", systemImage: "plus")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Theme.card, in: .capsule)
+                    .overlay(Capsule().strokeBorder(Theme.separator))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, 32)
+        .lockedToScreenWidth()
+    }
+
     // MARK: Header
 
+    /// Pinned at the top: options, elapsed time and Finish.
     private var headerBar: some View {
         HStack {
             Menu {
@@ -235,13 +265,9 @@ struct ActiveWorkoutView: View {
                     .shadow(color: Color.black.opacity(0.07), radius: 9, y: 4)
             }
             .accessibilityLabel("Workout options")
+            .accessibilityIdentifier("workout-options") // UI tests (ScreenshotTests)
             Spacer()
-            HStack(spacing: 6) {
-                Circle().fill(Theme.recoveryLow).frame(width: 8, height: 8)
-                Text("LIVE").tracking(1.5)
-            }
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(Theme.recoveryLowText)
+            elapsedClock
             Spacer()
             Button {
                 showingFinish = true
@@ -258,47 +284,59 @@ struct ActiveWorkoutView: View {
             .disabled(session.workingSets.isEmpty)
             .opacity(session.workingSets.isEmpty ? 0.5 : 1)
         }
-        .padding(.top, 8)
+        .padding(.top, 4)
+    }
+
+    /// A red "live" dot and the elapsed time, ticking each second.
+    private var elapsedClock: some View {
+        TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
+            let elapsed = max(0, context.date.timeIntervalSince(session.startedAt))
+            HStack(spacing: 6) {
+                Circle().fill(Theme.recoveryLow).frame(width: 8, height: 8)
+                    .accessibilityHidden(true)
+                Text(Duration.seconds(elapsed).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2))))
+                    .font(.system(size: timerSize, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .foregroundStyle(Theme.primaryText)
+                    .accessibilityLabel("Elapsed time")
+                    .accessibilityValue(Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide)))
+            }
+        }
     }
 
     private var titleBlock: some View {
         TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
             let elapsed = max(0, context.date.timeIntervalSince(session.startedAt))
-            titleContent(elapsed: elapsed, live: liveStrain(elapsed: elapsed))
+            titleContent(live: liveStrain(elapsed: elapsed))
         }
     }
 
-    /// Name, timer and progress beside the strain ring; stacked at
-    /// accessibility text sizes.
-    private func titleContent(elapsed: TimeInterval, live: Double) -> some View {
+    /// Name and progress beside the strain ring (the elapsed time is in the
+    /// pinned header); stacked at accessibility text sizes.
+    private func titleContent(live: Double) -> some View {
         let stacked = dynamicTypeSize.isAccessibilitySize
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
             : AnyLayout(HStackLayout(alignment: .center))
         return layout {
-            titleText(elapsed: elapsed)
+            titleText
             if !stacked { Spacer() }
             strainRing(live)
         }
     }
 
-    private func titleText(elapsed: TimeInterval) -> some View {
+    private var titleText: some View {
         VStack(alignment: .leading, spacing: 2) {
             TextField("Workout name", text: $session.name)
                 .font(.title.weight(.bold))
                 .foregroundStyle(Theme.primaryText)
-            Text(Duration.seconds(elapsed).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2))))
-                .font(.system(size: timerSize, weight: .bold, design: .rounded))
-                .minimumScaleFactor(0.6)
-                .monospacedDigit()
-                .foregroundStyle(Theme.primaryText)
-                .accessibilityLabel("Elapsed time")
-                .accessibilityValue(Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide)))
-            Text("Elapsed · \(finishedExercises) of \(session.exercises.count) exercises")
+            Text("\(finishedExercises) of \(session.exercises.count) exercises done")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
             if session.workingSets.isEmpty {
-                Text("Tick off a set to finish.")
+                Text("Tick off a working set to finish.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -386,6 +424,7 @@ struct ActiveWorkoutView: View {
                 onSetCompleted: { afterWarmUp in
                     startRest(for: exercise, afterWarmUp: afterWarmUp)
                     if !afterWarmUp { workingSetTicked(in: exercise) }
+                    scrollTarget = nextSetID(after: exercise)
                 },
                 onCollapse: { expanded.remove(exercise.persistentModelID) },
                 supersetLabel: supersetLabel(exercise),
@@ -420,6 +459,19 @@ struct ActiveWorkoutView: View {
     private func partner(of exercise: ExerciseLog) -> ExerciseLog? {
         guard let order = SupersetRegistry.partner(of: exercise.order, groups: supersetGroups) else { return nil }
         return session.exercises.first { $0.order == order }
+    }
+
+    /// The set to do after one in `exercise` is ticked: a superset partner's
+    /// set first, else the first unticked set in the workout.
+    private func nextSetID(after exercise: ExerciseLog) -> PersistentIdentifier? {
+        if let mate = partner(of: exercise), mate.order > exercise.order,
+           let set = mate.orderedSets.first(where: { !$0.isCompleted }) {
+            return set.persistentModelID
+        }
+        for item in session.orderedExercises {
+            if let set = item.orderedSets.first(where: { !$0.isCompleted }) { return set.persistentModelID }
+        }
+        return nil
     }
 
     private func isNext(_ exercise: ExerciseLog) -> Bool {
@@ -570,6 +622,8 @@ private struct ExerciseCard: View {
     @State private var confirmingRemove = false
     @State private var showingProgress = false
     @State private var showingGuide = false
+    /// Ticked warm-ups shown in full instead of folded into one row.
+    @State private var showingWarmUps = false
     /// This exercise's own rest time (nil = automatic).
     @State private var restSeconds: Int?
     /// Sets whose RPE 10 was filled in by marking them "to failure", so it
@@ -688,26 +742,12 @@ private struct ExerciseCard: View {
             }
 
             ForEach(sets, id: \.persistentModelID) { set in
-                setRow(set, in: sets, editing: editing)
+                setSlot(set, in: sets, editing: editing)
             }
 
-            if let adjustment = shownAdjustment(in: sets) {
-                AdjustmentNote(text: adjustment.message,
-                               onUndo: adjustment.restore?.isEmpty == false ? { undoAdjustment(adjustment) } : nil,
-                               isPainHold: adjustment.restore == nil)
-            }
-
-            if let editing {
-                SetEditor(
-                    set: editing,
-                    title: editorTitle(for: editing, in: sets),
-                    kind: editing.isWarmup ? nil : kindBinding(for: editing),
-                    unit: unit,
-                    step: { up in step(editing, up: up) },
-                    plateHint: plateHint(for: editing),
-                    onComplete: { toggle(editing) },
-                    onShowGuide: { showingRPEGuide = true }
-                )
+            // A change to a set other than the one being edited shows under the sets.
+            if let adjustment = shownAdjustment(in: sets), adjustment.setOrder != editing?.order {
+                adjustmentNote(adjustment)
             }
 
             AddSetButtons(canAddStage: canAddStage(to: sets), onAddSet: addSet, onAddStage: addStage)
@@ -744,6 +784,57 @@ private struct ExerciseCard: View {
     private var completedCount: Int { exercise.sets.filter(\.isCompleted).count }
 
     // MARK: Set rows and set types
+
+    /// Ticked warm-ups fold into one "3 warm-ups done" row until you open them.
+    private func warmUpsFolded(_ sets: [SetLog]) -> Bool {
+        let ramps = sets.filter(\.isWarmup)
+        return !ramps.isEmpty && ramps.allSatisfy(\.isCompleted)
+    }
+
+    /// One set: its row, and right under it the editor when it's the set being
+    /// edited (so the controls sit where you're looking). Ticked warm-ups fold
+    /// into one row. The id lets the screen scroll the next set into view.
+    @ViewBuilder
+    private func setSlot(_ set: SetLog, in sets: [SetLog], editing: SetLog?) -> some View {
+        let isEditing = set.persistentModelID == editing?.persistentModelID
+        let folded = warmUpsFolded(sets)
+        if folded, set.persistentModelID == sets.first(where: \.isWarmup)?.persistentModelID {
+            WarmUpsDoneRow(count: sets.filter(\.isWarmup).count, isOpen: showingWarmUps) {
+                withAnimation(.snappy) { showingWarmUps.toggle() }
+            }
+        }
+        if !folded || !set.isWarmup || showingWarmUps || isEditing {
+            VStack(spacing: 10) {
+                setRow(set, in: sets, editing: editing)
+                if isEditing, let editing {
+                    if let adjustment = shownAdjustment(in: sets), adjustment.setOrder == editing.order {
+                        adjustmentNote(adjustment)
+                    }
+                    setEditor(editing, in: sets)
+                }
+            }
+            .id(set.persistentModelID)
+        }
+    }
+
+    private func setEditor(_ editing: SetLog, in sets: [SetLog]) -> some View {
+        SetEditor(
+            set: editing,
+            title: editorTitle(for: editing, in: sets),
+            kind: editing.isWarmup ? nil : kindBinding(for: editing),
+            unit: unit,
+            step: { up in step(editing, up: up) },
+            plateHint: plateHint(for: editing),
+            onComplete: { toggle(editing) },
+            onShowGuide: { showingRPEGuide = true }
+        )
+    }
+
+    private func adjustmentNote(_ adjustment: AutoregulationLog.Entry) -> some View {
+        AdjustmentNote(text: adjustment.message,
+                       onUndo: adjustment.restore?.isEmpty == false ? { undoAdjustment(adjustment) } : nil,
+                       isPainHold: adjustment.restore == nil)
+    }
 
     /// One set's row with its context menu (warm-up, set type, delete).
     private func setRow(_ set: SetLog, in sets: [SetLog], editing: SetLog?) -> some View {
@@ -976,7 +1067,8 @@ private struct ExerciseCard: View {
         let ramps = sets.filter(\.isWarmup)
         let number = (ramps.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1
         let working = sets.first { !$0.isWarmup && $0.weightKg > 0 }?.weightKg
-        let percent = working.map { Int((set.weightKg / $0 * 100).rounded()) }
+        // To the nearest 5%: the load is rounded to your plates, so "69%" was false precision.
+        let percent = working.map { Int((set.weightKg / $0 * 20).rounded()) * 5 }
         return SetRow.WarmUpPosition(number: number, count: ramps.count, percent: percent)
     }
 
@@ -1103,6 +1195,37 @@ private struct AddSetButtons: View {
     }
 }
 
+/// "3 warm-ups done ✓": ticked ramp sets folded into one row; tap to show them.
+private struct WarmUpsDoneRow: View {
+    let count: Int
+    let isOpen: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 10) {
+                Text(count == 1 ? "1 warm-up done" : "\(count) warm-ups done")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.recoveryHigh)
+                    .accessibilityHidden(true)
+                Spacer(minLength: 4)
+                Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(Theme.recoveryHigh.opacity(0.1), in: .rect(cornerRadius: 16))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(isOpen ? "Hides the warm-up sets" : "Shows the warm-up sets")
+    }
+}
+
 /// One set as a compact line; tap to edit it in the SetEditor.
 ///
 /// VoiceOver reads the set as one element, e.g. "Set 2, 8 reps at 60
@@ -1180,9 +1303,10 @@ private struct SetRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 if let warmUp {
                     // "Warm-up 1 of 3 · 50%" instead of a bare "W" (user report: unclear).
+                    // Amber on the plain row; full-contrast text on the pink row being edited.
                     Text(warmUpTitle(warmUp))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.recoveryModerateText)
+                        .foregroundStyle(isEditing ? Theme.primaryText : Theme.recoveryModerateText)
                 }
                 if let kindLine {
                     Text(kindLine)
@@ -1817,28 +1941,46 @@ private struct LiveHeartRateBar: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "heart.fill")
-                .font(.title3)
-                .foregroundStyle(Theme.recoveryLow)
-                .symbolEffect(.pulse, isActive: recorder.heartRate != nil)
-                .accessibilityHidden(true)
-            if let bpm = recorder.heartRate {
+        if let bpm = recorder.heartRate {
+            HStack(spacing: 12) {
+                Image(systemName: "heart.fill")
+                    .font(.title3)
+                    .foregroundStyle(Theme.recoveryLow)
+                    .symbolEffect(.pulse)
+                    .accessibilityHidden(true)
                 live(bpm)
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(recorder.isRecording ? "Waiting for heart rate…" : "Live heart rate off")
-                        .font(.headline)
-                        .foregroundStyle(Theme.primaryText)
-                    Text(recorder.problem ?? "Wear AirPods Pro 3 or a chest strap to see it here.")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                Spacer(minLength: 0)
             }
+            .card()
+            .accessibilityElement(children: .combine)
+        } else {
+            offChip
         }
-        .card()
+    }
+
+    /// No heart rate coming in: one quiet line, not a whole card, so the sets stay high up.
+    private var offChip: some View {
+        Label {
+            Text(offText)
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "heart.slash")
+                .font(.footnote)
+                .foregroundStyle(Theme.recoveryLowText)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Theme.card, in: .capsule)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+
+    private var offText: String {
+        if let problem = recorder.problem { return problem }
+        return recorder.isRecording
+            ? "Waiting for heart rate · AirPods Pro 3 or a chest strap"
+            : "Heart rate off · wear AirPods Pro 3 or a chest strap"
     }
 
     /// Current bpm and zone beside Avg and Max; Avg and Max go underneath at

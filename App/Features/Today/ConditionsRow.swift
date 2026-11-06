@@ -24,6 +24,7 @@ struct ConditionsRow: View {
             .sheet(isPresented: $showingDetails) {
                 WeatherDetailSheet()
                     .presentationDetents([.medium, .large])
+                    .presentationBackground(Theme.background)
             }
         }
     }
@@ -74,6 +75,16 @@ private struct ConditionsRowLabel: View {
         }
     }
 
+    /// "19° now · high 22° · Partly cloudy": the heat advice below uses the
+    /// day's high, so the row names it when it's warmer than now.
+    private var headline: String {
+        let now = Int(conditions.temperature.rounded())
+        if let high = conditions.high.map({ Int($0.rounded()) }), high > now {
+            return "\(now)° now · high \(high)° · \(conditions.summary)"
+        }
+        return "\(now)° · \(conditions.summary)"
+    }
+
     private var content: some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: conditions.symbol)
@@ -82,7 +93,7 @@ private struct ConditionsRowLabel: View {
                 .frame(minWidth: 36)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(Int(conditions.temperature.rounded()))° · \(conditions.summary)")
+                Text(headline)
                     .font(isNotable ? Font.subheadline.weight(.semibold) : Font.subheadline)
                     .foregroundStyle(Theme.primaryText)
                 Text(tip.text)

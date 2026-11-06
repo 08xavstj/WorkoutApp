@@ -331,7 +331,7 @@ public enum PainGuard {
     /// The same rule in one line, for the trainer's row.
     public static let shortRuleText = "Up to 5/10 and settled by the next morning is OK. Stop a lift if pain climbs during the set or is worse the next day."
     /// Where the rule comes from, honestly.
-    public static let sourceText = "The 5/10 line is the pain-monitoring model physios use in tendon rehab, a clinical convention rather than a tested gym rule. Lifting itself cuts injuries by about two thirds (Lauersen 2018), and training into mild pain isn't harmful (Smith 2017). Which lifts get swapped and the 20% lighter loads are the app's choices. This isn't a diagnosis."
+    public static let sourceText = "The 5/10 line is the pain-monitoring model physios use in tendon rehab, a clinical convention rather than a tested gym rule. Lifting itself cuts injuries by about two thirds (Lauersen 2018), and training into mild pain isn't harmful (Smith 2017). Which lifts get swapped and the 20% lighter loads are the app's choices."
     public static func clinicianText(_ area: PainArea) -> String {
         "\(area.title) pain for 2 weeks or more: worth seeing a physio or doctor."
     }

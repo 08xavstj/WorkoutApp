@@ -32,12 +32,15 @@ struct AlcoholEffectCard: View {
             }
             ForEach(findings) { finding in
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: finding.isWorse ? "arrow.down.heart.fill" : "equal.circle.fill")
-                        .foregroundStyle(finding.isWorse ? Theme.recoveryModerateText : Theme.secondaryText)
+                    // The "worse" icon and a bold line only for a clear difference;
+                    // a maybe-chance one stays neutral.
+                    let clearlyWorse = finding.isWorse && finding.isClear
+                    Image(systemName: clearlyWorse ? "arrow.down.heart.fill" : "equal.circle.fill")
+                        .foregroundStyle(clearlyWorse ? Theme.recoveryModerateText : Theme.secondaryText)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(finding.sentence)
-                            .font(.subheadline.weight(.semibold))
+                            .font(finding.isClear ? .subheadline.weight(.semibold) : .subheadline)
                             .foregroundStyle(Theme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(finding.isClear ? "A clear difference for you." : "Not a clear difference yet; it may be chance.")

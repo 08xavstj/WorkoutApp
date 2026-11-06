@@ -97,18 +97,25 @@ private struct ProfileSettingsSection: View {
                 Text("Female").tag(BiologicalSex.female)
             }
             .disabled(locked("sex"))
+            heightRow
+            weightRow
+        } header: {
+            Text("Profile")
+        } footer: {
+            // Only mentions "Health" labels when the switch is on and there can be some.
+            Text(settings.profileFromHealth
+                 ? "Age and sex set your heart-rate zones, calorie estimate and body age. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in Apple Health (profile › Health Details), or turn the switch off to type your own."
+                 : "Age and sex set your heart-rate zones, calorie estimate and body age. Turn on the switch to fill them in from Apple Health.")
+        }
+        Section {
             maxHeartRateRow
             if settings.maxHeartRate == 0, settings.learnedMaxOverride != nil {
                 Button("Reset learned max heart rate", role: .destructive) {
                     settings.resetLearnedMaxHeartRate()
                 }
             }
-            heightRow
-            weightRow
-        } header: {
-            Text("Profile")
         } footer: {
-            Text("Age and sex set your heart-rate zones, calorie estimate and body age. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in Apple Health (profile → Health Details) or turn the switch off to type your own. Leave max heart rate blank and the app learns it from your hardest workouts; only type it if you've had it measured.")
+            Text("Leave it blank and the app learns it from your hardest workouts. Only type it if you've had it measured.")
         }
     }
 
@@ -290,7 +297,7 @@ private struct RemindersSettingsSection: View {
                 DatePicker("Creatine time", selection: creatineTime, displayedComponents: .hourAndMinute)
             }
             // The list itself is Health › Records › Medications (ux-audit.md 4.3).
-            NavigationLink("Medication reminders") {
+            NavigationLink("Medications & supplements") {
                 MedicationsView(pushed: true)
             }
         } header: {
@@ -396,7 +403,7 @@ private struct DataSourcesSettingsSection: View {
         } header: {
             Text("Data sources")
         } footer: {
-            Text("iOS only shows the permission screen once. To change access later, open Apple Health → your profile picture → Apps → Tensile, and tap Turn On All.")
+            Text("iOS only shows the permission screen once. To change access later, open Apple Health › your profile picture › Apps › Tensile, and tap Turn On All.")
         }
     }
 }

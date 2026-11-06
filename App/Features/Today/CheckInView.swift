@@ -156,23 +156,23 @@ struct CheckInView: View {
     private var eveningQuestions: some View {
         Section {
             Stepper("\(Int(evening.caffeineMg ?? 0)) mg", value: Binding(get: { evening.caffeineMg ?? 0 }, set: { evening.caffeineMg = $0 }), in: 0...1500, step: 10)
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(EveningCheckIn.caffeinePresets, id: \.name) { preset in
-                        Button {
-                            evening.caffeineMg = (evening.caffeineMg ?? 0) + preset.mg
-                        } label: {
-                            // With the bordered inset this makes a 44 pt target (ux-audit 4.8).
-                            Text("+ \(preset.name)")
-                                .frame(minHeight: 34)
-                        }
-                        .font(.caption.weight(.semibold))
-                        .buttonStyle(.bordered)
-                        .tint(Theme.strain)
+            // Wraps, so every drink is in view (a scrolling row cut them off).
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                ForEach(EveningCheckIn.caffeinePresets, id: \.name) { preset in
+                    Button {
+                        evening.caffeineMg = (evening.caffeineMg ?? 0) + preset.mg
+                    } label: {
+                        // With the bordered inset this makes a 44 pt target (ux-audit 4.8).
+                        Text("+ \(preset.name)")
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(maxWidth: .infinity, minHeight: 34)
                     }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .tint(Theme.strain)
                 }
             }
-            .scrollIndicators(.hidden)
             if (evening.caffeineMg ?? 0) > 0 {
                 optionalTime("Last caffeine", \.lastCaffeineMinutes, default: 13 * 60)
                 if let minutes = evening.lastCaffeineMinutes,
@@ -182,10 +182,14 @@ struct CheckInView: View {
                         .foregroundStyle(Theme.recoveryModerateText)
                 }
             }
+            EvidenceDisclosure(points: [
+                "In a review of 24 studies, caffeine closer to bed than these times cut sleep by about 45 minutes (Gardiner et al., Sleep Med Rev 2023).",
+                CaffeineTiming.cautionNote,
+            ])
         } header: {
             Text("Caffeine today")
         } footer: {
-            Text("For your usual \(CaffeineTiming.clockText(usualBedtime)) bedtime: last coffee by \(CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: usualBedtime, mg: 100))), pre-workout by \(CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: usualBedtime, mg: 200))). In a review of 24 studies, caffeine closer to bed than that cut sleep by about 45 minutes. \(CaffeineTiming.cautionNote)")
+            Text(caffeineCutoffText)
         }
         Section {
             if let logged = store.evening(on: evening.day), let total = logged.standardDrinks {
@@ -210,7 +214,8 @@ struct CheckInView: View {
             Text("A quick count is fine. Logging the type and amount counts standard drinks for you. Forgot last night? Tap Log › Drinks.")
         }
         Section("Stress today") {
-            ScalePicker(value: $evening.stress, labels: ["Calm", "Low", "Some", "High", "Very high"], color: Theme.recoveryModerate)
+            ScalePicker(value: $evening.stress, labels: ["Calm", "Low", "Some", "High", "Very high"], color: Theme.recoveryModerate,
+                        endLabels: ("Calm", "Very high"))
         }
         MoodQuestions(mood: $evening.mood, feelings: $evening.feelings, associations: $evening.associations)
         Section("Food") {
@@ -250,7 +255,20 @@ struct CheckInView: View {
     }
 
     /// When you usually fall asleep (minutes after midnight), for the caffeine cut-off.
-    private var usualBedtime: Int { CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes) }
+    /// To the nearest 15 minutes: "11:15 PM", not "11:16 PM", for an average
+    /// of several nights (display rounding, an app choice).
+    private var usualBedtime: Int {
+        let minutes = CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes)
+        return Int((Double(minutes) / 15).rounded()) * 15
+    }
+
+    /// "Bed around 11:15 PM: last coffee by 2:30 PM, pre-workout by 10:30 AM."
+    private var caffeineCutoffText: String {
+        let bed = CaffeineTiming.clockText(usualBedtime)
+        let coffee = CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: usualBedtime, mg: 100))
+        let preWorkout = CaffeineTiming.clockText(CaffeineTiming.cutoffMinutes(bedtimeMinutes: usualBedtime, mg: 200))
+        return "Bed around \(bed): last coffee by \(coffee), pre-workout by \(preWorkout)."
+    }
 
     /// A time that's only saved once you add it, so the form never shows a
     /// time you didn't enter.
@@ -388,6 +406,8 @@ struct CheckInView: View {
 /// trainer's "Something hurts?" sheet.
 struct PainQuestions: View {
     @Binding var pains: [PainReport]?
+    /// The section header; "Where?" on a screen already titled "Something hurts?".
+    var header = "Something hurts?"
 
     private var areas: Binding<[PainArea]> {
         Binding(
@@ -410,8 +430,9 @@ struct PainQuestions: View {
                              from: Self.fromText(report.loggedAt))
             }
         } header: {
-            Text("Something hurts?")
+            Text(header)
         } footer: {
+            // The one "not a diagnosis" line (`PainGuard.sourceText` no longer repeats it).
             Text(PainGuard.ruleText + " 0 clears an area. This isn't a diagnosis.")
         }
     }
@@ -499,7 +520,8 @@ private struct MoodQuestions: View {
 
     var body: some View {
         Section {
-            ScalePicker(value: $mood, labels: ["Low", "Meh", "OK", "Good", "Great"], color: Theme.recoveryHigh)
+            ScalePicker(value: $mood, labels: ["Low", "Meh", "OK", "Good", "Great"], color: Theme.recoveryHigh,
+                        endLabels: ("Low", "Great"))
             if mood != nil {
                 ChipFlow(options: MoodFeeling.allCases, selection: feelingSelection, label: \.title, color: Theme.recoveryHigh)
             }
@@ -541,9 +563,15 @@ struct ScalePicker: View {
     /// Words for the two ends of a numeric scale, e.g. ("None", "Very sore").
     var endLabels: (String, String)?
 
+    /// Up to 6 per row: 0-10 goes on two rows, so each button is wide enough
+    /// to hit (one row of 11 made them about 27 pt; HIG minimum 44 pt).
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 6), count: min(6, range.count))
+    }
+
     var body: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
+            LazyVGrid(columns: columns, spacing: 6) {
                 ForEach(Array(range), id: \.self) { number in
                     let selected = value == number
                     // A tap gesture, not a Button: a Form row full of buttons

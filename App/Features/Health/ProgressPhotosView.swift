@@ -98,7 +98,7 @@ struct ProgressPhotosView: View {
                     .accessibilityLabel(photos.todayEntry(pose) == nil ? "Take \(pose.title.lowercased()) photo" : "Retake \(pose.title.lowercased()) photo")
                 }
             }
-            Text("Same spot, same light, ideally each morning before eating. The camera shows a faint outline of your last photo to line up with.")
+            Text("Same spot, same light, same time of day (morning, before eating), every 2–4 weeks. The camera shows a faint outline of your last photo to line up with.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }

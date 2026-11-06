@@ -23,8 +23,8 @@ struct MusclesDetailView: View {
     }
 }
 
-/// This week's target band per muscle, sets so far this calendar week, and
-/// one line for each muscle whose target moved or held (`VolumeProgression`).
+/// This week's target band per muscle (sets done are the bars in
+/// `WeeklySetsCard` below, not repeated) and one line for each muscle whose target moved or held (`VolumeProgression`).
 /// The copy says the rule runs on performance and recovery, not pump or
 /// soreness, and that volume "landmarks" are coaching heuristics.
 struct VolumeTargetsCard: View {
@@ -44,8 +44,9 @@ struct VolumeTargetsCard: View {
                 }
             }
             if let targets, !targets.targets.isEmpty {
+                // Sets done so far are the bars in "Hard sets since Monday" below, not repeated here.
                 ForEach(targets.targets) { target in
-                    VolumeTargetRow(target: target, done: muscles.weekSets[target.muscle] ?? 0)
+                    VolumeTargetRow(target: target)
                 }
                 VolumeTargetNotes(targets: targets.notable)
                 Text("Up one set a session only when last week went to plan.")
@@ -76,22 +77,16 @@ struct VolumeTargetsCard: View {
     static let explanation = "A target goes up by one set per session only when last week's sets for that muscle were all done at the effort target, your reps held, and the muscle had recovered; otherwise it holds. Pump and soreness aren't used: neither tracks growth reliably. The 10-20 range comes from research (Schoenfeld 2017; Pelland 2024, preprint); the size of each step and \"landmarks\" like MEV and MRV are coaching rules of thumb, not measured values. A hard set is a working set at RPE 7 or harder (or with no RPE logged); easier sets count 0.6, helper muscles half, and a drop or rest-pause set as the sets it replaces, up to 3. Those weights are the app's choices."
 }
 
-/// "Chest · 12-14 sets · 6 so far".
+/// "Chest · 12-14 sets", with an arrow when the target moved.
 private struct VolumeTargetRow: View {
     let target: VolumeProgression.Target
-    let done: Double
 
     var body: some View {
-        let doneText = done.formatted(.number.precision(.fractionLength(0...1)))
         HStack(spacing: 10) {
             Text(target.muscle.name)
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
             Spacer(minLength: 8)
-            Text("\(doneText) so far")
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(Theme.secondaryText)
             Text(target.bandText)
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
@@ -99,7 +94,7 @@ private struct VolumeTargetRow: View {
             changeIcon
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(target.muscle.name): target \(target.bandText) this week, \(doneText) done so far")
+        .accessibilityLabel("\(target.muscle.name): target \(target.bandText) this week")
     }
 
     private var changeIcon: some View {

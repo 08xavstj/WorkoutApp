@@ -158,6 +158,8 @@ public enum Micronutrients {
         public var target: Double
         public var kind: Kind
         public var effect: String?
+        /// Daily average from supplements marked as taken, included in `average`.
+        public var fromSupplements: Double = 0
         public var id: Nutrient { nutrient }
         public var percentOfTarget: Double { average / max(target, 0.0001) * 100 }
     }

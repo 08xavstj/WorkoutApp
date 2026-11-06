@@ -93,7 +93,7 @@ struct UpNextCard: View {
     /// The caffeine cut-off before it passes, or a warning when today's last
     /// caffeine was late (`CaffeineTiming`).
     private func caffeineItem(now: Int) -> UpNextItem? {
-        let caffeine = habits.caffeine(metrics: metrics, checkIns: checkIns)
+        let caffeine = habits.caffeine(metrics: metrics, checkIns: checkIns, trainingMinutes: plans.todayPlan()?.time)
         guard caffeine.isLate || now < caffeine.cutoffMinutes else { return nil }
         return UpNextItem(id: "caffeine", minutes: caffeine.cutoffMinutes, kind: .info(
             icon: "cup.and.saucer.fill",
@@ -304,6 +304,7 @@ private struct BedtimeUpNextRow: View {
         .sheet(isPresented: $showingSleep) {
             LastNightSleepSheet()
                 .presentationDetents([.medium, .large])
+                .presentationBackground(Theme.background)
         }
     }
 }

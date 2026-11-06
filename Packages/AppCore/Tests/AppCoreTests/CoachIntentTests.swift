@@ -58,6 +58,28 @@ struct CoachRoutingTests {
         }
     }
 
+    @Test func followUpsFitTheAnswer() {
+        let afterPlan = CoachIntent.followUps(after: .planWorkout)
+        #expect(afterPlan.contains("Make it 30 min"))
+        let afterRecovery = CoachIntent.followUps(after: .whyRecovery)
+        #expect(!afterRecovery.contains("Make it 30 min"))
+        #expect(afterRecovery.contains("How did I sleep?"))
+        #expect(!afterRecovery.contains("Why is my recovery where it is?"))
+        #expect(afterRecovery.count == 4)
+        let afterSleep = CoachIntent.followUps(after: .sleep)
+        #expect(!afterSleep.contains("How did I sleep?"))
+        #expect(CoachIntent.followUps(after: .eatingEnough).allSatisfy { !$0.hasPrefix("Make it") })
+        #expect(CoachIntent.followUps(after: nil) == CoachIntent.suggestedQuestions)
+        // Each pool's chips route where they say.
+        #expect(CoachIntent.question("How did I sleep?") == .sleep)
+        #expect(CoachIntent.question("What's my HRV?") == .hrv)
+        #expect(CoachIntent.question("Should I rest today?") == .shouldRest)
+        #expect(CoachIntent.question("What do I weigh?") == .bodyWeight)
+        #expect(CoachIntent.question("How many calories did I burn today?") == .energyBurned)
+        #expect(CoachIntent.question("What's my strain?") == .strain)
+        #expect(CoachIntent.question("How many steps today?") == .steps)
+    }
+
     @Test func theSuggestedListsMatchTheChips() {
         #expect(CoachIntent.suggestedQuestions.count == 4)
         #expect(CoachIntent.followUpQuestions.count == 4)
