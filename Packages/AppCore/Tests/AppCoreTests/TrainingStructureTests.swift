@@ -27,8 +27,11 @@ struct TrainingBlockTests {
         #expect(weeks.map(\.targetRIR) == [3, 2, 1, 1, 3])
         #expect(weeks.map(\.isDeload) == [false, false, false, false, true])
         #expect(weeks[2].targetRPE == 9)
-        #expect(weeks[2].label == "Block week 3 of 5 · RIR 1")
-        #expect(weeks[4].label == "Deload week (5 of 5) · RIR 3")
+        #expect(weeks[2].label == "Block week 3 of 5 · 1 in reserve")
+        #expect(weeks[4].label == "Deload week (5 of 5) · 3 in reserve")
+        // The note says when today's plan backs off from the block target.
+        #expect(weeks[2].note(plannedRPE: 9) == weeks[2].note)
+        #expect(weeks[2].note(plannedRPE: 6.5).hasSuffix("Today eased to 3-4 in reserve."))
     }
 
     @Test func muscleRampsHigherAndLonger() {

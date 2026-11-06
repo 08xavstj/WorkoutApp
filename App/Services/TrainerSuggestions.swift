@@ -7,6 +7,9 @@ enum TrainerSuggestions {
         var option: StrainPlanner.Option
         var focus: WorkoutFocus?
         var minutes: Int
+        /// Lands inside today's range. False only for the planned session or,
+        /// when nothing fits, the closest option.
+        var fits: Bool = true
         var id: String { option.id }
     }
 
@@ -28,10 +31,11 @@ enum TrainerSuggestions {
                 load: planner.liftingLoad(minutes: Double(minutes), rpe: rpe)
             ))
         }
-        for minutes in [20, 30, 45] {
+        // Up to 75 min, so an easy day with a higher range still has a ride that reaches it.
+        for minutes in [20, 30, 45, 60, 75] {
             options.append(StrainPlanner.Option(
-                id: "cardio-\(minutes)", kind: .cardio, title: "Easy ride (can still talk)",
-                detail: "\(minutes) min · Cardio", minutes: Double(minutes),
+                id: "cardio-\(minutes)", kind: .cardio, title: "Easy ride",
+                detail: "\(minutes) min · conversational pace", minutes: Double(minutes),
                 load: planner.cardioLoad(minutes: Double(minutes), reserveFraction: 0.65, profile: profile)
             ))
         }
@@ -45,13 +49,22 @@ enum TrainerSuggestions {
         let current = metrics.strain?.strain ?? 0
         let target = metrics.targetStrain ?? StrainCalculator.targetStrain(forRecovery: 50)
         let ranked = planner.rank(options, current: current, target: target)
+        // Only options that end inside the range are offered as fitting it.
+        let fitting = ranked.filter { target.contains($0.landsAt) }
         if let planned, let plannedOption = ranked.first(where: { $0.id.hasPrefix("planned-") }) {
-            let cardio = ranked.first { $0.kind == .cardio }.map { [Suggestion(option: $0, focus: nil, minutes: Int($0.minutes))] } ?? []
-            return [Suggestion(option: plannedOption, focus: planned.focus, minutes: planned.minutes)] + cardio
+            let cardio = fitting.first { $0.kind == .cardio }.map { [Suggestion(option: $0, focus: nil, minutes: Int($0.minutes))] } ?? []
+            return [Suggestion(option: plannedOption, focus: planned.focus, minutes: planned.minutes,
+                               fits: target.contains(plannedOption.landsAt))] + cardio
         }
-        let bestStrength = ranked.first { $0.kind == .strength }
-        let bestCardio = ranked.first { $0.kind == .cardio }
-        return ranked
+        let pool = fitting.filter { !$0.id.hasPrefix("planned-") }
+        guard !pool.isEmpty else {
+            // Nothing lands inside: the closest strength option, marked as not fitting.
+            guard let closest = ranked.first(where: { $0.kind == .strength }) else { return [] }
+            return [Suggestion(option: closest, focus: focus, minutes: Int(closest.minutes), fits: false)]
+        }
+        let bestStrength = pool.first { $0.kind == .strength }
+        let bestCardio = pool.first { $0.kind == .cardio }
+        return pool
             .filter { $0.id == bestStrength?.id || $0.id == bestCardio?.id }
             .map { option in
                 Suggestion(option: option, focus: option.kind == .strength ? focus : nil, minutes: Int(option.minutes))

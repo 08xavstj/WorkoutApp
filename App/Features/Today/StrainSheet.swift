@@ -73,7 +73,8 @@ private struct StrainGoalCard: View {
         let suggestions = TrainerSuggestions.make(metrics: metrics, settings: settings, sessions: sessions, planned: plannedToday)
         return VStack(alignment: .leading, spacing: 16) {
             HStack {
-                CardLabel(text: "Today's range")
+                // "Day strain", not "Today's range": the sheet's title already says that.
+                CardLabel(text: "Day strain")
                 Spacer()
                 // Before any activity, "Not started" rather than "Below range" at 7 am.
                 StrainStatusChip(status: status, notStarted: current < 0.5 && metrics.activities.isEmpty)
@@ -231,10 +232,9 @@ private struct StrainOptions: View {
             }
         }
         Button {
-            let strength = suggestions.first { $0.option.kind == .strength }
             start(strength?.focus, strength?.minutes)
         } label: {
-            Label("Start workout", systemImage: "play.fill")
+            Label(startTitle, systemImage: "play.fill")
                 .font(.headline)
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -246,7 +246,21 @@ private struct StrainOptions: View {
         .accessibilityHint("Opens the workout builder")
     }
 
+    private var strength: TrainerSuggestions.Suggestion? {
+        suggestions.first { $0.option.kind == .strength }
+    }
+
+    /// "Start Upper · 60 min", so the button says what it starts rather than
+    /// repeating the row above it.
+    private var startTitle: String {
+        guard let strength else { return "Start workout" }
+        return "Start \(strength.option.title) · \(strength.minutes) min"
+    }
+
     private var intro: String {
+        if !suggestions.isEmpty && suggestions.allSatisfy({ !$0.fits }) {
+            return "None of the usual sessions lands inside today's range on its own. The closest:"
+        }
         if trainedToday {
             return "You've trained today, so anything more is optional. If a second session is part of your plan, these fit:"
         }
@@ -270,10 +284,11 @@ private struct SuggestionRow: View {
                 size: 42
             )
             VStack(alignment: .leading, spacing: 2) {
-                Text(isStrength ? suggestion.option.title : "Easy ride (you can still talk)")
+                Text(suggestion.option.title)
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
-                Text(isStrength ? suggestion.option.detail : "\(suggestion.minutes) min · track it on your watch")
+                    .lineLimit(1)
+                Text(suggestion.option.detail)
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -292,6 +307,6 @@ private struct SuggestionRow: View {
         .padding(12)
         .background(Theme.cardRaised, in: .rect(cornerRadius: 16))
         .accessibilityElement(children: .combine)
-        .accessibilityHint(isStrength ? "Opens the workout builder" : "")
+        .accessibilityHint(isStrength ? "Opens the workout builder" : "Track it on your watch")
     }
 }

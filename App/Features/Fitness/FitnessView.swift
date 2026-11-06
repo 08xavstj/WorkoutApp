@@ -166,12 +166,14 @@ private struct DayStrainGauge: View {
     /// colours: below is grey, never a warning (ux-audit.md P17, P19).
     private func rangeChip(current: Double, target: ClosedRange<Double>) -> some View {
         let status = StrainPlanner().status(current: current, target: target)
+        // Before any activity, "Not started" rather than "Below range" at 7 am (as on the Strain sheet).
+        let notStarted = current < 0.5 && metrics.activities.isEmpty
         let chip: (text: String, color: Color) = switch status {
         case .below: ("Below range", Theme.secondaryText)
         case .inRange: ("In range", Theme.recoveryHigh)
         case .above: ("Above range", Theme.strain)
         }
-        return Chip(text: chip.text, color: chip.color)
+        return notStarted ? Chip(text: "Not started", color: Theme.secondaryText) : Chip(text: chip.text, color: chip.color)
     }
 
     @ViewBuilder
@@ -376,6 +378,7 @@ private struct FitnessProgressCard: View {
     @Environment(VitalsModel.self) private var vitals
     @Environment(UserSettings.self) private var settings
     @Environment(MuscleModel.self) private var muscles
+    @Environment(WeeklyPlanStore.self) private var plans
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     var body: some View {
@@ -423,7 +426,7 @@ private struct FitnessProgressCard: View {
         return MetricRow(
             title: "Strength",
             value: "\(thisWeek)",
-            unit: "days · goal \(target)+",
+            unit: "in 7 days · goal \(target)+",
             spokenUnit: "days in the last 7, goal \(target) or more",
             verdict: verdict,
             hint: "Shows strength days, the health minimum and strength for health",
@@ -431,13 +434,22 @@ private struct FitnessProgressCard: View {
         )
     }
 
-    /// Muscles in the 10-20 hard sets a week range (Schoenfeld et al., J Sports
-    /// Sci 2017; Pelland et al., Sports Med 2026; `WeeklySetsCard`), with a
-    /// chip for overworked or recovering muscles (`MuscleRecovery`).
+    /// Muscles at this block week's target (sets since Monday within each
+    /// muscle's band, as on `WeeklySetsCard`), or without a block in the
+    /// 10-20 hard sets a week range (Schoenfeld et al., J Sports Sci 2017;
+    /// Pelland et al., Sports Med 2026), with a chip for overworked or
+    /// recovering muscles (`MuscleRecovery`).
     private var musclesRow: some View {
         let states = WeeklySetsCard.shown.compactMap { muscles.states[$0] }
         let all = Muscle.allCases.compactMap { muscles.states[$0] }
-        let inRange = states.filter { $0.volume == .productive }.count
+        let bands = (plans.volumeTargets(muscles: muscles)?.targets ?? []).filter { WeeklySetsCard.shown.contains($0.muscle) }
+        let atTarget = bands.filter { target in
+            let sets = muscles.weekSets[target.muscle] ?? 0
+            return sets >= Double(target.band.lowerBound) && sets <= Double(target.band.upperBound)
+        }.count
+        let hasBlock = !bands.isEmpty
+        let inRange = hasBlock ? atTarget : states.filter { $0.volume == .productive }.count
+        let total = hasBlock ? bands.count : states.count
         let overworked = all.filter(\.isOverworked).count
         let recovering = all.filter { $0.status != .fresh && !$0.isOverworked }.count
         let verdict: MetricVerdict? = if overworked > 0 {
@@ -449,9 +461,9 @@ private struct FitnessProgressCard: View {
         }
         return MetricRow(
             title: "Muscles",
-            value: states.isEmpty ? nil : "\(inRange) of \(states.count)",
-            unit: "at 10–20 sets",
-            spokenUnit: "muscles at 10 to 20 hard sets this week",
+            value: total == 0 ? nil : "\(inRange) of \(total)",
+            unit: hasBlock ? "at this week's target" : "at 10–20 sets",
+            spokenUnit: hasBlock ? "muscles at this week's set target" : "muscles at 10 to 20 hard sets this week",
             verdict: verdict,
             hint: "Shows the muscle map and hard sets per muscle",
             destination: MusclesDetailView()

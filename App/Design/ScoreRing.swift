@@ -629,16 +629,17 @@ struct MetricTile: View {
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
+                // Two lines reserved, so values line up across a row of tiles.
                 Text(title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(2)
+                    .lineLimit(2, reservesSpace: true)
                     .fixedSize(horizontal: false, vertical: true)
                 valueLine
                 footer
             }
             Spacer(minLength: 0)
-            VerticalRangeGauge(value: gauge, color: color, lightColor: lightColor)
+            VerticalRangeGauge(value: gauge, color: gaugeColor, lightColor: gaugeLightColor)
                 .frame(height: 78)
         }
         // Fills its grid row so tiles side by side are the same height.
@@ -646,6 +647,12 @@ struct MetricTile: View {
         .card()
         .modifier(TileAccessibility(isCombined: actionTitle == nil || onAction == nil, label: spokenLabel))
     }
+
+    /// A "Normal" reading gets the calm green of its pill, so a red heart
+    /// gauge doesn't read as an alarm when nothing is off.
+    private var isNormal: Bool { status?.text == "Normal" }
+    private var gaugeColor: Color { isNormal ? Theme.recoveryHigh : color }
+    private var gaugeLightColor: Color? { isNormal ? Theme.recoveryHighLight : lightColor }
 
     @ViewBuilder
     private var valueLine: some View {

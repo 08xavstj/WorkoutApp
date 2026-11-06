@@ -57,6 +57,26 @@ public enum SupplementKnowledge {
         public var evidence: Evidence
         public var summary: String
         public var id: String { purpose }
+
+        /// The first sentence without its citations, for a list card; the
+        /// research page shows `summary` in full.
+        public var shortSummary: String {
+            var text = ""
+            var depth = 0
+            for character in summary {
+                if character == "(" { depth += 1; continue }
+                if character == ")" { depth = max(0, depth - 1); continue }
+                if depth == 0 { text.append(character) }
+            }
+            text = text.replacingOccurrences(of: " ,", with: ",")
+                .replacingOccurrences(of: " .", with: ".")
+                .replacingOccurrences(of: " ;", with: ";")
+                .replacingOccurrences(of: "  ", with: " ")
+            if let end = text.range(of: ". ") {
+                text = String(text[..<end.lowerBound]) + "."
+            }
+            return text.trimmingCharacters(in: .whitespaces)
+        }
     }
 
     public struct Entry: Sendable, Identifiable, Equatable {

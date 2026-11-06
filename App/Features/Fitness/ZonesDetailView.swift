@@ -38,8 +38,15 @@ private struct ZonesCard: View {
             return "Heart rate couldn't be read from Apple Health (\(error)). Pull down on Today to try again."
         }
         if metrics.todaysHeartRateReadings > 0 {
+            let light = whole(metrics.todaysLightMinutes)
+            // The lifting explanation only when a strength session was logged today.
+            if metrics.activities.contains(where: \.isStrength) {
+                return metrics.todaysLightMinutes >= 1
+                    ? "Your heart rate today stayed below zone 1 (30–50% of reserve). Lifting often does: the effort is in the muscles, not the heart."
+                    : "Your heart rate today stayed under 30% of your reserve. Lifting often does: the effort is in the muscles, not the heart."
+            }
             return metrics.todaysLightMinutes >= 1
-                ? "Your heart rate today stayed below zone 1 (30–50% of reserve). Lifting often does: the effort is in the muscles, not the heart."
+                ? "Only light movement so far (\(light) min at 30–50% of reserve)."
                 : "Your heart rate today stayed under 30% of your reserve, close to resting."
         }
         guard let strain = metrics.strain, strain.strain > 0 else { return nil }

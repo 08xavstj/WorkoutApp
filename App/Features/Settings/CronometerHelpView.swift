@@ -13,7 +13,7 @@ struct CronometerHelpView: View {
                 "In Tensile, allow reading the same types: Settings › Data sources › Ask for Apple Health access.",
             ])
             HelpCard(title: "What Tensile gets", lines: [
-                "Food you log in Cronometer shows on Today's nutrition card, and the coach uses it. Vitamins and minerals feed Health › Patterns.",
+                "Food you log in Cronometer shows on Today's nutrition card, and the coach uses it. Vitamins and minerals show in Health › Key measures › Vitamins & minerals.",
             ], note: "Cronometer has no public API, so Apple Health is the only route. If it doesn't send a nutrient, that number shows \"--\".")
         }
     }

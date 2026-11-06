@@ -118,6 +118,26 @@ struct LiftGoalProjectionTests {
         #expect(benchFit.value(weeksAhead: 26) <= benchFit.intercept + 117 * 0.20 + 1e-9)
     }
 
+    @Test func likelyLowEndStaysNearYourBest() throws {
+        // A noisy month ending at 133 kg: the raw low edge at 6 months would
+        // sit far under 133; it's floored at the best minus one spread.
+        let noisy = samples([118, 133, 120, 133])
+        let projection = LiftGoalProjection.project(samples: noisy, targetKg: 160, now: now)
+        let fit = try #require(projection.fit)
+        let range = try #require(projection.range)
+        let spread = max(fit.residualSD, LiftGoalProjection.minimumSpreadKg)
+        #expect(abs(range.lowerBound - (133 - spread)) < 1e-9)
+        #expect(projection.band.allSatisfy { $0.low >= 133 - spread - 1e-9 || $0.low == $0.mid })
+        let line = try #require(LiftGoalProjection.rangeLine(projection, weight: kg, month: month))
+        #expect(line.contains("likely \(Int((133 - spread).rounded()))–"))
+    }
+
+    @Test func cappedRateSaysWhatTheLineUses() throws {
+        let advanced = LiftGoalProjection.project(samples: samples([91, 94, 97, 100]), targetKg: 110, trainingStatus: .advanced, now: now)
+        let line = try #require(LiftGoalProjection.rangeLine(advanced, weight: kg, month: month))
+        #expect(line.contains("so the line uses the typical pace for your level instead."))
+    }
+
     @Test func notOnTheCurrentTrend() {
         let flat = LiftGoalProjection.project(samples: samples([100, 100, 100, 100]), targetKg: 120, now: now)
         #expect(flat.status == .notOnTrend)

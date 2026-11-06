@@ -13,14 +13,21 @@ struct CoachDiagnosticsView: View {
     var body: some View {
         NavigationStack {
             List {
+                // In the list, not the top-left corner, where it read like a back button.
+                Section {
+                    Button(copied ? "Copied" : "Copy status for a bug report", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                        UIPasteboard.general.string = report
+                        copied = true
+                    }
+                }
                 Section("Model") {
                     row("Apple Intelligence", OnDeviceCoach.availabilityMessage ?? "Available")
                     row("Runs", "On this iPhone only")
                 }
                 Section("Last request") {
-                    row("Kind", diagnostics.lastMode ?? "None yet")
-                    row("Prompt length", diagnostics.lastPromptCharacters.map { "\($0) characters" } ?? "–")
-                    row("Finished", diagnostics.lastFinishedAt.map { $0.formatted(date: .omitted, time: .standard) } ?? "–")
+                    row("Kind", kindText)
+                    row("Prompt length", diagnostics.lastPromptCharacters.map { "\($0) characters" } ?? "No prompt sent")
+                    row("Finished", diagnostics.lastFinishedAt.map { $0.formatted(date: .omitted, time: .standard) } ?? "Not yet")
                     row("Retried after a refusal", diagnostics.retriedAfterRefusal ? "Yes, with training-only facts" : "No")
                 }
                 if let explanation = diagnostics.refusalExplanation {
@@ -49,17 +56,18 @@ struct CoachDiagnosticsView: View {
             .navigationTitle("Coach status")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                        UIPasteboard.general.string = report
-                        copied = true
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
         }
+    }
+
+    /// The last request's kind in plain words ("(no model)" read as jargon).
+    private var kindText: String {
+        guard let mode = diagnostics.lastMode else { return "None yet" }
+        if mode.contains("(no model)") { return "Answered from your data, without the model" }
+        return mode.prefix(1).uppercased() + mode.dropFirst()
     }
 
     private func row(_ title: String, _ value: String) -> some View {

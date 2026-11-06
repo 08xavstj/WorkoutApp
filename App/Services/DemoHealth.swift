@@ -35,7 +35,14 @@ nonisolated enum DemoMode {
 /// anyone: demo content only, never shown outside demo mode.
 nonisolated final class DemoHealth: Sendable {
     /// Set only in demo mode (`DemoMode.isOn`).
-    static let active: DemoHealth? = DemoMode.isOn ? DemoHealth(now: .now) : nil
+    static let active: DemoHealth? = DemoMode.isOn ? DemoHealth(now: pinnedNow()) : nil
+
+    /// The demo's data stops at 8:10 today, whatever the real time, so every
+    /// launch of a screenshot tour shows the same day (after breakfast and the
+    /// 8:00 supplements, before the 8:15 commute adds strain).
+    static func pinnedNow(calendar: Calendar = .current) -> Date {
+        calendar.startOfDay(for: .now).addingTimeInterval((8 * 60 + 10) * 60)
+    }
 
     /// The Health quantities the demo can answer, mapped from HealthKit
     /// identifiers in `DemoHealth+HealthKit`. Values are in the units the
@@ -366,7 +373,11 @@ nonisolated final class DemoHealth: Sendable {
         let (asleep, night) = isAsleep(date, minuteOfDay: minuteOfDay, daysAgo: daysAgo)
         if asleep {
             guard index % 2 == 0 else { return nil }
-            return restingHeartRate(max(0, night)) - 3 + 2.5 * wobble
+            // Lowest in the middle of the night (about 9 bpm under the
+            // resting value), averaging ~5 under it, as real nights do.
+            let sinceBed = (minuteOfDay - 22 * 60 - 30 + 1440).truncatingRemainder(dividingBy: 1440)
+            let progress = min(1, max(0, sinceBed / 500))
+            return restingHeartRate(max(0, night)) - 2 - 6 * sin(progress * .pi) + 1.5 * wobble
         }
         let weekday = calendar.component(.weekday, from: date)
         let workday = weekday != 1 && weekday != 7
@@ -489,6 +500,12 @@ nonisolated final class DemoHealth: Sendable {
             let entries = timedSamples(metric, from: day(daysAgo), to: day(daysAgo).addingTimeInterval(86_400), clip: false)
             return entries.isEmpty ? nil : entries.map(\.value).reduce(0, +)
         }
+    }
+
+    /// The newest scale reading (days with no weigh-in are skipped, as in `value`).
+    var latestWeightKg: Double {
+        let daysAgo = (0...10).first { $0 % 5 != 3 } ?? 0
+        return bodyMass(daysAgo)
     }
 
     private func bodyMass(_ daysAgo: Int) -> Double {

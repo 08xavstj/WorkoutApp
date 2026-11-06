@@ -84,7 +84,7 @@ struct RecordsSection: View {
                     MedicationsView(pushed: true)
                 }
                 Divider()
-                HealthNavigationRow(title: "Supplements", detail: supplementsDetail, icon: "leaf.fill", color: Theme.nutrition) {
+                HealthNavigationRow(title: "Supplement evidence", detail: supplementsDetail, icon: "leaf.fill", color: Theme.nutrition) {
                     SupplementsView(pushed: true)
                 }
             }

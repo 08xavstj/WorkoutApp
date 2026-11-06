@@ -328,23 +328,36 @@ extension Micronutrients {
     }
 
     /// One line for Today's Up next / Nutrition, or nil when there's nothing to
-    /// show (fewer than 4 logged days). "3 low this week: magnesium, iron and vitamin D".
+    /// show (fewer than 4 logged days). "3 low this week: magnesium, iron and
+    /// vitamin D", with anything over its upper limit or guideline added
+    /// ("Sodium high this week"), since that's worth knowing too.
     public static func summaryLine(findings: [Finding]) -> String? {
         guard !findings.isEmpty else { return nil }
         let low = toFix(findings)
-        guard !low.isEmpty else { return "Vitamins and minerals near target this week" }
+        let high = findings.filter { $0.kind == .high }.map { $0.nutrient.name.prefix(1).lowercased() + $0.nutrient.name.dropFirst() }
+        let highList = Self.list(high)
+        let highText: String? = high.isEmpty ? nil : highList.prefix(1).uppercased() + highList.dropFirst() + " high this week"
+        guard !low.isEmpty else {
+            return highText ?? "Vitamins and minerals near target this week"
+        }
         let names = low.prefix(3).map { finding -> String in
             let name = finding.nutrient.name
             return name.prefix(1).lowercased() + name.dropFirst()
         }
-        let list: String
-        switch names.count {
-        case 1: list = names[0]
-        case 2: list = "\(names[0]) and \(names[1])"
-        default: list = "\(names[0]), \(names[1]) and \(names[2])"
-        }
         let more = low.count > 3 ? " and \(low.count - 3) more" : ""
-        return "\(low.count) low this week: \(list)\(more)"
+        let lowText = "\(low.count) low this week: \(Self.list(names))\(more)"
+        guard let highText else { return lowText }
+        return "\(lowText). \(highText)"
+    }
+
+    /// "a", "a and b", "a, b and c".
+    static func list(_ names: [String]) -> String {
+        switch names.count {
+        case 0: ""
+        case 1: names[0]
+        case 2: "\(names[0]) and \(names[1])"
+        default: names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+        }
     }
 
     /// Where evidence suggests athletes need more than the RDA (IOC consensus,

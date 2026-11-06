@@ -50,8 +50,8 @@ private struct CategoryRow: View {
 
     private var detail: String {
         guard withData > 0 else { return "No data yet" }
-        // "5 of 6 measures" when some tiles inside still say No data.
-        let measures = withData < stats.count ? "\(withData) of \(stats.count) measures" : "\(withData) measure\(withData == 1 ? "" : "s")"
+        // One form on every row: "5 of 6 with data", "6 of 6 with data".
+        let measures = "\(withData) of \(stats.count) with data"
         return toWatch > 0 ? "\(measures) · \(toWatch) to watch" : measures
     }
 

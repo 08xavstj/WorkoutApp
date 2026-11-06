@@ -91,10 +91,11 @@ private struct YourSupplementRow: View {
             }
             EvidenceChip(evidence: match.entry.evidence)
             if let claim = match.entry.claims.first {
-                Text(claim.summary)
+                // One sentence, no citation; the research page has it all.
+                Text(claim.shortSummary)
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Label {
                 Text("Dose check: \(match.entry.doseLine)")

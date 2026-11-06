@@ -111,7 +111,8 @@ struct RecoveryContributorTests {
                         restingHeartRate: 55 + (day.isMultiple(of: 2) ? 1 : -1))
         }
         let result = try #require(RecoveryCalculator().score(
-            today: DailyVitals(date: today, hrvMilliseconds: 75, restingHeartRate: 52),
+            // 49 bpm: more than the 5 bpm notable-change limit below the usual 55.
+            today: DailyVitals(date: today, hrvMilliseconds: 75, restingHeartRate: 49),
             history: history, sleepScore: 90
         ))
         let hrv = try #require(result.contributors.first { $0.id == "hrv" })
@@ -172,10 +173,64 @@ struct MidpointShiftTests {
 
     @Test func indexNoteBandsFollowWindred() {
         // UK Biobank median about 81; benefit from about 85 (Windred 2024).
-        // Plain wording (QA round 1): "92 of 100: above the 85 linked to better health (typical is 81)".
-        #expect(SleepRegularity.indexNote(92).hasPrefix("92 of 100: above the 85 linked to better health (typical is 81"))
-        #expect(SleepRegularity.indexNote(85).hasPrefix("85 of 100: at the 85"))
-        #expect(SleepRegularity.indexNote(80).hasPrefix("80 of 100: about typical"))
-        #expect(SleepRegularity.indexNote(70).hasPrefix("70 of 100: below typical"))
+        // No number up front (QA round 3): the row already shows "92 / 100" beside it.
+        #expect(SleepRegularity.indexNote(92).hasPrefix("Above the 85 linked to better health (typical is 81"))
+        #expect(SleepRegularity.indexNote(85).hasPrefix("At the 85"))
+        #expect(SleepRegularity.indexNote(80).hasPrefix("About typical"))
+        #expect(SleepRegularity.indexNote(70).hasPrefix("Below typical"))
+    }
+}
+
+struct RecoveryNotableChangeTests {
+    let today = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private var history: [DailyVitals] {
+        (1...14).map { day in
+            DailyVitals(date: today.addingTimeInterval(Double(-day) * 86_400),
+                        hrvMilliseconds: 60 + (day.isMultiple(of: 2) ? 1 : -1),
+                        restingHeartRate: 51 + (day.isMultiple(of: 2) ? 0.5 : -0.5))
+        }
+    }
+
+    @Test func smallHeartRateRiseIsWithinNormal() throws {
+        // +2 bpm on a very steady baseline: a big z-score, but inside the 5 bpm limit.
+        let result = try #require(RecoveryCalculator().score(
+            today: DailyVitals(date: today, hrvMilliseconds: 60, restingHeartRate: 53),
+            history: history, sleepScore: 80
+        ))
+        let rhr = try #require(result.contributors.first { $0.id == "rhr" })
+        #expect(rhr.effect == .neutral)
+        #expect(rhr.note == RecoveryCalculator.withinNormalNote)
+        #expect(!(rhr.note ?? "").contains("stress"))
+    }
+
+    @Test func largeHeartRateRiseIsFlagged() throws {
+        let result = try #require(RecoveryCalculator().score(
+            today: DailyVitals(date: today, hrvMilliseconds: 60, restingHeartRate: 57),
+            history: history, sleepScore: 80
+        ))
+        let rhr = try #require(result.contributors.first { $0.id == "rhr" })
+        #expect(rhr.effect == .lowers)
+        #expect(rhr.note?.contains("stress") == true)
+    }
+
+    @Test func hrvDropOnlyLowersPastTheLimit() throws {
+        let small = try #require(RecoveryCalculator().score(
+            today: DailyVitals(date: today, hrvMilliseconds: 54, restingHeartRate: 51),
+            history: history, sleepScore: 80
+        ))
+        #expect(small.contributors.first { $0.id == "hrv" }?.effect == .neutral)
+        let large = try #require(RecoveryCalculator().score(
+            today: DailyVitals(date: today, hrvMilliseconds: 45, restingHeartRate: 51),
+            history: history, sleepScore: 80
+        ))
+        #expect(large.contributors.first { $0.id == "hrv" }?.effect == .lowers)
+    }
+
+    @Test func limitsAreTheTileLimits() {
+        #expect(RecoveryCalculator.notableRHRChangeBpm == 5)
+        #expect(RecoveryCalculator.notableHRVDropPercent == -15)
+        #expect(RecoveryCalculator.restingHeartRateEffect(change: 5) == .neutral)
+        #expect(RecoveryCalculator.restingHeartRateEffect(change: -5.5) == .raises)
     }
 }

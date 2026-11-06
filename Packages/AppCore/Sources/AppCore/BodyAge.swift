@@ -183,7 +183,7 @@ public enum BodyAge {
         }
         if let rhr = inputs.restingHeartRate, rhr > 30 {
             let years = clamp(gompertzYears(hazard: pow(1.09, (rhr - 60) / 10)), -2, 4)
-            factors.append(Factor(name: "Resting heart rate", years: years, detail: "\(Int(rhr.rounded())) bpm"))
+            factors.append(Factor(name: "Resting heart rate", years: years, detail: "\(Int(rhr.rounded())) bpm (2-week average)"))
         }
         if let hours = inputs.sleepHours, hours > 2 {
             let years = hours < 6 ? gompertzYears(hazard: 1.12) : 0
@@ -195,7 +195,7 @@ public enum BodyAge {
         if let steps = inputs.dailySteps, steps > 0 {
             let (reference, plateau) = inputs.age < 60 ? (7000.0, 10_000.0) : (6000.0, 8000.0)
             let years = clamp(-(min(steps, plateau) - reference) / 1000 * 0.6, -2.5, 4)
-            factors.append(Factor(name: "Daily steps", years: years, detail: "\(Int(steps.rounded())) a day"))
+            factors.append(Factor(name: "Daily steps", years: years, detail: "\(Int(steps.rounded()).formatted()) a day (30-day average)"))
         }
         if let ratio = inputs.waistToHeightRatio, ratio > 0.25, ratio < 1 {
             // Waist-to-height ratio (Ashwell 2012 bands; hazard steps borrowed from the BMI table below).

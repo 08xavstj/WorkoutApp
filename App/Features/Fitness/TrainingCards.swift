@@ -19,9 +19,11 @@ struct WeeklySetsCard: View {
     private static let scale = 25.0
 
     var body: some View {
-        // This block week's target per muscle (`VolumeProgression`), drawn as a tick on each bar.
+        // This block week's target per muscle (`VolumeProgression`), shaded on each bar.
         let week = plans.volumeTargets(muscles: muscles)
         let targets = week?.sets ?? [:]
+        // Each muscle's band this week ("8-10"); the bars shade and colour against it.
+        let bands = Dictionary((week?.targets ?? []).map { ($0.muscle, $0.band) }, uniquingKeysWith: { first, _ in first })
         // Block targets are per calendar week, so with them the bars count
         // since Monday (`MuscleModel.weekSets`); without, the last 7 days.
         let sinceMonday = !targets.isEmpty
@@ -46,15 +48,17 @@ struct WeeklySetsCard: View {
                     .foregroundStyle(Theme.secondaryText)
             } else {
                 ForEach(states) { state in
-                    row(state, target: targets[state.muscle], period: sinceMonday ? "since Monday" : "in the last 7 days")
+                    row(state, band: sinceMonday ? BarBand.target(bands[state.muscle]) : BarBand.general,
+                        period: sinceMonday ? "since Monday" : "in the last 7 days")
                 }
                 Text("A hard set is one taken within about 4 reps of failure. About 10-20 a week per muscle builds the most muscle for most people (Schoenfeld et al., J Sports Sci 2017); more still helps a little, with diminishing returns past 20 (Pelland et al., Sports Med 2026). Sets for helper muscles (e.g. triceps on bench press) count as half.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                 if !targets.isEmpty {
-                    Text("The tick on each bar is the top of that muscle's target this week.")
+                    Text(Self.blockCaption(untracked: states.map(\.muscle).filter { bands[$0] == nil }))
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -70,16 +74,56 @@ struct WeeklySetsCard: View {
         return low == high ? "Target \(low)" : "Target \(low)-\(high)"
     }
 
-    private func row(_ state: MuscleRecovery.State, target: Int?, period: String) -> some View {
-        let sets = state.weeklySets
-        let color: Color = switch state.volume {
-        case .none, .low: Theme.oxygen
-        case .productive: Theme.recoveryHigh
-        case .high: Theme.strain
+    /// What a bar is measured against: this block week's band for that
+    /// muscle (nil when the block sets none), or the general 10-20 range
+    /// when there's no block (Schoenfeld et al., J Sports Sci 2017).
+    private enum BarBand {
+        case general
+        case target(ClosedRange<Int>?)
+
+        var range: ClosedRange<Int>? {
+            switch self {
+            case .general: 10...20
+            case .target(let band): band
+            }
         }
+    }
+
+    /// The shading caption with a block; names muscles the block sets no target for.
+    private static func blockCaption(untracked: [Muscle]) -> String {
+        let base = "The shaded part of each bar is that muscle's target this week."
+        guard !untracked.isEmpty else { return base }
+        let names = untracked.map(\.name).formatted(.list(type: .and))
+        return base + " No target this week: \(names)."
+    }
+
+    /// Under, in or over the band: blue, green, orange. Grey with no target.
+    private func barColor(sets: Double, band: BarBand) -> Color {
+        guard let range = band.range else { return Theme.secondaryText.opacity(0.5) }
+        if sets < Double(range.lowerBound) { return Theme.oxygen }
+        if sets > Double(range.upperBound) { return Theme.strain }
+        return sets < 0.5 ? Theme.oxygen : Theme.recoveryHigh
+    }
+
+    private func spokenStatus(sets: Double, band: BarBand, state: MuscleRecovery.State) -> String {
+        switch band {
+        case .general:
+            return state.volume.rawValue.lowercased()
+        case .target(let range):
+            guard let range else { return "no target this week" }
+            let text = "target \(range.lowerBound) to \(range.upperBound) sets"
+            if sets < Double(range.lowerBound) { return "under the \(text)" }
+            if sets > Double(range.upperBound) { return "over the \(text)" }
+            return "within the \(text)"
+        }
+    }
+
+    private func row(_ state: MuscleRecovery.State, band: BarBand, period: String) -> some View {
+        let sets = state.weeklySets
+        let color = barColor(sets: sets, band: band)
         // Name beside the bar normally; above it at accessibility sizes.
         let stacked = dynamicTypeSize.isAccessibilitySize
-        let targetText = target.map { ", target \($0) sets" } ?? ""
+        let status = spokenStatus(sets: sets, band: band, state: state)
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
         return layout {
             Text(state.muscle.name)
@@ -89,7 +133,7 @@ struct WeeklySetsCard: View {
                 .lineLimit(stacked ? 2 : 1)
                 .minimumScaleFactor(0.8)
             HStack(spacing: 10) {
-                bar(sets: sets, color: color, target: target)
+                bar(sets: sets, color: color, band: band.range)
                 Text(sets.formatted(.number.precision(.fractionLength(0...1))))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
@@ -98,28 +142,26 @@ struct WeeklySetsCard: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(state.muscle.name): \(sets.formatted(.number.precision(.fractionLength(0...1)))) hard sets \(period), \(state.volume.rawValue.lowercased())\(targetText)")
+        .accessibilityLabel("\(state.muscle.name): \(sets.formatted(.number.precision(.fractionLength(0...1)))) hard sets \(period), \(status)")
     }
 
-    private func bar(sets: Double, color: Color, target: Int?) -> some View {
+    /// The shaded band is the same range the bar is coloured against.
+    private func bar(sets: Double, color: Color, band: ClosedRange<Int>?) -> some View {
         GeometryReader { geo in
             let width = geo.size.width
+            let low = Double(band?.lowerBound ?? 0)
+            let high = Double(band?.upperBound ?? 0)
             ZStack(alignment: .leading) {
                 Capsule().fill(Theme.track)
-                // The 10-20 band.
-                Rectangle()
-                    .fill(Theme.recoveryHigh.opacity(0.18))
-                    .frame(width: width * 10 / Self.scale)
-                    .offset(x: width * 10 / Self.scale)
+                if band != nil {
+                    Rectangle()
+                        .fill(Theme.recoveryHigh.opacity(0.18))
+                        .frame(width: max(3, width * min(1, (high - low) / Self.scale)))
+                        .offset(x: width * min(1, low / Self.scale))
+                }
                 Capsule()
                     .fill(color)
                     .frame(width: max(6, width * min(1, sets / Self.scale)))
-                if let target {
-                    Rectangle()
-                        .fill(Theme.primaryText)
-                        .frame(width: 2, height: 14)
-                        .offset(x: width * min(1, Double(target) / Self.scale) - 1)
-                }
             }
         }
         .frame(height: 10)
@@ -147,7 +189,8 @@ struct StrengthDaysCard: View {
             HStack {
                 CardLabel(text: "Strength days", color: Theme.lifting)
                 Spacer()
-                Chip(text: met ? "Goal reached" : "\(StrengthDays.weeklyTarget - thisWeek) more to go", color: met ? Theme.recoveryHigh : Theme.lifting)
+                // "Last 7 days", the same rolling window as the number (not the calendar week bars).
+                Chip(text: met ? "Met in the last 7 days" : "\(StrengthDays.weeklyTarget - thisWeek) more to go", color: met ? Theme.recoveryHigh : Theme.lifting)
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("\(thisWeek)")

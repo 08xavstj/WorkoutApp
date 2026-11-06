@@ -35,7 +35,8 @@ struct MoodRow: View {
     private var verdict: MetricVerdict? {
         let days = MoodHistory.dailyValence(recent).count
         guard days > 0, let average else { return MetricVerdict("Log a mood in a check-in") }
-        return MetricVerdict("Mostly \(MoodScale.word(valence: average).lowercased()) · \(days) day\(days == 1 ? "" : "s")")
+        // The value is the 14-day average (`recent`), so the chip names the window.
+        return MetricVerdict("Last 14 days")
     }
 }
 

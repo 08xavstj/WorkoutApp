@@ -147,16 +147,17 @@ extension SleepRegularity {
     public static let typicalIndex = 81
     public static let benefitIndex = 85
 
-    /// "92 of 100: above the 85 linked to better health (typical is 81)".
+    /// "Above the 85 linked to better health (typical is 81)". No number up
+    /// front: it sits beside the "92 / 100" it explains.
     public static func indexNote(_ sri: Int) -> String {
         if sri >= benefitIndex {
-            let place = sri == benefitIndex ? "at" : "above"
-            return "\(sri) of 100: \(place) the \(benefitIndex) linked to better health (typical is \(typicalIndex); Windred 2024)."
+            let place = sri == benefitIndex ? "At" : "Above"
+            return "\(place) the \(benefitIndex) linked to better health (typical is \(typicalIndex); Windred 2024)."
         }
         if sri >= typicalIndex - 5 {
-            return "\(sri) of 100: about typical (\(typicalIndex)); \(benefitIndex)+ is linked to better health (Windred 2024)."
+            return "About typical (\(typicalIndex)); \(benefitIndex)+ is linked to better health (Windred 2024)."
         }
-        return "\(sri) of 100: below typical (\(typicalIndex)); \(benefitIndex)+ is linked to better health (Windred 2024). A steady wake time moves it most."
+        return "Below typical (\(typicalIndex)); \(benefitIndex)+ is linked to better health (Windred 2024). A steady wake time moves it most."
     }
 }
 

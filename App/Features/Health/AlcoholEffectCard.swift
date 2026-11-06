@@ -25,7 +25,7 @@ struct AlcoholEffectCard: View {
             weekRow
             if findings.isEmpty {
                 Text(nightsLogged == 0
-                     ? "Log drinks in the evening check-in (zero counts too) and after 5 nights with and 5 without, you'll see what drinking does to your next morning."
+                     ? "Log drinks in the evening check-in (zero counts too). After 5 nights with and 5 without, you'll see what drinking does to your next morning."
                      : "Needs at least 5 nights with a drink and 5 without. \(nightsLogged) night\(nightsLogged == 1 ? "" : "s") logged so far.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
@@ -35,7 +35,7 @@ struct AlcoholEffectCard: View {
                     // The "worse" icon and a bold line only for a clear difference;
                     // a maybe-chance one stays neutral.
                     let clearlyWorse = finding.isWorse && finding.isClear
-                    Image(systemName: clearlyWorse ? "arrow.down.heart.fill" : "equal.circle.fill")
+                    Image(systemName: clearlyWorse ? "exclamationmark.circle.fill" : "equal.circle.fill")
                         .foregroundStyle(clearlyWorse ? Theme.recoveryModerateText : Theme.secondaryText)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
@@ -43,7 +43,7 @@ struct AlcoholEffectCard: View {
                             .font(finding.isClear ? .subheadline.weight(.semibold) : .subheadline)
                             .foregroundStyle(Theme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(finding.isClear ? "A clear difference for you." : "Not a clear difference yet; it may be chance.")
+                        Text(Self.clarity(finding))
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -57,6 +57,13 @@ struct AlcoholEffectCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // Neutral: pink means lifting only (ux-audit.md 4.5 colour rules, X3).
         .card()
+    }
+
+    /// Same rule as the patterns list (`AlcoholEffect.Finding.isClear`).
+    private static func clarity(_ finding: AlcoholEffect.Finding) -> String {
+        if finding.isClear { return "A clear difference for you." }
+        if finding.nightsWith < 7 || finding.nightsWithout < 7 { return "Not clear yet: needs 7 nights each way." }
+        return "Not a clear difference; it may be chance."
     }
 
     /// This week's total against Canada's 2023 tiers (0–2 low, 3–6 moderate,

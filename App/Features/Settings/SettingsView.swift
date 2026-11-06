@@ -26,6 +26,7 @@ struct SettingsView: View {
                 AboutSettingsSection()
             }
             .scrollContentBackground(.hidden)
+            .scrollEdgeEffectStyle(.hard, for: .top)
             .background(Theme.background)
             .navigationTitle("Settings")
             .toolbar {
@@ -193,11 +194,14 @@ private struct TrainingSettingsSection: View {
             } label: {
                 LabeledContent("Gym equipment", value: gym.isConfigured ? gym.profile.name : "Not set up")
             }
-            Picker("Rest timer", selection: $restSeconds) {
+            Picker(selection: $restSeconds) {
                 Text("Automatic").tag(0)
                 ForEach(RestTimer.choices, id: \.self) { seconds in
                     Text(RestPreferences.label(seconds)).tag(seconds)
                 }
+            } label: {
+                Text("Rest timer")
+                Text("Automatic follows your goal")
             }
             Toggle("Start workouts on Apple Watch", isOn: $settings.startWatchWithWorkout)
             Toggle(isOn: $settings.watchRepCounting) {
@@ -207,21 +211,35 @@ private struct TrainingSettingsSection: View {
             // Warm-up before lifting (`WarmUpRoutine.Tier`); the builder can
             // override it per focus. Default: ramp sets only (best evidence:
             // Ribeiro 2020 IJERPH; Ribeiro/Neves 2021 Motricidade).
-            Picker("Warm-up", selection: $settings.warmUpTier) {
+            Picker(selection: $settings.warmUpTier) {
                 ForEach(WarmUpRoutine.Tier.allCases) { tier in
                     Text(tier.menuLabel).tag(tier)
                 }
+            } label: {
+                Text("Warm-up")
+                Text("Ramp sets have the best evidence")
             }
             Button(action: showRPEGuide) {
                 LabeledContent("RPE guide", value: "What each number means")
             }
             LiftingExperienceRows()
+            EvidenceDisclosure(points: Self.details, title: "How these work")
         } header: {
             Text("Training")
         } footer: {
-            Text("Gym equipment lists what your gym has, down to the plates and dumbbells, so planned weights are ones you can load. Automatic rest follows your goal: about 2 min on big lifts and 90 s on small ones for muscle, 3 min for strength; set rest per exercise from its ••• menu during a workout. Warm-up: ramp sets have the best evidence. Movement prep adds a small, mostly feel-based benefit. You can pick a different warm-up for one focus from the workout planner. Lifting experience is used to choose your calorie equation and how fast to gain. Your logged workouts update it once there are 8 weeks of them; the 6-month and 2-year lines are rough guides, not exact. Rep counting on Apple Watch is experimental: it counts barbell squats and deadlifts from wrist motion, fills in the reps for you to check, and taps once when the bar slows by about a fifth (roughly 1–2 reps left). Use it as a cross-check on how hard a set feels, not instead of it. Motion data stays on the Watch.")
+            Text("Planned weights use only what your gym can load.")
         }
     }
+}
+
+extension TrainingSettingsSection {
+    /// The details that used to fill the footer, one short point per control.
+    fileprivate static let details = [
+        "Rest: automatic is about 2 min on big lifts and 90 s on small ones for muscle, 3 min for strength. Change one exercise from its ••• menu.",
+        "Warm-up: movement prep adds a small, mostly feel-based benefit. Pick a different warm-up for one focus in the planner.",
+        "Lifting experience picks your calorie equation and gain rate. After 8 weeks of logged workouts, your log sets it.",
+        "Rep counting reads barbell squats and deadlifts from wrist motion and taps when the bar slows by about a fifth (1–2 reps left). Check it against how the set felt. Motion data stays on the Watch.",
+    ]
 }
 
 /// How long you've lifted, for people who trained before they installed the
@@ -286,13 +304,19 @@ private struct RemindersSettingsSection: View {
     var body: some View {
         @Bindable var settings = settings
         Section {
-            Toggle("Check-in reminders", isOn: $settings.checkInRemindersOn)
+            Toggle(isOn: $settings.checkInRemindersOn) {
+                Text("Check-in reminders")
+                Text("Morning and evening, skipped once done")
+            }
             if settings.checkInRemindersOn {
                 DatePicker("Morning", selection: minutesBinding(\.morningCheckInMinutes), displayedComponents: .hourAndMinute)
                 DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
             }
             workoutRows
-            Toggle("Daily creatine", isOn: creatineOn)
+            Toggle(isOn: creatineOn) {
+                Text("Daily creatine")
+                Text("With a Taken button")
+            }
             if meds.creatineReminderOn {
                 DatePicker("Creatine time", selection: creatineTime, displayedComponents: .hourAndMinute)
             }
@@ -303,21 +327,27 @@ private struct RemindersSettingsSection: View {
         } header: {
             Text("Reminders")
         } footer: {
-            Text("Two check-ins a day: a morning one for last night's HRV and how you feel, and an evening one for one win and how today felt, with tonight's bed-by time. Each is skipped once it's done. Workout reminders come 30 minutes before a planned training day only, with your if-then line; after two go unanswered they pause until you confirm the next week's plan. The Monday review shows last week in plain numbers, then three changes for this week. Medication and creatine reminders have a Taken button, and today's doses also show on your Lock Screen.")
+            Text("Today's doses also show on your Lock Screen.")
         }
     }
 
     @ViewBuilder
     private var workoutRows: some View {
         @Bindable var settings = settings
-        Toggle("Workout reminders", isOn: $settings.workoutRemindersOn)
+        Toggle(isOn: $settings.workoutRemindersOn) {
+            Text("Workout reminders")
+            Text("30 min before a planned training day")
+        }
         if settings.workoutRemindersOn, Reminders.workoutRemindersPaused {
-            Text("Paused: two in a row went unanswered. They come back when you confirm next week's plan.")
+            Text("Paused after two went unanswered. Confirm next week's plan to resume.")
                 .font(.footnote)
                 .foregroundStyle(Theme.secondaryText)
         }
         // The same setting as This week › Weekly review.
-        Toggle("Monday review reminder", isOn: $settings.weeklyReviewOn)
+        Toggle(isOn: $settings.weeklyReviewOn) {
+            Text("Monday review reminder")
+            Text("Last week in numbers, three changes")
+        }
         if settings.weeklyReviewOn {
             DatePicker("Review time", selection: minutesBinding(\.weeklyReviewMinutes), displayedComponents: .hourAndMinute)
         }
@@ -374,7 +404,7 @@ private struct CoachSettingsSection: View {
         } header: {
             Text("Coach")
         } footer: {
-            Text("The coach runs on your iPhone with Apple Intelligence. Coach conversations, health data and photos stay on this iPhone. Two lookups go online: your city or its coordinates to Open-Meteo for weather, and a medication's name to the FDA's drug-label service.")
+            Text("Chats, health data and photos stay on this iPhone. Only weather (your city, via Open-Meteo) and medication names (FDA drug labels) are looked up online.")
         }
     }
 }

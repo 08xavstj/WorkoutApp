@@ -79,7 +79,12 @@ enum Theme {
     // Deep gradients for buttons with white text (both stops dark enough).
     static let recoveryDeep = adaptive(light: 0x15803D, dark: 0x16A34A)
     static let sleepDeep = adaptive(light: 0x4338CA, dark: 0x5B5BF0)
-    static var strainButtonColors: [Color] { [strainTextColor, lifting] }
+    /// Start-workout gradient: burnt orange to deep raspberry in both modes.
+    /// White text is 5.2:1 on 0xC2410C and 6.0:1 on 0xBE185D (WCAG 2.2 AA
+    /// 4.5:1); the lighter dark-mode accents were 2.3-2.7:1.
+    static let strainDeep = adaptive(light: 0xC2410C, dark: 0xC2410C)
+    static let liftingDeep = adaptive(light: 0xBE185D, dark: 0xBE185D)
+    static var strainButtonColors: [Color] { [strainDeep, liftingDeep] }
     static var recoveryButtonColors: [Color] { [recoveryHigh, recoveryDeep] }
     static var sleepButtonColors: [Color] { [sleep, sleepDeep] }
 
@@ -109,8 +114,8 @@ enum Theme {
     /// Pastel colors for the soft gradient wash at the top of each tab.
     enum Wash {
         static let peach = adaptive(light: 0xFFD3B0, dark: 0x6B3A1E)
-        static let butter = adaptive(light: 0xFFF0A6, dark: 0x5E5320)
-        static let lime = adaptive(light: 0xD9F5A6, dark: 0x3B5A1E)
+        static let butter = adaptive(light: 0xFFF0A6, dark: 0x6B4A1E)
+        static let lime = adaptive(light: 0xD9F5A6, dark: 0x2E5A2A)
         static let mint = adaptive(light: 0xB8F0DA, dark: 0x1E5A48)
         static let sky = adaptive(light: 0xB9DEFF, dark: 0x1E3F6B)
         static let lavender = adaptive(light: 0xD8CCFF, dark: 0x3A2E6B)

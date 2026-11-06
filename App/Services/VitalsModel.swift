@@ -111,6 +111,32 @@ final class VitalsModel {
         stats.first { $0.id == id }
     }
 
+    /// Nightly HRV (RMSSD, the same series as Health's HRV card,
+    /// `BiologyModel.hrvSeries`), kept so every refresh rebuilds the "hrv"
+    /// stat that Today's HRV tile opens.
+    private var hrvNightly: [DatedValue] = []
+
+    /// Called after `BiologyModel.refresh`; an empty series removes the stat.
+    func setHRVSeries(_ series: [DatedValue]) {
+        hrvNightly = series
+        stats.removeAll { $0.id == "hrv" }
+        guard !series.isEmpty else { return }
+        let stat = Self.describe(hrvStat(series))
+        if let rhr = stats.firstIndex(where: { $0.id == "rhr" }) {
+            stats.insert(stat, at: rhr + 1)
+        } else {
+            stats.append(stat)
+        }
+    }
+
+    /// The history page draws your normal band (`PersonalBaseline.band`) from
+    /// this nightly series, as it does for resting heart rate.
+    private func hrvStat(_ series: [DatedValue]) -> Stat {
+        var stat = makeStat("hrv", .heart, "HRV", "waveform.path.ecg", series: series, unit: "ms", digits: 0)
+        stat.status = nil
+        return stat
+    }
+
     /// VO₂ max readings from Apple Health (last 180 days), for the Fitness
     /// headline's 90-day trend (`CardioFitness.trend`).
     var vo2MaxHistory: [DatedValue] { stat("vo2")?.series ?? [] }
@@ -259,11 +285,12 @@ final class VitalsModel {
             status: { Biomarkers.restingHeartRateLabel($0) },
             tone: { $0 <= 65 ? .good : ($0 <= 80 ? .neutral : .caution) }
         ))
+        if !hrvNightly.isEmpty { result.append(hrvStat(hrvNightly)) }
         if let sleeping = derived.sleepingHeartRate {
             result.append(Stat(
                 id: "sleepingHR", category: .heart, title: "Sleeping heart rate", icon: "bed.double.fill",
                 value: fmt(sleeping.average), unit: "bpm",
-                status: "Lowest \(fmt(sleeping.lowest))", tone: .neutral,
+                status: "Lowest last night \(fmt(sleeping.lowest))", tone: .neutral,
                 series: derived.sleepingHeartRateByNight,
                 footnote: "Average while asleep last night"
             ))
@@ -304,7 +331,7 @@ final class VitalsModel {
 
         if let stress = derived.stressToday {
             result.append(Stat(
-                id: "stress", category: .heart, title: "Heart rate above resting", icon: "heart.text.square",
+                id: "stress", category: .heart, title: "Stress (from heart rate)", icon: "heart.text.square",
                 value: "\(stress.score)", unit: "/ 100", status: StressEstimate.label(for: stress.score),
                 tone: .neutral,
                 gauge: Double(stress.score) / 100,
@@ -312,7 +339,7 @@ final class VitalsModel {
                 footnote: "Experimental. Garmin's stress score uses HRV, which it doesn't share with Apple Health."
             ))
         } else {
-            result.append(Stat(id: "stress", category: .heart, title: "Heart rate above resting", icon: "heart.text.square", unit: "/ 100",
+            result.append(Stat(id: "stress", category: .heart, title: "Stress (from heart rate)", icon: "heart.text.square", unit: "/ 100",
                                footnote: "Needs about 30 minutes of daytime heart rate."))
         }
 
@@ -367,7 +394,8 @@ final class VitalsModel {
         let body = get(try? await bodyTemp)
         wristTemperatureHistory = wrist
         if !wrist.isEmpty || body.isEmpty {
-            let baseline = wrist.dropLast().suffix(14).map(\.value)
+            // The same 30-night baseline as the illness watch (`temperatureBaselineNights`).
+            let baseline = wrist.dropLast().suffix(Self.temperatureBaselineNights).map(\.value)
             let mean = baseline.isEmpty ? nil : baseline.reduce(0, +) / Double(baseline.count)
             var temp = makeStat("temperature", .breathing, "Sleeping temperature", "thermometer.medium", series: wrist, unit: "°C", digits: 2)
             if let last = wrist.last, let mean {
@@ -376,6 +404,8 @@ final class VitalsModel {
                 temp.unit = "°C vs usual"
                 temp.status = abs(delta) < 0.5 ? "Normal" : "Off baseline"
                 temp.tone = abs(delta) < 0.5 ? .good : .caution
+                // The pill shows the shown delta: centre = your usual, each end ±0.5 °C.
+                temp.gauge = min(1, max(0, 0.5 + delta / 1.0))
             }
             result.append(temp)
         } else {
@@ -409,7 +439,9 @@ final class VitalsModel {
         let miles = settings.weightUnit == .pounds
         let distanceSeries = miles ? distanceKm.map { DatedValue(date: $0.date, value: $0.value / 1.609344) } : distanceKm
         result.append(todayStat("distance", "Distance", "map.fill", series: distanceSeries, unit: miles ? "mi" : "km", digits: 2, today: latestToday))
-        result.append(todayStat("floors", "Floors climbed", "stairs", series: get(try? await floors), unit: "floors", digits: 0, today: latestToday))
+        var floorsStat = todayStat("floors", "Floors climbed", "stairs", series: get(try? await floors), unit: "floors", digits: 0, today: latestToday)
+        if floorsStat.value == "1" { floorsStat.unit = "floor" }
+        result.append(floorsStat)
         let intensity = derived.intensityWeek
         result.append(Stat(
             id: "intensity", category: .activity, title: "Intensity minutes", icon: "bolt.heart.fill",
@@ -470,7 +502,8 @@ final class VitalsModel {
             var bp = Stat(
                 id: "bp", category: .body, title: "Blood pressure", icon: "waveform.path.ecg.rectangle",
                 value: "\(fmt(avgS))/\(fmt(avgD))", unit: "mmHg",
-                status: "\(category.rawValue) · 7-day average", tone: category == .normal ? .good : .caution, series: sys
+                status: category.rawValue, tone: category == .normal ? .good : .caution, series: sys,
+                footnote: "Average of your home readings over the last 7 days."
             )
             bp.secondary = dia
             bp.secondaryLabel = "Diastolic"
@@ -479,7 +512,8 @@ final class VitalsModel {
             var bp = Stat(
                 id: "bp", category: .body, title: "Blood pressure", icon: "waveform.path.ecg.rectangle",
                 value: "\(fmt(s.value))/\(fmt(d.value))", unit: "mmHg",
-                status: "Latest · not a home average", tone: .neutral, series: sys
+                status: "Latest reading", tone: .neutral, series: sys,
+                footnote: "One reading. Blood pressure is classed from a 7-day home average."
             )
             bp.secondary = dia
             bp.secondaryLabel = "Diastolic"
@@ -523,7 +557,8 @@ final class VitalsModel {
         var debtStat = Stat(
             id: "sleepDebt", category: .sleep, title: "Sleep debt", icon: "hourglass",
             value: currentDebt.map { Duration.seconds($0.hours * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
-            unit: "", status: currentDebt.map { $0.level == .none ? "Caught up" : $0.level.rawValue },
+            // "Caught up" only at zero; a small debt reads "Under 1 h" (level .none is < 1 h).
+            unit: "", status: currentDebt.map { $0.level != .none ? $0.level.rawValue : ($0.hours > 0 ? "Under 1 h" : "Caught up") },
             tone: (currentDebt?.hours ?? 0) < 3 ? .good : .caution,
             gauge: currentDebt.map { min(1, $0.hours / 10) },
             series: debtSeries,
@@ -669,6 +704,8 @@ final class VitalsModel {
         switch stat.id {
         case "rhr":
             stat.about = "Your heart rate at full rest, measured overnight. It drops as aerobic fitness improves. A rise of 5 or more bpm above your normal can mean illness, stress, alcohol or not enough recovery."
+        case "hrv":
+            stat.about = "Heart rate variability overnight (RMSSD), the beat-to-beat variation that rises when you're recovered. Night-to-night swings are large, so the 7-day average against your own normal range is what counts (Plews et al., Sports Med 2013), not one night or another person's number."
         case "sleepingHR":
             stat.about = "Average heart rate between falling asleep and waking. It's lower when you're fit and well recovered, and rises after alcohol, late meals, illness or hard training."
         case "walkingHR":
@@ -904,7 +941,7 @@ extension VitalsModel {
             return DatedValue(date: day, value: flagged.contains(day) ? 1 : 0)
         }
         var stat = Stat(
-            id: "apnoea", category: .breathing, title: "Breathing disturbances", icon: "lungs",
+            id: "apnoea", category: .breathing, title: "Sleep apnoea alerts", icon: "lungs",
             value: "\(nights.count)", unit: "nights in 30",
             status: nights.isEmpty ? "None flagged" : "Possible apnoea flagged",
             tone: nights.isEmpty ? .good : .caution,
@@ -940,7 +977,7 @@ extension VitalsModel {
             stat.status = "2-hour anchor reached"
             stat.tone = .good
         } else {
-            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to 2 h"
+            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to go (2 h target)"
             stat.tone = .neutral
         }
         stat.footnote = "About 2 hours a day is the anchor (Burns 2023; evidence is observational)."

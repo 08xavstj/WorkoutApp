@@ -267,7 +267,7 @@ struct GripCard: View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
         return layout {
             HStack(spacing: 10) {
-                TextField(settings.weightUnit == .kilograms ? "48" : "106", value: $value, format: .number.precision(.fractionLength(0...1)))
+                TextField(settings.weightUnit.rawValue, value: $value, format: .number.precision(.fractionLength(0...1)))
                     .keyboardType(.decimalPad)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: fieldWidth)

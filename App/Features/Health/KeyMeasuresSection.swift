@@ -119,21 +119,33 @@ private struct BodyAgeRow: View {
 }
 
 /// Vitamins and minerals from the food log (`Micronutrients`): how many are
-/// low this week, pushing the "What to fix" page. Shown once 4 days of food
-/// are logged (`Micronutrients.assess` returns nothing before that).
+/// low or above the upper limit this week, pushing the "What to fix" page.
+/// Shown once 4 days of food are logged (`Micronutrients.assess` returns
+/// nothing before that).
 private struct MicronutrientsKeyRow: View {
     let findings: [Micronutrients.Finding]
 
     var body: some View {
         let low = Micronutrients.toFix(findings).count
+        let high = findings.filter { $0.kind == .high }.count
         MetricRow(
             title: "Vitamins & minerals",
-            value: "\(low)",
-            unit: "low this week",
-            verdict: MetricVerdict(low == 0 ? "Near target" : "See what to fix", color: low == 0 ? Theme.recoveryHigh : Theme.recoveryModerate),
+            value: "\(low > 0 || high == 0 ? low : high)",
+            unit: Self.unit(low: low, high: high),
+            verdict: Self.verdict(low: low, high: high),
             hint: "Shows what to fix",
             destination: MicronutrientsPage()
         )
+    }
+
+    private static func unit(low: Int, high: Int) -> String {
+        if low > 0, high > 0 { return "low, \(high) too high" }
+        return high > 0 ? "too high this week" : "low this week"
+    }
+
+    private static func verdict(low: Int, high: Int) -> MetricVerdict {
+        if low == 0, high == 0 { return MetricVerdict("Near target", color: Theme.recoveryHigh) }
+        return MetricVerdict(low == 0 ? "See what's high" : "See what to fix", color: Theme.recoveryModerate)
     }
 }
 

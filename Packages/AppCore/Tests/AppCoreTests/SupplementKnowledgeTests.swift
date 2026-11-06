@@ -26,6 +26,14 @@ struct SupplementKnowledgeTests {
         #expect(SupplementKnowledge.match(name)?.id == expected)
     }
 
+    @Test func shortSummaryIsOneSentenceWithoutCitations() {
+        let claim = SupplementKnowledge.Claim(purpose: "x", evidence: .strong,
+                                              summary: "More work in repeated efforts (ISSN 2017). Little effect on endurance (Smith 2020).")
+        #expect(claim.shortSummary == "More work in repeated efforts.")
+        let one = SupplementKnowledge.Claim(purpose: "y", evidence: .weak, summary: "Small effects; no gain in trained lifters (Jakubowski 2020).")
+        #expect(one.shortSummary == "Small effects; no gain in trained lifters.")
+    }
+
     @Test func unknownAndPartialNamesDontMatch() {
         #expect(SupplementKnowledge.match("Metoprolol") == nil)
         #expect(SupplementKnowledge.match("") == nil)

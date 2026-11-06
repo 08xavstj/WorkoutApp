@@ -25,11 +25,12 @@ struct OnboardingView: View {
         // Scrolls at large text sizes; the buttons stay pinned at the bottom.
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                AppMark()
+                    .padding(.top, 32)
                 Text("Your training, recovery and sleep in one place")
                     .font(.largeTitle.weight(.bold))
-                    .padding(.top, 40)
                 VStack(alignment: .leading, spacing: 16) {
-                    row("flame.fill", Theme.strain, "Strain", "How hard your body worked today, 0-100%. Gym sessions count, not just cardio.")
+                    row("flame.fill", Theme.strain, "Strain", "How hard your body worked today, 0–100%. Gym sessions count, not just cardio.")
                     row("bolt.heart.fill", Theme.recoveryHigh, "Recovery", "How ready you are, from your heart rate variability (HRV), resting heart rate and sleep.")
                     row("moon.zzz.fill", Theme.sleep, "Sleep", "Time asleep against what you need, plus quality.")
                     row("sparkles", Theme.lifting, "Coach", "Ask what to do today. It knows your numbers and your workouts.")
@@ -203,5 +204,26 @@ private struct OnboardingSetupRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isDone ? "\(title), done" : "\(title), not set up")
         .accessibilityHint(detail)
+    }
+}
+
+/// The app's name and mark on the welcome screen.
+private struct AppMark: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "figure.strengthtraining.traditional")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: .rect(cornerRadius: 14))
+                .accessibilityHidden(true)
+            Text("Tensile")
+                .font(.title.weight(.bold))
+                .fontDesign(.rounded)
+                .foregroundStyle(Theme.primaryText)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }

@@ -25,6 +25,21 @@ struct CheckInTests {
         #expect(CheckInCoaching.advice(for: checkIn)?.hasPrefix("Fever") == true)
     }
 
+    @Test func habitProgressCountsDaysEachWay() throws {
+        let days = (0..<10).map { index -> CheckInDay in
+            var evening = EveningCheckIn(day: start)
+            evening.sauna = index < 4
+            return CheckInDay(morning: start.addingTimeInterval(Double(index) * 86_400), evening: evening, checkIn: nil,
+                              hrv: 50, restingHeartRate: 60, sleepScore: 80)
+        }
+        let sauna = try #require(CheckInInsights.progress(days).first { $0.name == "Sauna" })
+        #expect(sauna.daysWith == 4)
+        #expect(sauna.daysWithout == 6)
+        #expect(sauna.text == "4/7 days")
+        // Never seen: not listed.
+        #expect(!CheckInInsights.progress(days).contains { $0.name == "Nicotine" })
+    }
+
     @Test func alcoholLowersHRVInsight() throws {
         var days: [CheckInDay] = []
         for index in 0..<18 {

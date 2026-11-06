@@ -25,6 +25,7 @@ enum DemoData {
         seedMedications(demo)
         seedMeasurements(demo)
         seedLabs(demo)
+        seedSleepScores(demo)
         return true
     }
 
@@ -57,6 +58,22 @@ enum DemoData {
         }
     }
 
+    // MARK: Sleep scores
+
+    /// The 30 mornings before today, scored the way the app scores each
+    /// morning (`SleepCalculator`, as in `DailyMetricsModel`). The app keeps
+    /// one score per day it's opened (`SleepScoreLog`), so a fresh demo
+    /// install had none and recovery's personal sleep baseline was empty.
+    private static func seedSleepScores(_ demo: DemoHealth) {
+        var calculator = SleepCalculator()
+        calculator.baseSleepNeedHours = 7.5
+        calculator.age = demo.age
+        for daysAgo in (1...30).reversed() {
+            let morning = demo.day(daysAgo)
+            SleepScoreLog.record(calculator.score(samples: demo.sleepSamples(forNightEnding: morning))?.score, on: morning)
+        }
+    }
+
     // MARK: Profile and goals
 
     private static func seedSettings(_ demo: DemoHealth) {
@@ -66,7 +83,8 @@ enum DemoData {
         settings.age = demo.age
         settings.sex = .male
         settings.heightCm = demo.heightCm
-        settings.weightKg = 81.6
+        // The scale's latest reading (`DemoHealth` bodyMass), so Settings and Health agree.
+        settings.weightKg = demo.latestWeightKg
         settings.profileFromHealth = false
         settings.weightUnit = .kilograms
         settings.placeName = "Lisbon"
@@ -84,7 +102,7 @@ enum DemoData {
 
     /// Lose weight slowly while building muscle and strength, with two lift goals.
     static func goals(_ demo: DemoHealth) -> Goals {
-        let bench = LiftGoal(exerciseID: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", targetKg: 100,
+        let bench = LiftGoal(exerciseID: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", targetKg: 115,
                              targetDate: demo.day(-120))
         let squat = LiftGoal(exerciseID: "Barbell_Squat", name: "Back Squat", bodyweightMultiple: 2)
         return Goals(weight: .lose, weeklyRatePercent: 0.5, focuses: [.muscle, .strength], targetWeightKg: 78,
@@ -132,7 +150,9 @@ enum DemoData {
             morning.rested = 3 + (DemoHealth.noise(daysAgo, 80) > 0 ? 1 : 0)
             morning.soreness = 2 + Int((DemoHealth.noise(daysAgo, 81) + 1) * 1.5)
             morning.soreAreas = daysAgo % 2 == 0 ? [.legs] : [.chest, .arms]
-            morning.mood = 3 + (DemoHealth.noise(daysAgo, 82) > -0.2 ? 1 : 0)
+            // Seeded, with a slow drift over the weeks, so the history isn't a repeating pattern.
+            let drift = 0.45 * sin(Double(daysAgo) / 4.3)
+            morning.mood = min(5, max(2, Int((3.7 + 0.9 * DemoHealth.noise(daysAgo, 82) + drift).rounded())))
             morning.nightWakings = daysAgo % 3 == 0 ? 1 : 0
             if daysAgo <= 2, daysAgo != 1 {
                 let level = daysAgo == 0 ? 4 : 3
@@ -148,7 +168,7 @@ enum DemoData {
             evening.stress = 2 + (DemoHealth.noise(daysAgo, 83) > 0.4 ? 1 : 0)
             // A seeded mix of evenings (mostly good, a few stressed or tired
             // ones after drinks or a long day), with words, like a real log.
-            let roll = DemoHealth.noise(daysAgo, 84)
+            let roll = 0.75 * DemoHealth.noise(daysAgo, 84) + 0.25 * DemoHealth.noise(daysAgo / 3, 85)
             let mood = roll > 0.35 ? 5 : (roll > -0.45 ? 4 : (roll > -0.8 ? 3 : 2))
             evening.mood = mood
             let feelings: [MoodFeeling] = switch mood {
@@ -230,21 +250,23 @@ enum DemoData {
         }
     }
 
+    // Sets sized so a week's hard sets per muscle land near the plan's
+    // block-week target rather than 20+ (helpers count half, `MuscleCoverage`).
     private static let upperLifts = [
         Lift(id: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", sets: 4, reps: 6, startKg: 77.5, stepKg: 0.5, roundKg: 2.5, warmUp: true),
         Lift(id: "Bent_Over_Barbell_Row", name: "Barbell Row", sets: 3, reps: 8, startKg: 60, stepKg: 0.5, roundKg: 2.5),
-        Lift(id: "Dumbbell_Shoulder_Press", name: "Dumbbell Shoulder Press", sets: 3, reps: 10, startKg: 20, stepKg: 0.2, roundKg: 2),
+        Lift(id: "Dumbbell_Shoulder_Press", name: "Dumbbell Shoulder Press", sets: 2, reps: 10, startKg: 20, stepKg: 0.2, roundKg: 2),
         Lift(id: "Wide-Grip_Lat_Pulldown", name: "Lat Pulldown", sets: 3, reps: 10, startKg: 55, stepKg: 0.5, roundKg: 5),
-        Lift(id: "Side_Lateral_Raise", name: "Lateral Raise", sets: 3, reps: 15, startKg: 8, stepKg: 0.2, roundKg: 2),
+        Lift(id: "Side_Lateral_Raise", name: "Lateral Raise", sets: 2, reps: 15, startKg: 8, stepKg: 0.2, roundKg: 2),
         Lift(id: "Triceps_Pushdown_-_Rope_Attachment", name: "Rope Pushdown", sets: 3, reps: 12, startKg: 25, stepKg: 0.4, roundKg: 5),
     ]
 
     private static let lowerLifts = [
-        Lift(id: "Barbell_Squat", name: "Back Squat", sets: 4, reps: 5, startKg: 100, stepKg: 0.6, roundKg: 2.5, warmUp: true),
+        Lift(id: "Barbell_Squat", name: "Back Squat", sets: 3, reps: 5, startKg: 100, stepKg: 0.6, roundKg: 2.5, warmUp: true),
         Lift(id: "Romanian_Deadlift", name: "Romanian Deadlift", sets: 3, reps: 8, startKg: 80, stepKg: 0.5, roundKg: 2.5),
-        Lift(id: "Leg_Press", name: "Leg Press", sets: 3, reps: 10, startKg: 120, stepKg: 1, roundKg: 5),
-        Lift(id: "Seated_Leg_Curl", name: "Seated Leg Curl", sets: 3, reps: 12, startKg: 40, stepKg: 0.5, roundKg: 5),
-        Lift(id: "Standing_Calf_Raises", name: "Standing Calf Raise", sets: 3, reps: 12, startKg: 70, stepKg: 1, roundKg: 5),
+        Lift(id: "Leg_Press", name: "Leg Press", sets: 2, reps: 10, startKg: 120, stepKg: 1, roundKg: 5),
+        Lift(id: "Seated_Leg_Curl", name: "Seated Leg Curl", sets: 2, reps: 12, startKg: 40, stepKg: 0.5, roundKg: 5),
+        Lift(id: "Standing_Calf_Raises", name: "Standing Calf Raise", sets: 2, reps: 12, startKg: 70, stepKg: 1, roundKg: 5),
         Lift(id: "Cable_Crunch", name: "Cable Crunch", sets: 3, reps: 15, startKg: 35, stepKg: 0.4, roundKg: 5),
     ]
 
@@ -282,10 +304,15 @@ enum DemoData {
                         clock = clock.addingTimeInterval(90)
                     }
                 }
-                for number in 0..<lift.sets {
-                    let last = number == lift.sets - 1
+                // Some sessions drop a set on a lift or two (a short evening),
+                // so sessions differ in sets and volume like a real log.
+                let skipped = DemoHealth.noise(index * 11 + order, 90 + (planned.focus == .upper ? 0 : 1)) > 0.45 ? 1 : 0
+                let sets = max(2, lift.sets - skipped)
+                for number in 0..<sets {
+                    let last = number == sets - 1
                     let rpe = min(9, 7 + 0.5 * Double(number))
-                    let set = SetLog(order: setOrder, weightKg: top, reps: last && lift.reps >= 10 ? lift.reps - 1 : lift.reps, rpe: rpe)
+                    let missedRep = last && (lift.reps >= 10 || DemoHealth.noise(index * 13 + order, 92) > 0.3)
+                    let set = SetLog(order: setOrder, weightKg: top, reps: missedRep ? lift.reps - 1 : lift.reps, rpe: rpe)
                     set.completedAt = clock
                     set.exercise = log
                     context.insert(set)
@@ -302,7 +329,7 @@ enum DemoData {
         let template = WorkoutTemplate(name: "Upper A", createdAt: demo.day(30))
         template.lastUsedAt = demo.day(3)
         context.insert(template)
-        for (order, lift) in upperLifts.prefix(5).enumerated() {
+        for (order, lift) in upperLifts.enumerated() {
             let item = TemplateExercise(exerciseID: lift.id, name: lift.name, order: order, sets: lift.sets,
                                         repsLow: lift.reps, repsHigh: lift.reps + 2, targetRPE: 8)
             item.template = template

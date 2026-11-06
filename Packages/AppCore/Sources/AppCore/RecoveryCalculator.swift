@@ -249,12 +249,17 @@ public struct RecoveryCalculator: Sendable {
             let z = (log(hrv) - mean) / max(sd, 0.10)
             combined += hrvWeight * Self.clampZ(z)
             weightUsed += hrvWeight
-            hrvChange = (hrv / exp(mean) - 1) * 100
-            let change = Int(((hrv / exp(mean) - 1) * 100).rounded())
+            let changePercent = (hrv / exp(mean) - 1) * 100
+            hrvChange = changePercent
+            let change = Int(changePercent.rounded())
+            // Worded with the same limit as the Today tile, so the sheet and
+            // coach never call a change "lowering" that the tile calls normal.
+            let hrvEffect = Self.hrvEffect(changePercent: changePercent, z: z)
             contributors.append(RecoveryContributor(
                 id: "hrv", name: "Last night's HRV",
                 detail: "\(Int(hrv.rounded())) ms, \(change >= 0 ? "+" : "")\(change)% vs your usual \(Int(exp(mean).rounded())) ms",
-                effect: Self.effect(z), weight: hrvWeight * abs(Self.clampZ(z))
+                note: hrvEffect == .neutral ? Self.withinNormalNote : nil,
+                effect: hrvEffect, weight: hrvWeight * abs(Self.clampZ(z))
             ))
         }
         if let rhr = today.restingHeartRate, rhr > 0, let mean = base.meanRHR, let sd = base.sdRHR, rhrReady {
@@ -262,13 +267,21 @@ public struct RecoveryCalculator: Sendable {
             combined -= restingHeartRateWeight * Self.clampZ(z)
             weightUsed += restingHeartRateWeight
             rhrChange = rhr - mean
+            // The band rule (below) still weighs the z-score; the wording uses
+            // the notable-change limit, the same one the Today tile uses.
             rhrEffect = Self.effect(-z)
+            let shownEffect = Self.restingHeartRateEffect(change: rhr - mean)
             let difference = Int((rhr - mean).rounded())
+            let note: String? = switch shownEffect {
+            case .lowers: "Higher than usual often means stress, alcohol, illness or hard training."
+            case .neutral: Self.withinNormalNote
+            case .raises: nil
+            }
             contributors.append(RecoveryContributor(
                 id: "rhr", name: restingHeartRateSource.label,
                 detail: "\(Int(rhr.rounded())) bpm, \(difference >= 0 ? "+" : "")\(difference) vs your usual \(Int(mean.rounded()))",
-                note: difference > 0 ? "Higher than usual often means stress, alcohol, illness or hard training." : nil,
-                effect: rhrEffect, weight: restingHeartRateWeight * abs(Self.clampZ(z))
+                note: note,
+                effect: shownEffect, weight: restingHeartRateWeight * abs(Self.clampZ(z))
             ))
         }
         if let sleepScore {
@@ -375,6 +388,37 @@ public struct RecoveryCalculator: Sendable {
     }
 
     static func clampZ(_ z: Double) -> Double { min(3, max(-3, z)) }
+
+    /// When a resting (or sleeping) heart rate change is worth mentioning:
+    /// more than this many bpm either way from your usual. App choice, not a
+    /// validated cut-off: day-to-day resting heart rate moves a few bpm
+    /// without meaning anything (Buchheit, Front Physiol 2014; Plews et al.,
+    /// Eur J Appl Physiol 2012), so only changes beyond this are flagged on
+    /// the Today tile, the recovery sheet and in the coach.
+    public static let notableRHRChangeBpm = 5.0
+    /// When a single morning's HRV drop is worth mentioning: more than 15%
+    /// below your usual. App choice for the same reason: single-morning HRV
+    /// swings a lot, and the 7-day trend, not one night, is the validated
+    /// signal (Plews et al., Eur J Appl Physiol 2012; Buchheit 2014).
+    public static let notableHRVDropPercent = -15.0
+    /// Shown under a reading inside the limits above.
+    public static let withinNormalNote = "Within your normal day-to-day range."
+
+    /// How a resting heart rate change reads: higher than the limit lowers
+    /// recovery, lower than minus the limit raises it, anything else is normal.
+    public static func restingHeartRateEffect(change: Double) -> RecoveryContributor.Effect {
+        if change > notableRHRChangeBpm { return .lowers }
+        if change < -notableRHRChangeBpm { return .raises }
+        return .neutral
+    }
+
+    /// How last night's HRV reads: a drop past the limit lowers recovery; a
+    /// clear rise (more than a third of a normal day's swing) raises it;
+    /// anything else is normal.
+    public static func hrvEffect(changePercent: Double, z: Double) -> RecoveryContributor.Effect {
+        if changePercent < notableHRVDropPercent { return .lowers }
+        return z > 0.33 ? .raises : .neutral
+    }
 
     /// Small changes (under a third of a normal day's swing) count as neutral.
     static func effect(_ z: Double) -> RecoveryContributor.Effect {

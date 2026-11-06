@@ -19,10 +19,24 @@ struct LabsView: View {
         var id: String { name }
     }
 
-    private var panels: [Panel] {
-        let grouped = Dictionary(grouping: labs.latest) { $0.panel ?? "Other" }
-        return grouped.keys.sorted().map { name in
-            Panel(name: name, results: (grouped[name] ?? []).sorted { $0.name < $1.name })
+    /// One report date: its panels, each with its latest results.
+    private struct ReportDay: Identifiable {
+        var date: Date
+        var panels: [Panel]
+        var id: Date { date }
+    }
+
+    /// One card per report date, newest first, instead of a near-empty card
+    /// per panel.
+    private var reportDays: [ReportDay] {
+        let calendar = Calendar.current
+        let byDay = Dictionary(grouping: labs.latest) { calendar.startOfDay(for: $0.date) }
+        return byDay.keys.sorted(by: >).map { day in
+            let grouped = Dictionary(grouping: byDay[day] ?? []) { $0.panel ?? "Other" }
+            let panels = grouped.keys.sorted().map { name in
+                Panel(name: name, results: (grouped[name] ?? []).sorted { $0.name < $1.name })
+            }
+            return ReportDay(date: day, panels: panels)
         }
     }
 
@@ -33,18 +47,12 @@ struct LabsView: View {
                     if labs.results.isEmpty {
                         emptyState
                     }
-                    ForEach(panels) { panel in
-                        // One date for the panel goes in its header, so rows don't truncate.
-                        let sharedDay = Self.sharedDay(panel.results)
-                        SectionTitle(text: panel.name, trailing: sharedDay.map(LabsView.dayText))
-                        VStack(spacing: 0) {
-                            ForEach(panel.results) { result in
-                                NavigationLink {
-                                    LabMarkerDetailView(key: result.groupKey)
-                                } label: {
-                                    LabRow(result: result, history: labs.history(for: result.groupKey), showsDate: sharedDay == nil)
-                                }
-                                .buttonStyle(.plain)
+                    ForEach(reportDays) { report in
+                        // The report's date goes in its header, so rows don't truncate.
+                        SectionTitle(text: LabsView.dayText(report.date))
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(report.panels) { panel in
+                                LabPanelRows(name: panel.name, results: panel.results)
                             }
                         }
                         .card()
@@ -80,12 +88,6 @@ struct LabsView: View {
             : date.formatted(date: .abbreviated, time: .omitted)
     }
 
-    /// The day every result in a panel was taken, or nil when they differ.
-    private static func sharedDay(_ results: [LabResult]) -> Date? {
-        let days = Set(results.map { Calendar.current.startOfDay(for: $0.date) })
-        return days.count == 1 ? days.first : nil
-    }
-
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Track blood tests over time: cholesterol, HbA1c, ferritin, vitamin D, thyroid, testosterone, kidney and liver markers. Type results in from your report.")
@@ -101,6 +103,29 @@ struct LabsView: View {
             .buttonStyle(.bordered)
         }
         .card()
+    }
+}
+
+/// A small panel subhead and its results, with separators only between rows.
+private struct LabPanelRows: View {
+    let name: String
+    let results: [LabResult]
+    @Environment(LabsModel.self) private var labs
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardLabel(text: name)
+            ForEach(results.indices, id: \.self) { index in
+                let result = results[index]
+                if index > 0 { Divider() }
+                NavigationLink {
+                    LabMarkerDetailView(key: result.groupKey)
+                } label: {
+                    LabRow(result: result, history: labs.history(for: result.groupKey), showsDate: false)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 
@@ -138,7 +163,7 @@ private struct LabRow: View {
                         .foregroundStyle(LabStatusColor.color(status))
                 }
                 if guidelineNote != nil {
-                    Text("Above IOM line")
+                    Text("Enough by IOM (≥20 ng/mL)")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -148,9 +173,6 @@ private struct LabRow: View {
                 .foregroundStyle(Theme.secondaryText)
         }
         .padding(.vertical, 10)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.separator).frame(height: 0.5)
-        }
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
         .accessibilityHint(history.count > 1 ? "\(history.count) results over time" : "")

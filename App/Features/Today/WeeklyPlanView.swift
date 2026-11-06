@@ -120,7 +120,8 @@ struct WeeklyPlanView: View {
             // Javaloyes 2019, from memory); equal-volume frequency (Schoenfeld, Grgic & Krieger 2019).
             text = "\(days.count) sessions on whichever days feel right; the week is done when they are. About \(suggestedCount) a week suits your goal. Fixed days have the stronger evidence (if-then plans); training on the days you feel recovered rests on fewer, smaller studies. Pick the one you'll keep."
         } else {
-            text = "\(days.count) of \(WeeklyPlan.dayRange.lowerBound)–\(WeeklyPlan.dayRange.upperBound) days. About \(suggestedCount) a week suits your goal; a plan you can keep beats a bigger one."
+            let dayWord = days.count == 1 ? "day" : "days"
+            text = "\(days.count) \(dayWord) a week (\(WeeklyPlan.dayRange.lowerBound)–\(WeeklyPlan.dayRange.upperBound) work). About \(suggestedCount) a week suits your goal; a plan you can keep beats a bigger one."
         }
         // A block's deload week keeps the days; the trainer halves the sets (`TrainingBlock`).
         if blockWeek?.isDeload == true {

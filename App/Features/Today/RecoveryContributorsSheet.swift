@@ -41,14 +41,15 @@ struct RecoveryContributorsSheet: View {
                         }
                         .card()
                     }
-                    // Which HRV measure this is: useful, but jargon, so folded away.
-                    if let metric = metrics.hrvMetric {
-                        EvidenceDisclosure(points: [metrics.hrvMetricNote ?? metric], title: "About this number")
-                    }
+                    // The caption first, so it doesn't read as the content of the disclosure above it.
                     Text("The 0-100 score is the app's own summary of these inputs; your 7-day HRV trend is the part research backs.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
+                    // Which HRV measure this is: useful, but jargon, so folded away.
+                    if let metric = metrics.hrvMetric {
+                        EvidenceDisclosure(points: [metrics.hrvMetricNote ?? metric], title: "About this number")
+                    }
                     EvidenceDisclosure(points: [
                         "In elite athletes, HRV averaged over 7 days and compared with each person's own normal range tracked how training was going better than single mornings (Plews et al., Eur J Appl Physiol 2012).",
                         "This app's 0-100 score itself hasn't been tested in studies, so treat it as a summary, not a measurement.",

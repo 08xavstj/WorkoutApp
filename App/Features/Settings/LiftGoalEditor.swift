@@ -198,7 +198,7 @@ private struct LiftGoalLatestRow: View {
 
     var body: some View {
         if let latest = LiftGoalHistory.samples(exerciseID: exerciseID, sessions: sessions).last {
-            LabeledContent("Latest e1RM", value: LiftGoalHistory.weightText(latest.kg, unit: unit))
+            LabeledContent("Estimated 1RM now", value: LiftGoalHistory.weightText(latest.kg, unit: unit))
         } else {
             Text("Not logged yet; the projection starts after a few sessions.")
                 .font(.footnote)

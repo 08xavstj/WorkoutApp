@@ -197,9 +197,22 @@ struct WeeklyReviewView: View {
     private var setsLine: ReviewLine? {
         let worked = muscles.states.values.filter { $0.weeklySets >= 0.5 }.sorted { $0.weeklySets > $1.weeklySets }
         guard !worked.isEmpty else { return nil }
-        let top = worked.prefix(4).map { "\($0.muscle.name) \($0.weeklySets.formatted(.number.precision(.fractionLength(0))))" }
+        // Top 3 only, so the value fits on a line or two without an odd wrap.
+        let top = worked.prefix(3).map { "\($0.muscle.name) \($0.weeklySets.formatted(.number.precision(.fractionLength(0))))" }
+        var parts: [String] = []
+        if worked.count > 3 { parts.append("Plus \(worked.count - 3) more.") }
+        let over = worked.filter { $0.weeklySets > 20 }.count
+        if over > 0 { parts.append("\(over) above 20.") }
+        // With a block, its week's band (`VolumeProgression.Target.band`);
+        // without, the general 10-20 range (Schoenfeld et al., J Sports Sci 2017).
+        let bands = (store.volumeTargets(muscles: muscles)?.targets ?? []).map(\.band)
+        if let low = bands.map(\.lowerBound).min(), let high = bands.map(\.upperBound).max() {
+            parts.append(low == high ? "This week's target is \(low) sets per muscle." : "This week's target is \(low)-\(high) sets per muscle.")
+        } else {
+            parts.append("About 10-20 a week is the productive range.")
+        }
         return ReviewLine(id: "sets", title: "Hard sets per muscle, 7 days", value: top.joined(separator: " · "),
-                          detail: worked.count > 4 ? "Plus \(worked.count - 4) more. About 10-20 a week is the productive range." : "About 10-20 a week is the productive range.")
+                          detail: parts.joined(separator: " "))
     }
 
     private var proteinLine: ReviewLine? {

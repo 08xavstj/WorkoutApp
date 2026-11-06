@@ -21,13 +21,11 @@ struct AlcoholLogView: View {
 
     var body: some View {
         Form {
-            // One day control (a Yesterday/Today switch and a date picker did the same job).
             Section {
+                // One day control, at the top of its list (a separate "Today"
+                // header said the same thing again).
                 DatePicker("Day", selection: Binding(get: { day }, set: { day = calendar.startOfDay(for: $0) }),
                            in: ...Date.now, displayedComponents: .date)
-            }
-
-            Section {
                 if entries.isEmpty {
                     Text("No drinks logged for this day.")
                         .foregroundStyle(Theme.secondaryText)
@@ -45,8 +43,6 @@ struct AlcoholLogView: View {
                     Label("Add a drink", systemImage: "plus.circle.fill")
                         .font(.headline)
                 }
-            } header: {
-                Text(dayTitle)
             } footer: {
                 if !entries.isEmpty {
                     Text("\(total.formatted(.number.precision(.fractionLength(1)))) standard drinks. One standard drink is 14 g of alcohol: 12 oz of 5% beer, 5 oz of 12% wine or 1.5 oz of 40% spirits (NIAAA).")
@@ -68,13 +64,6 @@ struct AlcoholLogView: View {
             AddDrinkSheet { entry in update { $0.append(entry) } }
                 .presentationDetents([.large])
         }
-    }
-
-    /// "Today", "Yesterday" or "Monday 3 November", so the list says which day it is.
-    private var dayTitle: String {
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
-        return day.formatted(.dateTime.weekday(.wide).day().month())
     }
 
     private func update(_ change: (inout [AlcoholEntry]) -> Void) {

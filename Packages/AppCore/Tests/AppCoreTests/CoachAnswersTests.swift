@@ -288,6 +288,19 @@ struct CoachAnswersTests {
         #expect(!text.contains(".)"))
     }
 
+    @Test func whyRecoveryCallsSmallChangesNormal() {
+        var f = facts
+        f.recoveryContributors = [
+            RecoveryContributor(id: "rhr", name: "Sleeping heart rate", detail: "53 bpm, +2 vs your usual 51",
+                                note: RecoveryCalculator.withinNormalNote, effect: .neutral, weight: 1),
+            RecoveryContributor(id: "sleep", name: "Sleep", detail: "Score 60, vs your usual 80", effect: .lowers, weight: 2),
+        ]
+        let text = CoachAnswers.whyRecovery(f)!.text
+        #expect(text.contains("Pulling it down: sleep (score 60, vs your usual 80)."))
+        #expect(text.contains("Within your normal: sleeping heart rate (53 bpm, +2 vs your usual 51)."))
+        #expect(!text.contains("Pulling it down: sleeping heart rate"))
+    }
+
     @Test func contributorExplanationJoinsTheNote() {
         let item = RecoveryContributor(id: "rhr", name: "RHR", detail: "53 bpm", note: "Higher than usual.", effect: .lowers)
         #expect(item.explanation == "53 bpm. Higher than usual.")

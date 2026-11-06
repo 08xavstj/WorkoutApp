@@ -323,6 +323,12 @@ public enum CoachAnswers {
         if !raises.isEmpty {
             lines.append("Helping: " + raises.prefix(2).map { "\(inSentence($0.name)) (\(inSentence(withoutFinalPeriod($0.detail))))" }.joined(separator: "; ") + ".")
         }
+        // Readings inside the notable-change limits (`RecoveryCalculator.notableRHRChangeBpm`,
+        // `notableHRVDropPercent`) are named as normal, matching the Today tiles.
+        let steady = scored.filter { $0.effect == .neutral && ["rhr", "hrv"].contains($0.id) }
+        if !steady.isEmpty && !(lowers.isEmpty && raises.isEmpty) {
+            lines.append("Within your normal: " + steady.map { "\(inSentence($0.name)) (\(inSentence(withoutFinalPeriod($0.detail))))" }.joined(separator: "; ") + ".")
+        }
         if !context.isEmpty {
             lines.append("Also worth knowing: " + context.prefix(3).map { "\(inSentence($0.name)): \(inSentence(withoutFinalPeriod($0.detail)))" }.joined(separator: "; ") + ".")
         }

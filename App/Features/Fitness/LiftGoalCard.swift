@@ -202,11 +202,17 @@ private struct LiftGoalChart: View {
             RuleMark(y: .value("Target", unit.display(projection.targetKg)))
                 .foregroundStyle(Theme.secondaryText.opacity(0.6))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                .annotation(position: .top, alignment: .leading, spacing: 2) {
+                    Text("Goal \(LiftGoalHistory.weightText(projection.targetKg, unit: unit))")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                }
         }
         .chartYScale(domain: .automatic(includesZero: false))
-        // Every other month, dropping labels that would collide, so the last one isn't clipped.
+        // Every month, dropping labels that would collide (greedy), so even a
+        // short chart (a reached goal has no band ahead) gets month labels.
         .chartXAxis {
-            AxisMarks(values: .stride(by: .month, count: 2)) { _ in
+            AxisMarks(values: .stride(by: .month)) { _ in
                 AxisGridLine()
                 AxisValueLabel(format: .dateTime.month(.abbreviated), collisionResolution: .greedy)
             }
@@ -326,12 +332,18 @@ enum LiftGoalReview {
                                                               trainingStatus: trainingStatus) else { return nil }
             let target = LiftGoalHistory.weightText(projection.targetKg, unit: unit)
             let value: String
-            if let latest = projection.latestKg {
-                value = "\(LiftGoalHistory.weightText(latest, unit: unit)) of \(target) (e1RM)"
+            if projection.status == .reached, let best = projection.recent.map(\.kg).max() {
+                value = "\(LiftGoalHistory.weightText(best, unit: unit)) · \(target) goal reached"
+            } else if let latest = projection.latestKg {
+                value = "\(LiftGoalHistory.weightText(latest, unit: unit)) of \(target)"
             } else {
                 value = "Target \(target)"
             }
             var detail = LiftGoalHistory.headline(projection, unit: unit)
+            // The projected range gives the line a number to go on.
+            if let range = LiftGoalHistory.rangeLine(projection, unit: unit) {
+                detail += " " + range
+            }
             if let open = LiftGoalProjection.openAlternative(projection, month: { LiftGoalHistory.monthText($0) }) {
                 detail += " " + open
             }

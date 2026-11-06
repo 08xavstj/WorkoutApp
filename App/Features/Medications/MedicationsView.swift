@@ -71,6 +71,7 @@ struct MedicationsView: View {
                 .padding()
                 .lockedToScreenWidth()
             }
+            .scrollEdgeEffectStyle(.hard, for: .top)
             .background(alignment: .top) {
                 TopGlow(colors: [Theme.Wash.rose, Theme.Wash.lavender, Theme.Wash.sky])
             }
@@ -143,7 +144,7 @@ struct TodayDosesList: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(dose.name)
                                 .font(.headline)
-                                .strikethrough(taken)
+                                // The tick and "Taken 8:02" say it; no strikethrough.
                                 .foregroundStyle(Theme.primaryText)
                             Text([dose.dose, dose.time.formatted(date: .omitted, time: .shortened)].filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.subheadline)
@@ -386,6 +387,7 @@ struct MedicationDetailView: View {
             .padding()
             .lockedToScreenWidth()
         }
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

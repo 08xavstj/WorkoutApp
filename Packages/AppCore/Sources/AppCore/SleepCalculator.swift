@@ -150,7 +150,15 @@ public struct SleepCalculator: Sendable {
         }
         let inBed = max(asleep, total(.inBed, in: usable), window)
 
-        let interruptions = awakeIntervals.filter { $0.1.timeIntervalSince($0.0) >= minimumInterruption }.count
+        // Wake-ups count only inside the main sleep: lying awake before
+        // falling asleep, or after the final wake, isn't an interruption
+        // (sleep latency and WASO are separate measures: Ohayon et al., Sleep
+        // Health 2017). Awake spans are clipped to the main sleep first.
+        let interruptions = awakeIntervals.compactMap { interval -> (Date, Date)? in
+            let start = max(interval.0, main.start)
+            let end = min(interval.1, main.end)
+            return end > start ? (start, end) : nil
+        }.filter { $0.1.timeIntervalSince($0.0) >= minimumInterruption }.count
         let need = sleepNeed(previousDayStrain: previousDayStrain)
 
         let durationScore = min(1, asleep / need)

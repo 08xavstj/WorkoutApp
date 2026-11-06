@@ -476,6 +476,44 @@ public enum CheckInInsights {
         return sorted.prefix(keep).map(\.insight).sorted { abs($0.percentChange) > abs($1.percentChange) }
     }
 
+    /// Indices of the p-values kept by Benjamini-Hochberg at `rate`: the k
+    /// smallest where p(k) <= k/m * rate. Infinite p-values count towards m
+    /// (they were tested) but are never kept.
+    static func benjaminiHochberg(_ pValues: [Double], rate: Double) -> Set<Int> {
+        let m = Double(max(pValues.count, 1))
+        let order = pValues.indices.sorted { pValues[$0] < pValues[$1] }
+        var keep = 0
+        for (rank, index) in order.enumerated() where pValues[index].isFinite && pValues[index] <= Double(rank + 1) / m * rate {
+            keep = rank + 1
+        }
+        return Set(order.prefix(keep))
+    }
+
+    /// The check-in patterns plus the alcohol card's clear findings, so the
+    /// list never says "no clear patterns" while the alcohol card shows one.
+    /// Alcohol is tested on its own (a well-documented, pre-stated effect:
+    /// Pietilä et al., JMIR Ment Health 2018) with the same rule, so it can
+    /// qualify there before it survives the wider many-factor correction.
+    public static func merged(_ insights: [Insight], alcohol: [AlcoholEffect.Finding]) -> [Insight] {
+        var result = insights
+        for finding in alcohol where finding.isClear && finding.without > 0 {
+            let outcome: Outcome = switch finding.measure {
+            case .restingHeartRate: .restingHeartRate
+            case .hrv: .hrv
+            case .sleepScore: .sleepScore
+            }
+            let alreadyShown = result.contains { $0.outcome == outcome && ($0.factor == "Any alcohol" || $0.factor == "2+ drinks") }
+            guard !alreadyShown else { continue }
+            let change = (finding.withDrinks / finding.without - 1) * 100
+            result.append(Insight(
+                factor: "Any alcohol", outcome: outcome, percentChange: change,
+                daysWith: finding.nightsWith, daysWithout: finding.nightsWithout,
+                isGood: (change > 0) == outcome.higherIsBetter
+            ))
+        }
+        return result.sorted { abs($0.percentChange) > abs($1.percentChange) }
+    }
+
     static func meanVariance(_ values: [Double]) -> (Double, Double) {
         let mean = values.reduce(0, +) / Double(values.count)
         guard values.count > 1 else { return (mean, 0) }
@@ -542,5 +580,39 @@ public enum CheckInInsights {
     /// Days of check-ins still needed before patterns are shown.
     public static func daysUntilReady(_ days: [CheckInDay], target: Int = 14) -> Int {
         max(0, target - days.filter { $0.evening != nil || $0.checkIn != nil }.count)
+    }
+
+    /// How close a habit is to being tested: days with it and without it
+    /// (with a morning outcome to compare), against `analyze`'s 7 each way.
+    public struct FactorProgress: Sendable, Equatable, Identifiable {
+        public var name: String
+        public var daysWith: Int
+        public var daysWithout: Int
+        public var needed: Int
+        public var id: String { name }
+        public var isReady: Bool { daysWith >= needed && daysWithout >= needed }
+        /// The short side: "4/7 days" (with the habit) or "5/7 days without".
+        public var text: String {
+            daysWith < needed
+                ? "\(daysWith)/\(needed) days"
+                : "\(min(daysWithout, needed))/\(needed) days without"
+        }
+    }
+
+    /// The habits (not mood chips) that have been seen at least once and are
+    /// still short of 7 days each way, closest first.
+    public static func progress(_ days: [CheckInDay], minimumDays: Int = 7) -> [FactorProgress] {
+        habitFactors.compactMap { factor -> FactorProgress? in
+            var with = 0
+            var without = 0
+            for day in days {
+                guard let present = factor.test(day),
+                      Outcome.allCases.contains(where: { $0.value(day) != nil }) else { continue }
+                if present { with += 1 } else { without += 1 }
+            }
+            let item = FactorProgress(name: factor.name, daysWith: with, daysWithout: without, needed: minimumDays)
+            return with > 0 && !item.isReady ? item : nil
+        }
+        .sorted { min($0.daysWith, $0.daysWithout) > min($1.daysWith, $1.daysWithout) }
     }
 }

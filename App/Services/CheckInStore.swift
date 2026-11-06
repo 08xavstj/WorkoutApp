@@ -21,6 +21,8 @@ final class CheckInStore {
     private var saved = Saved()
     private(set) var insights: [CheckInInsights.Insight] = []
     private(set) var daysUntilInsights = 14
+    /// Habits still short of 7 days each way ("Sauna 4/7 days").
+    private(set) var habitProgress: [CheckInInsights.FactorProgress] = []
     /// Your next-morning numbers after drinking vs not.
     private(set) var alcoholFindings: [AlcoholEffect.Finding] = []
     /// Nights with a known drink count (0 or more), for the empty state.
@@ -230,9 +232,10 @@ final class CheckInStore {
                 mindfulMinutes: mindfulByDay[key(previous)] ?? 0
             ))
         }
-        insights = CheckInInsights.analyze(days)
-        daysUntilInsights = CheckInInsights.daysUntilReady(days)
         alcoholFindings = AlcoholEffect.compare(alcoholNights)
+        insights = CheckInInsights.merged(CheckInInsights.analyze(days), alcohol: alcoholFindings)
+        daysUntilInsights = CheckInInsights.daysUntilReady(days)
+        habitProgress = CheckInInsights.progress(days)
         alcoholNightsLogged = alcoholNights.count
     }
 

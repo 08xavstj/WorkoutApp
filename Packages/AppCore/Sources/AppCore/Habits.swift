@@ -131,7 +131,11 @@ public enum AlcoholEffect {
         public var without: Double
         public var nightsWith: Int
         public var nightsWithout: Int
-        /// True when the difference is unlikely to be chance (Welch t-test, p < 0.05).
+        /// True when the difference passes the same rule as the check-in
+        /// patterns (`CheckInInsights.analyze`): 7+ nights each way, at least
+        /// half a standard deviation (Plews et al., Sports Med 2013), and a
+        /// Welch t-test that survives Benjamini-Hochberg correction across the
+        /// measures compared.
         public var isClear: Bool
         public var id: String { measure.rawValue }
         public var difference: Double { withDrinks - without }
@@ -145,19 +149,35 @@ public enum AlcoholEffect {
     }
 
     /// Nights with at least `minimumDrinks` vs nights with none; needs
-    /// `minimumNights` on each side for a measure to be shown.
-    public static func compare(_ nights: [Night], minimumDrinks: Int = 1, minimumNights: Int = 5) -> [Finding] {
-        Measure.allCases.compactMap { measure in
+    /// `minimumNights` on each side for a measure to be shown. Whether a shown
+    /// difference is clear follows `CheckInInsights.analyze`'s rule (see
+    /// `Finding.isClear`), so this card and the patterns list never disagree.
+    public static func compare(_ nights: [Night], minimumDrinks: Int = 1, minimumNights: Int = 5,
+                               clearNights: Int = 7, falseDiscoveryRate: Double = 0.1) -> [Finding] {
+        var findings: [Finding] = []
+        var pValues: [Double] = []
+        for measure in Measure.allCases {
             let with = nights.filter { $0.drinks >= minimumDrinks }.compactMap { measure.value($0) }
             let without = nights.filter { $0.drinks == 0 }.compactMap { measure.value($0) }
-            guard with.count >= minimumNights, without.count >= minimumNights else { return nil }
+            guard with.count >= minimumNights, without.count >= minimumNights else { continue }
             let (meanWith, varWith) = CheckInInsights.meanVariance(with)
             let (meanWithout, varWithout) = CheckInInsights.meanVariance(without)
             let p = CheckInInsights.welchPValue(meanA: meanWith, varA: varWith, nA: with.count,
                                                 meanB: meanWithout, varB: varWithout, nB: without.count)
-            return Finding(measure: measure, withDrinks: meanWith, without: meanWithout,
-                           nightsWith: with.count, nightsWithout: without.count, isClear: p < 0.05)
+            let pooledSD = ((varWith + varWithout) / 2).squareRoot()
+            let difference = abs(meanWith - meanWithout)
+            // Not enough nights or smaller than a normal swing: never clear.
+            let eligible = with.count >= clearNights && without.count >= clearNights
+                && difference > 0 && difference >= 0.5 * pooledSD
+            findings.append(Finding(measure: measure, withDrinks: meanWith, without: meanWithout,
+                                    nightsWith: with.count, nightsWithout: without.count, isClear: false))
+            pValues.append(eligible ? p : .infinity)
         }
+        let kept = CheckInInsights.benjaminiHochberg(pValues, rate: falseDiscoveryRate)
+        for index in findings.indices where kept.contains(index) {
+            findings[index].isClear = true
+        }
+        return findings
     }
 }
 

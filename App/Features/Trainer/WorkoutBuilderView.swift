@@ -99,6 +99,7 @@ struct WorkoutBuilderView: View {
                 .lockedToScreenWidth()
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .scrollEdgeEffectStyle(.hard, for: .top)
             .background(Theme.background)
             .navigationTitle("Start workout")
             .navigationBarTitleDisplayMode(.inline)
@@ -505,10 +506,19 @@ struct WorkoutBuilderView: View {
                 HStack(spacing: 6) {
                     ForEach(muscles, id: \.self) { muscle in
                         Chip(text: muscle, color: Theme.lifting)
+                            .fixedSize()
                     }
                 }
             }
             .scrollIndicators(.hidden)
+            // Room past the last chip, and a fade at the edge, so a chip that
+            // runs off reads as "scroll for more", not cut off ("Upper bac").
+            .contentMargins(.trailing, 28, for: .scrollContent)
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.86),
+                                       .init(color: .clear, location: 1)],
+                               startPoint: .leading, endPoint: .trailing)
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Muscles: \(muscles.joined(separator: ", "))")
         }
@@ -530,13 +540,13 @@ struct WorkoutBuilderView: View {
         }
     }
 
-    /// "Block week 3 of 5 · RIR 1" and what it means, plus the superset note.
+    /// "Block week 3 of 5 · 1 in reserve" and what it means, plus the superset note.
     @ViewBuilder
     private func blockLine(_ plan: PlannedWorkout) -> some View {
         if let week = plan.blockWeek {
             VStack(alignment: .leading, spacing: 4) {
                 Chip(text: week.label, color: week.isDeload ? Theme.oxygen : Theme.lifting)
-                Text(week.note)
+                Text(week.note(plannedRPE: plan.targetRPE))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -747,14 +757,15 @@ struct PlannedExerciseRow: View {
         .accessibilityHint("Swap it, mark equipment you don't have, or never plan it again")
     }
 
-    /// "3 × 6–8 · 2 in reserve · 60 kg": the one line that matters.
+    /// "3 × 6–8 · 2 in reserve": sets, reps and effort.
     private var prescription: String {
         let reserve = ReserveText.text(rpe: exercise.rpe)
-        var line = "\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · \(reserve)"
-        if let load = exercise.load {
-            line += " · \(load.formatted(.number.precision(.fractionLength(0...2)))) \(unit.rawValue)"
-        }
-        return line
+        return "\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · \(reserve)"
+    }
+
+    /// "60 kg", on its own line so the prescription never wraps mid-phrase.
+    private var loadText: String? {
+        exercise.load.map { "\($0.formatted(.number.precision(.fractionLength(0...2)))) \(unit.rawValue)" }
     }
 
     private var summary: some View {
@@ -771,6 +782,12 @@ struct PlannedExerciseRow: View {
                 Text(prescription)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.strainTextColor)
+                if let loadText {
+                    Text(loadText)
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.primaryText)
+                }
             }
         }
     }

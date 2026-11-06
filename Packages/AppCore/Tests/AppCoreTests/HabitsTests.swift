@@ -53,8 +53,9 @@ struct AlcoholEffectTests {
     let start = Date(timeIntervalSince1970: 1_800_000_000)
 
     @Test func comparesYourOwnNights() throws {
-        let nights = (0..<12).map { index -> AlcoholEffect.Night in
-            let drank = index < 6
+        // 8 nights each way (7 is the patterns list's minimum for a clear difference).
+        let nights = (0..<16).map { index -> AlcoholEffect.Night in
+            let drank = index < 8
             let wobble = index.isMultiple(of: 2) ? 1.0 : -1.0
             return AlcoholEffect.Night(morning: start.addingTimeInterval(Double(index) * 86_400), drinks: drank ? 3 : 0,
                                        restingHeartRate: (drank ? 62 : 56) + wobble, hrv: nil, sleepScore: nil)
@@ -65,6 +66,48 @@ struct AlcoholEffectTests {
         #expect(rhr.isWorse)
         #expect(rhr.isClear)
         #expect(!findings.contains { $0.measure == .hrv })
+    }
+
+    @Test func sixNightsEachWayIsShownButNotClear() throws {
+        // Same rule as the check-in patterns: under 7 nights a side is never "clear".
+        let nights = (0..<12).map { index -> AlcoholEffect.Night in
+            let drank = index < 6
+            let wobble = index.isMultiple(of: 2) ? 1.0 : -1.0
+            return AlcoholEffect.Night(morning: start.addingTimeInterval(Double(index) * 86_400), drinks: drank ? 3 : 0,
+                                       restingHeartRate: (drank ? 62 : 56) + wobble, hrv: nil, sleepScore: nil)
+        }
+        let rhr = try #require(AlcoholEffect.compare(nights).first { $0.measure == .restingHeartRate })
+        #expect(!rhr.isClear)
+    }
+
+    @Test func smallDifferenceIsNotClear() throws {
+        // 0.2 bpm apart with ±3 bpm swings: under half a standard deviation.
+        let nights = (0..<40).map { index -> AlcoholEffect.Night in
+            let drank = index < 20
+            let wobble = index.isMultiple(of: 2) ? 3.0 : -3.0
+            return AlcoholEffect.Night(morning: start.addingTimeInterval(Double(index) * 86_400), drinks: drank ? 2 : 0,
+                                       restingHeartRate: (drank ? 60.2 : 60) + wobble, hrv: nil, sleepScore: nil)
+        }
+        let rhr = try #require(AlcoholEffect.compare(nights).first { $0.measure == .restingHeartRate })
+        #expect(!rhr.isClear)
+    }
+
+    @Test func clearAlcoholFindingJoinsThePatternsList() throws {
+        let nights = (0..<16).map { index -> AlcoholEffect.Night in
+            let drank = index < 8
+            let wobble = index.isMultiple(of: 2) ? 1.0 : -1.0
+            return AlcoholEffect.Night(morning: start.addingTimeInterval(Double(index) * 86_400), drinks: drank ? 3 : 0,
+                                       restingHeartRate: (drank ? 62 : 56) + wobble, hrv: nil, sleepScore: nil)
+        }
+        let merged = CheckInInsights.merged([], alcohol: AlcoholEffect.compare(nights))
+        let insight = try #require(merged.first)
+        #expect(merged.count == 1)
+        #expect(insight.factor == "Any alcohol")
+        #expect(insight.outcome == .restingHeartRate)
+        #expect(!insight.isGood)
+        #expect(abs(insight.percentChange - (62.0 / 56 - 1) * 100) < 0.001)
+        // Not added twice when the patterns already have it.
+        #expect(CheckInInsights.merged(merged, alcohol: AlcoholEffect.compare(nights)).count == 1)
     }
 
     @Test func needsFiveNightsEachSide() {

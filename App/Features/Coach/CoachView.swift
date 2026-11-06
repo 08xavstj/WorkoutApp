@@ -112,7 +112,7 @@ struct CoachView: View {
 
     /// What the coach knows and where it runs; the title is in the navigation bar.
     private var modeLine: some View {
-        Text("Answers from your data first · on-device model for the rest")
+        Text("Answers come from your data; Apple's on-device model handles the rest")
             .font(.subheadline)
             .foregroundStyle(Theme.secondaryText)
     }
@@ -125,7 +125,7 @@ struct CoachView: View {
                                 value: recovery.isCalibrated ? "\(recovery.score)% · \(RecoveryWording.label(for: recovery.status))" : "\(recovery.score)%")
                 }
                 if let strain = metrics.strain {
-                    let target = metrics.targetStrain.map { " · target " + strainRangeText($0) } ?? ""
+                    let target = metrics.targetStrain.map { " · range " + strainRangeText($0) } ?? ""
                     ContextChip(color: Theme.strain, label: "Strain", value: "\(strainText(strain.strain))\(target)")
                 }
                 if let protein = metrics.nutritionToday?.proteinGrams {
@@ -582,6 +582,9 @@ private struct ContextChip: View {
             Text(label).foregroundStyle(Theme.secondaryText)
             Text(value).fontWeight(.semibold).foregroundStyle(Theme.primaryText)
         }
+        // The chips scroll sideways, so each keeps its full width instead of truncating.
+        .lineLimit(1)
+        .fixedSize()
         .font(.subheadline)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)

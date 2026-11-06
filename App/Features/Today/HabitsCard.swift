@@ -74,12 +74,21 @@ final class TodayHabits {
         } else {
             preWorkoutLine = "Pre-workout by \(CaffeineTiming.clockText(preWorkout))."
         }
+        // Hours from the cut-off to bed, wrapping past midnight.
+        let gap = Double(((bedtime - coffee) % 1440 + 1440) % 1440) / 60
+        let gapLine = "That's about \(Self.halfHours(gap)) h before your usual \(bed) bedtime; caffeine later than this cut sleep by about 45 min in studies."
         return Caffeine(
             isLate: false,
             title: "Last coffee by \(CaffeineTiming.clockText(coffee))",
-            detail: preWorkoutLine + " For your usual \(bed) bedtime; caffeine closer to bed cut sleep by about 45 minutes in studies.",
+            detail: gapLine + " " + preWorkoutLine,
             cutoffMinutes: coffee
         )
+    }
+
+    /// "8½", "9": hours to the nearest half.
+    static func halfHours(_ hours: Double) -> String {
+        let halves = Int((hours * 2).rounded())
+        return halves.isMultiple(of: 2) ? "\(halves / 2)" : "\(halves / 2)½"
     }
 
     // MARK: Protein per meal
@@ -88,11 +97,15 @@ final class TodayHabits {
     func proteinLine(metrics: DailyMetricsModel) -> String? {
         guard let weight = metrics.bodyMassKg,
               let result = ProteinMeals.assess(proteinToday.map { (date: $0.date, grams: $0.value) }, bodyMassKg: weight) else { return nil }
+        // 0.4 g/kg per meal over 4+ meals is a floor per meal (Schoenfeld &
+        // Aragon, JISSN 2018); the day's target can be higher, so say both
+        // and "at least" so the meals don't seem to add up to less.
+        let day = metrics.proteinTarget.map { " (\(whole($0)) g across the day)" } ?? ""
         switch result {
         case .noMealTimes:
-            return "Your food app doesn't send meal times, so meals can't be told apart. Aim for about \(whole(weight * ProteinMeals.gramsPerKgPerMeal)) g at each of 4 meals."
+            return "Your food app doesn't send meal times, so meals can't be told apart. Aim for at least \(whole(weight * ProteinMeals.gramsPerKgPerMeal)) g at each of \(ProteinMeals.targetMeals) meals\(day)."
         case .meals(let meals, goodMeals: let good, perMealTarget: let target):
-            return "\(good) of \(ProteinMeals.targetMeals) meals with \(whole(target)) g+ protein. \(meals.count) meal\(meals.count == 1 ? "" : "s") logged today. Spreading protein over 4 meals of about \(whole(target)) g builds the most muscle."
+            return "\(good) of \(ProteinMeals.targetMeals) meals with \(whole(target)) g+ protein. \(meals.count) meal\(meals.count == 1 ? "" : "s") logged today. At least \(whole(target)) g at each of \(ProteinMeals.targetMeals) meals\(day) builds the most muscle."
         }
     }
 

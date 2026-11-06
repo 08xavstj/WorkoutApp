@@ -70,6 +70,8 @@ struct TodayView: View {
             return "\(date) · Syncing"
         }
         if let lastUpdated = metrics.lastUpdated {
+            // Under a minute reads "just now" (the relative style can say "in 0 seconds").
+            if Date.now.timeIntervalSince(lastUpdated) < 60 { return "\(date) · Updated just now" }
             return "\(date) · Updated \(lastUpdated.formatted(.relative(presentation: .named)))"
         }
         return "\(date) · Not synced yet"
@@ -861,12 +863,10 @@ private struct HealthMonitor: View {
     }
 
     /// When a tile says "Normal" rather than "Higher/Lower than usual", and
-    /// what the header counts. App choices, not validated cut-offs: day-to-day
-    /// resting heart rate moves a few bpm and single-morning HRV moves a lot
-    /// without meaning anything (Buchheit, Front Physiol 2014; Plews et al.,
-    /// Eur J Appl Physiol 2012), so only changes beyond these are flagged.
-    static let restingHeartRateLimit = 5.0 // bpm either way from your normal
-    static let hrvDropLimit = -15.0 // % below your normal
+    /// what the header counts. The same limits word the recovery sheet and
+    /// the coach (`RecoveryCalculator.notableRHRChangeBpm`, cited there).
+    static let restingHeartRateLimit = RecoveryCalculator.notableRHRChangeBpm // bpm either way from your normal
+    static let hrvDropLimit = RecoveryCalculator.notableHRVDropPercent // % below your normal
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

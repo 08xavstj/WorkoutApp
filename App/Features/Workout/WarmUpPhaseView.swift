@@ -396,8 +396,9 @@ private struct WarmUpPlanSummary: View {
     let tier: WarmUpRoutine.Tier
     let routine: WarmUpRoutine.Routine
 
+    /// "Ramp sets only", "Short · 6 min": the "Warm-up" label sits above it.
     private var title: String {
-        tier.hasSteps ? "Warm-up · \(tier.label) · \(routine.minutes) min" : "Warm-up · \(tier.label)"
+        tier.hasSteps ? "\(tier.label) · \(routine.minutes) min" : tier.label
     }
 
     private var detail: String {
@@ -410,6 +411,7 @@ private struct WarmUpPlanSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            CardLabel(text: "Warm-up", color: Theme.liftingText)
             Text(title)
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)

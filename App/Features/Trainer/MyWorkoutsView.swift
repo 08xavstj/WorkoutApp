@@ -90,7 +90,8 @@ struct MyWorkoutsView: View {
         // filled; Quick start, an empty workout, is the plain secondary one.
         return VStack(alignment: .leading, spacing: 8) {
             layout {
-                bigButton("New workout", icon: "plus", colors: [Theme.lifting, Theme.sleep]) {
+                // The same gradient as Today's Start button (`Theme.strainButtonColors`).
+                bigButton("New workout", icon: "plus", colors: Theme.strainButtonColors) {
                     editing = EditorRequest(template: nil)
                 }
                 quickStartButton
@@ -213,14 +214,13 @@ private struct TemplateRow: View {
             }
             if !stacked { Spacer() }
             Button(action: onStart) {
-                // `card` on `ink`, so it reads in dark mode too (white on the
-                // light dark-mode ink was unreadable; ux-audit.md P24).
+                // One Start style across the app: Today's gradient (`Theme.strainButtonColors`).
                 Label("Start", systemImage: "play.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.card)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 18)
                     .frame(minHeight: 44)
-                    .background(Theme.ink, in: .capsule)
+                    .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
             }
             .buttonStyle(.plain)
             .disabled(template.orderedExercises.isEmpty)
@@ -289,7 +289,10 @@ struct TemplateEditorView: View {
                         }
                     }
                 } footer: {
-                    Text("Leave weight blank and the app suggests one from your history each time, so it keeps progressing. Swipe left to remove; tap Edit to reorder.")
+                    // Remove and reorder hints only when they apply (Edit shows with 2+ exercises).
+                    Text("Leave weight blank and the app suggests one from your history each time, so it keeps progressing."
+                         + (items.isEmpty ? "" : " Swipe left to remove.")
+                         + (items.count > 1 ? " Tap Edit to reorder." : ""))
                 }
             }
             .navigationTitle(template == nil ? "New workout" : "Edit workout")

@@ -292,7 +292,20 @@ public enum LiftGoalProjection {
         projection.fit = line
 
         let horizonWeeks = horizon.timeIntervalSince(now) / week
-        func low(_ x: Double) -> Double { line.value(weeksAhead: x) - factor * line.halfWidth(weeksAhead: x) }
+        // The low edge never drops further than one spread under your best
+        // recent session (but never above the line): strength already shown
+        // is mostly kept while you keep training, so a "likely" low end well
+        // under today's lift reads as a loss nobody expects (app choice; the
+        // spread is the same `minimumSpreadKg`-floored residual SD the band
+        // uses, times the training-status factor so the wider low edge for
+        // trained lifters still shows).
+        let best = recent.map(\.kg).max()
+        let floorKg = best.map { $0 - factor * max(line.residualSD, minimumSpreadKg) }
+        func low(_ x: Double) -> Double {
+            let raw = line.value(weeksAhead: x) - factor * line.halfWidth(weeksAhead: x)
+            guard let floorKg else { return raw }
+            return max(raw, min(floorKg, line.value(weeksAhead: x)))
+        }
         func high(_ x: Double) -> Double { line.value(weeksAhead: x) + line.halfWidth(weeksAhead: x) }
 
         // Weekly band points plus the horizon itself.
@@ -386,7 +399,7 @@ public enum LiftGoalProjection {
         }
         var line = "If the last 12 weeks continue: likely \(low)–\(high) by \(month(projection.horizon)) (a rough 2-in-3 range)."
         if projection.slopeCapped {
-            line += " Your recent rate was faster than lifters at your level usually keep up, so the line is drawn at that pace."
+            line += " Your recent rate was faster than lifters at your level usually keep up, so the line uses the typical pace for your level instead."
         }
         if projection.widenedForTrainingAge {
             line += " Progress usually slows, so the low end is more likely."

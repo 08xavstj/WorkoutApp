@@ -75,6 +75,13 @@ struct MicronutrientFixTests {
         #expect(Micronutrients.summaryLine(findings: two) == "2 low this week: iron and magnesium")
     }
 
+    @Test func summaryLineMentionsTooHigh() {
+        let salty = Micronutrients.assess(averages: [.sodium: 4000, .vitaminC: 100], daysLogged: 7, sex: .male)
+        #expect(Micronutrients.summaryLine(findings: salty) == "Sodium high this week")
+        let both = Micronutrients.assess(averages: [.sodium: 4000, .iron: 2], daysLogged: 7, sex: .female)
+        #expect(Micronutrients.summaryLine(findings: both) == "1 low this week: iron. Sodium high this week")
+    }
+
     @Test func fibreUsesTheAppsSpellingAndAPlainLowEffect() throws {
         // The app's copy is British English ("fibre", "behaviour"); the name matches it.
         #expect(Micronutrients.Nutrient.fiber.name == "Fibre")

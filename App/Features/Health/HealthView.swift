@@ -66,6 +66,7 @@ struct HealthView: View {
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         await checkIns.refreshInsights(health: health, manualHRV: manual)
         await biology.refresh(health: health, settings: settings, manualHRV: manual, proteinTarget: metrics.proteinTarget)
+        vitals.setHRVSeries(biology.hrvSeries)
     }
 }
 
@@ -183,6 +184,12 @@ private struct HRVBaselineChart: View {
     let series: [DatedValue]
     let trend: RecoveryCalculator.HRVTrend?
 
+    /// 7-day rolling average of the nightly values.
+    private var rolling: [DatedValue] {
+        PersonalBaseline.rollingAverage(series.map { DayValue(date: $0.date, value: $0.value) })
+            .map { DatedValue(date: $0.date, value: $0.value) }
+    }
+
     /// From the data (and band and baseline), padded, at least 10 ms tall:
     /// an area from zero flattens 40-50 ms into a straight line (`ChartScale`).
     private var domain: ClosedRange<Double> {
@@ -204,11 +211,19 @@ private struct HRVBaselineChart: View {
             RuleMark(y: .value("Baseline", baseline))
                 .foregroundStyle(Theme.secondaryText.opacity(0.5))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+            // Nightly HRV swings a lot, so each night is a faint dot and the
+            // line is the 7-day rolling average (the same smoothing as the
+            // normal band; Plews et al., Sports Med 2013).
             ForEach(series) { point in
-                AreaMark(x: .value("Date", point.date), yStart: .value("Floor", scale.lowerBound), yEnd: .value("HRV", point.value))
+                PointMark(x: .value("Date", point.date), y: .value("Nightly HRV", point.value))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.35))
+                    .symbolSize(10)
+            }
+            ForEach(rolling) { point in
+                AreaMark(x: .value("Date", point.date), yStart: .value("Floor", scale.lowerBound), yEnd: .value("7-day HRV", point.value))
                     .foregroundStyle(LinearGradient(colors: [Theme.recoveryHigh.opacity(0.3), Theme.oxygen.opacity(0.0)], startPoint: .top, endPoint: .bottom))
                     .interpolationMethod(.catmullRom)
-                LineMark(x: .value("Date", point.date), y: .value("HRV", point.value))
+                LineMark(x: .value("Date", point.date), y: .value("7-day HRV", point.value))
                     .foregroundStyle(LinearGradient(colors: [Theme.oxygen, Theme.recoveryHigh], startPoint: .leading, endPoint: .trailing))
                     .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.catmullRom)
@@ -324,10 +339,21 @@ struct VitalTile: View {
         }
     }
 
+    /// Day totals (steps, energy) leave out today until the evening, so the
+    /// line doesn't plunge to a half-finished day (`dayTotalVerdictHour`).
+    /// Sleep bars are whole nights and stay.
+    private static func sparklineSeries(_ stat: VitalsModel.Stat) -> [DatedValue] {
+        guard stat.chart == .bars, stat.nights.isEmpty, !stat.isHours,
+              Calendar.current.component(.hour, from: .now) < VitalsModel.dayTotalVerdictHour,
+              let last = stat.series.last, Calendar.current.isDateInToday(last.date),
+              stat.series.count > 2 else { return stat.series }
+        return Array(stat.series.dropLast())
+    }
+
     @ViewBuilder
     private func trendVisual(main: Color) -> some View {
         if stat.series.count > 1 {
-            let recent = Array(stat.series.suffix(30))
+            let recent = Array(Self.sparklineSeries(stat).suffix(30))
             let typical = recent.map(\.value).reduce(0, +) / Double(max(1, recent.count))
             Sparkline(values: recent, color: main, minimumSpan: ChartScale.minimumSpan(unit: stat.unit, typical: typical))
                 .frame(height: 34)
@@ -373,7 +399,8 @@ struct BodyAgeCard: View {
                         FactorRow(factor: factor)
                     }
                 }
-                Text("\(result.confidenceReason) Based on fitness (VO₂ max), resting heart rate, sleep, steps and body composition. Shown as whole years with a ±\(BodyAge.uncertaintyYears)-year range because only the parts, not the sum, have been tested in studies. An estimate, not a medical test.")
+                // The factors are listed above, so no second "Based on…" list here.
+                Text("\(result.confidenceReason) A ±\(BodyAge.uncertaintyYears)-year range, because only the parts, not the sum, have been tested in studies. An estimate, not a medical test.")
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
             } else {
@@ -532,6 +559,8 @@ struct BodyAgePage: View {
 struct InsightsCard: View {
     let insights: [CheckInInsights.Insight]
     let daysLeft: Int
+    /// Habits still being collected, closest first.
+    var progress: [CheckInInsights.FactorProgress] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -559,6 +588,9 @@ struct InsightsCard: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+            if !progress.isEmpty {
+                HabitProgressList(items: Array(progress.prefix(5)))
+            }
             if !insights.isEmpty {
                 Text("Patterns, not proof: other things can change on the same days.")
                     .font(.caption2)
@@ -566,6 +598,32 @@ struct InsightsCard: View {
             }
         }
         .card()
+    }
+}
+
+/// "Late caffeine · 4/7 days": how far each habit is from being tested.
+private struct HabitProgressList: View {
+    let items: [CheckInInsights.FactorProgress]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Still collecting")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+            ForEach(items) { item in
+                HStack {
+                    Text(item.name)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.primaryText)
+                    Spacer(minLength: 8)
+                    Text(item.text)
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 }
 
@@ -582,7 +640,7 @@ struct MicronutrientsCard: View {
             emptyCard
         } else {
             WhatToFixCard(findings: Micronutrients.toFix(findings), sex: settings.sex, focuses: settings.goals.focuses)
-            TooHighNutrientsCard(findings: Micronutrients.tooHigh(findings))
+            TooHighNutrientsCard(findings: Micronutrients.tooHigh(findings), age: settings.age)
             FineNutrientsCard(findings: findings.filter { $0.kind == .ok })
             MicronutrientsFooter()
         }
@@ -608,7 +666,7 @@ private struct WhatToFixCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                CardLabel(text: "What to fix", color: Theme.nutrition)
+                CardLabel(text: "Low this week", color: Theme.nutrition)
                 Spacer()
                 Text("7-day average")
                     .font(.caption)
@@ -712,6 +770,7 @@ private struct NutrientContextLines: View {
 /// "Fine" so a red sodium line never sits under a green heading.
 private struct TooHighNutrientsCard: View {
     let findings: [Micronutrients.Finding]
+    let age: Int
 
     var body: some View {
         if !findings.isEmpty {
@@ -719,7 +778,8 @@ private struct TooHighNutrientsCard: View {
                 CardLabel(text: "Too high", color: Theme.recoveryLow)
                 ForEach(findings) { finding in
                     VStack(alignment: .leading, spacing: 4) {
-                        NutrientAmountLine(finding: finding, color: Theme.recoveryLow)
+                        // Against the upper limit the warning cites (sodium 2,300 mg), not the intake target.
+                        NutrientAmountLine(finding: finding, color: Theme.recoveryLow, limit: finding.nutrient.upperLimit(age: age))
                         if let effect = finding.effect {
                             Text(effect)
                                 .font(.caption)
@@ -759,10 +819,26 @@ private struct FoodFixLine: View {
     }
 }
 
-/// Name, "210 / 400 mg" and a progress bar toward the target.
+/// Name, "210 / 400 mg" and a progress bar toward the target; for a
+/// too-high nutrient "2,900 mg · limit 2,300" with the bar running past a
+/// tick at the limit.
 private struct NutrientAmountLine: View {
     let finding: Micronutrients.Finding
     let color: Color
+    var limit: Double?
+
+    private var amountText: String {
+        if let limit {
+            return "\(nutrientAmount(finding.average)) \(finding.nutrient.unit) · limit \(nutrientAmount(limit))"
+        }
+        return "\(nutrientAmount(finding.average)) / \(nutrientAmount(finding.target)) \(finding.nutrient.unit)"
+    }
+
+    /// Where the limit tick sits on a full bar (the bar is the intake).
+    private var limitFraction: Double? {
+        guard let limit, finding.average > limit else { return nil }
+        return limit / finding.average
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -771,7 +847,7 @@ private struct NutrientAmountLine: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
                 Spacer()
-                Text("\(nutrientAmount(finding.average)) / \(nutrientAmount(finding.target)) \(finding.nutrient.unit)")
+                Text(amountText)
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(Theme.textColor(for: color))
@@ -779,16 +855,33 @@ private struct NutrientAmountLine: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Theme.track)
-                    Capsule()
-                        .fill(color.gradient)
-                        .frame(width: max(6, geo.size.width * min(1, finding.percentOfTarget / 100)))
+                    if let limitFraction {
+                        Capsule()
+                            .fill(color.gradient)
+                        Rectangle()
+                            .fill(Theme.card)
+                            .frame(width: 2, height: 10)
+                            .offset(x: geo.size.width * limitFraction - 1)
+                    } else {
+                        Capsule()
+                            .fill(color.gradient)
+                            .frame(width: max(6, geo.size.width * min(1, finding.percentOfTarget / 100)))
+                    }
                 }
             }
             .frame(height: 6)
             .accessibilityHidden(true)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(finding.nutrient.name), \(Int(finding.percentOfTarget.rounded())) percent of target")
+        .accessibilityLabel(spokenLabel)
+    }
+
+    private var spokenLabel: String {
+        let name = finding.nutrient.name
+        if let limit {
+            return "\(name), \(nutrientAmount(finding.average)) \(finding.nutrient.unit) a day, over the limit of \(nutrientAmount(limit))"
+        }
+        return "\(name), \(Int(finding.percentOfTarget.rounded())) percent of target"
     }
 }
 
@@ -832,7 +925,7 @@ private struct MicronutrientsFooter: View {
     }
 }
 
-/// Whole numbers from 100 up, one decimal below.
+/// Whole numbers from 100 up (with a thousands separator), one decimal below.
 private func nutrientAmount(_ value: Double) -> String {
-    value >= 100 ? "\(Int(value.rounded()))" : value.formatted(.number.precision(.fractionLength(0...1)))
+    value >= 100 ? Int(value.rounded()).formatted() : value.formatted(.number.precision(.fractionLength(0...1)))
 }

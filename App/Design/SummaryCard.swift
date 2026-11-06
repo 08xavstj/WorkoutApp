@@ -475,10 +475,24 @@ private struct MetricRowContent: View {
                 }
             }
         } else {
-            HStack(alignment: .center, spacing: 10) {
-                MetricValueText(value: value, unit: unit, style: .row)
-                if let verdict {
-                    Chip(text: verdict.text, color: verdict.color)
+            // Value and chip side by side when they fit; otherwise the chip
+            // drops below so neither the number nor the chip is cut off.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 10) {
+                    MetricValueText(value: value, unit: unit, style: .row)
+                        .layoutPriority(1)
+                    if let verdict {
+                        Chip(text: verdict.text, color: verdict.color)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    MetricValueText(value: value, unit: unit, style: .row)
+                    if let verdict {
+                        Chip(text: verdict.text, color: verdict.color)
+                            .lineLimit(1)
+                    }
                 }
             }
         }

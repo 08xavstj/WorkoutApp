@@ -37,6 +37,7 @@ struct CheckInView: View {
                 if kind == .morning { morningQuestions } else { eveningQuestions }
             }
             .scrollContentBackground(.hidden)
+            .scrollEdgeEffectStyle(.hard, for: .top)
             .background(alignment: .top) {
                 TopGlow(colors: kind == .morning
                         ? [Theme.Wash.butter, Theme.Wash.peach, Theme.Wash.sky]
@@ -230,8 +231,9 @@ struct CheckInView: View {
         } footer: {
             // Roberts 2015; Piñero 2024 (cold) and Laukkanen 2015 (sauna); see `HeatAndCold`.
             VStack(alignment: .leading, spacing: 6) {
-                Text("Cold plunge: " + HeatAndCold.coldPlungeNote)
-                Text("Sauna: " + HeatAndCold.saunaNote)
+                // The notes already open with "Cold water…" / "Regular sauna…".
+                Text(HeatAndCold.coldPlungeNote)
+                Text(HeatAndCold.saunaNote)
             }
         }
         let untaken = meds.todayDoses.filter { !meds.isTaken($0) }

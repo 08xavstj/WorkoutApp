@@ -23,7 +23,12 @@ struct WorkoutHistoryView: View {
                 .listRowBackground(Color.clear)
             }
             ForEach(finished) { session in
-                NavigationLink(value: session) {
+                // Closure-based: this page is itself pushed with
+                // navigationDestination(isPresented:), where a value link
+                // plus navigationDestination(for:) did not open reliably.
+                NavigationLink {
+                    WorkoutDetailView(session: session)
+                } label: {
                     SessionRow(session: session, unit: gym.liftingUnit)
                 }
                 .accessibilityIdentifier("history-session") // UI tests (ScreenshotTests)
@@ -45,9 +50,6 @@ struct WorkoutHistoryView: View {
             }
         } message: {
             Text("Its sets and strain are removed. This can't be undone.")
-        }
-        .navigationDestination(for: WorkoutSession.self) { session in
-            WorkoutDetailView(session: session)
         }
         // Watch workouts can sync days late (Garmin), so pair recent sessions on each load (`WorkoutLinker`).
         .task {
@@ -85,7 +87,8 @@ private struct SessionRow: View {
             HStack(spacing: 12) {
                 Label(Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)), systemImage: "clock")
                 Label("\(session.effortSets.count) sets", systemImage: "square.stack.3d.up")
-                Label("\(unit.format(session.totalVolumeKg)) \(unit.rawValue)", systemImage: "scalemass")
+                // "Volume" so the number isn't read as a body weight next to a scale icon.
+                Label("Volume \(unit.format(session.totalVolumeKg)) \(unit.rawValue)", systemImage: "scalemass")
                 if let source = session.linkedWorkoutSource {
                     Label(source, systemImage: "applewatch")
                         .lineLimit(1)

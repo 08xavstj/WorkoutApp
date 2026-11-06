@@ -118,7 +118,8 @@ struct VitalDetailView: View {
                 if let status = stat.status {
                     Chip(text: status, color: VitalTile.color(for: stat.tone))
                 }
-                if let normalText {
+                // One chip when both say "normal" (e.g. Breathing rate "Normal").
+                if let normalText, stat.status == nil || !isWithinNormal {
                     Chip(text: normalText, color: Theme.secondaryText)
                 }
             }
@@ -166,6 +167,12 @@ struct VitalDetailView: View {
             guard let percent = PersonalBaseline.percentFromNormal(recent, band: band) else { return nil }
             return "7-day avg \(Int(abs(percent).rounded()))% \(percent >= 0 ? "above" : "below") your normal"
         }
+    }
+
+    private var isWithinNormal: Bool {
+        guard let band,
+              let recent = PersonalBaseline.recentAverage(dayValues, excludingToday: stat.chart == .bars) else { return false }
+        return PersonalBaseline.position(recent, in: band) == .within
     }
 
     private func isOutsideNormal(_ value: Double) -> Bool {
@@ -493,13 +500,15 @@ struct VitalDetailView: View {
         var title: String
         var color: Color
         var isLine: Bool
+        /// Matches the dashed average rule on the chart.
+        var isDashed = false
         var id: String { title }
     }
 
     private var legendItems: [LegendItem] {
         var items: [LegendItem] = []
         if average != nil && !isWindows {
-            items.append(LegendItem(title: "Average for this range", color: Theme.primaryText.opacity(0.6), isLine: true))
+            items.append(LegendItem(title: "Average for this range", color: Theme.primaryText.opacity(0.6), isLine: true, isDashed: true))
         }
         if stat.goal != nil {
             items.append(LegendItem(title: "Goal", color: Theme.recoveryHigh, isLine: true))
@@ -529,9 +538,7 @@ struct VitalDetailView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 4) {
                 ForEach(legendItems) { item in
                     HStack(spacing: 4) {
-                        Capsule()
-                            .fill(item.color)
-                            .frame(width: 14, height: item.isLine ? 2 : 6)
+                        LegendSwatch(color: item.color, isLine: item.isLine, isDashed: item.isDashed)
                         Text(item.title)
                             .font(.caption2)
                             .foregroundStyle(Theme.secondaryText)
@@ -565,9 +572,9 @@ struct VitalDetailView: View {
                     return number(average)
                 }()
                 summaryItem(stat.chart == .bars ? "Daily avg" : "Average", averageText)
-                summaryItem("Lowest", values.min().map(number) ?? "–")
-                summaryItem("Highest", values.max().map(number) ?? "–")
-                summaryItem("Days", "\(values.count)")
+                summaryItem("Lowest", points.min { $0.value < $1.value }.map(pairText) ?? "–")
+                summaryItem("Highest", points.max { $0.value < $1.value }.map(pairText) ?? "–")
+                summaryItem(isSparse ? "Readings" : "Days", "\(values.count)")
             }
         }
         .card()
@@ -590,15 +597,24 @@ struct VitalDetailView: View {
 
     private var dayByDay: some View {
         VStack(alignment: .leading, spacing: 0) {
-            CardLabel(text: "Day by day", color: main)
+            // Weekly-ish readings (VO₂ max, blood pressure) aren't one per day.
+            CardLabel(text: isSparse && !isWindows ? "Readings" : "Day by day", color: main)
                 .padding(.bottom, 8)
             if isWindows {
-                ForEach(Array(nights.reversed().prefix(31))) { night in
-                    dayRow(night.date, "\(clock(offset(night.bedtime, night: night.date)))–\(clock(offset(night.wake, night: night.date))) · \(text(night.hoursAsleep))")
+                let shown = Array(nights.reversed().prefix(31))
+                ForEach(shown.indices, id: \.self) { index in
+                    let night = shown[index]
+                    dayRow(night.date, "\(clock(offset(night.bedtime, night: night.date)))–\(clock(offset(night.wake, night: night.date))) · \(text(night.hoursAsleep))",
+                           isLast: index == shown.count - 1)
                 }
             } else {
-                ForEach(Array(points.reversed().prefix(31))) { point in
-                    dayRow(point.date, dayText(point), delta: average.map { point.value - $0 })
+                // Newest first; each change is against the reading before it.
+                let newestFirst = Array(points.reversed())
+                let shown = Array(newestFirst.prefix(31))
+                ForEach(shown.indices, id: \.self) { index in
+                    let point = shown[index]
+                    let previous: Double? = index + 1 < newestFirst.count ? newestFirst[index + 1].value : nil
+                    dayRow(point.date, dayText(point), delta: previous.map { point.value - $0 }, isLast: index == shown.count - 1)
                 }
             }
             if (isWindows ? nights.count : points.count) > 31 {
@@ -611,7 +627,7 @@ struct VitalDetailView: View {
         .card()
     }
 
-    private func dayRow(_ date: Date, _ value: String, delta: Double? = nil) -> some View {
+    private func dayRow(_ date: Date, _ value: String, delta: Double? = nil, isLast: Bool = false) -> some View {
         HStack {
             Text(calendar.isDateInToday(date) ? "Today" : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                 .font(.subheadline)
@@ -627,13 +643,25 @@ struct VitalDetailView: View {
                     .monospacedDigit()
                     .foregroundStyle(Theme.secondaryText)
                     .frame(minWidth: 52, alignment: .trailing)
-                    .accessibilityLabel("\(delta > 0 ? "above" : "below") average by \(number(abs(delta)))")
+                    .accessibilityLabel("\(delta > 0 ? "up" : "down") \(number(abs(delta))) from the reading before")
             }
         }
         .padding(.vertical, 7)
+        // Separators only between rows, not under the last one.
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.separator).frame(height: 0.5)
+            if !isLast {
+                Rectangle().fill(Theme.separator).frame(height: 0.5)
+            }
         }
+    }
+
+    /// "117/72" for blood pressure (the second line's same-day value), else the number.
+    private func pairText(_ point: DatedValue) -> String {
+        if !stat.secondaryAsPoints,
+           let other = secondaryPoints.first(where: { calendar.isDate($0.date, inSameDayAs: point.date) }) {
+            return "\(number(point.value))/\(number(other.value))"
+        }
+        return number(point.value)
     }
 
     private func dayText(_ point: DatedValue) -> String {
@@ -657,5 +685,27 @@ struct VitalDetailView: View {
 
     private func nearestNight(to date: Date) -> SleepNight? {
         nights.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+    }
+}
+
+/// A legend key: a line (dashed for the range average), or a bar for a band.
+private struct LegendSwatch: View {
+    let color: Color
+    let isLine: Bool
+    let isDashed: Bool
+
+    var body: some View {
+        if isDashed {
+            HStack(spacing: 2) {
+                ForEach(0..<3, id: \.self) { _ in
+                    Capsule().fill(color).frame(width: 3.5, height: 2)
+                }
+            }
+            .frame(width: 14)
+        } else {
+            Capsule()
+                .fill(color)
+                .frame(width: 14, height: isLine ? 2 : 6)
+        }
     }
 }

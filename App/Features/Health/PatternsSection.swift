@@ -55,7 +55,7 @@ struct PatternsSection: View {
         let high = findings.filter { $0.kind == .high }.count
         var parts: [String] = []
         if low > 0 { parts.append("\(low) low") }
-        if high > 0 { parts.append("\(high) high") }
+        if high > 0 { parts.append("\(high) too high") }
         return (parts.isEmpty ? "All near target" : parts.joined(separator: ", ")) + " · 7-day average"
     }
 }
@@ -65,7 +65,7 @@ private struct InsightsPage: View {
 
     var body: some View {
         HealthDetailPage(title: "What affects you") {
-            InsightsCard(insights: checkIns.insights, daysLeft: checkIns.daysUntilInsights)
+            InsightsCard(insights: checkIns.insights, daysLeft: checkIns.daysUntilInsights, progress: checkIns.habitProgress)
         }
     }
 }

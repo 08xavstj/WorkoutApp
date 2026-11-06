@@ -247,6 +247,28 @@ struct SleepCalculatorTests {
         #expect(SleepSessions.main(intervals)?.end == at(7))
     }
 
+    @Test func awakeBeforeFallingAsleepIsNotAWakeUp() throws {
+        let night = [
+            SleepSample(stage: .core, start: at(0), end: at(3)),
+            SleepSample(stage: .awake, start: at(3), end: at(3.25)),
+            SleepSample(stage: .core, start: at(3.25), end: at(7.5)),
+        ]
+        // 20 minutes lying awake before sleep and 10 after the final wake.
+        let edges = [
+            SleepSample(stage: .awake, start: at(-1.0 / 3), end: at(0)),
+            SleepSample(stage: .awake, start: at(7.5), end: at(7.5 + 1.0 / 6)),
+        ]
+        let inBedEdges = edges.map { SleepSample(stage: .inBed, start: $0.start, end: $0.end) }
+        let alone = try #require(calculator.score(samples: night))
+        let withEdges = try #require(calculator.score(samples: night + edges))
+        let withInBed = try #require(calculator.score(samples: night + inBedEdges))
+        #expect(alone.interruptions == 1)
+        #expect(withEdges.interruptions == 1)
+        // Same time in bed either way, so the score is the same: before the
+        // fix the two edge spans counted as wake-ups and cost interruption points.
+        #expect(withEdges.score == withInBed.score)
+    }
+
     @Test func shortBrokenNightScoresLow() throws {
         let samples = [
             SleepSample(stage: .core, start: at(0), end: at(1.5)),
