@@ -28,17 +28,31 @@ private struct ZonesCard: View {
     }
 
     /// Why a day with workouts can show no zones: Apple Health's heart-rate read
-    /// failed, or strain today came only from exercise minutes and session effort,
+    /// failed, heart rate stayed below zone 1 (common when lifting), or there
+    /// were no readings and strain came from exercise minutes and session effort,
     /// which add strain but no zone time (`StrainCalculator`).
     private var noZonesReason: String? {
         if let error = metrics.heartRateReadError {
             return "Heart rate couldn't be read from Apple Health (\(error)). Pull down on Today to try again."
         }
+        if metrics.todaysHeartRateReadings > 0 {
+            return metrics.todaysLightMinutes >= 1
+                ? "Your heart rate today stayed below zone 1, in the light band. Lifting often does: the effort is in the muscles, not the heart."
+                : "Your heart rate today stayed below the light band."
+        }
         guard let strain = metrics.strain, strain.strain > 0 else { return nil }
         if strain.movementMinutes > 0 || strain.liftingLoad > 0 {
-            return "Today's strain so far comes from exercise minutes and workout effort, which count without heart rate. Zones need heart-rate readings in Apple Health, from a watch or an AirPods recording; past workouts keep theirs on the workout's page."
+            return "No heart-rate readings today yet, so strain so far comes from exercise minutes and workout effort. Zones need heart rate from a watch or an AirPods recording."
         }
         return nil
+    }
+
+    /// "Light 96–120 bpm" for the band below zone 1 (30-50% of reserve).
+    private var lightRange: String? {
+        guard let profile = metrics.heartRateProfile else { return nil }
+        let low = profile.heartRate(atReserve: HeartRateProfile.lightBand.lowerBound)
+        let high = profile.heartRate(atReserve: HeartRateProfile.lightBand.upperBound)
+        return "\(whole(low))–\(whole(high)) bpm"
     }
 
     var body: some View {
@@ -55,6 +69,9 @@ private struct ZonesCard: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if metrics.todaysLightMinutes >= 1 {
+                LightBandRow(minutes: metrics.todaysLightMinutes, range: lightRange)
             }
             HStack(alignment: .bottom, spacing: 12) {
                 ForEach(0..<5, id: \.self) { index in
@@ -109,6 +126,33 @@ private struct ZonesCard: View {
     }
 }
 
+/// Minutes in the light band below zone 1 (30-50% of reserve, `HeartRateProfile.lightBand`).
+/// They add strain but aren't a zone.
+private struct LightBandRow: View {
+    let minutes: Double
+    let range: String?
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Light, below zone 1")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text(range.map { "30–50% of reserve · \($0)" } ?? "30–50% of reserve")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Spacer()
+            Text("\(whole(minutes.rounded())) min")
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(Theme.primaryText)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// What the zones are, from the app's own definitions (`HeartRateProfile`).
 private struct ZonesAboutCard: View {
     var body: some View {
@@ -117,7 +161,8 @@ private struct ZonesAboutCard: View {
             // Zones on heart-rate reserve (Karvonen et al. 1957), 50-60 ... 90-100 %;
             // max heart rate from Tanaka et al., J Am Coll Cardiol 2001, unless
             // measured or learned (`HeartRateProfile`, `ObservedMaxHeartRate`).
-            Text("Each zone is a share of your heart-rate reserve, the gap between your resting and maximum heart rate (Karvonen et al. 1957): zone 1 is 50–60%, up to zone 5 at 90–100%.")
+            // Light band 30-50% HRR: strain's 30% floor (ACSM's Guidelines, 10th ed. 2018) up to zone 1.
+            Text("Each zone is a share of your heart-rate reserve, the gap between your resting and maximum heart rate (Karvonen et al. 1957): zone 1 is 50–60%, up to zone 5 at 90–100%. Below zone 1, 30–50% is light effort: it still adds strain.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)

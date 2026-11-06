@@ -13,6 +13,12 @@ enum SessionTargets {
         var repsHigh: Int
         /// The planned effort for each working set, 1-10 (block RIR and recovery included).
         var rpe: Double
+        /// The planned working weight (kg), so a set-by-set change also moves
+        /// sets still at the plan's weight. Optional: older saves decode.
+        var loadKg: Double? = nil
+        /// The pain cap on this lift's working weight (kg; `PainGuard.loadCapFraction`,
+        /// set by the planner). Set-by-set changes never go above it. Nil = no cap.
+        var maxLoadKg: Double? = nil
 
         /// Reps in reserve the plan asks for.
         var targetRIR: Double { max(0, 10 - rpe) }
@@ -22,13 +28,17 @@ enum SessionTargets {
     private static let keepSeconds: TimeInterval = 2 * 86_400
 
     /// Saves the plan's targets by exercise position (`ExerciseLog.order`).
-    static func save(_ exercises: [PlannedExercise], for sessionStart: Date) {
+    /// `unit` is the plan's load unit, for the planned weight.
+    static func save(_ exercises: [PlannedExercise], for sessionStart: Date, unit: LoadUnit? = nil) {
         var all = load()
         let cutoff = Date.now.addingTimeInterval(-keepSeconds)
         all = all.filter { WatchSession.startDate(for: $0.key).map { $0 >= cutoff } ?? false }
         var entry: [String: Target] = [:]
         for (index, exercise) in exercises.enumerated() {
-            entry[String(index)] = Target(repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound, rpe: exercise.rpe)
+            var loadKg: Double?
+            if let unit, let load = exercise.load, load > 0 { loadKg = unit.toKilograms(load) }
+            entry[String(index)] = Target(repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound,
+                                          rpe: exercise.rpe, loadKg: loadKg, maxLoadKg: exercise.maxLoadKg)
         }
         if !entry.isEmpty { all[WatchSession.id(for: sessionStart)] = entry }
         store(all)
@@ -62,6 +72,21 @@ enum AutoregulationLog {
         var message: String
         /// The new target reps when the change was to reps.
         var reps: Int?
+        /// The sets as they were before the change, for Undo. Nil when nothing
+        /// changed (a pain hold) or for entries saved before Undo existed.
+        var restore: [Restore]? = nil
+        /// True once undone: the note goes, and no second change is made
+        /// (still at most one per exercise per session).
+        var undone: Bool? = nil
+
+        nonisolated struct Restore: Codable, Sendable, Equatable {
+            var setOrder: Int
+            var weightKg: Double
+            var reps: Int
+        }
+
+        /// Shown on the phone and the Watch while its set is still to do.
+        var isShown: Bool { undone != true }
     }
 
     private static let key = "autoregulationLog"
@@ -107,17 +132,21 @@ enum LiveSetCoach {
     static func targetReps(for set: SetLog, target: SessionTargets.Target?, entry: AutoregulationLog.Entry?) -> Int? {
         // A drop stage or mini-set is "as many good reps as you can", not a target (`SetKind`).
         if set.kind.isStage { return nil }
-        if let entry, let reps = entry.reps, set.order >= entry.setOrder { return reps }
+        if let entry, entry.isShown, let reps = entry.reps, set.order >= entry.setOrder { return reps }
         return target?.repsHigh
     }
 
     /// After a working set is ticked: compares its RPE with the target and,
     /// when the gap is two reps or more, changes the remaining sets that are
-    /// still at the same weight (ones you've edited are left alone). At most
-    /// once per exercise per session; never off the first working set. Only
-    /// straight sets count (`SetKind.allowsAutoregulation`): a set to failure is
-    /// RPE 10 on purpose and drop stages or mini-sets are fatigued by design, so
-    /// neither moves the load, and stages are never changed.
+    /// still at the logged weight or the plan's weight (ones you've set to
+    /// something else are left alone). At most once per exercise per session;
+    /// never off the first working set. Only straight sets count
+    /// (`SetKind.allowsAutoregulation`): a set to failure is RPE 10 on purpose
+    /// and drop stages or mini-sets are fatigued by design, so neither moves
+    /// the load, and stages are never changed. Never above the plan's pain cap
+    /// (`Target.maxLoadKg`): a "go heavier" there is held, and says why. Nil
+    /// (and nothing saved) when no set changed, so the note never claims a
+    /// change that wasn't made.
     @discardableResult
     static func autoregulate(after set: SetLog, in exercise: ExerciseLog, sessionStart: Date,
                              gym: GymProfile, blockRIR: Int? = nil) -> AutoregulationLog.Entry? {
@@ -136,17 +165,72 @@ enum LiveSetCoach {
         guard let suggestion = Autoregulation.nextSet(after: logged, setNumber: index + 1, targetRIR: rir,
                                                       alreadyAdjusted: false, kind: kind, gym: gym),
               let message = suggestion.message(unit: unit.rawValue) else { return nil }
-        let changesReps = suggestion.change == .trimReps || suggestion.change == .addReps
-        for upcoming in remaining where abs(upcoming.weightKg - set.weightKg) < 0.01 {
-            if changesReps {
-                upcoming.reps = suggestion.reps
-            } else {
-                upcoming.weightKg = unit.toKilograms(suggestion.load)
+        let target = SessionTargets.target(for: sessionStart, order: exercise.order)
+        // Pain cap: no heavier load past it, and no extra reps at it.
+        if let cap = target?.maxLoadKg {
+            let past = switch suggestion.change {
+            case .loadUp: unit.toKilograms(suggestion.load) > cap + 0.01
+            case .addReps: set.weightKg >= cap - 0.01
+            case .hold, .loadDown, .trimReps: false
+            }
+            if past {
+                let held = AutoregulationLog.Entry(setOrder: next.order, message: painHoldMessage(for: exercise.exerciseID), reps: nil)
+                AutoregulationLog.save(held, for: sessionStart, order: exercise.order)
+                return held
             }
         }
-        let entry = AutoregulationLog.Entry(setOrder: next.order, message: message, reps: changesReps ? suggestion.reps : nil)
+        let changesReps = suggestion.change == .trimReps || suggestion.change == .addReps
+        let plannedKg = target?.loadKg
+        // A set you've set to some other weight is yours: left alone.
+        func isEligible(_ upcoming: SetLog) -> Bool {
+            abs(upcoming.weightKg - set.weightKg) < 0.01 || plannedKg.map { abs(upcoming.weightKg - $0) < 0.01 } == true
+        }
+        // The note says "Next set …", so the next set must be one that changes.
+        guard isEligible(next) else { return nil }
+        var restore: [AutoregulationLog.Entry.Restore] = []
+        for upcoming in remaining where isEligible(upcoming) {
+            let before = AutoregulationLog.Entry.Restore(setOrder: upcoming.order, weightKg: upcoming.weightKg, reps: upcoming.reps)
+            if changesReps {
+                guard upcoming.reps != suggestion.reps else { continue }
+                upcoming.reps = suggestion.reps
+            } else {
+                let newKg = unit.toKilograms(suggestion.load)
+                guard abs(upcoming.weightKg - newKg) >= 0.01 else { continue }
+                upcoming.weightKg = newKg
+            }
+            restore.append(before)
+        }
+        guard let first = restore.first else { return nil }
+        let entry = AutoregulationLog.Entry(setOrder: first.setOrder, message: message,
+                                            reps: changesReps ? suggestion.reps : nil, restore: restore)
         AutoregulationLog.save(entry, for: sessionStart, order: exercise.order)
         return entry
+    }
+
+    /// "Held: easing your knee" for a lift that loads a sore area
+    /// (`PainGuard.areas`, the newest reports in the trainer's log); "Held for
+    /// pain" when the area isn't clear.
+    static func painHoldMessage(for exerciseID: String) -> String {
+        guard let slot = ExerciseCatalog.slot(for: exerciseID) else { return "Held for pain" }
+        let loaded = PainGuard.areas(forExerciseID: exerciseID, slot: slot)
+        let sore = PainGuard.active(PainLogStore.shared.reports, today: .now).map(\.area).filter { loaded.contains($0) }
+        if let area = sore.first ?? (loaded.count == 1 ? loaded.first : nil) {
+            return "Held: easing \(area.possessive)"
+        }
+        return "Held for pain"
+    }
+
+    /// Undo for the set-by-set change: puts the sets it changed back and
+    /// marks the change undone (so no second one is made this session).
+    static func undo(_ entry: AutoregulationLog.Entry, in exercise: ExerciseLog, sessionStart: Date) {
+        for item in entry.restore ?? [] {
+            guard let set = exercise.sets.first(where: { $0.order == item.setOrder }), !set.isCompleted else { continue }
+            set.weightKg = item.weightKg
+            set.reps = item.reps
+        }
+        var undone = entry
+        undone.undone = true
+        AutoregulationLog.save(undone, for: sessionStart, order: exercise.order)
     }
 
     // MARK: Ghosts
@@ -207,7 +291,7 @@ enum LiveSetCoach {
                 }
                 snapshot.targetReps = targetReps(for: set, target: target, entry: entry)
                 snapshot.targetRIR = target?.targetRIR
-                if let entry, entry.setOrder == set.order, !set.isCompleted {
+                if let entry, entry.isShown, entry.setOrder == set.order, !set.isCompleted {
                     snapshot.note = entry.message
                 } else if set.kind == .failure, !set.isCompleted {
                     snapshot.note = set.kind.howTo

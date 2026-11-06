@@ -46,9 +46,11 @@ final class MuscleModel {
         for session in sessions where session.startedAt >= cutoff {
             for exercise in session.exercises {
                 guard let info = library.exercise(id: exercise.exerciseID) else { continue }
-                // A drop, rest-pause or myo-rep set is one effortful set for fatigue and
-                // one and a half for weekly volume; its stages add no sets of their own
-                // (`SetStructure.hardSetCredit`, feature spec §3.3).
+                // A drop, rest-pause or myo-rep set is one effortful set for fatigue and,
+                // for weekly volume, the straight sets it stands in for (up to 3); its
+                // stages add no sets of their own (`SetStructure.hardSetCredit`).
+                // No set RPE logged counts as at the target: the session RPE (Foster's
+                // CR-10 for the whole session) isn't a set's effort.
                 let ordered = exercise.orderedSets
                 let positions = SetStructure.positions(LiveSetCoach.structureItems(ordered))
                 for (index, set) in ordered.enumerated() where set.isCompleted && !set.isWarmup && !positions[index].isStage {
@@ -56,7 +58,7 @@ final class MuscleModel {
                         date: set.completedAt ?? session.startedAt,
                         primary: info.primaryMuscles,
                         secondary: info.secondaryMuscles,
-                        rpe: set.rpe ?? session.sessionRPE.map(Double.init),
+                        rpe: set.rpe,
                         volumeCredit: SetStructure.hardSetCredit(stages: positions[index].stages)
                     ))
                 }
@@ -86,9 +88,10 @@ final class MuscleModel {
         hasRefreshed = true
     }
 
-    /// Working sets (warm-ups left out, unfinished ones kept so the volume
-    /// rule can see them) since three weeks before last Monday: last week to
-    /// judge, and the sessions before it to compare reps against. Superset
+    /// Working sets (warm-ups left out) since three weeks before last Monday:
+    /// last week to judge, and the sessions before it to compare reps
+    /// against. Finished sessions only hold ticked sets (the finish sheet
+    /// deletes the rest), so a skipped set counts as a set not done. Superset
     /// pairing is only known for the last two days (`SupersetRegistry`).
     private static func makeLoggedSets(sessions: [WorkoutSession], library: ExerciseLibrary, now: Date) -> [VolumeProgression.LoggedSet] {
         let thisWeek = WeeklyPlan.weekStart(containing: now)
@@ -102,8 +105,9 @@ final class MuscleModel {
                 let secondary = info.secondaryMuscles.compactMap { Muscle(rawValue: $0.lowercased()) }
                 let compound = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound ?? (info.mechanic == "compound")
                 // Drop stages and mini-sets aren't sets of their own here: the set they
-                // follow counts one and a half (`SetStructure.hardSetCredit`), and their
-                // lighter, fatigued reps stay out of the reps-dropped comparison.
+                // follow counts as the sets it stands in for (`SetStructure.hardSetCredit`),
+                // and their lighter, fatigued reps stay out of the reps-dropped comparison.
+                // No set RPE = at the target (not the whole-session RPE).
                 let ordered = exercise.orderedSets
                 let positions = SetStructure.positions(LiveSetCoach.structureItems(ordered))
                 let working = ordered.indices.filter { !ordered[$0].isWarmup && !positions[$0].isStage }
@@ -112,7 +116,7 @@ final class MuscleModel {
                     result.append(VolumeProgression.LoggedSet(
                         exerciseID: exercise.exerciseID, name: exercise.name, sessionStart: session.startedAt,
                         order: index, primary: primary, secondary: secondary, weightKg: set.weightKg, reps: set.reps,
-                        rpe: set.rpe ?? session.sessionRPE.map(Double.init), isCompleted: set.isCompleted,
+                        rpe: set.rpe, isCompleted: set.isCompleted,
                         isCompound: compound, supersetGroup: groups[exercise.order],
                         setCredit: SetStructure.hardSetCredit(stages: positions[setIndex].stages)
                     ))

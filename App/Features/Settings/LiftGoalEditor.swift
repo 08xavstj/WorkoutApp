@@ -7,6 +7,7 @@ import AppCore
 struct LiftGoalsFormSection: View {
     @Binding var goals: [LiftGoal]
     @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
 
     var body: some View {
         Section {
@@ -18,7 +19,7 @@ struct LiftGoalsFormSection: View {
                         }
                     }
                 } label: {
-                    Text(LiftGoalHistory.title(goal, unit: settings.weightUnit))
+                    Text(LiftGoalHistory.title(goal, unit: gym.liftingUnit))
                 }
             }
             .onDelete { goals.remove(atOffsets: $0) }
@@ -41,6 +42,7 @@ struct LiftGoalEditor: View {
     private let onSave: (LiftGoal) -> Void
 
     @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
@@ -108,7 +110,7 @@ struct LiftGoalEditor: View {
                         Text(option.name).tag(option.id)
                     }
                 }
-                LiftGoalLatestRow(exerciseID: exerciseID, sessions: sessions, unit: settings.weightUnit)
+                LiftGoalLatestRow(exerciseID: exerciseID, sessions: sessions, unit: gym.liftingUnit)
             }
             Section {
                 Picker("Target", selection: $byBodyweight) {
@@ -118,16 +120,16 @@ struct LiftGoalEditor: View {
                 .pickerStyle(.segmented)
                 LabeledContent(byBodyweight ? "Multiple" : "Estimated 1RM") {
                     HStack(spacing: 4) {
-                        TextField(byBodyweight ? "1.5" : settings.weightUnit.rawValue, text: $valueText)
+                        TextField(byBodyweight ? "1.5" : gym.liftingUnit.rawValue, text: $valueText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: fieldWidth)
-                        Text(byBodyweight ? "×" : settings.weightUnit.rawValue)
+                        Text(byBodyweight ? "×" : gym.liftingUnit.rawValue)
                             .foregroundStyle(Theme.secondaryText)
                     }
                 }
                 if byBodyweight, let multiple = parsedValue {
-                    LabeledContent("Today", value: LiftGoalHistory.weightText(multiple * bodyMassKg, unit: settings.weightUnit))
+                    LabeledContent("Today", value: LiftGoalHistory.weightText(multiple * bodyMassKg, unit: gym.liftingUnit))
                 }
             } footer: {
                 Text("Estimated 1RM: the most you could lift once, worked out from your sets of 10 reps or fewer.")
@@ -164,7 +166,7 @@ struct LiftGoalEditor: View {
             byBodyweight = true
             valueText = multiple.formatted(.number.precision(.fractionLength(0...2)))
         } else if let target = original.targetKg {
-            valueText = settings.weightUnit.display(target).formatted(.number.precision(.fractionLength(0...1)))
+            valueText = gym.liftingUnit.display(target).formatted(.number.precision(.fractionLength(0...1)))
         }
         if let targetDate = original.targetDate {
             hasDate = true
@@ -179,7 +181,7 @@ struct LiftGoalEditor: View {
             id: original?.id ?? UUID(),
             exerciseID: exerciseID,
             name: name,
-            targetKg: byBodyweight ? nil : settings.weightUnit.toKilograms(value),
+            targetKg: byBodyweight ? nil : gym.liftingUnit.toKilograms(value),
             bodyweightMultiple: byBodyweight ? value : nil,
             targetDate: hasDate ? Calendar.current.startOfDay(for: date) : nil
         )

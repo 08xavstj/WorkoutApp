@@ -112,12 +112,18 @@ extension WorkoutPlanner {
             )
             // History behind a suggested load, for the "big jump" tip.
             var suggestedFrom: ExerciseHistory?
+            var suggestedMode = ProgressionMode.load
             if let fixed = item.weight, fixed > 0 {
                 planned.load = fixed
             } else if let past = history[item.exerciseID] {
-                if let kind, let suggested = suggestedLoad(history: past, reps: item.reps, rpe: rpe, kind: kind) {
+                // The lift's progression rule (`ProgressionMode`) picks the weight; the
+                // template's own sets and reps stay as you set them.
+                let compound = ExerciseCatalog.slot(for: item.exerciseID)?.isCompound ?? false
+                let mode = progressionMode(for: item.exerciseID, kind: kind, compound: compound, at: past.lastWeight)
+                if let kind, let suggested = suggestedLoad(history: past, reps: item.reps, rpe: rpe, kind: kind, mode: mode) {
                     planned.load = suggested
                     suggestedFrom = past
+                    suggestedMode = mode
                 } else if past.lastWeight > 0 {
                     planned.load = past.lastWeight
                 }
@@ -127,7 +133,7 @@ extension WorkoutPlanner {
             }
             if let load = planned.load, let kind {
                 if let suggestedFrom {
-                    planned.note = notes(load: load, history: suggestedFrom, reps: item.reps, rpe: rpe, kind: kind)
+                    planned.note = notes(load: load, history: suggestedFrom, reps: item.reps, rpe: rpe, kind: kind, mode: suggestedMode)
                 } else {
                     planned.note = loadNote(load: load, kind: kind)
                 }

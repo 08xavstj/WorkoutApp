@@ -2,8 +2,9 @@ import SwiftUI
 import WatchKit
 
 /// "How hard?" after Complete: effort buttons 6-10 (reps left underneath, as
-/// in the app's `RPEScale`), reps and weight to adjust, and Skip. The rest
-/// timer starts the moment this closes.
+/// in the app's `RPEScale`), the plan's effort highlighted, reps and weight to
+/// adjust, and "No rating". One tap on an effort logs the set; the rest timer
+/// starts the moment this closes.
 struct WatchSetEffortSheet: View {
     @Environment(WatchWorkoutModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -40,10 +41,10 @@ struct WatchSetEffortSheet: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Edit reps and weight")
                 }
-                WatchRPEGrid(choices: WatchRPEChoice.set, selected: set.plannedRPE.map { Int($0.rounded()) }) { value in
+                WatchRPEGrid(choices: WatchRPEChoice.set, selected: set.suggestedRPE) { value in
                     finish(rpe: Double(value))
                 }
-                Button("Skip") { finish(rpe: nil) }
+                Button("No rating") { finish(rpe: nil) }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
@@ -51,7 +52,7 @@ struct WatchSetEffortSheet: View {
     }
 
     private func finish(rpe: Double?) {
-        model.completeSet(exerciseIndex: set.exerciseIndex, setIndex: set.setIndex, reps: reps, weightKg: weightKg, rpe: rpe)
+        model.completeSet(set, reps: reps, weightKg: weightKg, rpe: rpe)
         dismiss()
     }
 }
@@ -149,18 +150,19 @@ struct WatchSetAdjuster: View {
     }
 }
 
-/// Effort buttons in rows of five, with a short label under each number.
-/// A tap clicks (haptic) and fires `action`.
+/// Effort buttons in rows of three (room for the labels on a 41 mm Watch),
+/// with a short label under each number. A tap clicks (haptic) and fires `action`.
 struct WatchRPEGrid: View {
     let choices: [WatchRPEChoice]
     let selected: Int?
     let action: (Int) -> Void
+    private static let perRow = 3
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(Array(stride(from: 0, to: choices.count, by: 5)), id: \.self) { start in
+            ForEach(Array(stride(from: 0, to: choices.count, by: Self.perRow)), id: \.self) { start in
                 HStack(spacing: 4) {
-                    ForEach(choices[start..<min(start + 5, choices.count)]) { choice in
+                    ForEach(choices[start..<min(start + Self.perRow, choices.count)]) { choice in
                         WatchRPEButton(choice: choice, isSelected: choice.value == selected) {
                             WKInterfaceDevice.current().play(.click)
                             action(choice.value)

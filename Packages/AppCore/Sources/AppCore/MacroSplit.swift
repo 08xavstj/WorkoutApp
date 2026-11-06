@@ -167,10 +167,22 @@ public struct MacroSplit: Sendable, Equatable {
 
     // MARK: Text
 
-    /// "Protein 145 g · Carbs 148 g+ · Fat 52 g+" (floors with a plus: above
-    /// them the split is flexible, Helms 2014).
+    /// "Protein 145 g · Carbs about 163 g (at least 148) · Fat at least 52 g".
+    /// Each macro shows the same target its bar fills to (`carbsGrams`,
+    /// `fatGrams`), with the floor beside it when the two differ: above the
+    /// floors the split is flexible (Helms 2014).
     public var summaryLine: String {
-        "Protein \(Int(proteinGrams)) g · Carbs \(Int(carbsFloorGrams)) g+ · Fat \(Int(fatFloorGrams)) g+"
+        let carbs = Self.targetText(target: carbsGrams, floor: carbsFloorGrams, floorHolds: !tooFewCaloriesForFloors)
+        let fat = Self.targetText(target: fatGrams, floor: fatFloorGrams, floorHolds: true)
+        return "Protein \(Int(proteinGrams)) g · Carbs \(carbs) · Fat \(fat)"
+    }
+
+    /// "at least 52 g" when the target sits on its floor, "about 163 g (at
+    /// least 148)" above it, and just "about 90 g" when the floor doesn't fit.
+    static func targetText(target: Double, floor: Double, floorHolds: Bool) -> String {
+        guard floorHolds else { return "about \(Int(target)) g" }
+        if target - floor < 1 { return "at least \(Int(floor)) g" }
+        return "about \(Int(target)) g (at least \(Int(floor)))"
     }
 
     /// One line for when protein was lowered, or nil.

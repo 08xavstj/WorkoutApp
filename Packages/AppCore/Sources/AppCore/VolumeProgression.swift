@@ -47,12 +47,23 @@ public enum VolumeProgression {
     /// The fewest sets a deload week keeps (Pelland 2024: ~4 a week still grows muscle).
     public static let minimumSets = 4
     /// Deload: about half the sets (Bell et al., Sports Med Open 2023, Delphi consensus).
+    /// The per-exercise fallback (`TrainingBlock.deloadMultiplier`) is 0.6 only
+    /// so a 3-set exercise rounds to 2; both are "about half" in the UI.
     public static let deloadFraction = 0.5
     /// RPE over the target still counted as "at the target" (Halperin 2022: ~1 rep misjudged).
     public static let effortTolerance = 0.5
     /// Sets short of last week's target still counted as "all done" (one skipped
     /// set is noise, not a sign the volume was too much; app's choice).
     public static let missedSetTolerance = 1.0
+    /// A set is "hard" at RPE 7 or more (3 or fewer reps left). Easier sets
+    /// still count, at this share. Direction from the evidence: muscle growth
+    /// falls off as sets stop further from failure (Robinson et al., Sports
+    /// Med 2024, proximity-to-failure meta-regression; Refalo et al., J
+    /// Sports Sci 2024); the RPE 7 line and the 0.6 itself are the app's
+    /// choice, not trial figures (same rule as `MuscleRecovery` and
+    /// `MuscleCoverage`). A set with no RPE logged counts as hard.
+    public static let hardSetRPE = 7.0
+    public static let easySetCredit = 0.6
 
     /// The top of the ramp for a goal's training style.
     public static func ceiling(style: TrainingStyle) -> Int {
@@ -82,9 +93,9 @@ public enum VolumeProgression {
         public var isCompound: Bool
         /// Superset group within the session, if the set was paired.
         public var supersetGroup: Int?
-        /// Hard sets it counts as: 1, or 1.5 for a set followed by drop stages
-        /// or mini-sets, which aren't logged sets of their own here
-        /// (`SetStructure.hardSetCredit`).
+        /// Hard sets it counts as: 1, or for a set followed by drop stages or
+        /// mini-sets (not logged sets of their own here) the straight sets
+        /// they stand in for, up to 3 (`SetStructure.hardSetCredit`).
         public var setCredit: Double
 
         public init(exerciseID: String, name: String, sessionStart: Date, order: Int, primary: [Muscle],
@@ -110,7 +121,10 @@ public enum VolumeProgression {
     public struct Performance: Sendable, Equatable {
         /// Hard sets done (helpers half, as everywhere in the app).
         public var sets: Double
-        /// Every logged working set for it was finished.
+        /// Every logged working set for it was finished. Sets passed in from
+        /// finished sessions are always completed (the finish sheet deletes
+        /// unticked sets), so a skipped set shows up as fewer `sets` against
+        /// the target instead; this stays for callers that pass unfinished sets.
         public var allCompleted: Bool
         /// Exercises with a set harder than the effort target.
         public var overEffort: [String]
@@ -161,7 +175,7 @@ public enum VolumeProgression {
                 for muscle in set.primary { result[muscle]?.allCompleted = false }
                 continue
             }
-            let effort = (set.rpe ?? 8) >= 7 ? 1.0 : 0.6
+            let effort = (set.rpe ?? hardSetRPE) >= hardSetRPE ? 1.0 : easySetCredit
             var weights: [Muscle: Double] = [:]
             for muscle in set.secondary { weights[muscle] = max(weights[muscle] ?? 0, 0.5) }
             for muscle in set.primary { weights[muscle] = 1 }

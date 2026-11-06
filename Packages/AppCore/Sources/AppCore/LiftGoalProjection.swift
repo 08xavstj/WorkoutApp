@@ -132,7 +132,10 @@ public enum LiftGoalProjection {
         /// new observation from the line, s·√(1 + 1/n + (x − x̄)²/Sxx), the
         /// textbook prediction interval at ±1 SE. It widens with distance from
         /// the logged sessions (about linearly far out). s is the residual SD,
-        /// at least `minimumSpreadKg`.
+        /// at least `minimumSpreadKg`. ±1 SE covers about 2 in 3 outcomes with
+        /// normal errors and many sessions, fewer with only a handful (about
+        /// 58% at 4 sessions by the t distribution), so the UI calls it a
+        /// "rough 2-in-3 range", never a sure one.
         public func halfWidth(weeksAhead x: Double) -> Double {
             let spread = max(residualSD, LiftGoalProjection.minimumSpreadKg)
             let distance = x - meanWeeks
@@ -184,9 +187,12 @@ public enum LiftGoalProjection {
         case needsMoreData
         /// A session in the last 12 weeks already hit the target.
         case reached
-        /// The band's upper edge reaches the target before the horizon.
+        /// The trend line itself reaches the target before the horizon.
         case onTrend
-        /// It doesn't, within the horizon (target date or 6 months).
+        /// Only the band's upper edge does: possible, but the line gets there
+        /// later (or not before the horizon).
+        case possible
+        /// Neither does, within the horizon (target date or 6 months).
         case notOnTrend
     }
 
@@ -210,6 +216,8 @@ public enum LiftGoalProjection {
         public var range: ClosedRange<Double>?
         /// First day the upper edge reaches the target.
         public var reachFrom: Date?
+        /// First day the trend line reaches it.
+        public var reachLine: Date?
         /// First day the lower edge reaches it (nil if not before the horizon).
         public var reachBy: Date?
         /// Weekly band from now to the horizon, for the chart.
@@ -240,7 +248,7 @@ public enum LiftGoalProjection {
         let latest = recent.last?.kg
         let factor = lowerEdgeFactor(trainingStatus)
         var projection = Projection(status: .needsMoreData, targetKg: targetKg, latestKg: latest, fit: nil, horizon: horizon,
-                                    range: nil, reachFrom: nil, reachBy: nil, band: [], recent: recent,
+                                    range: nil, reachFrom: nil, reachLine: nil, reachBy: nil, band: [], recent: recent,
                                     widenedForTrainingAge: factor > 1)
         if recent.contains(where: { $0.kg >= targetKg }) {
             projection.status = .reached
@@ -271,16 +279,25 @@ public enum LiftGoalProjection {
             if projection.reachFrom == nil, high(weeksAhead) >= targetKg {
                 projection.reachFrom = now.addingTimeInterval(Double(day) * 86_400)
             }
+            if projection.reachLine == nil, line.value(weeksAhead: weeksAhead) >= targetKg {
+                projection.reachLine = now.addingTimeInterval(Double(day) * 86_400)
+            }
             if projection.reachBy == nil, low(weeksAhead) >= targetKg {
                 projection.reachBy = now.addingTimeInterval(Double(day) * 86_400)
                 break
             }
         }
-        // A flat or falling line isn't heading to the target, even when the
-        // band's upper edge brushes it.
-        projection.status = projection.reachFrom != nil && line.slopePerWeek > 0 ? .onTrend : .notOnTrend
+        // "On trend" needs the line itself to get there; the upper edge alone
+        // (a rough 1-in-6 chance) is only "possible". A flat or falling line
+        // isn't heading to the target, even when the upper edge brushes it.
+        if line.slopePerWeek <= 0 || projection.reachFrom == nil {
+            projection.status = .notOnTrend
+        } else {
+            projection.status = projection.reachLine != nil ? .onTrend : .possible
+        }
         if projection.status == .notOnTrend {
             projection.reachFrom = nil
+            projection.reachLine = nil
             projection.reachBy = nil
         }
         return projection
@@ -314,15 +331,18 @@ public enum LiftGoalProjection {
             let endText = month(projection.horizon)
             return soon ? "At your last 12 weeks' rate, \(target) is within range now; past \(endText) is too far to say more."
                 : "At your last 12 weeks' rate, \(target) comes into range from about \(month(from))."
+        case .possible:
+            return "At your last 12 weeks' rate, \(target) is possible by \(month(projection.horizon)), but the trend line gets there later."
         case .notOnTrend:
             return "\(target) isn't on the current trend by \(month(projection.horizon))."
         }
     }
 
-    /// The range at the horizon, "If the last 12 weeks continue: about
-    /// 95–105 kg by June.", or nil without a line.
+    /// The range at the horizon, "If the last 12 weeks continue: likely
+    /// 95–105 kg by June (a rough 2-in-3 range).", or nil without a line.
     public static func rangeLine(_ projection: Projection, weight: (Double) -> String, month: (Date) -> String) -> String? {
-        guard let range = projection.range, projection.status == .onTrend || projection.status == .notOnTrend else { return nil }
+        guard let range = projection.range,
+              [.onTrend, .possible, .notOnTrend].contains(projection.status) else { return nil }
         var low = weight(max(0, range.lowerBound))
         let high = weight(range.upperBound)
         // "112–140 kg", not "112 kg–140 kg": drop the shared unit from the low end.
@@ -330,7 +350,7 @@ public enum LiftGoalProjection {
             let unit = String(high[space...])
             if low.hasSuffix(unit) { low = String(low.dropLast(unit.count)) }
         }
-        var line = "If the last 12 weeks continue: about \(low)–\(high) by \(month(projection.horizon))."
+        var line = "If the last 12 weeks continue: likely \(low)–\(high) by \(month(projection.horizon)) (a rough 2-in-3 range)."
         if projection.widenedForTrainingAge {
             line += " Gains slow with training years, so the lower edge is wider."
         }
@@ -340,7 +360,7 @@ public enum LiftGoalProjection {
     /// The open alternative to a specific target (Swann 2021 [E14]).
     public static func openAlternative(_ projection: Projection, month: (Date) -> String) -> String? {
         switch projection.status {
-        case .notOnTrend, .needsMoreData:
+        case .possible, .notOnTrend, .needsMoreData:
             return "Or keep it open: see how far you get by \(month(projection.horizon))."
         case .onTrend, .reached:
             return nil
@@ -348,5 +368,5 @@ public enum LiftGoalProjection {
     }
 
     /// The note under the chart.
-    public static let evidenceNote = "The projection is arithmetic, not a forecast: a straight line through your last 12 weeks of estimated 1RMs (sets of 10 reps or fewer), with a band for the session-to-session spread that widens further ahead. It stops at 6 months because gains usually slow. Setting goals helps people train more (McEwan 2016 meta-analysis), but specific goals that feel out of reach can backfire (Swann 2021), so treat the target as a direction, not a test."
+    public static let evidenceNote = "The projection is arithmetic, not a forecast: a straight line through your last 12 weeks of estimated 1RMs (sets of 10 reps or fewer). The band is a rough 2-in-3 range for the session-to-session spread, wider further ahead; it's \"on trend\" only when the line itself reaches the target. It stops at 6 months because gains usually slow. Setting goals helps people train more (McEwan 2016 meta-analysis), but specific goals that feel out of reach can backfire (Swann 2021), so treat the target as a direction, not a test."
 }

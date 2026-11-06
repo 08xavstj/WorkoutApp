@@ -64,8 +64,12 @@ struct LastNightSleepSheet: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             row("Asleep", SleepText.hours(sleep.asleep / 3600), detail: "Your need: \(SleepText.hours(sleep.need / 3600))")
-            if let bed = sleep.bedtime, let wake = sleep.wakeTime {
-                row("Fell asleep – woke", "\(bed.formatted(date: .omitted, time: .shortened)) – \(wake.formatted(date: .omitted, time: .shortened))")
+            // The main sleep's own start and end (`asleepStart`/`asleepEnd`); `bedtime`/
+            // `wakeTime` also span in-bed samples, so they're labelled as time in bed.
+            if let start = sleep.asleepStart, let end = sleep.asleepEnd {
+                row("Fell asleep – woke", "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))")
+            } else if let bed = sleep.bedtime, let wake = sleep.wakeTime {
+                row("In bed – up", "\(bed.formatted(date: .omitted, time: .shortened)) – \(wake.formatted(date: .omitted, time: .shortened))")
             }
             row("Efficiency", "\(Int((sleep.efficiency * 100).rounded()))%", detail: "Time asleep while in bed. 85% or more is good (National Sleep Foundation).")
             row("Woke up", "\(sleep.interruptions) time\(sleep.interruptions == 1 ? "" : "s")", detail: "Awake 5 minutes or more.")
@@ -89,10 +93,13 @@ struct LastNightSleepSheet: View {
                 row("Deep", SleepText.hours(sleep.deep / 3600))
                 row("REM", SleepText.hours(sleep.rem / 3600))
                 row("Core (light)", SleepText.hours(sleep.core / 3600))
-                Text("Wrist trackers are good at telling sleep from wake but rough at stages (compared with a sleep lab, Chinoy et al., Sleep 2021), so stages count for only 10% of the sleep score. Watch the trend, not one night.")
+                Text("Watches only roughly tell the stages apart, so stages count for just 10% of the sleep score. Watch the trend, not one night.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                EvidenceDisclosure(points: [
+                    "Compared with a sleep lab, wrist trackers tell sleep from wake well but stages much less well (Chinoy et al., Sleep 2021).",
+                ])
             }
             .card()
         }
@@ -111,15 +118,31 @@ struct LastNightSleepSheet: View {
                         .font(.subheadline)
                         .foregroundStyle(Theme.primaryText)
                 }
-                Text("Based on a need of \(SleepText.hours(settings.sleepNeedHours)) a night (change it in Settings). Short nights add up and you feel it less than it affects you (Van Dongen et al., Sleep 2003); longer nights pay it back.")
+                Text(needCaption)
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 bedByRows
+                EvidenceDisclosure(points: Self.debtEvidence)
             }
             .card(tint: Theme.sleep)
         }
     }
+
+    /// Whose need the debt is counted against, and that it can be changed.
+    private var needCaption: String {
+        let need = SleepText.hours(settings.sleepNeedHours)
+        let source = settings.sleepNeedIsDefault ? "the app's default" : "your setting"
+        return "Counted against \(need) asleep a night (\(source); change it in Settings). Short nights add up; longer nights pay them back."
+    }
+
+    /// The studies behind the debt and bed-by captions.
+    private static let debtEvidence = [
+        "Adults need 7 hours or more of sleep a night (AASM and Sleep Research Society consensus, Watson et al., Sleep 2015). The 7.5-hour default is the app's choice just above that; your need may differ.",
+        "Two weeks of short nights slowed reactions steadily while people felt only a little sleepier (Van Dongen et al., Sleep 2003).",
+        "A regular wake time predicted lower mortality more strongly than sleep length (Windred et al., Sleep 2024), so the window moves your bedtime, not your alarm.",
+        "Athletes who slept longer ran faster and reacted quicker (Mah et al., Sleep 2011). Recovering even an hour of debt took several nights in a lab study (Kitamura et al., Sci Rep 2016), so the window adds at most an hour a night.",
+    ]
 
     /// Tonight's bed-by window and why: need, debt repayment (at most an hour
     /// a night, Kitamura et al., Sci Rep 2016) and your usual wake time, which
@@ -133,7 +156,7 @@ struct LastNightSleepSheet: View {
             Text("Tonight: in bed by \(window.windowText)")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.primaryText)
-            Text(window.reason + ". Earlier to bed, not later up: a regular wake time predicted lower mortality more strongly than sleep length (Windred 2024), and athletes who extended their sleep ran faster and reacted quicker (Mah 2011). Debt is repaid an hour a night at most (Kitamura 2016).")
+            Text(window.reason + ". Go to bed earlier rather than sleeping in.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

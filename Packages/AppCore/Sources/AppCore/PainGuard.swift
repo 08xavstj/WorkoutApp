@@ -222,8 +222,11 @@ public enum PainGuard {
             R(.shoulder, .inclinePress, [
                 C.ex("Hammer_Grip_Incline_DB_Bench_Press", "Neutral-Grip Incline Dumbbell Press", .dumbbell, .bench),
             ]),
+            // Overhead: a machine's fixed, back-supported path. (The neutral-grip
+            // incline press stays under incline press only: a regression has one
+            // pattern, so swaps and muscle counts know what it replaces.)
             R(.shoulder, .verticalPress, [
-                C.ex("Hammer_Grip_Incline_DB_Bench_Press", "Neutral-Grip Incline Dumbbell Press", .dumbbell, .bench),
+                C.ex("Machine_Shoulder_Military_Press", "Machine Shoulder Press", .machine),
             ]),
             R(.shoulder, .verticalPull, [
                 C.ex("Wide-Grip_Lat_Pulldown", "Lat Pulldown", .cable),
@@ -401,13 +404,15 @@ public struct ExerciseFilter: Sendable, Equatable {
 
     /// Caps the working load 20 % lighter (rounded down to a load the gym
     /// can make) on a lift that loads a 3-5/10 area, and says why. Lifts
-    /// with no load get the note only.
+    /// with no load get the note only. The cap is kept on the exercise
+    /// (`PlannedExercise.maxLoadKg`) so live autoregulation can't add it back.
     public func capLoad(_ exercise: inout PlannedExercise, slot: MovementSlot, gym: GymProfile) {
         guard let area = regressArea(forExerciseID: exercise.exerciseID, slot: slot) else { return }
         let line: String
         if let load = exercise.load, let kind = exercise.loadKind,
            let capped = gym.load(atMost: load * PainGuard.loadCapFraction, on: kind), capped < load - 0.001 {
             exercise.load = capped
+            exercise.maxLoadKg = gym.unit.toKilograms(capped)
             // The progression line would contradict the cap.
             exercise.progressionNote = nil
             line = "About 20% lighter for \(area.possessive) (the app's choice). Stop the lift if pain goes above 5/10."

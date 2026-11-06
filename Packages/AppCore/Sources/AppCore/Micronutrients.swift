@@ -30,7 +30,7 @@ public enum Micronutrients {
             case .folate: "Folate"
             case .vitaminA: "Vitamin A"
             case .selenium: "Selenium"
-            case .fiber: "Fiber"
+            case .fiber: "Fibre"
             }
         }
 
@@ -132,7 +132,7 @@ public enum Micronutrients {
             case .potassium: "Potassium helps fluid balance and muscle contraction, and offsets sodium's effect on blood pressure."
             case .sodium: "Sodium is lost in sweat; very low intake on heavy training days can mean cramps and dizziness."
             case .calcium: "Calcium keeps bones strong under heavy training, together with vitamin D."
-            case .fiber: "Low fibre means steadier energy and gut health are harder to keep up; most people eat about half the target."
+            case .fiber: "Fibre helps you feel full and feeds your gut bacteria; eating more goes with less heart disease and type 2 diabetes (Reynolds et al., Lancet 2019). Most people eat about half the target."
             }
         }
 

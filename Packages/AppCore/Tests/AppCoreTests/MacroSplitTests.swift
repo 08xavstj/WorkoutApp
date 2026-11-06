@@ -22,7 +22,9 @@ struct MacroSplitTests {
         #expect(abs(kcal - 1700) < 15)
         #expect(split.proteinPercentOfCalories > 30 && split.proteinPercentOfCalories < 37)
         #expect(!split.tooFewCaloriesForFloors)
-        #expect(split.summaryLine == "Protein 145 g · Carbs 148 g+ · Fat 52 g+")
+        // The line names the same carb and fat targets the bars fill to, with the floor beside them.
+        #expect(split.summaryLine == "Protein 145 g · Carbs about \(Int(split.carbsGrams)) g (at least 148) · Fat at least 52 g")
+        #expect(split.carbsGrams > 150)
         #expect(split.capNote?.contains("164 g") == true)
     }
 
@@ -45,6 +47,8 @@ struct MacroSplitTests {
         #expect(split.proteinGrams == 128)
         #expect(split.fatGrams == 78)
         #expect(split.carbsGrams > 380)
+        // Fat above its 56 g floor shows both numbers.
+        #expect(split.summaryLine.hasSuffix("Fat about 78 g (at least 56)"))
         #expect(split.capNote == nil)
         #expect(!split.tooFewCaloriesForFloors)
     }
@@ -58,6 +62,9 @@ struct MacroSplitTests {
         #expect(split.fatGrams == 52)
         #expect(split.carbsGrams < split.carbsFloorGrams)
         #expect(split.capNote?.contains("too little") == true)
+        // The carb floor doesn't fit, so the line shows only what does.
+        #expect(split.summaryLine.contains("Carbs about \(Int(split.carbsGrams)) g ·"))
+        #expect(!split.summaryLine.contains("at least 148"))
     }
 
     @Test func medicationFloorIsKeptEvenWhenItBreaksTheCarbFloor() throws {

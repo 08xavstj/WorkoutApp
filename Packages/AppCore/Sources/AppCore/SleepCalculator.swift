@@ -18,7 +18,7 @@ import Foundation
 ///   2004 meta-analysis): 40% under 40, 35% at 40-59, 30% from 60.
 /// - Interruptions: awakenings over 5 minutes; 0-1 is good and 4 or more is
 ///   poor (Ohayon et al., Sleep Health 2017), so 0-1 → full marks, 2-3 → half,
-///   4+ → none.
+///   4+ → none. Awake periods from several trackers are merged first.
 /// - Regularity: the Sleep Regularity Index, mapped so 85+ is full marks and
 ///   50 or less is none (`regularityScore`), because the UK Biobank median is
 ///   about 81 and the bottom fifth starts near 72 (Windred et al., Sleep 2024).
@@ -78,6 +78,10 @@ public struct SleepCalculator: Sendable {
         public var interruptions: Int
         public var bedtime: Date?
         public var wakeTime: Date?
+        /// When the main sleep began and ended (asleep samples only; `bedtime`
+        /// and `wakeTime` also span in-bed and awake samples around it).
+        public var asleepStart: Date? = nil
+        public var asleepEnd: Date? = nil
         /// 0-100 how consistent bed and wake times were over the last week, if known.
         public var consistency: Int?
 
@@ -122,13 +126,21 @@ public struct SleepCalculator: Sendable {
         let asleep = Self.unionDuration(asleepIntervals)
         guard asleep > 0 else { return nil }
 
-        func total(_ stage: SleepStage) -> TimeInterval {
-            Self.unionDuration(usable.filter { $0.stage == stage }.map { ($0.start, $0.end) })
+        func total(_ stage: SleepStage, in samples: [SleepSample]) -> TimeInterval {
+            Self.unionDuration(samples.filter { $0.stage == stage }.map { ($0.start, $0.end) })
         }
-        let deep = total(.deep)
-        let rem = total(.rem)
-        let core = total(.core)
-        let awake = total(.awake)
+        // Stages from one source only: two trackers stage the same night
+        // differently, and a union of both would inflate every stage. The
+        // source with the most staged time wins (the app's choice).
+        let stageSamples = Self.mostStagedSource(usable)
+        let deep = total(.deep, in: stageSamples)
+        let rem = total(.rem, in: stageSamples)
+        let core = total(.core, in: stageSamples)
+        let stagedAsleep = deep + rem + core
+        // Awake time and interruptions from every source, merged first, so an
+        // awakening two trackers both saw counts once.
+        let awakeIntervals = Self.mergedIntervals(usable.filter { $0.stage == .awake }.map { ($0.start, $0.end) })
+        let awake = awakeIntervals.map { $0.1.timeIntervalSince($0.0) }.reduce(0, +)
 
         let bedtime = usable.map(\.start).min()
         let wakeTime = usable.map(\.end).max()
@@ -136,9 +148,9 @@ public struct SleepCalculator: Sendable {
         if let bedtime, let wakeTime {
             window = wakeTime.timeIntervalSince(bedtime)
         }
-        let inBed = max(asleep, total(.inBed), window)
+        let inBed = max(asleep, total(.inBed, in: usable), window)
 
-        let interruptions = usable.filter { $0.stage == .awake && $0.duration >= minimumInterruption }.count
+        let interruptions = awakeIntervals.filter { $0.1.timeIntervalSince($0.0) >= minimumInterruption }.count
         let need = sleepNeed(previousDayStrain: previousDayStrain)
 
         let durationScore = min(1, asleep / need)
@@ -146,7 +158,7 @@ public struct SleepCalculator: Sendable {
         // Full marks from 85%, none at 70% (Ohayon et al., Sleep Health 2017: ≥ 85% good, < 74% poor).
         let efficiency = min(1, max(0, (rawEfficiency - 0.70) / 0.15))
         let restorativeTarget = age.map(Self.restorativeShareTarget(age:)) ?? targetRestorativeShare
-        let restorative = hasStages ? min(1, (deep + rem) / asleep / restorativeTarget) : 0.75
+        let restorative = hasStages && stagedAsleep > 0 ? min(1, (deep + rem) / stagedAsleep / restorativeTarget) : 0.75
         let interruptionScore = Self.interruptionScore(interruptions)
 
         let weighted: Double
@@ -169,27 +181,43 @@ public struct SleepCalculator: Sendable {
             interruptions: interruptions,
             bedtime: bedtime,
             wakeTime: wakeTime,
+            asleepStart: main.start,
+            asleepEnd: main.end,
             consistency: consistency
         )
     }
 
     /// Total time covered by a set of intervals, counting overlaps once.
     static func unionDuration(_ intervals: [(Date, Date)]) -> TimeInterval {
+        mergedIntervals(intervals).map { $0.1.timeIntervalSince($0.0) }.reduce(0, +)
+    }
+
+    /// Overlapping or touching intervals joined into one, in time order.
+    static func mergedIntervals(_ intervals: [(Date, Date)]) -> [(Date, Date)] {
         let sorted = intervals.filter { $0.1 > $0.0 }.sorted { $0.0 < $1.0 }
-        var total: TimeInterval = 0
-        var currentStart: Date?
-        var currentEnd: Date?
+        var merged: [(Date, Date)] = []
         for (start, end) in sorted {
-            if let runningEnd = currentEnd, start <= runningEnd {
-                currentEnd = max(runningEnd, end)
+            if let last = merged.last, start <= last.1 {
+                merged[merged.count - 1].1 = max(last.1, end)
             } else {
-                if let s = currentStart, let e = currentEnd { total += e.timeIntervalSince(s) }
-                currentStart = start
-                currentEnd = end
+                merged.append((start, end))
             }
         }
-        if let s = currentStart, let e = currentEnd { total += e.timeIntervalSince(s) }
-        return total
+        return merged
+    }
+
+    /// The samples from the source with the most core + deep + REM time
+    /// (all samples when sources aren't known or only one recorded stages).
+    static func mostStagedSource(_ samples: [SleepSample]) -> [SleepSample] {
+        let stagedTypes: Set<SleepStage> = [.core, .deep, .rem]
+        var stagedBySource: [String: TimeInterval] = [:]
+        for sample in samples where stagedTypes.contains(sample.stage) {
+            stagedBySource[sample.source ?? "", default: 0] += sample.duration
+        }
+        guard stagedBySource.count > 1,
+              let best = stagedBySource.max(by: { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) })?.key
+        else { return samples }
+        return samples.filter { ($0.source ?? "") == best }
     }
 }
 

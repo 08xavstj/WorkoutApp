@@ -28,7 +28,7 @@ struct UpNextCard: View {
     private static let maximumRows = 4
 
     var body: some View {
-        let items = Array(upNextItems().prefix(Self.maximumRows))
+        let items = Self.keepingCardio(upNextItems())
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 CardLabel(text: "Up next")
@@ -152,6 +152,24 @@ struct UpNextCard: View {
         ) else { return nil }
         return UpNextItem(id: "cardio", minutes: now, kind: .info(
             icon: today.kind.systemImage, color: Theme.oxygen, title: today.title, detail: today.detail))
+    }
+
+    /// The first `maximumRows` rows, but the day's easy cardio isn't cut by
+    /// the cap: it takes the place of the last row that isn't a dose or a
+    /// blood-pressure check (rows are by time, so it still comes last).
+    private static func keepingCardio(_ all: [UpNextItem]) -> [UpNextItem] {
+        var shown = Array(all.prefix(maximumRows))
+        guard let cardio = all.first(where: { $0.id == "cardio" }),
+              !shown.contains(where: { $0.id == "cardio" }),
+              let index = shown.lastIndex(where: { item in
+                  switch item.kind {
+                  case .dose, .bloodPressure: false
+                  default: true
+                  }
+              }) else { return shown }
+        shown.remove(at: index)
+        shown.append(cardio)
+        return shown
     }
 
     private static func minutesNow() -> Int {

@@ -8,8 +8,9 @@ import AppCore
 
 /// The experimental rep counter (lifting-features.md, Pick 8): reads the
 /// Watch's device motion during one set of a barbell squat or deadlift and
-/// runs `RepDetection` on the vertical acceleration. It runs only while a set
-/// is in progress (no rest timer, workout not paused) and stops when the set
+/// runs `RepDetection` on the vertical acceleration. It starts on "Start set"
+/// (`WatchRepCounterView`), runs only while the set is in progress (no rest
+/// timer, workout not paused) and stops when the set
 /// is ticked, after `maximumSeconds`, or when the view goes away, to save
 /// battery. Nothing leaves the Watch.
 ///
@@ -35,7 +36,7 @@ final class RepCounter {
     private(set) var setKey: String?
     private(set) var isRunning = false
     private(set) var analysis = RepDetection.Analysis.empty
-    /// The count shown: nil before 3 reps; never goes down within a set.
+    /// The count shown: nil before 3 reps; follows the latest analysis.
     private(set) var count: Int?
     /// The one "slowing" tap has been played for this set.
     private(set) var hasSignalledSlowing = false
@@ -143,8 +144,10 @@ final class RepCounter {
         }
         let result = RepDetection.analyze(samples, sampleRate: rate)
         analysis = result
+        // Follows the analysis, which can drop a stray early bout once the set's
+        // longer run of reps shows (`RepDetection.longestBout`).
         if let shown = result.shownCount {
-            count = max(count ?? 0, shown)
+            count = shown
         }
         if signalSlowing, result.isSlowing, !hasSignalledSlowing {
             hasSignalledSlowing = true

@@ -268,8 +268,10 @@ public enum CardioPlanner {
         let tooMuch = strainRange.map { estimatedStrain(minutes: slot.minutes) > $0.upperBound } ?? false
         if lowRecovery || tooMuch {
             let minutes = min(slot.minutes, EasyCardio.shortMinutes)
-            return Today(kind: slot.kind, minutes: minutes, title: "\(slot.kind.title) · \(minutes) min",
-                         detail: "Recovery is low: keep it to \(minutes) easy minutes, or skip it")
+            let detail = lowRecovery
+                ? "Recovery is low: keep it to \(minutes) easy minutes, or skip it"
+                : "\(slot.minutes) minutes would pass today's strain range: keep it to \(minutes) easy minutes"
+            return Today(kind: slot.kind, minutes: minutes, title: "\(slot.kind.title) · \(minutes) min", detail: detail)
         }
         let when = slot.weekday == nil ? "Any day this week. " : ""
         return Today(kind: slot.kind, minutes: slot.minutes, title: "\(slot.kind.title) · \(slot.minutes) min",

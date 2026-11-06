@@ -37,19 +37,21 @@ extension DailyVitals {
     /// HRV with Apple Health). Health data wins when both exist for a night.
     /// Returned newest first.
     ///
-    /// - Parameter manualOnlyHRV: drop Health's HRV when the user types HRV in.
-    ///   Garmin reports RMSSD and Apple Health stores SDNN; the two differ, so
-    ///   mixing them would skew the baseline.
+    /// - Parameter manualOnlyHRV: treat `manualHRV` as overnight RMSSD and pick
+    ///   one HRV measure for the whole baseline (`resolvingHRV`): Garmin reports
+    ///   RMSSD and Apple Health stores SDNN, and mixing them would skew it. One
+    ///   typed reading no longer wipes Apple Health's HRV.
     public static func merging(
         _ vitals: [DailyVitals],
         manualHRV: [Date: Double],
         manualOnlyHRV: Bool = false,
         calendar: Calendar = .current
     ) -> [DailyVitals] {
+        if manualOnlyHRV {
+            return resolvingHRV(vitals, overnightRMSSD: manualHRV, calendar: calendar).vitals
+        }
         var byNight: [Date: DailyVitals] = [:]
-        let dropHealthHRV = manualOnlyHRV && manualHRV.values.contains { $0 > 0 }
-        for var entry in vitals {
-            if dropHealthHRV { entry.hrvMilliseconds = nil }
+        for entry in vitals {
             byNight[calendar.startOfDay(for: entry.date)] = entry
         }
         for (date, milliseconds) in manualHRV where milliseconds > 0 {
@@ -61,6 +63,129 @@ extension DailyVitals {
             byNight[night] = entry
         }
         return byNight.values.sorted { $0.date > $1.date }
+    }
+
+    /// Nights looked at when choosing the HRV measure (the recovery baseline's 30).
+    public static let hrvWindowNights = 30
+    /// Overnight RMSSD nights in that window before RMSSD replaces SDNN: the
+    /// same 14-night minimum a recovery baseline needs (`RecoveryCalculator`).
+    public static let minimumRMSSDNights = 14
+    /// Nights with both overnight measures needed before one fills the other's gaps.
+    public static let minimumPairedNights = 5
+
+    /// One HRV measure for every night, so a baseline never mixes two.
+    ///
+    /// - Overnight RMSSD (Apple Watch beat-to-beat, or typed in from a Garmin)
+    ///   is used once it covers 14 of the last 30 nights; otherwise Apple
+    ///   Health's SDNN is. Only readings inside that window decide, so an old
+    ///   typed value can't switch the measure.
+    /// - A night missing the chosen measure but having the other one gets the
+    ///   other, converted with your own median RMSSD/SDNN ratio from nights with
+    ///   both (5 or more). Overnight RMSSD and SDNN track each other closely
+    ///   (Shaffer & Ginsberg, Front Public Health 2017), but their size differs
+    ///   from person to person, hence a personal ratio. The ratio and the 5
+    ///   nights are the app's choice.
+    /// - Morning readings (the camera, seated and awake) are taken under
+    ///   different conditions from overnight ones (posture and sleep both change
+    ///   HRV: Buchheit, Front Physiol 2014), so they are never mixed in: they
+    ///   form their own baseline only when there's no overnight HRV in the window.
+    ///
+    /// - Parameters:
+    ///   - today: the newest morning; defaults to the newest date in the inputs.
+    /// - Returns: vitals newest first, and the measure they carry.
+    public static func resolvingHRV(
+        _ vitals: [DailyVitals],
+        overnightRMSSD: [Date: Double],
+        morningHRV: [Date: Double] = [:],
+        today: Date? = nil,
+        calendar: Calendar = .current
+    ) -> HRVSelection {
+        var byNight: [Date: DailyVitals] = [:]
+        for entry in vitals {
+            let night = calendar.startOfDay(for: entry.date)
+            byNight[night] = DailyVitals(date: entry.date, hrvMilliseconds: entry.hrvMilliseconds.flatMap { $0 > 0 ? $0 : nil },
+                                         restingHeartRate: entry.restingHeartRate)
+        }
+        func nights(_ values: [Date: Double]) -> [Date: Double] {
+            var result: [Date: Double] = [:]
+            for (date, value) in values where value > 0 { result[calendar.startOfDay(for: date)] = value }
+            return result
+        }
+        let rmssd = nights(overnightRMSSD)
+        let morning = nights(morningHRV)
+        let newest = today.map { calendar.startOfDay(for: $0) }
+            ?? (Array(byNight.keys) + Array(rmssd.keys) + Array(morning.keys)).max()
+        guard let anchor = newest else { return HRVSelection(vitals: [], metric: nil) }
+        let windowStart = calendar.date(byAdding: .day, value: -(hrvWindowNights - 1), to: anchor) ?? anchor
+        func inWindow(_ night: Date) -> Bool { night >= windowStart && night <= anchor }
+
+        let sdnn = byNight.compactMapValues(\.hrvMilliseconds)
+        let rmssdCount = rmssd.keys.filter(inWindow).count
+        let sdnnCount = sdnn.keys.filter(inWindow).count
+        let morningCount = morning.keys.filter(inWindow).count
+        let metric: HRVMetric?
+        if rmssdCount >= minimumRMSSDNights {
+            metric = .rmssd
+        } else if sdnnCount > 0 || rmssdCount > 0 {
+            metric = sdnnCount >= rmssdCount ? .sdnn : .rmssd
+        } else if morningCount > 0 {
+            metric = .morningRMSSD
+        } else {
+            metric = nil
+        }
+
+        // Personal RMSSD/SDNN ratio from nights with both (window first, else any).
+        let paired = rmssd.keys.filter { sdnn[$0] != nil }
+        let pairedInWindow = paired.filter(inWindow)
+        let ratioNights = pairedInWindow.count >= minimumPairedNights ? pairedInWindow : paired
+        var ratio: Double?
+        if ratioNights.count >= minimumPairedNights {
+            let ratios = ratioNights.compactMap { night in sdnn[night].flatMap { s in rmssd[night].map { $0 / s } } }.sorted()
+            ratio = ratios.isEmpty ? nil : ratios[ratios.count / 2]
+        }
+
+        var result: [Date: DailyVitals] = byNight
+        let allNights = Set(byNight.keys).union(rmssd.keys).union(morning.keys)
+        for night in allNights {
+            var entry = result[night] ?? DailyVitals(date: night, hrvMilliseconds: nil, restingHeartRate: nil)
+            let value: Double?
+            switch metric {
+            case .rmssd: value = rmssd[night] ?? sdnn[night].flatMap { s in ratio.map { s * $0 } }
+            case .sdnn: value = sdnn[night] ?? rmssd[night].flatMap { r in ratio.map { r / $0 } }
+            case .morningRMSSD: value = morning[night]
+            case nil: value = nil
+            }
+            entry.hrvMilliseconds = value
+            // Nights that only ever had a value of the other kind, with no conversion, add nothing.
+            if value == nil, byNight[night] == nil { continue }
+            result[night] = entry
+        }
+        return HRVSelection(vitals: result.values.sorted { $0.date > $1.date }, metric: metric, rmssdNights: rmssdCount)
+    }
+}
+
+/// Which HRV measure a baseline uses. Never mixed within one baseline.
+public enum HRVMetric: String, Sendable, Codable {
+    /// Apple Health's overnight SDNN.
+    case sdnn = "SDNN"
+    /// Overnight RMSSD: Apple Watch beat-to-beat, or typed in from a Garmin.
+    case rmssd = "RMSSD"
+    /// Morning camera readings (RMSSD, seated and awake), kept apart from overnight HRV.
+    case morningRMSSD = "RMSSD (morning)"
+}
+
+/// The vitals with one HRV measure, and which one (`DailyVitals.resolvingHRV`).
+public struct HRVSelection: Sendable, Equatable {
+    /// Newest first.
+    public var vitals: [DailyVitals]
+    public var metric: HRVMetric?
+    /// Overnight RMSSD nights in the last 30.
+    public var rmssdNights: Int
+
+    public init(vitals: [DailyVitals], metric: HRVMetric?, rmssdNights: Int = 0) {
+        self.vitals = vitals
+        self.metric = metric
+        self.rmssdNights = rmssdNights
     }
 }
 
@@ -85,11 +210,15 @@ public struct SleepSample: Sendable, Equatable {
     public var stage: SleepStage
     public var start: Date
     public var end: Date
+    /// The app or device that recorded it (Apple Health's source name), if known,
+    /// so two trackers recording the same night aren't counted twice.
+    public var source: String?
 
-    public init(stage: SleepStage, start: Date, end: Date) {
+    public init(stage: SleepStage, start: Date, end: Date, source: String? = nil) {
         self.stage = stage
         self.start = start
         self.end = end
+        self.source = source
     }
 
     public var duration: TimeInterval { max(0, end.timeIntervalSince(start)) }

@@ -16,7 +16,9 @@ import Foundation
 ///   volume, how the sessions fall across the week makes little difference to
 ///   muscle growth (Schoenfeld, Grgic & Krieger, J Sports Sci 2019,
 ///   volume-equated meta-analysis), so the session is moved, not lost, and
-///   never doubled up on a day that already has one. Only the last two days
+///   never doubled up on a day that already has one. A session counts as
+///   done when one was logged that day, or the watch recorded a workout day
+///   (`isWatchTrainingDay`), not from strain alone. Only the last two days
 ///   are looked at: older misses are left alone rather than piled up. One
 ///   missed session costs little: strength and muscle take weeks without
 ///   training to fall off (Mujika & Padilla, Sports Med 2000; from memory).
@@ -54,15 +56,37 @@ public enum TrainingDayPlanner {
     /// One finished day before today.
     public struct PastDay: Sendable, Equatable {
         public var date: Date
-        /// What the plan had on that day; nil on a rest day.
+        /// What the plan had on that day; nil on a rest day, or when the day
+        /// had no fixed-day plan (see `planKnown`).
         public var plannedFocus: WorkoutFocus?
         public var strain: Double
+        /// False when the day's week had no fixed-day plan (none saved, or a
+        /// flexible week): the day was neither a planned rest day nor a
+        /// planned session, so it can't have been "missed" or a "rest day
+        /// that turned hard".
+        public var planKnown: Bool
+        /// Whether the day counted as a training day: a logged session, or a
+        /// watch-only workout day (`isWatchTrainingDay`). Nil when the caller
+        /// doesn't know; then strain at or above `trainingDayStrain` counts.
+        public var trained: Bool?
 
-        public init(date: Date, plannedFocus: WorkoutFocus?, strain: Double) {
+        public init(date: Date, plannedFocus: WorkoutFocus?, strain: Double, planKnown: Bool = true, trained: Bool? = nil) {
             self.date = date
             self.plannedFocus = plannedFocus
             self.strain = strain
+            self.planKnown = planKnown
+            self.trained = trained
         }
+
+        /// True on a planned rest day, false on a planned session, nil without a fixed-day plan.
+        public var wasRestDay: Bool? { planKnown ? plannedFocus == nil : nil }
+
+        /// A planned session that day (only when the plan is known).
+        var plannedSession: WorkoutFocus? { planKnown ? plannedFocus : nil }
+
+        /// Done or missed comes from what was logged, not from strain alone:
+        /// a short lift can stay under 25% and a long walk can pass it.
+        public var isTrainingDay: Bool { trained ?? (strain >= TrainingDayPlanner.trainingDayStrain) }
     }
 
     public struct Guidance: Sendable, Equatable {
@@ -84,8 +108,20 @@ public enum TrainingDayPlanner {
     /// plan's easy cardio (30 min at about 45% of heart-rate reserve ≈ 15%,
     /// `CardioPlanner.estimatedStrain`) fits inside it, so a rest day can take it.
     public static let restDayRange: ClosedRange<Double> = 0...25
-    /// A day at or above this strain counted as a training day (as `recentTrainingDays`).
-    public static let trainingDayStrain = 25.0
+    /// Strain that makes a day without a logged session count as a training
+    /// day, when the caller can't say (`PastDay.trained` nil), and the strain
+    /// half of `isWatchTrainingDay`. App choice: above the rest-day range
+    /// (0-25%, so the two never share a boundary) and past what a long walk
+    /// reaches (about 20% an hour), below the hard-day line (40%+). Not from a
+    /// study.
+    public static let trainingDayStrain = 35.0
+
+    /// A day with no logged session counts as a training day only when the
+    /// watch recorded a workout and day strain reached `trainingDayStrain`
+    /// (app choice, see there). Logged sessions always count, however short.
+    public static func isWatchTrainingDay(hadWorkout: Bool, strain: Double) -> Bool {
+        hadWorkout && strain >= trainingDayStrain
+    }
 
     /// Strain that makes a rest day count as a hard training day: the bottom
     /// of your normal training range (`StrainCalculator.targetStrain`), at least 40%.
@@ -110,7 +146,8 @@ public enum TrainingDayPlanner {
         let days = past.sorted { $0.date < $1.date }
 
         // Yesterday was a rest day in the plan and ended up a hard training day.
-        if let yesterday = days.last, yesterday.plannedFocus == nil, yesterday.strain >= hard {
+        // Days without a fixed-day plan (`planKnown` false) were never rest days.
+        if let yesterday = days.last, yesterday.wasRestDay == true, yesterday.strain >= hard {
             if let planned = plannedToday, !lowRecovery {
                 return Guidance(
                     kind: .easyTraining, strainRange: easy, title: "Easy day",
@@ -138,9 +175,11 @@ public enum TrainingDayPlanner {
         }
 
         // A rest day: does it take a session missed in the last two days?
-        if let missed = days.suffix(2).last(where: { $0.plannedFocus != nil && $0.strain < trainingDayStrain }),
-           let focus = missed.plannedFocus,
-           !days.contains(where: { $0.date > missed.date && $0.strain >= trainingDayStrain }) {
+        // Done or missed from logged sessions (`PastDay.isTrainingDay`); days
+        // without a fixed-day plan had nothing to miss.
+        if let missed = days.suffix(2).last(where: { $0.plannedSession != nil && !$0.isTrainingDay }),
+           let focus = missed.plannedSession,
+           !days.contains(where: { $0.date > missed.date && $0.isTrainingDay }) {
             let weekday = missed.date.formatted(.dateTime.weekday(.wide))
             if lowRecovery {
                 return Guidance(

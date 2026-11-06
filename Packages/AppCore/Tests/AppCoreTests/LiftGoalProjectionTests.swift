@@ -66,7 +66,11 @@ struct LiftGoalProjectionTests {
         #expect(projection.progress == 100.0 / 110)
         let headline = LiftGoalProjection.headline(projection, weight: kg, month: month, now: now)
         #expect(headline == "At your last 12 weeks' rate, 110 kg falls between M4 and M22.")
-        #expect(LiftGoalProjection.rangeLine(projection, weight: kg, month: month) == "If the last 12 weeks continue: about 112–140 kg by M26.")
+        // The line itself reaches 110 kg after 10 weeks (+1 kg a week from 100).
+        #expect(projection.reachLine == now.addingTimeInterval(70 * 86_400))
+        // Worded as a rough 2-in-3 range: ±1 SE of a prediction, not a sure thing.
+        #expect(LiftGoalProjection.rangeLine(projection, weight: kg, month: month)
+                == "If the last 12 weeks continue: likely 112–140 kg by M26 (a rough 2-in-3 range).")
         #expect(LiftGoalProjection.openAlternative(projection, month: month) == nil)
     }
 
@@ -101,6 +105,20 @@ struct LiftGoalProjectionTests {
         // Slow gains toward a far target.
         let slow = LiftGoalProjection.project(samples: samples([98.2, 98.4, 98.6, 98.8]), targetKg: 150, now: now)
         #expect(slow.status == .notOnTrend)
+    }
+
+    @Test func onlyTheUpperEdgeIsPossibleNotOnTrend() {
+        // 8 weeks ahead the line is at 108 kg and the upper edge at about 114.5 kg:
+        // 110 kg is possible, but the line doesn't reach it by then.
+        let date = now.addingTimeInterval(8 * week)
+        let projection = LiftGoalProjection.project(samples: samples([91, 94, 97, 100]), targetKg: 110, targetDate: date, now: now)
+        #expect(projection.status == .possible)
+        #expect(projection.reachFrom != nil)
+        #expect(projection.reachLine == nil)
+        #expect(LiftGoalProjection.headline(projection, weight: kg, month: month, now: now)
+                == "At your last 12 weeks' rate, 110 kg is possible by M8, but the trend line gets there later.")
+        #expect(LiftGoalProjection.openAlternative(projection, month: month) == "Or keep it open: see how far you get by M8.")
+        #expect(LiftGoalProjection.rangeLine(projection, weight: kg, month: month) != nil)
     }
 
     @Test func targetDateShortensTheHorizon() {

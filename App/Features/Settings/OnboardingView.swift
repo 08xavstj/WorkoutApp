@@ -6,6 +6,7 @@ import SwiftUI
 struct OnboardingView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(\.healthClient) private var health
+    @Environment(AppRefresher.self) private var refresher
     @Environment(\.dismiss) private var dismiss
     @State private var isRequesting = false
     @State private var showingSetup = false
@@ -89,6 +90,16 @@ struct OnboardingView: View {
             let profile = health.profileCharacteristics()
             if let age = profile.age { settings.age = age }
             if let sex = profile.sex { settings.sex = sex }
+            // The launch refresh ran before access was granted, and the launch task only
+            // turns on background delivery for people already onboarded: do both now, so
+            // Today fills in without reopening the app. Observers started at launch
+            // without access are started again (refreshSoon folds duplicates into one refresh).
+            health.enableBackgroundDelivery()
+            let refresher = refresher
+            health.observeChanges {
+                Task { @MainActor in refresher.refreshSoon() }
+            }
+            Task { await refresher.refresh() }
         }
         showingSetup = true
     }

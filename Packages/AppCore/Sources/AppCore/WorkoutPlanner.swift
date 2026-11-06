@@ -271,13 +271,42 @@ public struct ExerciseHistory: Sendable, Equatable {
     public var lastReps: Int
     public var lastRPE: Double?
     public var lastDate: Date
+    /// Top working weight of each of the last few sessions (at most
+    /// `recentSessions`), oldest first, the last one included. Rep and set
+    /// progression hold the heaviest of these, so one easier day (low
+    /// recovery, deload, a pain cap) doesn't lower the weight for good.
+    /// Empty = only `lastWeight` is known.
+    public var recentWeights: [Double] = []
+    /// Working sets logged last session (drop stages and mini-sets not
+    /// counted); nil when unknown. Set progression adds to this.
+    public var lastSets: Int? = nil
 
-    public init(bestEstimatedOneRepMax: Double, lastWeight: Double, lastReps: Int, lastRPE: Double?, lastDate: Date) {
+    /// Sessions `recentWeights` keeps.
+    public static let recentSessions = 3
+
+    public init(bestEstimatedOneRepMax: Double, lastWeight: Double, lastReps: Int, lastRPE: Double?, lastDate: Date,
+                recentWeights: [Double] = [], lastSets: Int? = nil) {
         self.bestEstimatedOneRepMax = bestEstimatedOneRepMax
         self.lastWeight = lastWeight
         self.lastReps = lastReps
         self.lastRPE = lastRPE
         self.lastDate = lastDate
+        self.recentWeights = Array(recentWeights.suffix(Self.recentSessions))
+        self.lastSets = lastSets
+    }
+
+    /// The heaviest top working weight of the last few sessions (`recentWeights`, `lastWeight`).
+    public var recentHeaviestWeight: Double {
+        max(lastWeight, recentWeights.max() ?? 0)
+    }
+
+    /// True when the last session's top set was lighter than the recent
+    /// heaviest: an easier day, not a new level.
+    public var lastWasLighter: Bool { lastWeight < recentHeaviestWeight - 0.001 }
+
+    /// `recentWeights` with this session's top weight added, kept to the last few.
+    public static func appending(_ weight: Double, to weights: [Double]) -> [Double] {
+        Array((weights + [weight]).suffix(recentSessions))
     }
 }
 
@@ -308,6 +337,10 @@ public struct PlannedExercise: Codable, Sendable, Equatable, Identifiable {
     public var lastSetKind: SetKind? = nil
     /// The drop stages or mini-sets after that set, in order.
     public var stages: [Stage]? = nil
+    /// The most the working sets may weigh today, in kg: set by the pain
+    /// guard (`ExerciseFilter.capLoad`) so live autoregulation can't add the
+    /// weight back. Nil when there's no cap. Optional, so older plans decode.
+    public var maxLoadKg: Double? = nil
 }
 
 extension PlannedExercise {
@@ -518,7 +551,17 @@ public struct WorkoutPlanner: Sendable {
                 planned.load = suggestedLoad(history: past, reps: reps, rpe: setRPE, kind: kind, mode: mode)
                 if let load = planned.load {
                     planned.note = notes(load: load, history: past, reps: reps, rpe: setRPE, kind: kind, mode: mode)
-                    planned.progressionNote = progressionNote(load: load, history: past, reps: reps, mode: mode)
+                    planned.progressionNote = progressionNote(load: load, history: past, reps: reps, mode: mode, rpe: setRPE)
+                    // Rep progression: today's target goes one past last time (the
+                    // live session pre-fills the top of the range).
+                    if mode == .reps, let target = repTarget(load: load, history: past, reps: reps, rpe: setRPE) {
+                        planned.reps = reps.lowerBound...target
+                    }
+                    // Set progression: one more set than last time, before the
+                    // block, the week's targets and the time fit (`plan`).
+                    if mode == .sets, let more = progressedSets(load: load, history: past, reps: reps, rpe: setRPE) {
+                        planned.sets = max(planned.sets, more)
+                    }
                 }
             } else if let estimate = LoadEstimator.estimate(exerciseID: choice.id, reps: reps, rpe: setRPE,
                                                             history: history, lifter: lifter, gym: gym) {
@@ -534,12 +577,19 @@ public struct WorkoutPlanner: Sendable {
     /// "+5 lb from last time: you hit 8 reps at RPE 7", "Same weight as last
     /// time: get 8 reps to move up", or "−10 lb from last time for today's
     /// effort". Makes the double progression visible. With rep or set
-    /// progression (`ProgressionMode`) the held weight says what to add instead.
-    func progressionNote(load: Double, history: ExerciseHistory, reps: ClosedRange<Int>, mode: ProgressionMode = .load) -> String {
+    /// progression (`ProgressionMode`) the held weight says what to add
+    /// instead. `rpe` is today's target (nil: as last time).
+    func progressionNote(load: Double, history: ExerciseHistory, reps: ClosedRange<Int>, mode: ProgressionMode = .load,
+                         rpe: Double? = nil) -> String {
         let unit = gym.unit.rawValue
         func fmt(_ v: Double) -> String { v.formatted(.number.precision(.fractionLength(0...2))) }
         let delta = load - history.lastWeight
         let effort = history.lastRPE.map { " at RPE \($0.formatted())" } ?? ""
+        // Back up after one easier session (low recovery, deload, a pain cap):
+        // not a new step, so don't credit last time's reps for it.
+        if delta > 0.001, history.lastWasLighter, load <= history.recentHeaviestWeight + 0.001 {
+            return "Back to \(fmt(load)) \(unit) after an easier session"
+        }
         if delta > 0.001 {
             return "+\(fmt(delta)) \(unit) from last time: you hit \(history.lastReps) reps\(effort)"
         }
@@ -547,13 +597,60 @@ public struct WorkoutPlanner: Sendable {
             return "−\(fmt(-delta)) \(unit) from last time for today's effort"
         }
         let goal = reps.upperBound + Self.bigJumpExtraReps
+        let today = rpe ?? history.lastRPE ?? 8
         switch mode {
         case .load:
             return "Same weight as last time: get \(reps.upperBound) reps to move up"
         case .reps:
-            return "Same weight as last time: add a rep; it moves up at \(goal) reps"
+            let target = repTarget(load: load, history: history, reps: reps, rpe: today) ?? reps.upperBound
+            return "Same weight as last time: aim for \(target) reps; it moves up at \(goal)"
         case .sets:
-            return "Same weight and reps: add a set when \(reps.upperBound) reps feel on target; it moves up at \(goal) reps"
+            let most = TrainingBlock.setRange.upperBound
+            if progressedSets(load: load, history: history, reps: reps, rpe: today) != nil {
+                return "Same weight, one more set: you hit \(reps.upperBound) reps; it moves up at \(most) sets"
+            }
+            return "Same weight: hit \(reps.upperBound) reps to add a set; it moves up at \(most) sets"
+        }
+    }
+
+    /// True when last session was at or under today's effort target, at the
+    /// recent heaviest weight, and `load` is that same weight: the case where
+    /// rep and set progression add reps or sets.
+    func isHeldAtLastWeight(load: Double, history: ExerciseHistory, rpe: Double) -> Bool {
+        abs(load - history.lastWeight) < 0.001 && !history.lastWasLighter && (history.lastRPE ?? rpe) <= rpe + 0.001
+    }
+
+    /// Rep progression's target for today: one rep more than last time, at
+    /// most `bigJumpExtraReps` past the top of the range (where the load
+    /// moves up instead). Nil when the top of the range is the target anyway,
+    /// or the weight changed.
+    func repTarget(load: Double, history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double) -> Int? {
+        guard isHeldAtLastWeight(load: load, history: history, rpe: rpe) else { return nil }
+        let target = min(history.lastReps + 1, reps.upperBound + Self.bigJumpExtraReps)
+        return target > reps.upperBound ? target : nil
+    }
+
+    /// Set progression's sets for today: one more than last time (at most
+    /// `TrainingBlock.setRange`'s 5) when last time reached the top of the
+    /// range at the effort target at the same weight. Nil otherwise, or when
+    /// last session's set count isn't known.
+    func progressedSets(load: Double, history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double) -> Int? {
+        guard isHeldAtLastWeight(load: load, history: history, rpe: rpe), let last = history.lastSets,
+              history.lastReps >= reps.upperBound else { return nil }
+        return min(TrainingBlock.setRange.upperBound, last + 1)
+    }
+
+    /// Rep and set progression move the weight up one step when last time
+    /// beat the top of the range by `bigJumpExtraReps`; set progression also
+    /// once it reached the top of the range on the most sets (5).
+    func earnedLoadStep(_ history: ExerciseHistory, reps: ClosedRange<Int>, mode: ProgressionMode) -> Bool {
+        let pastRange = history.lastReps >= reps.upperBound + Self.bigJumpExtraReps
+        switch mode {
+        case .load: return false
+        case .reps: return pastRange
+        case .sets:
+            let atMostSets = (history.lastSets ?? 0) >= TrainingBlock.setRange.upperBound
+            return pastRange || (atMostSets && history.lastReps >= reps.upperBound)
         }
     }
 
@@ -619,15 +716,22 @@ public struct WorkoutPlanner: Sendable {
         let exerciseCount = Self.exerciseCount(minutes: minutes)
         let slots = Self.orderedSlots(focus: focus, minutes: minutes, priority: prioritySlots)
         var exercises: [PlannedExercise] = []
+        // Sets earned by set progression (`progressedSets`), by exercise.
+        var earnedSets: [String: Int] = [:]
         for slot in slots {
             // A repeated slot (the long session's extra) gets a different exercise.
             let used = Set(exercises.map(\.exerciseID))
             guard exercises.count < exerciseCount,
                   let choice = alternatives(for: slot).first(where: { !used.contains($0.id) }) else { continue }
             var planned = prescribe(choice, slot: slot, minutes: minutes, sessionRPE: rpe, history: history, lifter: lifter)
+            var base = Self.baseSets(compound: slot.isCompound, minutes: minutes)
             if let block {
-                planned.sets = TrainingBlock.scaledSets(planned.sets, multiplier: block.setMultiplier)
+                // Scale the base sets, so a set added by set progression isn't
+                // scaled again; the deload cuts it like any other set.
+                base = TrainingBlock.scaledSets(base, multiplier: block.setMultiplier)
+                planned.sets = block.isDeload ? base : max(base, planned.sets)
             }
+            if planned.sets > base { earnedSets[choice.id] = planned.sets }
             exercises.append(planned)
         }
         // This week's per-muscle targets (`VolumeProgression`) set the sets; `fit` still trims to the time.
@@ -635,6 +739,13 @@ public struct WorkoutPlanner: Sendable {
         // Ramp sets first, so the time they take counts when fitting.
         addWarmUps(&exercises)
         Self.fit(&exercises, minutes: minutes, style: style, warmUpMinutes: warmUpMinutes)
+        // A muscle with a weekly target already has its sets; the others keep an earned set if time allows.
+        let targeted = Set(muscleSetGoals.keys)
+        earnedSets = earnedSets.filter { id, _ in
+            guard let exercise = exercises.first(where: { $0.exerciseID == id }) else { return false }
+            return VolumeProgression.primaryMuscle(exercise).map { !targeted.contains($0) } ?? true
+        }
+        Self.keepEarnedSets(&exercises, earned: earnedSets, minutes: minutes, style: style, warmUpMinutes: warmUpMinutes)
         // A deload week is meant to be short; every other session fills the time.
         if block?.isDeload != true {
             fill(&exercises, focus: focus, minutes: minutes, rpe: rpe, history: history, lifter: lifter, warmUpMinutes: warmUpMinutes,
@@ -856,6 +967,29 @@ public struct WorkoutPlanner: Sendable {
         }
     }
 
+    /// `fit` trims the exercise with the most sets first, which is the one set
+    /// progression just added a set to. This moves the earned set back, one
+    /// set at a time from the latest other straight exercise above two sets,
+    /// as long as the session still fits the time; otherwise the trim stands.
+    static func keepEarnedSets(_ exercises: inout [PlannedExercise], earned: [String: Int], minutes: Int,
+                               style: TrainingStyle = .balanced, warmUpMinutes: Int = 0) {
+        for (id, goal) in earned.sorted(by: { $0.key < $1.key }) {
+            guard let index = exercises.firstIndex(where: { $0.exerciseID == id }),
+                  exercises[index].supersetGroup == nil else { continue }
+            while exercises[index].sets < goal {
+                guard let donor = exercises.indices.reversed().first(where: { other in
+                    other != index && earned[exercises[other].exerciseID] == nil &&
+                        exercises[other].supersetGroup == nil && exercises[other].sets > minimumSetsWhenShort
+                }) else { break }
+                var trial = exercises
+                trial[donor].sets -= 1
+                trial[index].sets += 1
+                guard estimatedMinutes(trial, style: style, warmUpMinutes: warmUpMinutes) <= minutes else { break }
+                exercises = trial
+            }
+        }
+    }
+
     /// The biggest jump in weight taken just for reaching the top of the rep
     /// range: the ACSM suggests adding 2-10% at a time (position stand, Med Sci
     /// Sports Exerc 2009).
@@ -873,10 +1007,15 @@ public struct WorkoutPlanner: Sendable {
     ///
     /// `mode` (`ProgressionMode`; Plotkin et al., PeerJ 2022: load and rep
     /// progression both work): `.load` is the rule above. `.reps` and `.sets`
-    /// keep last time's weight (when last time was at today's effort or
-    /// easier) and move up one jump only once you've beaten the top of the
-    /// range by `bigJumpExtraReps`, whatever the jump; a harder day (lower
-    /// target effort than last time) can still go lighter.
+    /// hold the heaviest top weight of the last few sessions
+    /// (`ExerciseHistory.recentHeaviestWeight`), so one easier day doesn't
+    /// lower it for good, and add reps (`repTarget`) or a set
+    /// (`progressedSets`) instead. They move up one jump, whatever its size,
+    /// once that's earned (`earnedLoadStep`): `.reps` at `bigJumpExtraReps`
+    /// past the top of the range, `.sets` also at the top of the range on the
+    /// most sets. A day with a lower effort target than last time (low
+    /// recovery, deload) goes lighter for that day only; the session after an
+    /// easier one goes back to the held weight without a step.
     public func suggestedLoad(history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind,
                               mode: ProgressionMode = .load) -> Double? {
         let repsInReserve = max(0, 10 - rpe)
@@ -884,10 +1023,10 @@ public struct WorkoutPlanner: Sendable {
         let target = history.bestEstimatedOneRepMax / (1 + effectiveReps / 30)
         guard var load = gym.load(atMost: target, on: kind) else { return nil }
         if mode != .load {
-            let held = gym.load(atMost: history.lastWeight, on: kind) ?? load
+            let held = gym.load(atMost: history.recentHeaviestWeight, on: kind) ?? load
             guard (history.lastRPE ?? rpe) <= rpe + 0.001 else { return min(load, held) }
-            if history.lastReps >= reps.upperBound + Self.bigJumpExtraReps,
-               let next = gym.nextLoad(above: history.lastWeight, on: kind) {
+            if !history.lastWasLighter, earnedLoadStep(history, reps: reps, mode: mode),
+               let next = gym.nextLoad(above: held, on: kind) {
                 return next
             }
             return held

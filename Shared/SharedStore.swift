@@ -29,6 +29,9 @@ nonisolated struct WidgetSnapshot: Codable, Sendable, Equatable {
     var hrvDate: Date?
     var recovery: Int?
     var strain: Double?
+    /// The user types or measures HRV in the app (recent readings), so the widget
+    /// may ask for one; nil (older snapshots) counts as yes. Watch users aren't asked.
+    var logsHRV: Bool? = nil
 
     static let key = "widgetSnapshot"
 

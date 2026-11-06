@@ -25,12 +25,17 @@ public enum SetFeedback {
         /// Same weight and reps as last time (no plan to compare with).
         case matchedLastTime
 
-        public func message(unit: String) -> String {
+        /// `targetReps` names the target in a `.short` verdict ("2 short of 8").
+        /// A short set isn't progressed: the planner adds weight only after the
+        /// top of the range (`WorkoutPlanner.suggestedLoad`). Today's next set
+        /// is the separate autoregulation note, so the two don't contradict.
+        public func message(unit: String, targetReps: Int? = nil) -> String {
             switch self {
             case let .short(reps):
-                return "\(reps) short: the planner will hold the load"
+                let of = targetReps.map { " of \($0)" } ?? ""
+                return "\(reps) short\(of) · no weight added next session"
             case let .pastEffort(rir):
-                return "Harder than planned: aim for \(Autoregulation.reserveText(rir)) in reserve next set"
+                return "Harder than planned: aim for \(ReserveText.text(rir)) next set"
             case let .heavier(delta):
                 return "+\(Autoregulation.format(delta)) \(unit) on last time"
             case let .moreReps(reps):
@@ -90,7 +95,8 @@ public enum SetFeedback {
     public enum Record: Sendable, Equatable {
         /// Best estimated one-rep max (Epley with reps left from RPE, `OneRepMax`).
         case estimatedOneRepMax(Double)
-        /// Most reps ever at this weight or heavier.
+        /// Most reps ever at this weight or heavier; weight 0 is a
+        /// bodyweight lift (most reps in one set).
         case reps(weight: Double, reps: Int)
         /// Most weight × reps in one session.
         case volume(Double)
@@ -100,6 +106,7 @@ public enum SetFeedback {
             case let .estimatedOneRepMax(value):
                 return "Best estimated 1RM: \(Autoregulation.format(value.rounded())) \(unit)"
             case let .reps(weight, reps):
+                if weight <= 0 { return "Most reps in a set: \(reps)" }
                 return "Most reps at \(Autoregulation.format(weight)) \(unit): \(reps)"
             case let .volume(value):
                 return "Most volume in a session: \(Autoregulation.format(value.rounded())) \(unit)"
@@ -124,8 +131,10 @@ public enum SetFeedback {
 
         // Rep PR: more reps than ever at this weight or heavier, where there
         // was an earlier set that heavy (a first-ever weight isn't a rep record).
+        // A bodyweight set (weight 0) is compared with every earlier set, so
+        // push-ups and pull-ups get a rep record too (their e1RM and volume are 0).
         var repRecord: LiftProgress.LoggedSet?
-        for set in sets where set.weight > 0 {
+        for set in sets where set.weight >= 0 {
             let comparable = past.filter { $0.weight >= set.weight - 0.01 }
             guard let most = comparable.map(\.reps).max(), set.reps > most else { continue }
             if let current = repRecord, current.weight > set.weight || (current.weight == set.weight && current.reps >= set.reps) {

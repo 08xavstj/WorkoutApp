@@ -10,6 +10,7 @@ final class ConditionsModel {
     private(set) var errorMessage: String?
 
     func refresh(settings: UserSettings, force: Bool = false) async {
+        if let demo = DemoHealth.active { current = demo.conditions(latitude: settings.latitude, longitude: settings.longitude); return } // demo mode: no network
         guard settings.hasLocation else {
             current = nil
             return

@@ -94,16 +94,13 @@ final class CoachModel {
         messages.append(ChatMessage(role: .user, text: trimmed))
 
         // 1. Deterministic: instant, never errors, never the model. A routed
-        // question always gets a data answer; should `answer` ever be nil, the
-        // topic's nearest answer stands in rather than the model being asked.
+        // question always gets its own data answer, never another question's.
         let topic = CoachIntent.topic(trimmed)
-        if let question = CoachIntent.question(trimmed) {
-            if let answer = CoachAnswers.answer(for: question, facts: facts) ?? CoachAnswers.fallback(for: topic, facts: facts) {
-                onDevice.remember(question: trimmed, answer: answer.text)
-                diagnostics = onDevice.diagnostics
-                messages.append(ChatMessage(role: .coach, text: answer.text, source: .data, action: answer.action, plan: plan, facts: facts))
-                return
-            }
+        if let question = CoachIntent.question(trimmed), let answer = CoachAnswers.answer(for: question, facts: facts) {
+            onDevice.remember(question: trimmed, answer: answer.text)
+            diagnostics = onDevice.diagnostics
+            messages.append(ChatMessage(role: .coach, text: answer.text, source: .data, action: answer.action, plan: plan, facts: facts))
+            return
         }
 
         // 2. Open question: the model, with a small prompt.
@@ -115,8 +112,10 @@ final class CoachModel {
             messages.append(ChatMessage(role: .coach, text: reply.answer, source: .model, action: reply.action, plan: plan, facts: facts))
         } catch {
             diagnostics = onDevice.diagnostics
-            // 3. The nearest answer from the data, when there is one.
-            if let fallback = CoachAnswers.fallback(for: topic, facts: facts) {
+            // 3. A data answer about the same thing ("Is my HRV normal?" → the
+            // HRV reading), when there is one; otherwise the real error, so an
+            // open question never gets an answer to a different question.
+            if let fallback = CoachAnswers.fallback(for: trimmed, facts: facts) {
                 let lead = Self.fallbackLead(for: error)
                 messages.append(ChatMessage(role: .coach, text: lead + " " + fallback.text, source: .data,
                                             action: fallback.action, plan: plan, facts: facts, expanded: true))
@@ -155,11 +154,16 @@ final class CoachModel {
     /// Under a data answer the model wouldn't expand on.
     static let sayMoreDeclinedText = "Apple's on-device model declined to add to that one, so the answer above, from your data, is the whole of it. You could ask a follow-up about your training or food."
 
-    /// One short sentence before a fallback answer, saying why the model didn't answer.
+    /// One short sentence before a fallback answer, saying why the model
+    /// didn't answer: the real reason (e.g. "Turn on Apple Intelligence in
+    /// the Settings app…"), not a generic line.
     static func fallbackLead(for error: Error) -> String {
         if OnDeviceCoach.isRefusal(error) {
             return "Apple's on-device model declined that one (even reworded as a workout-log query), but here's what your data says:"
         }
-        return "The on-device model couldn't take that one, but here's what your data says:"
+        if let coach = error as? CoachError, case .unavailable(let message) = coach {
+            return message + " Meanwhile, here's what your data says:"
+        }
+        return "The on-device model couldn't take that one (\(error.localizedDescription)), but here's what your data says:"
     }
 }

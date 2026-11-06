@@ -19,8 +19,13 @@ struct ActiveWorkoutView: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     /// The quiet PR banner at the end of an exercise (`SetFeedback.records`).
     @State private var recordBanner: RecordBanner?
-    /// Exercise orders whose records were already shown this visit.
-    @State private var shownRecords: Set<Int> = []
+    /// Record lines already shown this visit, by exercise order: a later,
+    /// better set can still show a new one.
+    @State private var shownRecords: [Int: [String]] = [:]
+    /// The exercise of the last ticked working set, so its records show once you move on.
+    @State private var lastTickedOrder: Int?
+    /// Records not shown yet when Finish opens, listed in the finish sheet.
+    @State private var finishRecords: [RecordBanner] = []
     @State private var showingPicker = false
     @State private var showingFinish = false
     @State private var showingDiscard = false
@@ -62,10 +67,6 @@ struct ActiveWorkoutView: View {
                     WarmUpPhaseCard(sessionStart: session.startedAt) {
                         WatchSync.shared.update(from: session)
                     }
-                    if let recordBanner {
-                        RecordBannerView(banner: recordBanner) { self.recordBanner = nil }
-                            .transition(.opacity)
-                    }
                     ForEach(session.orderedExercises) { exercise in
                         exerciseCard(exercise)
                     }
@@ -84,6 +85,15 @@ struct ActiveWorkoutView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 32)
                 .lockedToScreenWidth()
+            }
+            // The PR banner sits over the top of the screen, wherever you've scrolled to.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let recordBanner {
+                    RecordBannerView(banner: recordBanner) { self.recordBanner = nil }
+                        .padding(.horizontal)
+                        .padding(.top, 4)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
@@ -114,7 +124,7 @@ struct ActiveWorkoutView: View {
                 ExercisePickerView { exercise in add(exercise) }
             }
             .sheet(isPresented: $showingFinish) {
-                FinishWorkoutSheet(session: session) {
+                FinishWorkoutSheet(session: session, records: finishRecords) {
                     WatchSync.shared.sessionFinished(session) // Apple Watch: end its recording
                     dismiss()
                 }
@@ -124,6 +134,15 @@ struct ActiveWorkoutView: View {
             // or rest changes; the Watch's Finish opens the finish sheet here.
             .onChange(of: watchFingerprint, initial: true) { _, _ in
                 WatchSync.shared.update(from: session)
+            }
+            .onChange(of: showingFinish) { _, showing in
+                if showing { finishRecords = pendingRecords() }
+            }
+            // An exercise you've moved on from shows its records, even with sets left unticked.
+            .onChange(of: currentExerciseID) { old, _ in
+                if let old, let exercise = session.exercises.first(where: { $0.persistentModelID == old }) {
+                    showRecords(for: exercise)
+                }
             }
             .onChange(of: launcher.pendingFinish, initial: true) { _, pending in
                 guard pending else { return }
@@ -321,10 +340,15 @@ struct ActiveWorkoutView: View {
         session.exercises.filter { !$0.sets.isEmpty && $0.sets.allSatisfy(\.isCompleted) }.count
     }
 
-    /// Changes whenever a set is ticked, added or removed, so the Watch is told (`WatchSync`).
+    /// Changes whenever a set is ticked, added, removed or edited (weight,
+    /// reps, type, effort), so the Watch is told (`WatchSync`).
     private var watchFingerprint: String {
-        let sets = session.exercises.flatMap(\.sets)
-        return "\(session.exercises.count)/\(sets.count)/\(sets.filter(\.isCompleted).count)/\(session.name)"
+        let sets = session.orderedExercises.flatMap(\.orderedSets)
+        let detail = sets.map { set in
+            let rpe = set.rpe.map { "\($0)" } ?? "-"
+            return "\(set.weightKg),\(set.reps),\(set.kind.rawValue),\(rpe),\(set.isCompleted ? 1 : 0)"
+        }
+        return "\(session.exercises.count)/\(session.name)/" + detail.joined(separator: ";")
     }
 
     /// Strain this session has added on top of today's strain, from time and effort.
@@ -343,7 +367,7 @@ struct ActiveWorkoutView: View {
 
     /// Weights in a workout show in the gym's unit, so the numbers, the +/-
     /// steps and the plates to load all match what's on the bar.
-    private var workoutUnit: WeightUnit { gym.profile.unit == .kg ? .kilograms : .pounds }
+    private var workoutUnit: WeightUnit { gym.liftingUnit }
 
     @ViewBuilder
     private func exerciseCard(_ exercise: ExerciseLog) -> some View {
@@ -355,13 +379,13 @@ struct ActiveWorkoutView: View {
             ExerciseCard(
                 exercise: exercise,
                 isCurrent: isCurrent,
-                previous: LiftHistory.previousSets(for: exercise.exerciseID, before: session.startedAt, in: sessions),
-                bestBefore: LiftHistory.bestOneRepMax(for: exercise.exerciseID, before: session.startedAt, in: sessions),
+                previous: LiftHistory.cachedPreviousSets(for: exercise.exerciseID, before: session.startedAt, in: sessions),
+                bestBefore: LiftHistory.cachedBestOneRepMax(for: exercise.exerciseID, before: session.startedAt, in: sessions),
                 unit: workoutUnit,
                 gym: gym.profile,
                 onSetCompleted: { afterWarmUp in
                     startRest(for: exercise, afterWarmUp: afterWarmUp)
-                    if !afterWarmUp { showRecords(for: exercise) }
+                    if !afterWarmUp { workingSetTicked(in: exercise) }
                 },
                 onCollapse: { expanded.remove(exercise.persistentModelID) },
                 supersetLabel: supersetLabel(exercise),
@@ -458,22 +482,51 @@ struct ActiveWorkoutView: View {
         return ("All sets done", "Tap Finish when you're ready")
     }
 
-    /// Once every set of an exercise is ticked: e1RM, rep and volume PRs
-    /// against earlier sessions, as a short banner (once per exercise).
+    /// A working set was ticked: the exercise's records once its sets are all
+    /// done, and the last exercise's when you've moved on to another one (a
+    /// superset partner doesn't count as moving on).
+    private func workingSetTicked(in exercise: ExerciseLog) {
+        if let previousOrder = lastTickedOrder, previousOrder != exercise.order,
+           partner(of: exercise)?.order != previousOrder,
+           let previous = session.exercises.first(where: { $0.order == previousOrder }) {
+            showRecords(for: previous)
+        }
+        lastTickedOrder = exercise.order
+        if !exercise.sets.isEmpty, exercise.sets.allSatisfy(\.isCompleted) {
+            showRecords(for: exercise)
+        }
+    }
+
+    /// e1RM, rep and volume PRs against earlier sessions from the exercise's
+    /// ticked working sets, as a short banner; only lines not shown yet.
     private func showRecords(for exercise: ExerciseLog) {
-        guard !exercise.sets.isEmpty, exercise.sets.allSatisfy(\.isCompleted),
-              !shownRecords.contains(exercise.order) else { return }
-        let records = LiveSetCoach.records(for: exercise, sessionStart: session.startedAt, sessions: sessions, unit: workoutUnit)
-        guard !records.isEmpty else { return }
-        shownRecords.insert(exercise.order)
-        let banner = RecordBanner(order: exercise.order, exercise: exercise.name,
-                                  lines: records.map { $0.message(unit: workoutUnit.rawValue) })
+        guard let banner = newRecords(for: exercise) else { return }
+        shownRecords[exercise.order, default: []].append(contentsOf: banner.lines)
         withAnimation { recordBanner = banner }
         AccessibilityNotification.Announcement(banner.spokenText).post()
     }
 
+    /// Records from the exercise's ticked working sets that haven't been shown; nil if none.
+    private func newRecords(for exercise: ExerciseLog) -> RecordBanner? {
+        guard exercise.sets.contains(where: { $0.isCompleted && !$0.isWarmup }) else { return nil }
+        let shown = shownRecords[exercise.order] ?? []
+        let lines = LiveSetCoach.records(for: exercise, sessionStart: session.startedAt, sessions: sessions, unit: workoutUnit)
+            .map { $0.message(unit: workoutUnit.rawValue) }
+            .filter { !shown.contains($0) }
+        guard !lines.isEmpty else { return nil }
+        return RecordBanner(order: exercise.order, exercise: exercise.name, lines: lines)
+    }
+
+    /// Records not shown yet across the workout, for the finish sheet.
+    private func pendingRecords() -> [RecordBanner] {
+        session.orderedExercises.compactMap(newRecords(for:))
+    }
+
     private func add(_ exercise: Exercise) {
-        let log = ExerciseLog(exerciseID: exercise.id, name: exercise.name, order: session.exercises.count)
+        // One past the highest order: after a removal, the count would repeat an
+        // order, and targets, supersets, records and the Watch are keyed by it.
+        let order = (session.exercises.map(\.order).max() ?? -1) + 1
+        let log = ExerciseLog(exerciseID: exercise.id, name: exercise.name, order: order)
         log.session = session
         modelContext.insert(log)
         let firstSet = SetLog(order: 0)
@@ -519,6 +572,9 @@ private struct ExerciseCard: View {
     @State private var showingGuide = false
     /// This exercise's own rest time (nil = automatic).
     @State private var restSeconds: Int?
+    /// Sets whose RPE 10 was filled in by marking them "to failure", so it
+    /// goes again if the type changes back (a leftover 10 would cut the load).
+    @State private var autoFilledRPE: Set<PersistentIdentifier> = []
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
@@ -635,14 +691,17 @@ private struct ExerciseCard: View {
                 setRow(set, in: sets, editing: editing)
             }
 
-            if let note = adjustmentNote(in: sets) {
-                AdjustmentNote(text: note)
+            if let adjustment = shownAdjustment(in: sets) {
+                AdjustmentNote(text: adjustment.message,
+                               onUndo: adjustment.restore?.isEmpty == false ? { undoAdjustment(adjustment) } : nil,
+                               isPainHold: adjustment.restore == nil)
             }
 
             if let editing {
                 SetEditor(
                     set: editing,
                     title: editorTitle(for: editing, in: sets),
+                    kind: editing.isWarmup ? nil : kindBinding(for: editing),
                     unit: unit,
                     step: { up in step(editing, up: up) },
                     plateHint: plateHint(for: editing),
@@ -655,7 +714,7 @@ private struct ExerciseCard: View {
 
             if needsWeightFinding(sets) {
                 // No history and nothing to estimate from, so no ramp sets: the first set finds the weight.
-                Text("First set: find your weight. Start light and add weight until the reps feel like the plan's effort.")
+                Text("First set: find your weight, starting light.")
                     .font(.footnote)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -703,6 +762,7 @@ private struct ExerciseCard: View {
             warmUp: set.isWarmup ? warmUpPosition(set, in: sets) : nil,
             targetText: isWorking ? targetText(for: set) : nil,
             verdict: isWorking ? verdict(for: set, index: ghostIndex) : nil,
+            verdictTargetReps: isWorking ? verdictTargetReps(for: set) : nil,
             kindLine: Self.kindLine(set.kind, isStage: position.isStage)
         )
         .contextMenu {
@@ -744,25 +804,37 @@ private struct ExerciseCard: View {
         case .failure: return "To failure"
         case .drop: return isStage ? "Drop · no rest, lighter" : "Drop set"
         case .restPause: return isStage ? "Rest-pause · about \(SetKind.restPauseRestSeconds) s rest" : "Rest-pause"
-        case .myoRep: return isStage ? "Myo-rep mini-set · 3-5 breaths (untested in trials)" : "Myo-reps (untested in trials)"
+        // How good the evidence is sits behind the editor's ⓘ (`SetKind.evidence`).
+        case .myoRep: return isStage ? "Myo-rep · 3-5 breaths" : "Myo-reps"
         }
     }
 
-    /// "Set 2", "Warm-up" or "Drop 1 of 2" above the editor.
+    /// "Set 2", "Set 3 · To failure", "Warm-up" or "Drop 1 of 2" above the editor.
     private func editorTitle(for set: SetLog, in sets: [SetLog]) -> String {
         if set.isWarmup { return "Warm-up" }
         let position = structurePosition(of: set, in: sets)
         if position.isStage { return LiveSetCoach.title(for: set, in: sets) }
-        return "Set \(position.number ?? 1)"
+        let number = "Set \(position.number ?? 1)"
+        return set.kind == .straight ? number : number + " · " + set.kind.title
     }
 
-    /// The set type from the context menu. Marking a set "to failure" fills its effort as 10.
+    /// The set type, from the editor or the row's context menu. Marking a set
+    /// "to failure" fills its effort as 10; changing it back clears that 10
+    /// again (left in, it would read as harder than planned and cut the load).
     private func kindBinding(for set: SetLog) -> Binding<SetKind> {
         Binding(
             get: { set.kind },
             set: { kind in
+                let id = set.persistentModelID
+                if set.kind == .failure, kind != .failure, autoFilledRPE.contains(id) {
+                    if set.rpe == 10 { set.rpe = nil }
+                    autoFilledRPE.remove(id)
+                }
                 set.kind = kind
-                if kind == .failure, set.rpe == nil { set.rpe = 10 }
+                if kind == .failure, set.rpe == nil {
+                    set.rpe = 10
+                    autoFilledRPE.insert(id)
+                }
                 try? modelContext.save()
             }
         )
@@ -773,7 +845,7 @@ private struct ExerciseCard: View {
         sets.last.map { !$0.isWarmup } ?? false
     }
 
-    /// Adds a drop stage (about a quarter lighter, rounded to the gym's
+    /// Adds a drop stage (at least 20% lighter, `TimeSaver.dropFraction`, rounded to the gym's
     /// loads: `TimeSaver.dropLoads`) or a rest-pause / myo-rep mini-set at the
     /// same weight after the last set.
     private func addStage(_ kind: SetKind) {
@@ -787,8 +859,11 @@ private struct ExerciseCard: View {
             if let loadKind, gym.has(loadKind),
                let lighter = TimeSaver.dropLoads(from: current, kind: loadKind, gym: gym, stages: 1).first {
                 weightKg = gym.unit.toKilograms(lighter)
+            } else if let loadKind, let rounded = gym.load(atMost: current * (1 - TimeSaver.dropFraction), on: loadKind),
+                      rounded > 0 {
+                weightKg = gym.unit.toKilograms(rounded)
             } else {
-                weightKg = last.weightKg * (1 - 0.25)
+                weightKg = last.weightKg * (1 - TimeSaver.dropFraction)
             }
         }
         let set = SetLog(order: last.order + 1, weightKg: weightKg, reps: reps, rpe: nil, kind: kind)
@@ -821,16 +896,9 @@ private struct ExerciseCard: View {
         let reps = LiveSetCoach.targetReps(for: set, target: target, entry: adjustment)
         var parts: [String] = []
         if let reps { parts.append("Target \(reps)") }
-        if let targetRIR { parts.append(Self.reserveText(targetRIR)) }
+        // A set to failure has no reserve target: it says "To failure" on its own line.
+        if let targetRIR, set.kind != .failure { parts.append(ReserveText.text(targetRIR)) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    /// "2 in reserve", "2-3 in reserve" (as `PlannedExercise.repsInReserve`).
-    static func reserveText(_ reserve: Double) -> String {
-        let low = Int(reserve.rounded(.down))
-        let high = Int(reserve.rounded(.up))
-        if high == 0 { return "to failure" }
-        return low == high ? "\(low) in reserve" : "\(low)-\(high) in reserve"
     }
 
     /// The verdict once a working set is ticked (`SetFeedback.verdict`).
@@ -838,19 +906,32 @@ private struct ExerciseCard: View {
         guard set.isCompleted, !set.isWarmup, !set.kind.isStage else { return nil }
         let logged = LiftProgress.LoggedSet(weight: unit.display(set.weightKg), reps: set.reps, rpe: set.rpe)
         let last = previousSet(index: index).map { LiftProgress.LoggedSet(weight: unit.display($0.weightKg), reps: $0.reps, rpe: $0.rpe) }
-        // A set to failure is RPE 10 on purpose: no "harder than planned".
+        // A set to failure is RPE 10 on purpose, and as many reps as you can:
+        // no "harder than planned" and no "short".
         let targetRPE = set.kind == .failure ? nil : targetRIR.map { 10 - $0 }
         return SetFeedback.verdict(logged: logged, last: last,
-                                   targetReps: LiveSetCoach.targetReps(for: set, target: target, entry: adjustment),
+                                   targetReps: verdictTargetReps(for: set),
                                    targetRPE: targetRPE)
     }
 
-    /// The set-by-set change, while the set it changed is still to do.
-    private func adjustmentNote(in sets: [SetLog]) -> String? {
-        guard let adjustment,
+    /// The reps a ticked set is judged against; none for a set to failure.
+    private func verdictTargetReps(for set: SetLog) -> Int? {
+        set.kind == .failure ? nil : LiveSetCoach.targetReps(for: set, target: target, entry: adjustment)
+    }
+
+    /// The set-by-set change (or pain hold), while the set it changed is still to do.
+    private func shownAdjustment(in sets: [SetLog]) -> AutoregulationLog.Entry? {
+        guard let adjustment, adjustment.isShown,
               let changed = sets.first(where: { $0.order == adjustment.setOrder }),
               !changed.isCompleted else { return nil }
-        return adjustment.message
+        return adjustment
+    }
+
+    /// Puts back the weights or reps the set-by-set change moved.
+    private func undoAdjustment(_ entry: AutoregulationLog.Entry) {
+        LiveSetCoach.undo(entry, in: exercise, sessionStart: sessionStart)
+        adjustment = AutoregulationLog.entry(for: sessionStart, order: exercise.order)
+        try? modelContext.save()
     }
 
     private func progressionLabel(_ mode: ProgressionMode) -> String {
@@ -980,9 +1061,9 @@ private struct ExerciseCard: View {
     }
 }
 
-/// "+ Add set", and beside it a menu to add a drop stage, rest-pause or
-/// myo-rep mini-set after the last set (`SetKind`), with what each one is
-/// and how good the evidence is.
+/// "+ Add set", and beside it a "Set type" menu to add a drop stage,
+/// rest-pause or myo-rep mini-set after the last set (`SetKind`). What each
+/// one is and how good the evidence is sits behind the set editor's ⓘ.
 private struct AddSetButtons: View {
     let canAddStage: Bool
     let onAddSet: () -> Void
@@ -1008,15 +1089,10 @@ private struct AddSetButtons: View {
     private var stageMenu: some View {
         Menu {
             ForEach(SetKind.stageKinds) { kind in
-                Button {
-                    onAddStage(kind)
-                } label: {
-                    Text(kind.title)
-                    Text(kind.evidence)
-                }
+                Button(kind.title) { onAddStage(kind) }
             }
         } label: {
-            Label("Drop", systemImage: "arrow.down.right")
+            Label("Set type", systemImage: "plus.square.on.square")
                 .font(.headline)
                 .foregroundStyle(Theme.liftingText)
                 .padding(.horizontal, 14)
@@ -1048,6 +1124,8 @@ private struct SetRow: View {
     var targetText: String? = nil
     /// The one-line verdict once the set is ticked (`SetFeedback`).
     var verdict: SetFeedback.Verdict? = nil
+    /// The reps the verdict was judged against ("2 short of 8").
+    var verdictTargetReps: Int? = nil
     /// "Drop · no rest, lighter", "To failure": the set type (`SetKind`); nil for a normal set.
     var kindLine: String? = nil
 
@@ -1175,7 +1253,7 @@ private struct SetRow: View {
 
     private var verdictText: String? {
         guard set.isCompleted, let verdict else { return nil }
-        return verdict.message(unit: unit.rawValue)
+        return verdict.message(unit: unit.rawValue, targetReps: verdictTargetReps)
     }
 
     @ViewBuilder
@@ -1267,6 +1345,8 @@ extension WeightUnit {
 private struct SetEditor: View {
     @Bindable var set: SetLog
     let title: String
+    /// The set type, settable here; nil for a warm-up.
+    let kind: Binding<SetKind>?
     let unit: WeightUnit
     let step: (Bool) -> Void
     let plateHint: String?
@@ -1275,14 +1355,12 @@ private struct SetEditor: View {
 
     @FocusState private var typing: Field?
     private enum Field { case weight, reps }
+    @State private var showingKindInfo = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(title.uppercased())
-                .font(.caption.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(Theme.liftingText)
+            header
             steppers
             if let plateHint {
                 Label(plateHint, systemImage: "circle.grid.2x1")
@@ -1290,12 +1368,6 @@ private struct SetEditor: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             // A drop stage or mini-set is as many good reps as you can: no effort of its own.
-            if set.kind != .straight, !set.isWarmup {
-                Text(set.kind.howTo)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             if !set.isWarmup, !set.kind.isStage {
                 RPEPicker(rpe: $set.rpe, onShowGuide: onShowGuide)
             }
@@ -1317,6 +1389,45 @@ private struct SetEditor: View {
         }
         .padding(14)
         .background(Theme.lifting.opacity(0.05), in: .rect(cornerRadius: 20))
+    }
+
+    /// "SET 2 · TO FAILURE", the set-type menu and, for a set type, an ⓘ
+    /// with how to do it and how good the evidence is.
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(title.uppercased())
+                .font(.caption.weight(.bold))
+                .tracking(1.2)
+                .foregroundStyle(Theme.liftingText)
+            if set.kind != .straight, !set.isWarmup {
+                Button { showingKindInfo = true } label: {
+                    Image(systemName: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("About \(set.kind.title)")
+                .popover(isPresented: $showingKindInfo) {
+                    SetKindInfo(kind: set.kind)
+                        .presentationCompactAdaptation(.popover)
+                }
+            }
+            Spacer(minLength: 0)
+            if let kind {
+                Picker(selection: kind) {
+                    ForEach(SetKind.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                } label: {
+                    Label("Set type", systemImage: "square.stack.3d.down.right")
+                }
+                .pickerStyle(.menu)
+                .font(.footnote)
+                .accessibilityLabel("Set type")
+            }
+        }
     }
 
     /// Weight and reps side by side; one above the other at accessibility
@@ -1346,6 +1457,26 @@ private struct SetEditor: View {
             get: { unit.display(set.weightKg) },
             set: { set.weightKg = unit.toKilograms($0) }
         )
+    }
+}
+
+/// How to do a set type and how good the evidence for it is (`SetKind`).
+private struct SetKindInfo: View {
+    let kind: SetKind
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(kind.title)
+                .font(.headline)
+            Text(kind.howTo)
+                .font(.subheadline)
+            Text(kind.evidence)
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: 320, alignment: .leading)
+        .padding()
     }
 }
 
@@ -1408,10 +1539,8 @@ private struct RPEPicker: View {
             header
             buttons
                 .sensoryFeedback(.selection, trigger: rpe)
-            Text(rpe.map { value in
-                let level = RPEScale.level(for: value)
-                return "\(RPEScale.summary(value)). \(level?.feel ?? "")"
-            } ?? "Optional. Pick how hard the set was: 8 means you had 2 reps left, 10 means none.")
+            // One line: the reps left. What each number feels like is in "What's RPE?".
+            Text(rpe.map { RPEScale.summary($0) } ?? "Optional · 8 = 2 reps left, 10 = none")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -1567,7 +1696,8 @@ private struct CollapsedExerciseRow: View {
         if isDone, let best = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) {
             return "\(working.count) sets · \(unit.format(best.weightKg)) \(unit.rawValue) × \(best.reps) · done"
         }
-        let first = exercise.orderedSets.first
+        // The first working set, not a warm-up ramp or a drop stage.
+        let first = exercise.orderedSets.first { !$0.isWarmup && !$0.kind.isStage }
         let reps = first.map { "\($0.reps)" } ?? "–"
         return "\(working.count) × \(reps)" + (first.map { $0.weightKg > 0 ? " · \(unit.format($0.weightKg)) \(unit.rawValue)" : "" } ?? "")
     }
@@ -1700,7 +1830,7 @@ private struct LiveHeartRateBar: View {
                     Text(recorder.isRecording ? "Waiting for heart rate…" : "Live heart rate off")
                         .font(.headline)
                         .foregroundStyle(Theme.primaryText)
-                    Text(recorder.problem ?? "Wear AirPods Pro 3 (or connect a Bluetooth chest strap) to see heart rate here. It's saved with the workout so you can compare it with your watch.")
+                    Text(recorder.problem ?? "Wear AirPods Pro 3 or a chest strap to see it here.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -1800,20 +1930,54 @@ private struct RecordBannerView: View {
 }
 
 /// "Next set 62.5 kg (you had 3 in reserve)": the set-by-set change
-/// (`Autoregulation`), already applied to the next set and editable there.
+/// (`Autoregulation`), already applied to the next set and editable there,
+/// with Undo; or "Held: easing your knee" when the pain cap stopped one.
+/// Why it can be off sits behind ⓘ.
 private struct AdjustmentNote: View {
     let text: String
+    /// Puts the sets back; nil when nothing was changed (a pain hold).
+    let onUndo: (() -> Void)?
+    /// The pain cap held the load (`PainGuard.loadCapFraction`), rather than a change.
+    var isPainHold = false
+
+    @State private var showingInfo = false
+
+    private var info: String {
+        let percent = Int(((1 - PainGuard.loadCapFraction) * 100).rounded())
+        return isPainHold
+            ? "While it hurts, the plan keeps this lift about \(percent)% lighter and doesn't add weight or reps. That cap is an app choice, not a tested number."
+            : "From your effort rating, which can be a rep or so off (Halperin et al., Sports Med 2022). Change the weight if it feels wrong."
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Label(text, systemImage: "arrow.up.arrow.down")
+        HStack(spacing: 8) {
+            Label(text, systemImage: isPainHold ? "hand.raised" : "arrow.up.arrow.down")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.liftingText)
-            Text("From your effort rating, which can be a rep or so off. Change the weight below if it feels wrong.")
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button { showingInfo = true } label: {
+                Image(systemName: "info.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPainHold ? "Why the load is held" : "Why the next set changed")
+            .popover(isPresented: $showingInfo) {
+                Text(info)
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 300, alignment: .leading)
+                    .padding()
+                    .presentationCompactAdaptation(.popover)
+            }
+            if let onUndo {
+                Button("Undo", action: onUndo)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .accessibilityLabel("Undo the change to the next set")
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 }

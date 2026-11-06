@@ -9,7 +9,6 @@ struct LiftProgressView: View {
     let exerciseID: String
     let name: String
 
-    @Environment(UserSettings.self) private var settings
     @Environment(GymStore.self) private var gym
     @Query(sort: \WorkoutSession.startedAt) private var sessions: [WorkoutSession]
     /// How the planner moves this lift forward (`ProgressionPreferences`).
@@ -18,7 +17,8 @@ struct LiftProgressView: View {
     @State private var selectedDate: Date?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    private var unit: WeightUnit { settings.weightUnit }
+    /// The gym's unit, as on every lifting screen (`GymStore.liftingUnit`).
+    private var unit: WeightUnit { gym.liftingUnit }
 
     /// Points in the display unit.
     private var points: [LiftProgress.Point] {

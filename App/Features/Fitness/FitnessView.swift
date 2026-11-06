@@ -229,7 +229,7 @@ private struct TodayActivityRows: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                     Spacer()
-                    Chip(text: "+\(strainText(item.strainAdded))")
+                    Chip(text: item.noHeartRate ? "—" : "+\(strainText(item.strainAdded))")
                 }
                 .accessibilityElement(children: .combine)
             }

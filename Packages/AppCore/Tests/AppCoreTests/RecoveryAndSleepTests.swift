@@ -416,15 +416,17 @@ struct ManualHRVTests {
         #expect(merged[0].hrvMilliseconds == 60)
     }
 
-    @Test func manualOnlyDropsHealthHRV() {
+    // Changed on purpose (QA round 1): one typed reading used to wipe every
+    // night's Apple Health HRV. Now SDNN stays until RMSSD covers 14 of 30 nights.
+    @Test func manualOnlyKeepsHealthHRVUntilRMSSDCoversTheWindow() {
         let earlier = morning.addingTimeInterval(-86_400)
         let health = [
             DailyVitals(date: morning, hrvMilliseconds: 60, restingHeartRate: 52),
             DailyVitals(date: earlier, hrvMilliseconds: 62, restingHeartRate: 53),
         ]
         let merged = DailyVitals.merging(health, manualHRV: [morning: 48], manualOnlyHRV: true, calendar: calendar)
-        #expect(merged.first { $0.date == morning }?.hrvMilliseconds == 48)
-        #expect(merged.first { $0.date == earlier }?.hrvMilliseconds == nil)
+        #expect(merged.first { $0.date == morning }?.hrvMilliseconds == 60)
+        #expect(merged.first { $0.date == earlier }?.hrvMilliseconds == 62)
         #expect(merged.first { $0.date == earlier }?.restingHeartRate == 53)
     }
 

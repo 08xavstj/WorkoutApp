@@ -32,7 +32,8 @@ private struct WatchExerciseRow: View {
     let position: Int
     let isNext: Bool
 
-    private var working: [WatchSession.SetSnapshot] { exercise.sets.filter { !$0.isWarmup } }
+    /// Working sets; a drop set or rest-pause set counts once, not once per stage.
+    private var working: [WatchSession.SetSnapshot] { exercise.sets.filter { !$0.isWarmup && !$0.isStage } }
     private var isDone: Bool { !exercise.sets.isEmpty && exercise.sets.allSatisfy(\.isCompleted) }
 
     var body: some View {

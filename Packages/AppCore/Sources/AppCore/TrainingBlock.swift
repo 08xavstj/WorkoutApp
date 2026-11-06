@@ -63,7 +63,8 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
 
         /// One short line on what this week changes.
         public var note: String {
-            if isDeload { return "Planned easier week: same weights, about half the sets." }
+            // RIR 3 at the usual reps makes the planner's weights a little lighter (`WorkoutPlanner.suggestedLoad`).
+            if isDeload { return "Planned easier week: about half the sets, a little lighter." }
             if isHeld { return "HRV is below your normal range, so this week repeats last week's sets instead of adding more." }
             let percent = Int(((setMultiplier - 1) * 100).rounded())
             let reserve = targetRIR == 1 ? "1 rep" : "\(targetRIR) reps"

@@ -88,6 +88,9 @@ public struct RecoveryCalculator: Sendable {
         public var sleepBaselineNights: Int = 0
         /// What pushed the score up or down, biggest effect first.
         public var contributors: [RecoveryContributor] = []
+        /// True when there's no HRV or resting heart rate at all (e.g. iPhone-only
+        /// sleep tracking), so the score is sleep alone and will never "calibrate".
+        public var isSleepOnly: Bool = false
     }
 
     public struct Baseline: Sendable, Equatable {
@@ -125,19 +128,27 @@ public struct RecoveryCalculator: Sendable {
     ///   - sleeping: average heart rate asleep, keyed by the morning it ended.
     ///   - minimumNights: nights of sleeping heart rate needed before it's used
     ///     (pass one more than the baseline minimum when `vitals` includes today).
+    ///   - current: the source used last time. Once sleeping heart rate is in
+    ///     use it stays until fewer than `keepNights` nights remain, so one
+    ///     night without the watch doesn't flip the baseline back and forth.
+    ///   - keepNights: the lower threshold for `current == .sleeping`
+    ///     (`sleepingHeartRateKeepNights` by default; the app's choice).
     /// - Returns: the vitals to use and which source they carry. With too few
     ///   sleeping nights the input comes back unchanged, as HealthKit data.
     public static func preferSleepingHeartRate(
         _ vitals: [DailyVitals],
         sleeping: [Date: Double],
         minimumNights: Int,
+        current: RestingHeartRateSource? = nil,
+        keepNights: Int = RecoveryCalculator.sleepingHeartRateKeepNights,
         calendar: Calendar = .current
     ) -> (vitals: [DailyVitals], source: RestingHeartRateSource) {
         var byNight: [Date: Double] = [:]
         for (date, bpm) in sleeping where bpm > 0 {
             byNight[calendar.startOfDay(for: date)] = bpm
         }
-        guard byNight.count >= minimumNights else { return (vitals, .healthKit) }
+        let needed = current == .sleeping ? min(keepNights, minimumNights) : minimumNights
+        guard byNight.count >= needed else { return (vitals, .healthKit) }
         var result: [DailyVitals] = []
         var seen: Set<Date> = []
         for entry in vitals {
@@ -150,6 +161,10 @@ public struct RecoveryCalculator: Sendable {
         }
         return (result.sorted { $0.date > $1.date }, .sleeping)
     }
+
+    /// Sleeping heart rate, once in use, is kept while at least this many
+    /// nights have it (hysteresis below the 15 needed to switch; app's choice).
+    public static let sleepingHeartRateKeepNights = 10
 
     /// - Parameters:
     ///   - today: last night's vitals.
@@ -268,6 +283,17 @@ public struct RecoveryCalculator: Sendable {
                 effect: sleepEffect, weight: sleepWeight * abs(Self.clampZ(z))
             ))
         }
+        // No HRV or resting heart rate at all: sleep is the only input, so say
+        // so instead of "learning" forever.
+        let sleepOnly = sleepScore != nil && base.hrvNights == 0 && base.rhrNights == 0
+            && (today.hrvMilliseconds ?? 0) <= 0 && (today.restingHeartRate ?? 0) <= 0
+        if sleepOnly {
+            contributors.append(RecoveryContributor(
+                id: "sleepOnly", name: "Sleep only",
+                detail: "Apple Health has no HRV or resting heart rate for you, so this is a sleep-only estimate. A watch that records them overnight makes recovery personal.",
+                effect: .neutral
+            ))
+        }
         guard weightUsed > 0 else { return nil }
 
         // Rescale so missing inputs don't drag the score toward 50.
@@ -290,7 +316,8 @@ public struct RecoveryCalculator: Sendable {
             restingHeartRateSource: restingHeartRateSource,
             isCalibrated: calibrated,
             sleepBaselineNights: sleepBaselineNights,
-            contributors: contributors.sorted { $0.weight > $1.weight }
+            contributors: contributors.sorted { $0.weight > $1.weight },
+            isSleepOnly: sleepOnly
         )
     }
 
@@ -354,6 +381,36 @@ public struct RecoveryCalculator: Sendable {
         guard values.count > 1 else { return (mean, nil) }
         let variance = values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count - 1)
         return (mean, sqrt(variance))
+    }
+}
+
+/// When last night is over, so today's recovery can be scored. Before that
+/// (after midnight, still asleep) today's HRV would come only from the
+/// evening before bed, with no sleep or resting heart rate yet.
+///
+/// Over when the main sleep has woken after midnight with 3 h asleep or a wake
+/// at 4 am or later (a 1 am trip to the bathroom isn't the morning). With no
+/// sleep recorded tonight: from 4 am for someone who never tracks sleep, from
+/// noon for someone who does (they may sync late). All app choices.
+public enum RecoveryTiming {
+    public static let earliestWakeHour = 4
+    public static let minimumAsleepHours = 3.0
+    public static let untrackedHour = 4
+    public static let trackedFallbackHour = 12
+
+    /// - Parameters:
+    ///   - wake: the end of tonight's main sleep, if recorded.
+    ///   - asleepHours: hours asleep in that sleep.
+    ///   - tracksSleep: sleep was recorded on any of the last 7 nights.
+    public static func nightIsOver(now: Date, wake: Date?, asleepHours: Double?, tracksSleep: Bool,
+                                   calendar: Calendar = .current) -> Bool {
+        let midnight = calendar.startOfDay(for: now)
+        if let wake, wake >= midnight, wake <= now.addingTimeInterval(60) {
+            let wakeHour = calendar.component(.hour, from: wake)
+            if wakeHour >= earliestWakeHour || (asleepHours ?? 0) >= minimumAsleepHours { return true }
+        }
+        let hour = calendar.component(.hour, from: now)
+        return hour >= (tracksSleep ? trackedFallbackHour : untrackedHour)
     }
 }
 

@@ -11,6 +11,7 @@ nonisolated extension HealthKitClient {
     /// logged sessions) count as zero, which makes the estimate err high.
     @concurrent
     func workoutEnergyPerDay(days: Int) async throws -> [DatedValue] {
+        if let demo = DemoHealth.active { return demo.workoutEnergyPerDay(days: days) }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) else { return [] }

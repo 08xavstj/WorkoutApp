@@ -313,12 +313,13 @@ private struct MacroBars: View {
         HStack(alignment: .top, spacing: 14) {
             MacroColumn(label: "Protein", grams: food.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
             if settings.hideCalories {
-                // The app's fibre table (25/38 g Adequate Intake); 25-29 g/day
-                // and above is where the benefit sits (Reynolds et al., Lancet 2019).
+                // The app's fibre target, 29 g: the top of the 25-29 g/day band
+                // where the benefit sits (Reynolds et al., Lancet 2019).
                 MacroColumn(label: "Fibre", grams: food.fiberGrams ?? 0,
                             goal: Micronutrients.Nutrient.fiber.target(settings.sex, age: settings.age), color: Theme.oxygen)
             } else {
-                // Carb and fat targets from the calorie split (`MacroSplit`; Helms 2014).
+                // Carb and fat targets from the calorie split (`MacroSplit`; Helms 2014),
+                // the same numbers `MacroTargetsLine` names, with their floors.
                 MacroColumn(label: "Carbs", grams: food.carbsGrams ?? 0, goal: metrics.macroSplit?.carbsGrams, color: Theme.strain)
                 MacroColumn(label: "Fat", grams: food.fatGrams ?? 0, goal: metrics.macroSplit?.fatGrams, color: Theme.sleep)
             }
@@ -329,7 +330,8 @@ private struct MacroBars: View {
     }
 }
 
-/// "Protein 145 g · Carbs 148 g+ · Fat 52 g+", and one line when protein was
+/// "Protein 145 g · Carbs about 163 g (at least 148) · Fat at least 52 g",
+/// the same targets the bars fill to, and one line when protein was
 /// lowered to fit the calories (`MacroSplit`; Helms 2014; Morton 2018).
 private struct MacroTargetsLine: View {
     @Environment(DailyMetricsModel.self) private var metrics
@@ -690,7 +692,10 @@ private struct CalorieDetailsSheet: View {
                         }
                         // Carbs by training day (`NutritionTargets.carbsText`: Burke 2011; Kerksick 2017) and
                         // low energy availability (`EnergyAvailability`: IOC REDs 2023). Calorie targets are unchanged.
-                        if let carbs = NutritionTargets.carbsText(bodyMassKg: metrics.bodyMassKg, trainingDay: !metrics.activities.isEmpty, goals: metrics.goals) {
+                        // Only without a calorie split: with one, `MacroSplitNotes` gives the carb
+                        // target that fits the calories, and a second per-kg range would contradict it.
+                        if metrics.macroSplit == nil,
+                           let carbs = NutritionTargets.carbsText(bodyMassKg: metrics.bodyMassKg, trainingDay: !metrics.activities.isEmpty, goals: metrics.goals) {
                             Text(carbs + " The calorie target doesn't change; this is how to split it, with protein first.")
                         }
                         MacroSplitNotes()
@@ -865,6 +870,7 @@ private struct HealthMonitor: View {
             Button { selected = stat } label: { tile() }
                 .buttonStyle(.plain)
                 .accessibilityHint("Shows history")
+                .accessibilityIdentifier("tile-\(id)") // UI tests (ScreenshotTests)
         } else {
             tile()
         }

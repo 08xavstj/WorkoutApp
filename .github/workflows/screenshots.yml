@@ -1,9 +1,11 @@
 name: Screenshots
 
-# Captures every main screen in the simulator for design review. Runs only
-# for commits whose message contains "[screens]", or by hand. The images are
-# printed into the log as base64 JPEGs between "=== SHOT <name> ===" and
-# "=== END ===" markers, so they can be read without downloading artifacts.
+# Captures every page and sheet in the simulator for design review, on the
+# made-up demo dataset (`-demoData YES`, App/Services/DemoData.swift). Runs
+# only for commits whose message contains "[screens]", or by hand. The images
+# are printed into the log as base64 JPEGs between "=== SHOT <name> ===" and
+# "=== END ===" markers, so they can be read without downloading artifacts;
+# steps the tour couldn't find are printed as "MISSING <name>" lines.
 
 on:
   push:
@@ -20,7 +22,7 @@ jobs:
   shots:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screens]')
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +64,7 @@ jobs:
             > test.log 2>&1
           echo "xcodebuild exit: $?"
           grep -E "error:|Test Case|passed|failed" test.log | tail -20
+          grep -E "MISSING " test.log | sort -u | head -100 || true
 
       - name: Print screenshots
         run: |
@@ -76,10 +79,21 @@ jobs:
               for a in test.get("attachments", []):
                   items.append((a.get("suggestedHumanReadableName") or a["exportedFileName"], a["exportedFileName"]))
           for name, file in sorted(items):
-              out = file + ".jpg"
-              subprocess.run(["sips", "-Z", "900", "-s", "format", "jpeg", "-s", "formatOptions", "55", file, "--out", out],
-                             check=True, capture_output=True)
-              data = base64.b64encode(open(out, "rb").read()).decode()
+              raw = open(file, "rb").read()
+              if raw[:3] == b"\xff\xd8\xff":
+                  # Already a small JPEG (ScreenshotTests saves 1x, quality 0.5).
+                  data = base64.b64encode(raw).decode()
+              elif raw[:8] == b"\x89PNG\r\n\x1a\n":
+                  out = file + ".jpg"
+                  subprocess.run(["sips", "-Z", "900", "-s", "format", "jpeg", "-s", "formatOptions", "55", file, "--out", out],
+                                 check=True, capture_output=True)
+                  data = base64.b64encode(open(out, "rb").read()).decode()
+              else:
+                  # A text note (the MISSING list).
+                  print(f"=== NOTE {name} ===")
+                  print(raw.decode("utf-8", "replace"))
+                  print("=== END ===")
+                  continue
               print(f"=== SHOT {name} ===")
               for i in range(0, len(data), 4000):
                   print(data[i:i+4000])

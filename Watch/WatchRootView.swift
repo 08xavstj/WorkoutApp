@@ -22,7 +22,7 @@ struct WatchRootView: View {
 
     private var workoutPages: some View {
         TabView(selection: $page) {
-            WatchControlsView()
+            WatchControlsView(page: $page)
                 .tag(WatchPage.controls)
             WatchLiveView()
                 .tag(WatchPage.live)

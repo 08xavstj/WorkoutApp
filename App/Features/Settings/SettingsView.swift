@@ -367,7 +367,7 @@ private struct CoachSettingsSection: View {
         } header: {
             Text("Coach")
         } footer: {
-            Text("The coach runs on your iPhone with Apple Intelligence; your data never leaves the device.")
+            Text("The coach runs on your iPhone with Apple Intelligence. Coach conversations, health data and photos stay on this iPhone. Two lookups go online: your city or its coordinates to Open-Meteo for weather, and a medication's name to the FDA's drug-label service.")
         }
     }
 }

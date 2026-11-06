@@ -90,6 +90,11 @@ private struct StrainGoalCard: View {
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
+            // No study sets a daily strain range (`StrainCalculator.targetStrain`).
+            Text("The range is an app estimate from your own training days, not a published target.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             if let note = movementNote {
                 Text(note)
                     .font(.caption)

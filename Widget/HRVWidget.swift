@@ -55,6 +55,17 @@ struct HRVWidgetView: View {
         return snapshot.hrv
     }
 
+    private var recoveryText: String {
+        guard let recovery = today?.recovery else { return "--" }
+        return "\(recovery)%"
+    }
+
+    /// Ask for a reading only from people who log HRV in the app; for a
+    /// watch that writes HRV to Apple Health it's simply not synced yet.
+    private var asksForHRV: Bool {
+        entry.snapshot?.logsHRV ?? true
+    }
+
     var body: some View {
         switch family {
         case .accessoryCircular: circular
@@ -82,11 +93,20 @@ struct HRVWidgetView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(WidgetPalette.recovery(recovery))
                 }
-            } else {
+            } else if asksForHRV {
                 Text("Log last night's HRV")
                     .font(.headline)
                     .foregroundStyle(WidgetPalette.ink)
                 addButton
+            } else {
+                Text("No HRV yet today")
+                    .font(.headline)
+                    .foregroundStyle(WidgetPalette.ink)
+                if let recovery = today?.recovery {
+                    Text("Recovery \(recovery)%")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WidgetPalette.recovery(recovery))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -124,8 +144,10 @@ struct HRVWidgetView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(WidgetPalette.orange)
                 }
-                Link(destination: URL(string: "workoutapp://hrv")!) {
-                    addButton
+                if asksForHRV || hrvToday != nil {
+                    Link(destination: URL(string: "workoutapp://hrv")!) {
+                        addButton
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -145,7 +167,7 @@ struct HRVWidgetView: View {
         ZStack {
             AccessoryWidgetBackground()
             VStack(spacing: 0) {
-                Image(systemName: hrvToday == nil ? "plus" : "waveform.path.ecg")
+                Image(systemName: hrvToday == nil && asksForHRV ? "plus" : "waveform.path.ecg")
                     .font(.caption.weight(.bold))
                 Text(hrvToday.map { "\(Int($0.rounded()))" } ?? "HRV")
                     .font(.system(.headline, design: .rounded))
@@ -159,8 +181,10 @@ struct HRVWidgetView: View {
             if let hrv = hrvToday {
                 Text("\(Int(hrv.rounded())) ms · recovery \(today?.recovery.map { "\($0)%" } ?? "--")")
                     .font(.headline)
-            } else {
+            } else if asksForHRV {
                 Text("Tap to log last night's HRV").font(.headline)
+            } else {
+                Text("No HRV yet · recovery \(recoveryText)").font(.headline)
             }
         }
     }

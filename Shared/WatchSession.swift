@@ -32,6 +32,9 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         var restBeforeSeconds: Int? = nil
         /// "Set 2 of 3", "Drop 1 of 2", "Warm-up 1 of 3", from the phone; nil on older phones.
         var title: String? = nil
+        /// The set's stable id on the phone (`SetLog.order`), so a queued command
+        /// still finds it after sets were added or removed. Nil on older phones.
+        var order: Int? = nil
 
         /// A drop stage or mini-set that carries on from the set before it.
         var isStage: Bool { restBeforeSeconds != nil }
@@ -46,16 +49,32 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
             return line
         }
 
-        /// "Target 8 · 2 in reserve", or nil without a plan.
+        /// "Target 8 · 2 in reserve", "Target 8 · 2-3 in reserve" or "to failure",
+        /// or nil without a plan (worded as the phone's `ReserveText` in AppCore,
+        /// which the Watch doesn't compile).
         var targetLine: String? {
             guard targetReps != nil || targetRIR != nil else { return nil }
             var parts: [String] = []
             if let targetReps { parts.append("Target \(targetReps)") }
-            if let targetRIR {
-                let reserve = targetRIR < 0.25 ? "none" : targetRIR.formatted(.number.precision(.fractionLength(0...1)))
-                parts.append("\(reserve) in reserve")
-            }
+            if let targetRIR { parts.append(Self.reserveText(targetRIR)) }
             return parts.joined(separator: " · ")
+        }
+
+        /// "2 in reserve", "2-3 in reserve", "to failure"; rounded to the nearest half rep first.
+        static func reserveText(_ reserve: Double) -> String {
+            let halves = (max(0, reserve) * 2).rounded() / 2
+            let low = Int(halves.rounded(.down))
+            let high = Int(halves.rounded(.up))
+            if high == 0 { return "to failure" }
+            return low == high ? "\(low) in reserve" : "\(low)-\(high) in reserve"
+        }
+
+        /// The effort to pre-select after the set: 10 minus the target reps in
+        /// reserve (`TrainingBlock.WeekState.targetRPE`), else the planned RPE; 6-10.
+        var suggestedRPE: Int? {
+            let value = targetRIR.map { 10 - $0 } ?? rpe
+            guard let value else { return nil }
+            return min(10, max(6, Int(value.rounded())))
         }
     }
 
@@ -96,6 +115,9 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
     var sentAt: Date
     /// Weight jump in kg when an exercise has no load list (2.5 kg, or 5 lb).
     var weightStepKg: Double?
+    /// Records from the exercise just finished on the wrist (`SetFeedback`),
+    /// sent for about a minute so the Watch can show them once. Missing on older phones.
+    var records: WatchRecordNote?
     /// The movement warm-up before the first lift (`WarmUpRoutine` on the
     /// phone), when the session has one. Missing on older phones.
     var warmUp: [WatchWarmUpStep]?
@@ -147,6 +169,53 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         return exercises.firstIndex { $0.sets.contains { !$0.isCompleted } }
     }
 
+    /// The set that's up: the first exercise with a set left, or its superset
+    /// partner once the first half is a round ahead (A1 done, A2 next), as
+    /// the phone rests (none between the halves, `Supersets`). A drop stage or
+    /// mini-set of the first half comes before the partner.
+    func upNext() -> (exercise: Int, set: Int)? {
+        guard let first = exercises.firstIndex(where: { $0.sets.contains { !$0.isCompleted } }) else { return nil }
+        var index = first
+        if let partner = partnerIndex(of: first), partner > first,
+           exercises[partner].sets.contains(where: { !$0.isCompleted }),
+           exercises[first].sets.first(where: { !$0.isCompleted })?.isStage != true,
+           roundsDone(first) > roundsDone(partner) {
+            index = partner
+        }
+        guard let set = exercises[index].sets.firstIndex(where: { !$0.isCompleted }) else { return nil }
+        return (index, set)
+    }
+
+    /// Working sets ticked (a drop set or rest-pause set counts once).
+    func roundsDone(_ index: Int) -> Int {
+        exercises[index].sets.filter { $0.isCompleted && !$0.isWarmup && !$0.isStage }.count
+    }
+
+    /// Where a set is now, found by its stable ids (exercise `id`, set `order`),
+    /// else by the positions it had (older phones send no set ids).
+    func locate(exerciseID: Int, setOrder: Int?, exerciseIndex: Int, setIndex: Int) -> (exercise: Int, set: Int)? {
+        let index: Int
+        if exerciseIndex < exercises.count, exercises[exerciseIndex].id == exerciseID {
+            index = exerciseIndex
+        } else if let found = exercises.firstIndex(where: { $0.id == exerciseID }) {
+            index = found
+        } else {
+            return nil
+        }
+        let sets = exercises[index].sets
+        guard let setOrder else { return setIndex < sets.count ? (index, setIndex) : nil }
+        if setIndex < sets.count, sets[setIndex].order == setOrder { return (index, setIndex) }
+        return sets.firstIndex { $0.order == setOrder }.map { (index, $0) }
+    }
+
+    /// A key for one set that survives sets being added or removed on the
+    /// phone ("exercise id-set id"; by position on older phones).
+    func setKey(exercise index: Int, set setIndex: Int) -> String {
+        guard index < exercises.count, setIndex < exercises[index].sets.count else { return "\(index)-\(setIndex)" }
+        let exercise = exercises[index]
+        return "\(exercise.id)-\(exercise.sets[setIndex].order ?? setIndex)"
+    }
+
     /// The warm-up step to show, or nil when there's none left (or none at all).
     var currentWarmUpStep: WatchWarmUpStep? {
         guard let warmUp, let index = warmUpStepIndex, index >= 0, index < warmUp.count else { return nil }
@@ -163,6 +232,14 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         guard index < exercises.count, let label = exercises[index].supersetLabel, let group = label.first else { return nil }
         return exercises.indices.first { $0 != index && exercises[$0].supersetLabel?.first == group }
     }
+}
+
+/// Records from one exercise, as short lines ("Best estimated 1RM: 102 kg").
+nonisolated struct WatchRecordNote: Codable, Sendable, Equatable {
+    /// "<session id>-<exercise order>": the Watch shows each one once.
+    var id: String
+    var exercise: String
+    var lines: [String]
 }
 
 /// One step of the warm-up, as the Watch shows it (`WarmUpRoutine.Step` on
@@ -185,9 +262,17 @@ nonisolated struct WatchWarmUpStep: Codable, Sendable, Equatable {
 /// What the Watch asks the phone to do with the session.
 nonisolated enum WatchCommand: Codable, Sendable, Equatable {
     /// Ticks off a set with what was actually done. `rpe` is nil when the effort step was skipped.
-    case completeSet(exerciseIndex: Int, setIndex: Int, reps: Int, weightKg: Double, rpe: Double?)
+    /// `exerciseOrder` / `setOrder` are the stable ids (`ExerciseLog.order`,
+    /// `SetLog.order`) the phone looks the set up by; the indices are kept for
+    /// older phones. `repsEdited` / `weightEdited`: whether the wrist changed
+    /// the value from the snapshot it had, so an unchanged one doesn't overwrite
+    /// an edit made on the phone meanwhile. All four are nil from older Watches
+    /// (synthesized Codable decodes a missing optional as nil).
+    case completeSet(exerciseIndex: Int, setIndex: Int, reps: Int, weightKg: Double, rpe: Double?,
+                     exerciseOrder: Int? = nil, setOrder: Int? = nil, repsEdited: Bool? = nil, weightEdited: Bool? = nil)
     case skipRest
-    /// Drops the current exercise's remaining sets so the next one is up.
+    /// Sent by older Watches for "Skip exercise". The phone no longer deletes
+    /// anything for it: the Watch moves on by itself, and Finish drops unticked sets.
     case nextExercise
     case pause
     case resume
@@ -282,7 +367,7 @@ nonisolated struct WatchRPEChoice: Sendable, Identifiable, Equatable {
     static let session: [WatchRPEChoice] = (1...10).map { WatchRPEChoice(value: $0, label: WatchRPEChoice.sessionLabel($0)) }
 
     /// Foster's CR-10 anchors, as `RPEScale.sessionLabel`, shortened to fit
-    /// five buttons a row on the wrist ("very, very easy" → "Very easy",
+    /// three buttons a row on the wrist ("very, very easy" → "Very easy",
     /// "somewhat hard" → "Fairly hard"; same meaning).
     static func sessionLabel(_ rpe: Int) -> String {
         switch rpe {

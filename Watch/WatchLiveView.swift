@@ -11,24 +11,36 @@ nonisolated func watchFormat(_ kilograms: Double, unit: String) -> String {
 struct PendingSet: Identifiable, Equatable {
     var exerciseIndex: Int
     var setIndex: Int
+    /// Stable ids (`ExerciseSnapshot.id`, `SetSnapshot.order`) for the phone.
+    var exerciseID: Int
+    var setOrder: Int?
     var reps: Int
     var weightKg: Double
-    var plannedRPE: Double?
+    /// The reps and weight the snapshot had: what was changed on the wrist is
+    /// told apart from what wasn't (`WatchCommand.completeSet`).
+    var baseReps: Int
+    var baseWeightKg: Double
+    /// Effort to pre-select: 10 minus the target reps in reserve, else the planned RPE.
+    var suggestedRPE: Int?
     var isWarmup: Bool
     /// Achievable weights in kg, ascending; never empty.
     var loads: [Double]
     var unit: String
-
-    var id: String { "\(exerciseIndex)-\(setIndex)" }
+    let id: String
 
     init(session: WatchSession, exerciseIndex: Int, setIndex: Int, reps: Int, weightKg: Double) {
         let exercise = session.exercises[exerciseIndex]
         let set = exercise.sets[setIndex]
         self.exerciseIndex = exerciseIndex
         self.setIndex = setIndex
+        exerciseID = exercise.id
+        setOrder = set.order
+        id = session.setKey(exercise: exerciseIndex, set: setIndex)
         self.reps = reps
         self.weightKg = weightKg
-        plannedRPE = set.rpe
+        baseReps = set.reps
+        baseWeightKg = set.weightKg
+        suggestedRPE = set.suggestedRPE
         isWarmup = set.isWarmup
         unit = session.unit
         if let known = exercise.achievableLoadsKg, !known.isEmpty {
@@ -61,12 +73,21 @@ struct WatchLiveView: View {
             VStack(alignment: .leading, spacing: 8) {
                 WatchElapsedLine()
                 WatchVitalsLine()
+                if let note = model.recordNote {
+                    WatchRecordBanner(note: note) { model.dismissRecords() }
+                }
                 if let ends = model.restEndsAt {
                     WatchRestView(endsAt: ends, length: model.restLength)
                 }
                 content
             }
             .padding(.horizontal, 4)
+        }
+        // Complete stays on screen on the smallest Watch, without scrolling.
+        .safeAreaInset(edge: .bottom, spacing: 4) {
+            if let target = completable {
+                WatchCompleteButton { complete(target.session, target.index) }
+            }
         }
         .sheet(item: $rating) { set in
             WatchSetEffortSheet(set: set)
@@ -86,7 +107,6 @@ struct WatchLiveView: View {
                 session: session,
                 index: index,
                 edit: edits[key(session, index)],
-                onComplete: { complete(session, index) },
                 onEdit: { editing = pending(session, index) },
                 onNext: { model.selectedExercise = nil }
             )
@@ -111,17 +131,26 @@ struct WatchLiveView: View {
         return index
     }
 
+    /// The session and exercise whose open set Complete ticks (not during the warm-up).
+    private var completable: (session: WatchSession, index: Int)? {
+        guard let session = model.snapshot, session.currentWarmUpStep == nil,
+              let index = shownIndex(in: session),
+              session.exercises[index].sets.contains(where: { !$0.isCompleted }) else { return nil }
+        return (session, index)
+    }
+
     private func key(_ session: WatchSession, _ index: Int) -> String {
         guard let setIndex = session.exercises[index].sets.firstIndex(where: { !$0.isCompleted }) else { return "" }
-        return "\(index)-\(setIndex)"
+        return session.setKey(exercise: index, set: setIndex)
     }
 
     private func pending(_ session: WatchSession, _ index: Int) -> PendingSet? {
         guard let setIndex = session.exercises[index].sets.firstIndex(where: { !$0.isCompleted }) else { return nil }
         let set = session.exercises[index].sets[setIndex]
-        let edit = edits["\(index)-\(setIndex)"]
+        let key = session.setKey(exercise: index, set: setIndex)
+        let edit = edits[key]
         return PendingSet(session: session, exerciseIndex: index, setIndex: setIndex,
-                          reps: edit?.reps ?? RepCounter.shared.countedReps(forSet: "\(index)-\(setIndex)") ?? set.reps, weightKg: edit?.weightKg ?? set.weightKg)
+                          reps: edit?.reps ?? RepCounter.shared.countedReps(forSet: key) ?? set.reps, weightKg: edit?.weightKg ?? set.weightKg)
     }
 
     /// Working sets ask how hard it was first; warm-ups, drop stages and
@@ -131,7 +160,7 @@ struct WatchLiveView: View {
         guard let set = pending(session, index) else { return }
         let isStage = session.exercises[set.exerciseIndex].sets[set.setIndex].isStage
         if set.isWarmup || isStage {
-            model.completeSet(exerciseIndex: set.exerciseIndex, setIndex: set.setIndex, reps: set.reps, weightKg: set.weightKg, rpe: nil)
+            model.completeSet(set, reps: set.reps, weightKg: set.weightKg, rpe: nil)
         } else {
             rating = set
         }
@@ -198,7 +227,6 @@ private struct WatchExerciseBlock: View {
     let session: WatchSession
     let index: Int
     let edit: SetEdit?
-    let onComplete: () -> Void
     let onEdit: () -> Void
     let onNext: () -> Void
 
@@ -258,20 +286,14 @@ private struct WatchExerciseBlock: View {
             WatchSetGhost(set: set, unit: session.unit)
         }
         if exercise.repCounting == true, !set.isWarmup {
-            WatchRepCounterView(setKey: "\(index)-\(setIndex)")
+            WatchRepCounterView(setKey: session.setKey(exercise: index, set: setIndex))
         }
         if exercise.supersetLabel?.hasSuffix("1") == true, let partner = session.partnerIndex(of: index) {
             Text("then \(session.exercises[partner].name)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
-        Button(action: onComplete) {
-            Label("Complete", systemImage: "checkmark")
-                .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 40)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(WatchTheme.recovery)
     }
 
     @ViewBuilder
@@ -289,28 +311,79 @@ private struct WatchExerciseBlock: View {
     }
 }
 
-/// Under the target: the plan's reps and reps in reserve, last session's
-/// same set in grey ("ghost"), and the phone's set-by-set change, if any.
+/// Under the set: the plan's target and last session's same set on one line
+/// ("Target 8 · 2 in reserve · Last 60 kg × 8"), and the phone's set-by-set
+/// change, if any, on one more.
 private struct WatchSetGhost: View {
     let set: WatchSession.SetSnapshot
     let unit: String
 
+    private var guide: String? {
+        let parts = [set.targetLine, set.ghostLine(unit: unit)].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     var body: some View {
-        if let target = set.targetLine {
-            Text(target)
-                .font(.caption2.weight(.semibold))
-        }
-        if let ghost = set.ghostLine(unit: unit) {
-            Text(ghost)
+        if let guide {
+            Text(guide)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+                .minimumScaleFactor(0.8)
         }
         if let note = set.note {
             Text(note)
                 .font(.caption2)
                 .foregroundStyle(WatchTheme.lifting)
-                .lineLimit(3)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
+    }
+}
+
+/// Complete, pinned under the live page.
+private struct WatchCompleteButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label("Complete", systemImage: "checkmark")
+                .font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 36)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(WatchTheme.recovery)
+        .padding(.horizontal, 4)
+    }
+}
+
+/// New records after the exercise finished on the wrist; tap to close.
+private struct WatchRecordBanner: View {
+    let note: WatchRecordNote
+    let onClose: () -> Void
+
+    private var spoken: String {
+        (["New record"] + note.lines).joined(separator: ". ")
+    }
+
+    var body: some View {
+        Button(action: onClose) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("New record", systemImage: "trophy.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(WatchTheme.lifting)
+                ForEach(note.lines, id: \.self) { line in
+                    Text(line)
+                        .font(.caption2)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+            .background(WatchTheme.lifting.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(spoken)
+        .accessibilityHint("Closes the banner")
     }
 }

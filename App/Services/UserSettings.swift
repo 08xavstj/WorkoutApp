@@ -87,6 +87,13 @@ final class UserSettings {
     var goals: Goals { didSet { if let data = try? JSONEncoder().encode(goals) { defaults.set(data, forKey: "goals") } } }
     var goalsSet: Bool { didSet { defaults.set(goalsSet, forKey: "goalsSet") } }
     /// Hours of sleep you need a night (for the sleep score and sleep debt). Adults: 7+.
+    /// Default before the user picks one (Watson et al., Sleep 2015: 7+ h; see init).
+    static let defaultSleepNeedHours = 7.5
+    /// True until the user sets a sleep need (the key is written only by `didSet`).
+    var sleepNeedIsDefault: Bool {
+        _ = sleepNeedHours // observe changes
+        return defaults.object(forKey: "sleepNeedHours") == nil
+    }
     var sleepNeedHours: Double { didSet { defaults.set(sleepNeedHours, forKey: "sleepNeedHours") } }
     /// Rest mode (sick or resting) is on until this time.
     var restModeUntil: Date? { didSet { defaults.set(restModeUntil, forKey: "restModeUntil") } }
@@ -178,8 +185,16 @@ final class UserSettings {
         longitude = defaults.double(forKey: "longitude")
         goals = defaults.data(forKey: "goals").flatMap { try? JSONDecoder().decode(Goals.self, from: $0) } ?? Goals()
         goalsSet = defaults.bool(forKey: "goalsSet")
+        // Default sleep need 7.5 h of time asleep. The AASM/SRS consensus is
+        // 7 h or more a night for adults (Watson et al., Sleep 2015), and the
+        // watch measures time asleep, not time in bed, so 8 h put almost
+        // everyone in permanent debt. 7.5 h is an app choice just above the
+        // consensus floor; it's adjustable in Settings. The key is written
+        // only when the user changes the stepper (`didSet` doesn't run here),
+        // so anyone who never changed it gets this new default, and anyone
+        // who chose 8 h keeps 8 h.
         let need = defaults.double(forKey: "sleepNeedHours")
-        sleepNeedHours = need >= 6 && need <= 11 ? need : 8
+        sleepNeedHours = need >= 6 && need <= 11 ? need : Self.defaultSleepNeedHours
         restModeUntil = defaults.object(forKey: "restModeUntil") as? Date
         hideCalories = defaults.bool(forKey: "hideCalories")
         startWatchWithWorkout = defaults.object(forKey: "startWatchWithWorkout") as? Bool ?? true

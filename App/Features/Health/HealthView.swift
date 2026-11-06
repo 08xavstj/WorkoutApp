@@ -55,7 +55,7 @@ struct HealthView: View {
     private func load() async {
         guard let health else { return }
         var manual: [Date: Double] = [:]
-        for reading in hrvReadings where manual[reading.date] == nil {
+        for reading in hrvReadings where manual[reading.date] == nil && reading.source != "Camera" {
             manual[reading.date] = reading.milliseconds
         }
         let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now
@@ -383,20 +383,30 @@ struct BodyAgeCard: View {
             }
             .frame(width: 118, height: 118)
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 4) {
-                    Image(systemName: younger ? "arrow.down" : "arrow.up")
-                    Text("\(abs(result.difference).formatted(.number.precision(.fractionLength(0)))) years \(younger ? "younger" : "older")")
+                // Within the ±5-year range the estimate can't tell you from your age, so it says so.
+                let gap = result.years - result.age
+                let nearAge = abs(gap) <= BodyAge.uncertaintyYears
+                let direction = younger ? "younger" : "older"
+                if nearAge {
+                    Text("About your age")
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: younger ? "arrow.down" : "arrow.up")
+                        Text("\(abs(gap)) years \(direction)")
+                    }
+                    .font(.headline)
+                    .foregroundStyle(tone)
                 }
-                .font(.headline)
-                .foregroundStyle(tone)
-                Text("than your age (\(result.age))")
+                Text(nearAge ? "You're \(result.age)" : "than your age (\(result.age))")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                 // Whole years with a ±5-year range: no composite "age" is validated finer than that.
                 Text("Likely \(result.rangeLabel)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
-                Text(younger ? "Your habits are taking years off. Keep it up." : "Fitness, sleep and steps are the quickest ways to bring this down.")
+                Text(nearAge || !younger ? "Fitness, sleep and steps are the quickest ways to bring this down." : "Your fitness, sleep and steps look better than typical for your age.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }

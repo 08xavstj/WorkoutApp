@@ -21,6 +21,31 @@ public struct CoachFacts: Sendable, Equatable {
         }
     }
 
+    /// The last finished gym session logged in the app.
+    public struct LastWorkout: Sendable, Equatable {
+        public var name: String
+        /// Calendar days before today (0 = today).
+        public var daysAgo: Int
+        public var minutes: Int
+        public var workingSets: Int
+        public var exerciseNames: [String]
+        /// How hard it felt, 1-10, when the user said.
+        public var sessionRPE: Int?
+        /// Total volume already in the user's unit ("8,450 kg"), when known.
+        public var volumeText: String?
+
+        public init(name: String, daysAgo: Int, minutes: Int, workingSets: Int, exerciseNames: [String],
+                    sessionRPE: Int? = nil, volumeText: String? = nil) {
+            self.name = name
+            self.daysAgo = daysAgo
+            self.minutes = minutes
+            self.workingSets = workingSets
+            self.exerciseNames = exerciseNames
+            self.sessionRPE = sessionRPE
+            self.volumeText = volumeText
+        }
+    }
+
     public var goals: Goals?
     /// Rest mode is on (sick or resting on purpose).
     public var restMode = false
@@ -65,12 +90,33 @@ public struct CoachFacts: Sendable, Equatable {
     public var bodyMassKg: Double?
     /// A workout (gym or cardio) was recorded today.
     public var trainedToday = false
+    /// The user hid calorie numbers in Settings: answers don't show them.
+    public var caloriesHidden = false
+
+    // Energy out and other readings
+    /// Calories burned since midnight (resting plus active).
+    public var caloriesBurnedSoFar: Double?
+    /// The active part of `caloriesBurnedSoFar`.
+    public var activeCaloriesSoFar: Double?
+    public var steps: Double?
+    public var stepGoal: Double?
+    /// The latest VO₂ max in ml/kg/min (an Apple Watch estimate).
+    public var vo2Max: Double?
+    /// The latest weigh-in, already in the user's unit ("82.4 kg"); weights stay in kg everywhere else.
+    public var bodyWeightText: String?
+    /// The weekly weight trend in the user's unit ("-0.3 kg a week"), when known.
+    public var weightTrendText: String?
 
     // Training
     public var plannedSession: PlannedSession?
     public var gymConfigured = false
     public var workoutsLast14Days = 0
     public var daysSinceLastWorkout: Int?
+    public var lastWorkout: LastWorkout?
+    /// The gym's training style, for the rest timer's defaults (`RestTimer`).
+    public var trainingStyle: TrainingStyle?
+    /// The rest timer chosen in Settings for every exercise; nil or 0 = automatic from the goal.
+    public var restTimerSeconds: Int?
     /// Trusted one-line facts from the rest of the app (goal line, HRV trend,
     /// sleep debt plan, weather…), one per element. Medications and lab
     /// results are kept apart so open questions don't get them by default.
@@ -125,24 +171,36 @@ public enum CoachAnswers {
         case .sleep: sleep(facts)
         case .strain: strain(facts)
         case .shouldRest: shouldRest(facts)
+        case .restBetweenSets: restBetweenSets(facts)
+        case .energyBurned: energyBurned(facts)
+        case .lastWorkout: lastWorkout(facts)
+        case .restingHeartRate: restingHeartRate(facts)
+        case .hrv: hrv(facts)
+        case .steps: steps(facts)
+        case .vo2Max: vo2Max(facts)
+        case .bodyWeight: bodyWeight(facts)
         }
     }
 
-    /// The nearest data-backed answer for an open question the model couldn't
-    /// take (a refusal or guardrail), by topic; nil when there is none.
-    public static func fallback(for topic: CoachIntent.Topic, facts: CoachFacts) -> Answer? {
-        switch topic {
-        case .nutrition: eatingEnough(facts)
-        case .training: facts.plannedSession != nil ? planWorkout(facts) : trainToday(facts)
-        case .recovery: whyRecovery(facts) ?? sleep(facts)
-        case .general: trainToday(facts)
-        }
+    /// The data answer for an open question the model couldn't take (Apple
+    /// Intelligence off, still downloading, or a refusal): only an answer
+    /// about the same thing (`CoachIntent.relatedQuestion`), never a stand-in
+    /// about something else; nil means the chat shows the model's own error.
+    public static func fallback(for text: String, facts: CoachFacts) -> Answer? {
+        guard let question = CoachIntent.relatedQuestion(text) else { return nil }
+        return answer(for: question, facts: facts)
     }
 
     // MARK: - Training
 
     public static func trainToday(_ f: CoachFacts) -> Answer? {
         if f.restMode {
+            // A card is only attached here when the user asked for one anyway (CoachView).
+            if let plan = f.plannedSession {
+                return Answer(question: .trainToday,
+                              text: "Rest mode is on, so today is meant for rest. You asked anyway, so the card below has \(plan.title), about \(plan.minutes) min with lighter loads. Keep it easy and stop if you feel worse.",
+                              action: "Turn rest mode off in Settings when you feel ready.")
+            }
             return Answer(question: .trainToday,
                           text: "Rest mode is on, so today is for rest: sleep, fluids and at most an easy walk. Workouts can wait until you turn it off.",
                           action: "Turn rest mode off in Settings when you feel ready.")
@@ -170,6 +228,12 @@ public enum CoachAnswers {
 
     public static func planWorkout(_ f: CoachFacts) -> Answer? {
         if f.restMode { return trainToday(f) }
+        // A rest day in the weekly plan: no card unless the user asked anyway (CoachView).
+        if f.plannedSession == nil, let guidance = f.dayGuidance, guidance.isRestDay {
+            return Answer(question: .planWorkout,
+                          text: "\(guidance.title): \(guidance.reason) So there's no workout card today. If you'd still like to train, ask for a workout anyway.",
+                          action: "A walk or easy mobility is plenty today.")
+        }
         guard let plan = f.plannedSession else {
             if !f.gymConfigured {
                 return Answer(question: .planWorkout,
@@ -245,13 +309,22 @@ public enum CoachAnswers {
                           action: "Open Apple Health to check last night's data synced.")
         }
         var lines = ["Recovery is \(recovery)%: \(bandLabel(recovery).lowercased())\(f.recoveryCalibrated ? "." : ", though the baseline is still building, so treat it as rough.")"]
-        let lowers = f.recoveryContributors.filter { $0.effect == .lowers }.sorted { $0.weight > $1.weight }
-        let raises = f.recoveryContributors.filter { $0.effect == .raises }.sorted { $0.weight > $1.weight }
+        // Only the score's own inputs (weight > 0) moved the number; sleep debt,
+        // yesterday's training, drinks and illness signs are context the score
+        // doesn't include (`DailyMetricsModel.recoveryContributors`), so they
+        // are listed apart rather than as reasons for the score.
+        let scored = f.recoveryContributors.filter { $0.weight > 0 }
+        let lowers = scored.filter { $0.effect == .lowers }.sorted { $0.weight > $1.weight }
+        let raises = scored.filter { $0.effect == .raises }.sorted { $0.weight > $1.weight }
+        let context = f.recoveryContributors.filter { $0.weight <= 0 && $0.effect == .lowers }
         if !lowers.isEmpty {
             lines.append("Pulling it down: " + lowers.prefix(3).map { "\($0.name.lowercased()) (\($0.detail))" }.joined(separator: "; ") + ".")
         }
         if !raises.isEmpty {
             lines.append("Helping: " + raises.prefix(2).map { "\($0.name.lowercased()) (\($0.detail))" }.joined(separator: "; ") + ".")
+        }
+        if !context.isEmpty {
+            lines.append("Also worth knowing: " + context.prefix(3).map { "\($0.name.lowercased()): \(withoutFinalPeriod($0.detail))" }.joined(separator: "; ") + ".")
         }
         if lowers.isEmpty && raises.isEmpty {
             var inputs: [String] = []
@@ -398,6 +471,159 @@ public enum CoachAnswers {
                       action: "Have a meal with about \(perMealGrams) g of protein in the next two hours.")
     }
 
+    // MARK: - Rest between sets
+
+    /// The rest timer's own numbers (`RestTimer.defaultSeconds`, which cites
+    /// the evidence): muscle 2 min on big lifts and 90 s on small ones (Singer
+    /// et al., Front Sports Act Living 2024); strength 3 min and 2 min
+    /// (Schoenfeld et al., J Strength Cond Res 2016; Grgic et al., Sports Med
+    /// 2018; ACSM position stand 2009); endurance 60-90 s is common practice,
+    /// not a tested optimum.
+    public static func restBetweenSets(_ f: CoachFacts) -> Answer? {
+        let style = f.trainingStyle ?? .balanced
+        let big = RestTimer.defaultSeconds(style: style, compound: true)
+        let small = RestTimer.defaultSeconds(style: style, compound: false)
+        var lines: [String] = []
+        let why: String = switch style {
+        case .muscle: "For muscle, resting more than a minute gave slightly more growth, with little extra past about 90 s on small lifts; big lifts need a bit longer to keep their reps up."
+        case .strength: "For strength, 2-3 minutes or more between heavy sets lifted more than short rests in trained lifters."
+        case .balanced: "That sits between the 2-3 minutes heavy sets need and the 90 s that is enough for growth."
+        case .endurance: "Shorter rests keep the session brisk; that's common practice rather than a tested best."
+        }
+        lines.append("For your \(styleName(style)) training, rest about \(restText(big)) between sets of big lifts (squats, presses, rows) and \(restText(small)) on smaller ones. \(why)")
+        if let chosen = f.restTimerSeconds, chosen > 0 {
+            lines.append("Your rest timer is set to \(restText(chosen)) for every exercise in Settings, so it runs that instead.")
+        } else {
+            lines.append("The rest timer already does this for you.")
+        }
+        return Answer(question: .restBetweenSets, text: lines.joined(separator: " "),
+                      action: "Change it per exercise from the timer menu during a workout, or for all in Settings.")
+    }
+
+    static func styleName(_ style: TrainingStyle) -> String {
+        switch style {
+        case .muscle: "muscle-building"
+        case .strength: "strength"
+        case .balanced: "balanced"
+        case .endurance: "endurance"
+        }
+    }
+
+    static func restText(_ seconds: Int) -> String {
+        if seconds % 60 == 0 { return "\(seconds / 60) min" }
+        if seconds < 120 || seconds % 30 != 0 { return "\(seconds) s" }
+        return "\((Double(seconds) / 60).formatted(.number.precision(.fractionLength(1)))) min"
+    }
+
+    // MARK: - Energy out
+
+    /// Calories burned so far, from the watch or the app's estimate. Wearable
+    /// and equation estimates miss by 15-25% and more on training days
+    /// (Shcherbina 2017; Germini 2022; `EnergyCalculator.accuracyNote`).
+    public static func energyBurned(_ f: CoachFacts) -> Answer? {
+        if f.caloriesHidden {
+            return Answer(question: .energyBurned, text: "Calorie numbers are hidden in Settings, so I'm not showing them here. Turn that setting off to see what you've burned today.")
+        }
+        guard let burned = f.caloriesBurnedSoFar else {
+            return Answer(question: .energyBurned, text: "There's no energy data for today yet. It comes from your watch's active and resting calories in Apple Health, or from the app's estimate once it knows your weight.",
+                          action: "Check your watch is syncing to Apple Health.")
+        }
+        var first = "You've burned about \(whole(burned)) kcal so far today"
+        if let active = f.activeCaloriesSoFar { first += ", \(whole(active)) of them from movement and exercise" }
+        var lines = [first + "."]
+        if let projected = f.caloriesProjectedBurn, projected > burned {
+            lines.append("By midnight that should reach about \(whole(projected)) kcal.")
+        }
+        lines.append("Treat it as a guide: estimates like this are \(EnergyCalculator.accuracyNote).")
+        return Answer(question: .energyBurned, text: lines.joined(separator: " "))
+    }
+
+    // MARK: - Last workout
+
+    public static func lastWorkout(_ f: CoachFacts) -> Answer? {
+        guard let last = f.lastWorkout else {
+            return Answer(question: .lastWorkout, text: "There's no finished gym session logged in the app yet, so I can't look back at one. Workouts recorded only on your watch show in Today's activity list.",
+                          action: "Log your next session from the Log tab.")
+        }
+        let when: String = switch last.daysAgo {
+        case 0: "today"
+        case 1: "yesterday"
+        default: "\(last.daysAgo) days ago"
+        }
+        var lines = ["Your last gym session was \(last.name), \(when): about \(last.minutes) min with \(last.workingSets) working set\(last.workingSets == 1 ? "" : "s")."]
+        if !last.exerciseNames.isEmpty {
+            let names = last.exerciseNames.prefix(4).joined(separator: ", ")
+            let more = last.exerciseNames.count > 4 ? " and \(last.exerciseNames.count - 4) more" : ""
+            lines.append("Exercises: \(names)\(more).")
+        }
+        if let volume = last.volumeText { lines.append("Total volume \(volume).") }
+        if let rpe = last.sessionRPE { lines.append("You rated it \(rpe)/10 for effort.") }
+        return Answer(question: .lastWorkout, text: lines.joined(separator: " "),
+                      action: "Open it in the Log tab to see each set.")
+    }
+
+    // MARK: - Readings
+
+    /// A resting heart rate a few beats above your usual often follows hard
+    /// training, alcohol, stress or a coming illness (the same note the
+    /// recovery score carries, `RecoveryCalculator`).
+    public static func restingHeartRate(_ f: CoachFacts) -> Answer? {
+        guard let rhr = f.restingHeartRate else {
+            return Answer(question: .restingHeartRate, text: "There's no resting heart rate in Apple Health for today yet. Your watch works it out from quiet moments, so it can arrive later in the day.")
+        }
+        var text = "Your resting heart rate is \(Int(rhr.rounded())) bpm today"
+        if let change = f.restingHeartRateChange { text += " (\(signed(change, 1)) vs your usual)" }
+        text += ". It's one of the recovery score's inputs: a few beats above your usual often follows hard training, alcohol, stress or a coming cold."
+        return Answer(question: .restingHeartRate, text: text)
+    }
+
+    /// One night's HRV is noisy; the 7-day average against your normal range
+    /// is what HRV-guided training uses (Plews et al., Sports Med 2013).
+    public static func hrv(_ f: CoachFacts) -> Answer? {
+        guard let hrv = f.hrv else {
+            return Answer(question: .hrv, text: "There's no HRV from last night in Apple Health yet. Apple Watch measures it while you sleep; wear it to bed and it appears in the morning.")
+        }
+        var text = "Last night's HRV was \(Int(hrv.rounded())) ms"
+        if let change = f.hrvChangePercent { text += " (\(signed(change, 0))% vs your usual)" }
+        text += ". One night jumps around a lot; the 7-day average against your normal range says more"
+        text += f.hrvBelowNormal ? ", and right now it's below that range, so today is an easy day." : "."
+        return Answer(question: .hrv, text: text)
+    }
+
+    /// The step goal is personal (`StepGoal`: Paluch 2022; Ding 2025).
+    public static func steps(_ f: CoachFacts) -> Answer? {
+        guard let steps = f.steps else {
+            return Answer(question: .steps, text: "No steps are recorded in Apple Health for today yet. Your iPhone or watch counts them as you move.")
+        }
+        var text = "You've taken \(steps.formatted(.number.precision(.fractionLength(0)))) steps today"
+        if let goal = f.stepGoal {
+            let left = goal - steps
+            text += left > 0 ? ", about \(left.formatted(.number.precision(.fractionLength(0)))) short of your \(goal.formatted(.number.precision(.fractionLength(0)))) goal." : ", past your \(goal.formatted(.number.precision(.fractionLength(0)))) goal."
+        } else {
+            text += "."
+        }
+        return Answer(question: .steps, text: text)
+    }
+
+    /// Watch VO₂ max is an estimate that under-reads fit people by about 6
+    /// ml/kg/min (health-metrics.md §8, `CardioFitness.watchUncertaintyYears`).
+    public static func vo2Max(_ f: CoachFacts) -> Answer? {
+        guard let vo2 = f.vo2Max else {
+            return Answer(question: .vo2Max, text: "There's no VO₂ max in Apple Health yet. Apple Watch estimates it after outdoor walks, runs or hikes with GPS.")
+        }
+        let text = "Your latest VO₂ max is \(vo2.formatted(.number.precision(.fractionLength(1)))) ml/kg/min, an Apple Watch estimate that can be several points off, so the trend over months says more than one reading."
+        return Answer(question: .vo2Max, text: text)
+    }
+
+    public static func bodyWeight(_ f: CoachFacts) -> Answer? {
+        guard let weight = f.bodyWeightText else {
+            return Answer(question: .bodyWeight, text: "There's no weigh-in in Apple Health yet. Weigh in on a smart scale or add it in the Health app and it shows here.")
+        }
+        var text = "Your latest weigh-in is \(weight)."
+        if let trend = f.weightTrendText { text += " The trend is \(trend)." }
+        return Answer(question: .bodyWeight, text: text)
+    }
+
     // MARK: - Facts for the model
 
     /// The facts an open question needs, as short lines for the model's
@@ -426,12 +652,16 @@ public enum CoachAnswers {
             lines.append("Gym sessions in the last 14 days: \(f.workoutsLast14Days)" + (f.daysSinceLastWorkout.map { ", last one \($0) day\($0 == 1 ? "" : "s") ago" } ?? "") + ".")
             if !f.gymConfigured { lines.append("No gym equipment set up.") }
             if f.hrvBelowNormal { lines.append("7-day HRV below normal: easy day.") }
+            if let last = f.lastWorkout {
+                lines.append("Last gym session: \(last.name), \(last.daysAgo) day\(last.daysAgo == 1 ? "" : "s") ago, \(last.minutes) min, \(last.workingSets) working sets.")
+            }
         case .recovery, .general:
             if let hours = f.sleepHours { lines.append("Sleep \(hours.formatted(h1)) h" + (f.sleepNeedHours.map { " of \($0.formatted(h1)) h needed" } ?? "") + (f.sleepScore.map { ", score \($0)" } ?? "") + ".") }
             if let hrv = f.hrv { lines.append("HRV \(Int(hrv.rounded())) ms" + (f.hrvChangePercent.map { " (\(signed($0, 0))% vs baseline)" } ?? "") + ".") }
             if let rhr = f.restingHeartRate { lines.append("Resting heart rate \(Int(rhr.rounded())) bpm" + (f.restingHeartRateChange.map { " (\(signed($0, 1)) vs baseline)" } ?? "") + ".") }
             if let debt = f.sleepDebtHours, debt >= 2 { lines.append("Sleep debt \(debt.formatted(h1)) h over 14 nights.") }
             if let yesterday = f.yesterdayStrain { lines.append("Yesterday's strain \(strainText(yesterday))%.") }
+            if topic == .general, let steps = f.steps { lines.append("Steps today \(whole(steps)).") }
         }
         // Extras by relevance to the question's words; medications and labs only when asked.
         let words = Set(CoachIntent.words(question).filter { $0.count > 3 })
@@ -489,14 +719,21 @@ public enum CoachAnswers {
         }
     }
 
+    /// Rounded half away from zero, like the app's `strainText`/`strainRangeText`
+    /// (Theme.swift) that the strain ring uses, so a coach answer and the ring
+    /// never show different numbers (a number formatter rounds half to even).
     static func strainText(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0)))
+        value.isFinite ? String(Int(value.rounded())) : "0"
     }
 
     static func whole(_ value: Double) -> String { String(Int(value.rounded())) }
 
     static func signed(_ value: Double, _ digits: Int) -> String {
         (value > 0 ? "+" : "") + value.formatted(.number.precision(.fractionLength(digits)))
+    }
+
+    static func withoutFinalPeriod(_ text: String) -> String {
+        text.hasSuffix(".") ? String(text.dropLast()) : text
     }
 
     static func shortened(_ line: String, _ limit: Int) -> String {
@@ -576,7 +813,7 @@ public enum CoachPromptVocabulary {
     static let trainingOnlyPrefixes = [
         "Goal:", "Rest mode", "Training load", "Planned session", "Gym sessions", "No gym", "Protein", "No food logged",
         "Calories", "Carbs", "Body weight", "Trained today", "Training day", "Easy day", "Rest day", "Make-up day",
-        "Yesterday's training load",
+        "Yesterday's training load", "Last gym session", "Steps today",
     ]
 
     /// The subset of `lines` about training and food only, in training-log

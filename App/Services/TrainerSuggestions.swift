@@ -59,24 +59,25 @@ enum TrainerSuggestions {
             return ("Wear your watch to sleep tonight to get recovery and daily coaching.", nil)
         }
         guard let target = metrics.targetStrain else { return ("", nil) }
-        let range = "\(Int(target.lowerBound))–\(Int(target.upperBound))%"
+        let range = strainRangeText(target)
+        let upper = strainText(target.upperBound)
         // The weekly plan's rest, recovery and make-up days speak for themselves
         // (`TrainingDayPlanner`); planned training days keep the lines below.
         if let guidance = metrics.dayGuidance {
             switch guidance.kind {
             case .rest, .recovery:
-                return (guidance.reason, "Anything up to \(Int(target.upperBound))% strain is fine today.")
+                return (guidance.reason, "Anything up to \(upper) strain is fine today.")
             case .makeUp:
                 return (guidance.reason, "Your range is \(range).")
             case .easyTraining where !metrics.trainEasyToday:
-                return (guidance.reason, "Anything under \(Int(target.upperBound))% strain is fine.")
+                return (guidance.reason, "Anything under \(upper) strain is fine.")
             case .training, .easyTraining:
                 break
             }
         }
         if metrics.trainEasyToday, let trend = recovery.hrvTrend {
             return ("Your 7-day HRV (\(Int(trend.average.rounded())) ms) is below your normal range (\(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms), so today suits an easy session: technique work, mobility or a Zone 2 ride, whichever you prefer,",
-                    "anything under \(Int(target.upperBound))% strain is fine.")
+                    "anything under \(upper) strain is fine.")
         }
         let sleptWell = (metrics.sleep?.score ?? 80) >= 75
         switch recovery.status {
@@ -85,7 +86,20 @@ enum TrainerSuggestions {
         case .moderate:
             return (sleptWell ? "Recovery is normal. A planned session or an easier one both fit; keep the effort controlled:" : "Recovery is normal and sleep was short. A controlled session or an easy day both fit:", "your range is \(range).")
         case .low:
-            return ("Easy day: HRV or resting heart rate is off your normal, so a light session or a walk suits today, and an early night helps:", "anything under \(Int(target.upperBound))% strain is fine.")
+            return ("Easy day: \(lowRecoveryCause(recovery.contributors)), so a light session or a walk suits today, and an early night helps:", "anything under \(upper) strain is fine.")
         }
+    }
+
+    /// Why recovery is low, from the inputs that were there and pulled it
+    /// down (`RecoveryContributor`), so a sleep-only score doesn't blame HRV.
+    static func lowRecoveryCause(_ contributors: [RecoveryContributor]) -> String {
+        let lowering = Set(contributors.filter { $0.effect == .lowers }.map(\.id))
+        let hrv = !lowering.isDisjoint(with: ["hrv", "hrvTrend"])
+        let rhr = lowering.contains("rhr")
+        if hrv && rhr { return "HRV and resting heart rate are off your normal" }
+        if hrv { return "HRV is below your normal" }
+        if rhr { return "resting heart rate is above your normal" }
+        if lowering.contains("sleep") { return "last night's sleep was below your usual" }
+        return "recovery is low"
     }
 }

@@ -5,7 +5,7 @@ import AppCore
 /// Read-only view of a finished session.
 struct WorkoutDetailView: View {
     let session: WorkoutSession
-    @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
     @Environment(\.modelContext) private var modelContext
     @State private var reloadToken = 0
     @State private var savedTemplate = false
@@ -51,7 +51,8 @@ struct WorkoutDetailView: View {
         .task { supersetGroups = SupersetRegistry.groups(for: session.startedAt) }
     }
 
-    private var unit: WeightUnit { settings.weightUnit }
+    /// The gym's unit, as on every lifting screen (`GymStore.liftingUnit`).
+    private var unit: WeightUnit { gym.liftingUnit }
 
     /// Date, then duration, total lifted and effort; the three stats stack at
     /// accessibility text sizes so none is cut off (ux-audit.md 4.8, P22).

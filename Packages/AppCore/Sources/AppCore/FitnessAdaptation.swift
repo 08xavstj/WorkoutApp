@@ -105,6 +105,17 @@ extension StrainCalculator {
     /// As you get fitter, the same workout costs less heart rate and so less
     /// strain, while your usual days climb; both nudge you to do a little more.
     /// If you train less, U drops and so do the targets.
+    ///
+    /// **An app estimate, not a published target.** No study gives a daily
+    /// strain range; the band widths (−15/+5, −45/−20) are app choices around
+    /// the HRV-guided rule above. **Not tailored to `Goals` on purpose:** the
+    /// HRV-guided trials were in endurance athletes and recreational runners,
+    /// and no trial compares daily load targets between goals (strength, muscle,
+    /// fat loss, endurance). What differs by goal is the week (sessions, volume,
+    /// cardio: `GoalPlanner`, `CardioPlanner`), and U already follows how each
+    /// person trains, so an endurance trainee's usual days set a higher U by
+    /// themselves. For fat loss, total activity and steps matter (`StepGoal`),
+    /// not a higher strain target. A goal offset here would be invented precision.
     public static func targetStrain(forRecovery recovery: Int, usualTrainingStrain usual: Double?) -> ClosedRange<Double> {
         let u = min(85, max(35, usual ?? referenceUsualStrain))
         switch recovery {

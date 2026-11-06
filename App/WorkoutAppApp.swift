@@ -6,6 +6,8 @@ import os
 
 @main
 struct WorkoutAppApp: App {
+    /// `-demoData YES` in the Simulator: reset and fill the stores before they load (`DemoData`). First on purpose.
+    private let demoMode = DemoData.prepare()
     @State private var settings = UserSettings()
     @State private var library = ExerciseLibrary()
     @State private var metrics = DailyMetricsModel()
@@ -99,7 +101,7 @@ struct WorkoutAppApp: App {
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(Theme.strain)
         }
-        .modelContainer(container)
+        .modelContainer(demoMode ? DemoData.container : container)
     }
 }
 
@@ -284,9 +286,19 @@ struct RootView: View {
         sessions.filter { !$0.isActive }.count
     }
 
+    /// Typed-in overnight HRV (Garmin RMSSD), keyed by morning. Camera readings
+    /// are morning values and go separately (`cameraHRV`, `DailyVitals.resolvingHRV`).
     var manualHRV: [Date: Double] {
         var result: [Date: Double] = [:]
-        for reading in hrvReadings where result[reading.date] == nil {
+        for reading in hrvReadings where result[reading.date] == nil && reading.source != "Camera" {
+            result[reading.date] = reading.milliseconds
+        }
+        return result
+    }
+
+    var cameraHRV: [Date: Double] {
+        var result: [Date: Double] = [:]
+        for reading in hrvReadings where result[reading.date] == nil && reading.source == "Camera" {
             result[reading.date] = reading.milliseconds
         }
         return result
@@ -309,12 +321,16 @@ struct RootView: View {
             let calendar = Calendar.current
             let today = calendar.startOfDay(for: .now)
             var byDay: [Date: WorkoutFocus] = [:]
+            var fixedDays: Set<Date> = [] // weeks with a fixed-day plan (not none, not flexible)
             for offset in -8...0 {
-                guard let day = calendar.date(byAdding: .day, value: offset, to: today),
-                      let planned = weeklyPlans.todayPlan(now: day) else { continue }
+                guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+                if let plan = weeklyPlans.plan(containing: day), !plan.isFlexible { fixedDays.insert(day) }
+                guard let planned = weeklyPlans.todayPlan(now: day) else { continue }
                 byDay[day] = planned.focus
             }
             metrics.plannedFocusByDay = byDay
+            metrics.fixedPlanDays = fixedDays
+            metrics.loggedSessionDays = Set(WeeklyPlanStore.trainingDays(sessions: sessions))
             metrics.hasWeeklyPlan = !(weeklyPlans.current?.plannedDays.isEmpty ?? true)
             // Flexible week (WeeklyPlanStore builder): quota progress and the coverage rule's next focus.
             if weeklyPlans.current?.isFlexible == true {
@@ -327,7 +343,7 @@ struct RootView: View {
         }
         // Personal calories (docs/research/calories.md): training status from the whole lifting log.
         metrics.trainingStatus = TrainingStatus.resolve(reported: settings.liftingExperience, sessionDates: sessions.filter { !$0.isActive }.map(\.startedAt))
-        await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV)
+        await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV, morningHRV: cameraHRV)
         // Training block (`TrainingBlock`): the trainer's style from the goals, then this week's
         // state; a week that starts with 7-day HRV below normal holds the ramp instead of adding sets.
         weeklyPlans.trainingStyle = gym.style
@@ -351,9 +367,10 @@ struct RootView: View {
         Reminders.updateWidget(WidgetSnapshot(
             updated: .now,
             hrv: todayHRV?.milliseconds ?? metrics.hrv,
-            hrvDate: (todayHRV != nil || metrics.hrv != nil) ? Calendar.current.startOfDay(for: .now) : nil,
+            hrvDate: (todayHRV != nil || (metrics.hrv != nil && !metrics.recoveryIsFromYesterday)) ? Calendar.current.startOfDay(for: .now) : nil,
             recovery: metrics.recovery?.score,
-            strain: metrics.strain?.strain
+            strain: metrics.strain?.strain,
+            logsHRV: hrvReadings.contains { $0.date >= (Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now) }
         ))
         // [Watch complications] Recovery, strain and the next planned session for the watch face (`WatchFaceData`).
         do {
@@ -387,7 +404,7 @@ struct RootView: View {
             let nudgeDay = await Reminders.scheduleCheckIns(
                 enabled: enabled, morningMinutes: morning, eveningMinutes: evening,
                 morningDone: checkedIn, eveningDone: eveningDone,
-                hrvMissing: hrvMissing, weighInNudge: weighIn, bedByTonight: bedBy
+                hrvMissing: hrvMissing, logsHRV: typesHRV, weighInNudge: weighIn, bedByTonight: bedBy
             )
             if let nudgeDay { settings.weighInNudgeDay = nudgeDay }
         }

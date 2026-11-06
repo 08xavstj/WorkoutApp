@@ -72,8 +72,43 @@ struct TrainingDayPlannerTests {
     @Test func oldOrMadeUpMissesAreLeftAlone() {
         // Missed three days ago: too old to move.
         #expect(guidance(today: nil, [day(3, .pull, strain: 5), day(2, nil, strain: 10), day(1, nil, strain: 12)]).kind == .rest)
-        // Missed two days ago, but trained yesterday (made up already).
-        #expect(guidance(today: nil, [day(2, .pull, strain: 5), day(1, nil, strain: 30)]).kind == .rest)
+        // Missed two days ago, but trained yesterday (made up already). Strain 40:
+        // a day without `trained` now needs `trainingDayStrain` (35, was 25).
+        #expect(guidance(today: nil, [day(2, .pull, strain: 5), day(1, nil, strain: 40)]).kind == .rest)
+    }
+
+    func past(_ daysAgo: Int, _ focus: WorkoutFocus?, strain: Double, planKnown: Bool = true, trained: Bool? = nil) -> TrainingDayPlanner.PastDay {
+        TrainingDayPlanner.PastDay(date: today.addingTimeInterval(Double(-daysAgo) * 86_400), plannedFocus: focus,
+                                   strain: strain, planKnown: planKnown, trained: trained)
+    }
+
+    @Test func daysWithoutAFixedPlanAreNeitherRestNorMissed() {
+        // Monday after a week with no plan (or a flexible one): a hard Sunday wasn't a rest day.
+        let sunday = past(1, nil, strain: 70, planKnown: false, trained: true)
+        #expect(sunday.wasRestDay == nil)
+        #expect(guidance(today: .push, [sunday]).kind == .training)
+        #expect(guidance(today: nil, [sunday]).kind == .rest)
+        // A focus on an unknown-plan day can't be missed either.
+        #expect(guidance(today: nil, [past(1, .pull, strain: 5, planKnown: false, trained: false)]).kind == .rest)
+    }
+
+    @Test func doneOrMissedComesFromLoggedSessionsNotStrain() {
+        // A 20-minute lift logged on the planned day (strain about 23%): done, not missed.
+        #expect(guidance(today: nil, [past(1, .push, strain: 23, trained: true)]).kind == .rest)
+        // A long walk on the planned day (strain 30%, no session): still missed.
+        let walk = guidance(today: nil, [past(1, .push, strain: 30, trained: false)])
+        #expect(walk.kind == .makeUp)
+        #expect(walk.focus == .push)
+        // A logged session the day after a miss makes it up, however light.
+        #expect(guidance(today: nil, [past(2, .pull, strain: 5, trained: false), past(1, nil, strain: 20, trained: true)]).kind == .rest)
+    }
+
+    @Test func watchOnlyDaysNeedAWorkoutAndEnoughStrain() {
+        #expect(TrainingDayPlanner.isWatchTrainingDay(hadWorkout: true, strain: 40))
+        #expect(!TrainingDayPlanner.isWatchTrainingDay(hadWorkout: true, strain: 28))
+        #expect(!TrainingDayPlanner.isWatchTrainingDay(hadWorkout: false, strain: 60))
+        // The training-day line sits above the rest-day range, not on its edge.
+        #expect(TrainingDayPlanner.trainingDayStrain > TrainingDayPlanner.restDayRange.upperBound)
     }
 
     // MARK: Flexible weeks (a quota, any days)

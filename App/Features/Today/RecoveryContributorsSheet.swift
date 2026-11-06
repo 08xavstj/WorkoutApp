@@ -42,15 +42,18 @@ struct RecoveryContributorsSheet: View {
                         .card()
                     }
                     if let metric = metrics.hrvMetric {
-                        Text(metric == "RMSSD"
-                             ? "HRV is RMSSD (from your watch app, the camera reading or Apple Watch beat-to-beat data). Apple Health's SDNN isn't mixed in, since the two aren't comparable."
-                             : "HRV is Apple Health's SDNN. If you add RMSSD readings (Garmin or the camera), the app switches to those.")
+                        Text(metrics.hrvMetricNote ?? metric)
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
-                    Text("The 7-day HRV trend against your normal range is the research-backed part (Plews et al., Eur J Appl Physiol 2012). The 0-100 score is the app's own summary of these inputs.")
+                    Text("The 0-100 score is the app's own summary of these inputs; your 7-day HRV trend is the part research backs.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    EvidenceDisclosure(points: [
+                        "In elite athletes, HRV averaged over 7 days and compared with each person's own normal range tracked how training was going better than single mornings (Plews et al., Eur J Appl Physiol 2012).",
+                        "This app's 0-100 score itself hasn't been tested in studies, so treat it as a summary, not a measurement.",
+                    ])
                 }
                 .padding()
                 .lockedToScreenWidth()

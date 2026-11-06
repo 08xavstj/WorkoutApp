@@ -32,6 +32,9 @@ struct CoachView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         modeLine
+                        if let message = OnDeviceCoach.availabilityMessage {
+                            ModelStatusBanner(message: message)
+                        }
                         contextChips
                         if coach.messages.isEmpty {
                             emptyState
@@ -122,7 +125,7 @@ struct CoachView: View {
                                 value: recovery.isCalibrated ? "\(recovery.score)% · \(RecoveryWording.label(for: recovery.status))" : "\(recovery.score)%")
                 }
                 if let strain = metrics.strain {
-                    let target = metrics.targetStrain.map { " / \(whole($0.lowerBound))–\(whole($0.upperBound))%" } ?? ""
+                    let target = metrics.targetStrain.map { " / " + strainRangeText($0) } ?? ""
                     ContextChip(color: Theme.strain, label: "Strain", value: "\(strainText(strain.strain))\(target)")
                 }
                 if let protein = metrics.nutritionToday?.proteinGrams {
@@ -237,9 +240,17 @@ struct CoachView: View {
         return { Task { await coach.sayMore(about: message) } }
     }
 
+    /// Rest mode or a rest day in the weekly plan: no workout card unless the
+    /// user asks anyway ("give me a workout anyway", "I want to train"), so the
+    /// card never contradicts an answer that says rest.
+    private func restingToday(for text: String) -> Bool {
+        let resting = settings.isRestMode || metrics.dayGuidance?.isRestDay == true
+        return resting && !CoachIntent.insistsOnWorkout(text)
+    }
+
     private func send(_ text: String) async {
         var plan: PlannedWorkout?
-        if CoachModel.isTrainingQuestion(text) && !CoachModel.wantsCardio(text) {
+        if CoachModel.isTrainingQuestion(text) && !CoachModel.wantsCardio(text) && !restingToday(for: text) {
             let (focus, minutes) = CoachModel.requestedFocusAndMinutes(text)
             let lastPlan = coach.messages.last { $0.plan != nil }?.plan
             let resolvedFocus = focus ?? lastPlan?.focus
@@ -284,7 +295,7 @@ extension CoachView {
 
         f.recovery = metrics.recovery?.score
         f.recoveryCalibrated = metrics.recovery?.isCalibrated ?? true
-        f.recoveryContributors = metrics.recoveryContributors(drinksLastNight: checkIns.evening(on: yesterday)?.drinks, illness: nil)
+        f.recoveryContributors = metrics.recoveryContributors(drinksLastNight: checkIns.evening(on: yesterday)?.drinks, illness: illnessAlert)
         f.hrv = metrics.hrv
         f.hrvChangePercent = metrics.recovery?.hrvChangePercent
         f.restingHeartRate = metrics.restingHeartRate
@@ -309,6 +320,25 @@ extension CoachView {
         f.carbsGrams = metrics.nutritionToday?.carbsGrams
         f.bodyMassKg = metrics.bodyMassKg
         f.trainedToday = !metrics.activities.isEmpty
+        f.caloriesHidden = settings.hideCalories
+        if !settings.hideCalories, let summary = metrics.calories {
+            f.caloriesBurnedSoFar = summary.burnedSoFar
+            f.activeCaloriesSoFar = summary.activeSoFar
+        }
+
+        // Readings for the questions the app answers itself (and when the model is off).
+        f.steps = metrics.steps
+        f.stepGoal = vitals.stat("steps")?.goal
+        f.vo2Max = vitals.vo2MaxHistory.max { $0.date < $1.date }?.value
+        let unit = settings.weightUnit
+        if let mass = metrics.bodyMassKg { f.bodyWeightText = "\(unit.format(mass)) \(unit.rawValue)" }
+        if let weekly = metrics.weightTrendWeekly {
+            let sign = weekly > 0 ? "+" : ""
+            let perWeek = unit.display(weekly).formatted(.number.precision(.fractionLength(1)))
+            f.weightTrendText = "\(sign)\(perWeek) \(unit.rawValue) a week"
+        }
+        f.trainingStyle = gym.style
+        f.restTimerSeconds = RestPreferences.global
 
         if let plan {
             f.plannedSession = CoachFacts.PlannedSession(
@@ -326,6 +356,9 @@ extension CoachView {
         if let last = finished.map(\.startedAt).max() {
             f.daysSinceLastWorkout = calendar.dateComponents([.day], from: calendar.startOfDay(for: last), to: calendar.startOfDay(for: .now)).day
         }
+        if let last = finished.max(by: { $0.startedAt < $1.startedAt }) {
+            f.lastWorkout = lastWorkoutFact(last)
+        }
 
         var extras = healthSummary.split(separator: "\n").map(String.init)
         if let weather = conditions.coachSummary(place: settings.placeName) { extras.append(weather) }
@@ -340,6 +373,34 @@ extension CoachView {
 }
 
 extension CoachView {
+    /// Today's illness-watch alert, the same one the recovery sheet shows.
+    var illnessAlert: IllnessWatch.Alert? {
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
+        return vitals.illnessAlert(metrics: metrics, drinksLastNight: checkIns.evening(on: yesterday)?.drinks,
+                                   reportedSymptoms: checkIns.morning()?.isSick ?? false,
+                                   daysSinceLastPeriod: checkIns.daysSinceLastPeriod())
+    }
+
+    /// The last finished gym session, for "How did my workout go?".
+    func lastWorkoutFact(_ session: WorkoutSession) -> CoachFacts.LastWorkout {
+        let calendar = Calendar.current
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: session.startedAt), to: calendar.startOfDay(for: .now)).day ?? 0
+        let unit = settings.weightUnit
+        let volume = session.totalVolumeKg
+        let volumeText: String? = volume > 0
+            ? "\(unit.display(volume).formatted(.number.precision(.fractionLength(0)))) \(unit.rawValue)" : nil
+        let names = session.orderedExercises.filter { log in log.sets.contains { $0.isCompleted } }.map(\.name)
+        return CoachFacts.LastWorkout(
+            name: session.name,
+            daysAgo: max(0, days),
+            minutes: Int((session.duration / 60).rounded()),
+            workingSets: session.effortSets.count,
+            exerciseNames: names,
+            sessionRPE: session.sessionRPE,
+            volumeText: volumeText
+        )
+    }
+
     /// Everything newer the app knows, in a few lines for the coach.
     var healthSummary: String {
         var lines: [String] = []
@@ -393,9 +454,7 @@ extension CoachView {
         if !lowNutrients.isEmpty {
             lines.append("Vitamins/minerals (7-day avg vs target): " + lowNutrients.map { "\($0.nutrient.name) \(Int($0.percentOfTarget.rounded()))% (\($0.kind.rawValue))" }.joined(separator: ", ") + ".")
         }
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
-        if let alert = vitals.illnessAlert(metrics: metrics, drinksLastNight: checkIns.evening(on: yesterday)?.drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false,
-                                           daysSinceLastPeriod: checkIns.daysSinceLastPeriod()) {
+        if let alert = illnessAlert {
             lines.append("Illness watch (\(alert.level.label)): " + alert.signals.joined(separator: ", ") + ".")
         }
         // Daylight and apnoea from the newer HealthKit types (HealthKitClient+iOS26; Burns 2023; competitors.md §1g).
@@ -452,7 +511,10 @@ extension CoachView {
 
         // What moved today's recovery.
         let yesterday = calendar.date(byAdding: .day, value: -1, to: .now) ?? .now
-        let contributors = metrics.recoveryContributors(drinksLastNight: checkIns.evening(on: yesterday)?.drinks, illness: nil)
+        // Illness signs have their own "Illness watch" line, which the prompt
+        // leaves out; kept out of this line so it isn't dropped with them.
+        let contributors = metrics.recoveryContributors(drinksLastNight: checkIns.evening(on: yesterday)?.drinks, illness: illnessAlert)
+            .filter { $0.id != "illness" }
         if !contributors.isEmpty {
             lines.append("What moved recovery: " + contributors.prefix(5).map { "\($0.name) \($0.effect.rawValue) it (\($0.detail))" }.joined(separator: "; ") + ".")
         }
@@ -465,6 +527,33 @@ extension CoachView {
         }
         if !stats.isEmpty { lines.append("Health stats: " + stats.joined(separator: "; ") + ".") }
         return lines
+    }
+}
+
+/// Shown while Apple's on-device model can't answer (Apple Intelligence off,
+/// not supported, or still downloading): data answers still work.
+private struct ModelStatusBanner: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Theme.recoveryModerate)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(message)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text("Answers from your data still work.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Theme.recoveryModerate.opacity(0.12), in: .rect(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
     }
 }
 

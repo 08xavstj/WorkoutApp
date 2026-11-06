@@ -33,6 +33,10 @@ final class GymStore {
         return planner
     }
 
+    /// The one unit every lifting screen shows weights in: the gym's, so the
+    /// numbers match the plates on the bar (Settings' unit is for body weight).
+    var liftingUnit: WeightUnit { profile.unit == .kg ? .kilograms : .pounds }
+
     func save(_ profile: GymProfile) {
         self.profile = profile
         isConfigured = true
@@ -54,13 +58,18 @@ enum LiftHistory {
                 let working = exercise.sets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage && $0.reps > 0 }
                 guard let top = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) else { continue }
                 let e1RM = unit.fromKilograms(top.estimatedOneRepMax)
-                let previousBest = result[exercise.exerciseID]?.bestEstimatedOneRepMax ?? 0
+                let previous = result[exercise.exerciseID]
+                let previousBest = previous?.bestEstimatedOneRepMax ?? 0
+                let topWeight = unit.fromKilograms(top.weightKg)
+                // The last few top weights and last session's sets, for rep and set progression.
                 result[exercise.exerciseID] = ExerciseHistory(
                     bestEstimatedOneRepMax: max(previousBest, e1RM),
-                    lastWeight: unit.fromKilograms(top.weightKg),
+                    lastWeight: topWeight,
                     lastReps: top.reps,
                     lastRPE: top.rpe,
-                    lastDate: session.startedAt
+                    lastDate: session.startedAt,
+                    recentWeights: ExerciseHistory.appending(topWeight, to: previous?.recentWeights ?? []),
+                    lastSets: working.count
                 )
             }
         }
@@ -76,6 +85,41 @@ enum LiftHistory {
             .compactMap { session in session.exercises.first { $0.exerciseID == exerciseID } }
             .first
         return previous?.orderedSets.filter(\.isCompleted) ?? []
+    }
+
+    // MARK: Live-workout cache
+
+    /// The live workout asks for every open card's history on each render;
+    /// sorting all sessions each time is wasted work, so answers are kept per
+    /// session start and session count (a finished or deleted session resets it).
+    private static var cacheKey = ""
+    private static var previousCache: [String: [SetLog]] = [:]
+    private static var bestCache: [String: Double] = [:]
+
+    private static func resetCache(before date: Date, sessions: [WorkoutSession]) {
+        let key = "\(date.timeIntervalSinceReferenceDate)/\(sessions.count)"
+        guard key != cacheKey else { return }
+        cacheKey = key
+        previousCache = [:]
+        bestCache = [:]
+    }
+
+    /// `previousSets`, cached for the live workout.
+    static func cachedPreviousSets(for exerciseID: String, before date: Date, in sessions: [WorkoutSession]) -> [SetLog] {
+        resetCache(before: date, sessions: sessions)
+        if let cached = previousCache[exerciseID] { return cached }
+        let sets = previousSets(for: exerciseID, before: date, in: sessions)
+        previousCache[exerciseID] = sets
+        return sets
+    }
+
+    /// `bestOneRepMax`, cached for the live workout.
+    static func cachedBestOneRepMax(for exerciseID: String, before date: Date, in sessions: [WorkoutSession]) -> Double {
+        resetCache(before: date, sessions: sessions)
+        if let cached = bestCache[exerciseID] { return cached }
+        let best = bestOneRepMax(for: exerciseID, before: date, in: sessions)
+        bestCache[exerciseID] = best
+        return best
     }
 
     /// Best e1RM (kg) before a date, for PR detection.
@@ -178,7 +222,7 @@ final class WorkoutLauncher {
         }
         // Superset pairs (`Supersets`) for the live view: exercise order → group.
         SupersetRegistry.save(SupersetRegistry.groups(in: exercises), for: session.startedAt)
-        SessionTargets.save(exercises, for: session.startedAt)
+        SessionTargets.save(exercises, for: session.startedAt, unit: unit)
         try? context.save()
         activeSession = session
     }

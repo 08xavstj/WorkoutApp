@@ -21,6 +21,8 @@ final class DailyMetricsModel {
         var strainAdded: Double
         var isStrength: Bool
         var minutes: Int = 0
+        /// No heart rate during it, so `strainAdded` is unknown, not zero (show "—").
+        var noHeartRate = false
     }
 
     private(set) var strain: StrainCalculator.Result?
@@ -38,7 +40,8 @@ final class DailyMetricsModel {
     private(set) var weekStrain: [DayStrain] = []
     /// What your training days usually reach over the last 4 weeks (nil while calibrating).
     private(set) var usualTrainingStrain: Double?
-    /// Days in the last 4 weeks with training (strain 25%+), for heat acclimation.
+    /// Days in the last 4 weeks with a workout or logged session and strain 35%+
+    /// (`TrainingDayPlanner.isWatchTrainingDay`), for plan ticks and heat acclimation.
     private(set) var recentTrainingDays: Set<Date> = []
     /// When you fell asleep on recent nights, for the caffeine cut-off.
     private(set) var recentBedtimes: [Date] = []
@@ -79,8 +82,41 @@ final class DailyMetricsModel {
     /// "RMSSD" when HRV comes from Garmin, the camera or Apple Watch beat-to-beat
     /// data; "SDNN" when only Apple Health's own HRV is available. Never mixed.
     private(set) var hrvMetric: String?
+    /// The HRV measure behind `hrvMetric`, for `hrvMetricNote` (`DailyVitals.resolvingHRV`).
+    private(set) var hrvSelection: HRVMetric?
+    /// True between midnight and waking: today's night isn't over, so
+    /// `recovery`, `hrv` and `restingHeartRate` are yesterday's (`RecoveryTiming`).
+    private(set) var recoveryIsFromYesterday = false
+    /// Minutes today at 30-50% of heart-rate reserve, below zone 1 (`HeartRateProfile.lightBand`).
+    private(set) var todaysLightMinutes: Double = 0
+    /// Per-minute heart-rate readings today (all sources, merged), so the
+    /// zones page can tell "no readings" from "readings below zone 1".
+    private(set) var todaysHeartRateReadings = 0
     /// Sick / rest mode (from settings): strain targets and training nudges pause.
     var restMode = false
+
+    /// Remembers the resting-heart-rate source between launches (hysteresis in
+    /// `RecoveryCalculator.preferSleepingHeartRate`).
+    private static let rhrSourceKey = "recoveryRestingHeartRateSource"
+
+    /// A short label for the recovery ring instead of the usual one, when it
+    /// needs explaining: yesterday's score before you wake, or sleep only.
+    var recoveryNote: String? {
+        guard let recovery else { return nil }
+        if recoveryIsFromYesterday { return "Yesterday · updates when you wake" }
+        if recovery.isSleepOnly { return "Sleep-only estimate" }
+        return nil
+    }
+
+    /// One line on which HRV measure recovery uses (`DailyVitals.resolvingHRV`).
+    var hrvMetricNote: String? {
+        switch hrvSelection {
+        case .rmssd: "HRV is overnight RMSSD (Apple Watch beat-to-beat data or your watch app's value). Nights without it use Apple Health's SDNN, scaled to your own RMSSD."
+        case .sdnn: "HRV is Apple Health's SDNN. Once overnight RMSSD covers 14 of the last 30 nights, the app switches to it."
+        case .morningRMSSD: "HRV is your morning camera reading. It isn't mixed with overnight HRV, which is measured asleep."
+        case nil: nil
+        }
+    }
 
     // MARK: Weekly calorie target, weigh-ins and the bed-by window
 
@@ -100,6 +136,11 @@ final class DailyMetricsModel {
     /// week at all. Set by the app before a refresh (`TrainingDayPlanner`).
     var plannedFocusByDay: [Date: WorkoutFocus] = [:]
     var hasWeeklyPlan = false
+    /// Of those days, the ones whose week had a fixed-day plan (not none, not
+    /// flexible): only they can be a planned rest day or a missed session.
+    var fixedPlanDays: Set<Date> = []
+    /// Start-of-day dates with a logged gym session (`WeeklyPlanStore.trainingDays(sessions:)`).
+    var loggedSessionDays: Set<Date> = []
     // MARK: Flexible weeks (WeeklyPlanStore builder)
     /// In a flexible week (`WeeklyPlan.Mode.flexible`): sessions done against
     /// the quota, days left, trained today, and the coverage rule's next focus.
@@ -209,12 +250,18 @@ final class DailyMetricsModel {
     @ObservationIgnored private let strainCalculator = StrainCalculator()
     /// Finished days don't change, so their strain is kept between refreshes.
     @ObservationIgnored private var dayCache: [Date: (key: String, result: StrainCalculator.Result)] = [:]
+    /// Days with a workout in Apple Health, kept like `dayCache` (refetched
+    /// from the first recomputed day on), for `TrainingDayPlanner.isWatchTrainingDay`.
+    @ObservationIgnored private var workoutDays: Set<Date> = []
     @ObservationIgnored private var isRefreshing = false
     @ObservationIgnored private var refreshQueued = false
     /// The newest arguments passed while a refresh was running, so the queued
     /// pass includes a just-finished workout or a newly typed HRV.
     @ObservationIgnored private var queuedSessions: [StrengthSessionSummary] = []
     @ObservationIgnored private var queuedManualHRV: [Date: Double] = [:]
+    @ObservationIgnored private var queuedMorningHRV: [Date: Double] = [:]
+    /// When the last 7 days' heart rate was last read in full (see `performRefresh`).
+    @ObservationIgnored private var lastWideHeartRateRead: Date?
     @ObservationIgnored private let recoveryCalculator = RecoveryCalculator()
     @ObservationIgnored private let sleepCalculator = SleepCalculator()
 
@@ -340,10 +387,14 @@ final class DailyMetricsModel {
         let past = weekStrain
             .filter { calendar.startOfDay(for: $0.date) < today }
             .map { day in
-                TrainingDayPlanner.PastDay(
+                let start = calendar.startOfDay(for: day.date)
+                // Done or missed from logged sessions and watch workout days, not strain alone.
+                return TrainingDayPlanner.PastDay(
                     date: day.date,
-                    plannedFocus: plannedFocusByDay[calendar.startOfDay(for: day.date)],
-                    strain: day.strain
+                    plannedFocus: plannedFocusByDay[start],
+                    strain: day.strain,
+                    planKnown: fixedPlanDays.contains(start),
+                    trained: loggedSessionDays.contains(start) || recentTrainingDays.contains(start)
                 )
             }
         // Flexible week: a quota on any days, no planned day to miss (`TrainingDayPlanner.flexibleGuidance`).
@@ -412,12 +463,14 @@ final class DailyMetricsModel {
 
     /// - Parameters:
     ///   - sessions: finished gym sessions from the last 28 days.
-    ///   - manualHRV: HRV the user typed in, keyed by morning.
+    ///   - manualHRV: overnight HRV (RMSSD) the user typed in, keyed by morning.
+    ///   - morningHRV: camera readings (morning RMSSD), kept apart from overnight HRV.
     func refresh(
         health: HealthKitClient,
         settings: UserSettings,
         sessions: [StrengthSessionSummary],
         manualHRV: [Date: Double] = [:],
+        morningHRV: [Date: Double] = [:],
         now: Date = .now
     ) async {
         guard health.isAvailable else {
@@ -429,6 +482,7 @@ final class DailyMetricsModel {
             refreshQueued = true
             queuedSessions = sessions
             queuedManualHRV = manualHRV
+            queuedMorningHRV = morningHRV
             return
         }
         isRefreshing = true
@@ -437,10 +491,11 @@ final class DailyMetricsModel {
             isRefreshing = false
             isLoading = false
         }
-        await performRefresh(health: health, settings: settings, sessions: sessions, manualHRV: manualHRV, now: now)
+        await performRefresh(health: health, settings: settings, sessions: sessions, manualHRV: manualHRV, morningHRV: morningHRV, now: now)
         while refreshQueued {
             refreshQueued = false
-            await performRefresh(health: health, settings: settings, sessions: queuedSessions, manualHRV: queuedManualHRV, now: .now)
+            await performRefresh(health: health, settings: settings, sessions: queuedSessions, manualHRV: queuedManualHRV,
+                                 morningHRV: queuedMorningHRV, now: .now)
         }
     }
 
@@ -449,6 +504,7 @@ final class DailyMetricsModel {
         settings: UserSettings,
         sessions: [StrengthSessionSummary],
         manualHRV: [Date: Double],
+        morningHRV: [Date: Double],
         now: Date
     ) async {
 
@@ -477,25 +533,43 @@ final class DailyMetricsModel {
                 regularity: sleepConsistency, plannedSessionStart: plannedSessionTomorrow, now: now
             )
 
-            // RMSSD (typed-in Garmin values, camera readings, Apple Watch
-            // beat-to-beat) and Apple Health's SDNN aren't comparable, so once
-            // any RMSSD exists, only RMSSD is used; typed values win per night.
+            // One HRV measure for every night (`DailyVitals.resolvingHRV`): overnight
+            // RMSSD (Apple Watch beat-to-beat, typed-in Garmin values; typed wins per
+            // night) once it covers 14 of the last 30 nights, else Apple Health's SDNN,
+            // with gaps filled from the other via your own ratio. Camera readings are
+            // taken awake in the morning, so they only stand in when there's no overnight HRV.
             let beatToBeat = await health.nightlyRMSSD(nights: nights)
             let rmssd = beatToBeat.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
-            hrvMetric = rmssd.isEmpty ? (healthVitals.contains { $0.hrvMilliseconds != nil } ? "SDNN" : nil) : "RMSSD"
+            let selection = DailyVitals.resolvingHRV(healthVitals, overnightRMSSD: rmssd, morningHRV: morningHRV,
+                                                     today: today, calendar: calendar)
+            hrvSelection = selection.metric
+            hrvMetric = selection.metric.map { $0 == .sdnn ? "SDNN" : "RMSSD" }
             // [Recovery research] Sleeping heart rate as the resting heart rate, all nights or none
             // (HealthKit RHR as the fallback); see RecoveryCalculator.preferSleepingHeartRate.
+            // Once in use it stays until fewer than 10 nights have it, so the baseline doesn't flip.
             let sleepingHeartRate = await health.nightlySleepingHeartRate(nights: nights)
+            let previousSource = UserDefaults.standard.string(forKey: Self.rhrSourceKey).flatMap(RestingHeartRateSource.init(rawValue:))
             let (vitals, rhrSource) = RecoveryCalculator.preferSleepingHeartRate(
-                DailyVitals.merging(healthVitals, manualHRV: rmssd, manualOnlyHRV: true, calendar: calendar),
-                sleeping: sleepingHeartRate, minimumNights: recoveryCalculator.minimumBaselineDays + 1, calendar: calendar)
+                selection.vitals,
+                sleeping: sleepingHeartRate, minimumNights: recoveryCalculator.minimumBaselineDays + 1,
+                current: previousSource, calendar: calendar)
+            UserDefaults.standard.set(rhrSource.rawValue, forKey: Self.rhrSourceKey)
             restingHeartRateSource = rhrSource
+            // Between midnight and waking, today's "night" is only the evening's
+            // HRV before bed: show yesterday's recovery until the night is over.
+            let tracksSleep = nights.contains { $0.date >= (calendar.date(byAdding: .day, value: -7, to: today) ?? today) }
+            let tonight = self.sleepCalculator.score(samples: sleepSamples)
+            let nightOver = RecoveryTiming.nightIsOver(now: now, wake: tonight?.asleepEnd, asleepHours: tonight.map { $0.asleep / 3600 },
+                                                       tracksSleep: tracksSleep, calendar: calendar)
+            recoveryIsFromYesterday = !nightOver
+            let scoredDay = nightOver ? today : yesterday
             // Today's HRV is the typed one when you entered a value for today
             // (typed values replace Health's, see `merging`).
-            let typedToday = manualHRV.contains { calendar.isDate($0.key, inSameDayAs: today) && $0.value > 0 }
-            let todayVitals = vitals.first { calendar.isDate($0.date, inSameDayAs: today) }
-                ?? DailyVitals(date: today, hrvMilliseconds: nil, restingHeartRate: nil)
-            let history = vitals.filter { !calendar.isDate($0.date, inSameDayAs: today) }
+            let typedValues = selection.metric == .morningRMSSD ? morningHRV : manualHRV
+            let typedToday = typedValues.contains { calendar.isDate($0.key, inSameDayAs: scoredDay) && $0.value > 0 }
+            let todayVitals = vitals.first { calendar.isDate($0.date, inSameDayAs: scoredDay) }
+                ?? DailyVitals(date: scoredDay, hrvMilliseconds: nil, restingHeartRate: nil)
+            let history = vitals.filter { calendar.startOfDay(for: $0.date) < scoredDay }
             let base = recoveryCalculator.baseline(from: history, restingHeartRateSource: rhrSource)
             baseline = base
 
@@ -524,9 +598,14 @@ final class DailyMetricsModel {
                 let daySessions = sessions.filter { $0.start >= day && $0.start < next }
                 return profileKey + daySessions.map { "|\($0.start.timeIntervalSince1970)-\($0.end.timeIntervalSince1970)-\($0.sessionRPE ?? 0)" }.joined()
             }
-            // The last 7 days are always recomputed: Garmin Connect can sync
-            // several days late, and cached days wouldn't see the new heart rate.
-            let recentStart = calendar.date(byAdding: .day, value: -6, to: today) ?? yesterday
+            // The last 7 days are recomputed: Garmin Connect can sync several days
+            // late, and cached days wouldn't see the new heart rate. That per-minute,
+            // per-source read is heavy, so in between (every 5 minutes while open)
+            // only today and yesterday are read; the full week at most every 30
+            // minutes (the app's choice).
+            let wideDue = lastWideHeartRateRead.map { now.timeIntervalSince($0) >= 30 * 60 || $0 < yesterday } ?? true
+            let recentStart = wideDue ? (calendar.date(byAdding: .day, value: -6, to: today) ?? yesterday) : yesterday
+            if wideDue { lastWideHeartRateRead = now }
             let needed = allDays.filter { day in
                 day >= recentStart || dayCache[day]?.key != key(for: day)
             }
@@ -558,6 +637,8 @@ final class DailyMetricsModel {
                 heartRateReadError = heartRateError
                 let mergeSources = sourceSeries.map(\.mergeSource)
                 let fetchedWorkouts = (try? await health.externalWorkouts(from: firstNeeded, to: now)) ?? []
+                workoutDays = workoutDays.filter { $0 < firstNeeded }
+                    .union(fetchedWorkouts.map { calendar.startOfDay(for: $0.start) })
                 let liftingWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                     + fetchedWorkouts.filter(\.isStrength).map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                 let merged = await Self.mergeHeartRate(mergeSources, liftingWindows: liftingWindows)
@@ -576,6 +657,8 @@ final class DailyMetricsModel {
                     dayCache[date] = (key(for: date), result)
                 }
                 todaysHeartRate = heartRate.filter { $0.date >= today }
+                todaysHeartRateReadings = todaysHeartRate.count
+                todaysLightMinutes = profile.lightMinutes(todaysHeartRate)
                 todaysDisagreements = merged.disagreements.filter { $0.start >= today }
                 // Why a workout day shows no zones: no samples from any source, every minute
                 // dropped by the merge, or readings below zone 1 for this profile.
@@ -596,7 +679,11 @@ final class DailyMetricsModel {
             yesterdayStrain = days.first { calendar.isDate($0.0, inSameDayAs: yesterday) }?.1.strain
             weekStrain = days.suffix(7).map { DayStrain(date: $0.0, strain: $0.1.strain) }
             usualTrainingStrain = StrainCalculator.usualTrainingStrain(days.dropLast().map(\.1.strain))
-            recentTrainingDays = Set(days.filter { $0.1.strain >= 25 }.map(\.0))
+            // A workout (or logged session) and strain at least 35%, not strain alone (`TrainingDayPlanner.isWatchTrainingDay`).
+            let sessionDays = Set(sessions.map { calendar.startOfDay(for: $0.start) })
+            recentTrainingDays = Set(days.filter { entry in
+                TrainingDayPlanner.isWatchTrainingDay(hadWorkout: workoutDays.contains(entry.0) || sessionDays.contains(entry.0), strain: entry.1.strain)
+            }.map(\.0))
             let loadCalculator = TrainingLoadCalculator()
             // Completed days only: today isn't over, so it would make this week read low.
             let completeDays = days.dropLast()
@@ -609,8 +696,10 @@ final class DailyMetricsModel {
             sleep = sleepCalculator.score(samples: sleepSamples, previousDayStrain: yesterdayStrain, consistency: sleepConsistency)
             // [Recovery research] Sleep is compared with your own last 30 scores; RHR source as above.
             SleepScoreLog.record(sleep?.score, on: today)
-            recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: sleep?.score,
-                                                sleepScoreHistory: SleepScoreLog.recentScores(before: today),
+            // Before the night is over, yesterday's score with yesterday's sleep (`recoveryIsFromYesterday`).
+            let scoredSleep = nightOver ? sleep?.score : SleepScoreLog.recentScores(before: today, days: 1).last
+            recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: scoredSleep,
+                                                sleepScoreHistory: SleepScoreLog.recentScores(before: scoredDay),
                                                 restingHeartRateSource: rhrSource)
 
             // Today's activities: logged lifts plus workouts from other apps.
@@ -671,7 +760,8 @@ final class DailyMetricsModel {
             let creatine = MedicationStore.medications().first {
                 $0.isActive && MedicationKnowledge.match($0.name)?.id == "creatine"
             }
-            let loading = creatine.map { $0.dose.contains("20") } ?? false
+            // Loading is ~20 g a day; the dose text is read in grams (`DoseText`), so "120 mg" isn't loading.
+            let loading = creatine.map { DoseText.isCreatineLoading($0.dose) } ?? false
             let expected = calories?.projected
             let measured = AdaptiveTDEE.estimate(intake: intake, weights: weights, now: now,
                                                  creatineStart: creatine?.startDate, creatineLoading: loading,
@@ -831,19 +921,24 @@ final class DailyMetricsModel {
             if sessions.contains(where: { $0.linkedWorkoutUUID == workout.uuid }) { continue }
             // Skip watch strength workouts that overlap a logged session (same workout).
             if workout.isStrength, sessions.contains(where: { $0.start < workout.end && $0.end > workout.start }) { continue }
+            let workoutHeartRate = heartRate.filter { $0.date >= workout.start && $0.date <= workout.end }
             let load = strainCalculator.dailyStrain(
-                heartRate: heartRate.filter { $0.date >= workout.start && $0.date <= workout.end },
+                heartRate: workoutHeartRate,
                 strengthSessions: [], profile: profile
             ).cardioLoad
             var detail = "\(workout.minutes) min"
             if let km = workout.distanceKm, km > 0.1 {
                 detail += " · \(km.formatted(.number.precision(.fractionLength(1)))) km"
             }
+            // No heart rate (e.g. a Garmin workout synced without it): strain can't
+            // be measured, so say so rather than show +0 as if it were easy.
+            let noHeartRate = workoutHeartRate.count < 2
+            if noHeartRate { detail += " · no heart rate" }
             items.append(ActivityItem(
                 id: "w\(workout.uuid.uuidString)",
                 name: workout.name, detail: detail, start: workout.start,
                 strainAdded: contribution(load), isStrength: workout.isStrength,
-                minutes: workout.minutes
+                minutes: workout.minutes, noHeartRate: noHeartRate
             ))
         }
         return items.sorted { $0.start < $1.start }

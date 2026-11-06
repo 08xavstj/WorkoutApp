@@ -31,7 +31,9 @@ private struct DeloadCard: View {
                 Label("Planned deload this week", systemImage: "arrow.down.right.circle.fill")
                     .font(.headline)
                     .foregroundStyle(Theme.oxygenText)
-                Text("\(week.label). The trainer plans about half the sets at the same weights; your lifts should feel easy. The next block starts next week.")
+                // Bell et al. 2023: fewer sets and an easier effort. Keeping the reps at RIR 3
+                // makes the planner's weights a little lighter (about 5%).
+                Text("\(week.label). The trainer plans about half the sets, a little lighter, with 3 reps left; your lifts should feel easy. The next block starts next week.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.primaryText)
                 Text(StrengthHealthFloor.deloadNote)

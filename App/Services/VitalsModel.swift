@@ -94,6 +94,12 @@ final class VitalsModel {
     private static let log = Logger(subsystem: "com.lontraindustries.workoutapp", category: "vitals")
     private(set) var isLoading = false
     @ObservationIgnored private var isRefreshing = false
+    /// Per-minute heart rate before `heartRateCacheEdge` (start of yesterday at the
+    /// last read), so a refresh reads only the last day or two. The full 14 days
+    /// are read again at most hourly, for watch apps that sync late (the app's choice).
+    @ObservationIgnored private var heartRateCache: [HeartRateSample] = []
+    @ObservationIgnored private var heartRateCacheEdge: Date?
+    @ObservationIgnored private var lastFullHeartRateRead: Date?
 
     func stats(in category: Category) -> [Stat] {
         stats.filter { $0.category == category }
@@ -180,7 +186,10 @@ final class VitalsModel {
         async let water = health.dailySeries(.dietaryWater, unit: .liter(), days: 90, cumulative: true)
         async let mindful = health.mindfulMinutes(days: 90)
         async let workouts = health.workoutIntervals(from: twoWeeksAgo, to: now)
-        async let perMinute = health.heartRatePerMinute(from: twoWeeksAgo, to: now)
+        let fullHeartRateRead = heartRateCacheEdge == nil
+            || lastFullHeartRateRead.map { now.timeIntervalSince($0) >= 3600 } ?? true
+        let heartRateFrom = fullHeartRateRead ? twoWeeksAgo : max(twoWeeksAgo, heartRateCacheEdge ?? twoWeeksAgo)
+        async let perMinute = health.heartRatePerMinute(from: heartRateFrom, to: now)
         async let lastNight = health.sleepSamples(forNightEnding: today)
         async let sleepHistory = health.sleepHistory(nights: 90)
         // iOS 17/18 types (HealthKitClient+iOS26; competitors.md §1g).
@@ -210,7 +219,18 @@ final class VitalsModel {
             + sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
         let nights = (try? await sleepHistory) ?? []
         let heartRateMinutes: [HeartRateSample]
-        do { heartRateMinutes = try await perMinute } catch { failed("heart rate", error, core: true); heartRateMinutes = [] }
+        do {
+            let fresh = try await perMinute
+            let kept = fullHeartRateRead ? [] : heartRateCache.filter { $0.date >= twoWeeksAgo && $0.date < heartRateFrom }
+            heartRateMinutes = (kept + fresh).sorted { $0.date < $1.date }
+            let edge = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+            heartRateCache = heartRateMinutes.filter { $0.date < edge }
+            heartRateCacheEdge = edge
+            if fullHeartRateRead { lastFullHeartRateRead = now }
+        } catch {
+            failed("heart rate", error, core: true)
+            heartRateMinutes = []
+        }
         let derived = await Self.derive(
             heartRate: heartRateMinutes,
             workouts: workoutWindows,

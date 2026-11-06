@@ -253,7 +253,9 @@ final class WeeklyPlanStore {
     // MARK: Matching sessions
 
     /// Start-of-day dates with a finished gym session, plus any other training
-    /// days (`DailyMetricsModel.recentTrainingDays` covers watch workouts).
+    /// days (`DailyMetricsModel.recentTrainingDays`: watch workout days with
+    /// strain at least 35%, `TrainingDayPlanner.isWatchTrainingDay`). A logged
+    /// session always counts as done, however light; a walk alone doesn't.
     static func trainingDays(sessions: [WorkoutSession], extra: Set<Date> = []) -> [Date] {
         let calendar = Calendar.current
         var days = Set(sessions.filter { !$0.isActive }.map { calendar.startOfDay(for: $0.startedAt) })

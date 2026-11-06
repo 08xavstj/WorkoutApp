@@ -271,7 +271,11 @@ struct WorkoutBuilderView: View {
               let position = options.firstIndex(where: { $0.id == current.exercises[index].exerciseID }) else { return }
         let next = options[(position + 1) % options.count]
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
-        var replacement = planner.prescribe(next, slot: slot, minutes: minutes, sessionRPE: current.targetRPE, history: history)
+        // Same starting-weight estimate as the plan (`LoadEstimator`) for a lift with no history.
+        let lifter = LoadEstimator.Lifter(bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,
+                                          status: metrics.trainingStatus ?? .novice)
+        var replacement = planner.prescribe(next, slot: slot, minutes: minutes, sessionRPE: current.targetRPE,
+                                            history: history, lifter: lifter)
         // A lighter load on a lift that loads a 3-5/10 area (`PainGuard`).
         exerciseFilter.capLoad(&replacement, slot: slot, gym: gym.profile)
         // Keep the fitted set count and any superset pairing; redo the warm-up ramp for the new lift.
@@ -530,8 +534,11 @@ struct WorkoutBuilderView: View {
 }
 
 /// "Same work, less time": the short session's small lifts as one drop set,
-/// rest-pause or myo-rep set each, with the time it saves and how good the
-/// evidence is (`TimeSaver`, `SetKind.evidence`).
+/// rest-pause or myo-rep set each, with the time it saves. One line up front;
+/// which lifts, the evidence and the safety rule behind "Details"
+/// (`TimeSaver`, `SetKind.evidence`). A converted set counts as the straight
+/// sets it replaces for weekly volume (`SetStructure.hardSetCredit`), so the
+/// headline says "same sets".
 struct TimeSaverCard: View {
     let options: [TimeSaver.Option]
     @Binding var isOn: Bool
@@ -549,7 +556,6 @@ struct TimeSaverCard: View {
                 Text(headline)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .tint(Theme.lifting)
             if options.count > 1 {
@@ -560,34 +566,43 @@ struct TimeSaverCard: View {
                 }
                 .pickerStyle(.segmented)
             }
-            if let selected {
-                Text(selected.kind.evidence)
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("Details") {
+                details
             }
-            // Safety: multi-joint lifts keep straight sets (`TimeSaver.isEligible`).
-            Text("Squats, presses, rows and deadlifts keep straight sets: going to failure with no rest under a heavy bar is where form slips.")
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-            if let strengthNote {
-                Text(strengthNote)
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            .font(.caption)
+            .tint(Theme.secondaryText)
         }
         .card()
     }
 
-    /// "Lateral Raise as one drop set: about 2 min less (planner's estimate)".
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let selected {
+                Text(lifts(selected))
+                Text(selected.kind.evidence)
+            }
+            // Safety: multi-joint lifts keep straight sets (`TimeSaver.isEligible`).
+            Text("Big lifts (squats, presses, rows, deadlifts) keep straight sets: no-rest sets under a heavy bar are where form slips.")
+            if let strengthNote { Text(strengthNote) }
+        }
+        .font(.caption)
+        .foregroundStyle(Theme.secondaryText)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
+    }
+
+    /// "Same sets, about 2 min less".
     private var headline: String {
         guard let selected else { return "" }
-        let names = selected.exerciseNames.joined(separator: ", ")
-        let style = selected.kind.title.lowercased()
-        let each = selected.exerciseNames.count > 1 ? " each" : ""
-        return "\(names) as one \(style)\(each): about \(selected.minutesSaved) min less"
+        return "Same sets, about \(selected.minutesSaved) min less"
+    }
+
+    /// "Lateral Raise, Curl as one drop set each; it counts as the sets it replaces."
+    private func lifts(_ option: TimeSaver.Option) -> String {
+        let names = option.exerciseNames.joined(separator: ", ")
+        let each = option.exerciseNames.count > 1 ? " each" : ""
+        return "\(names) as one \(option.kind.title.lowercased())\(each); it counts as the sets it replaces."
     }
 }
 
@@ -635,6 +650,8 @@ struct PlannedExerciseRow: View {
     /// Fits "A1" or "12" at every text size.
     @ScaledMetric(relativeTo: .headline) private var badgeSize: CGFloat = 34
     @State private var showingGuide = false
+    /// The ⓘ: muscles, plates, how the weight moved, stages and warm-up.
+    @State private var showingDetails = false
     @Environment(ExerciseLibrary.self) private var library
 
     /// "Lats, biceps": the exercise library's primary then secondary muscles
@@ -650,17 +667,26 @@ struct PlannedExerciseRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Tap the exercise for how to do it, with form videos.
-            Button { showingGuide = true } label: {
-                details
-                    .contentShape(.rect)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                // Tap the exercise for how to do it, with form videos.
+                Button { showingGuide = true } label: {
+                    summary
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows how to do it, with form videos")
+                Spacer(minLength: 0)
+                if !detailLines.isEmpty {
+                    infoButton
+                }
+                if onSwap != nil || onNeverAgain != nil {
+                    optionsMenu
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("Shows how to do it, with form videos")
-            Spacer(minLength: 0)
-            if onSwap != nil || onNeverAgain != nil {
-                optionsMenu
+            if showingDetails {
+                detailsList
+                    .padding(.leading, badgeSize + 12)
             }
         }
         .card()
@@ -697,7 +723,17 @@ struct PlannedExerciseRow: View {
         .accessibilityHint("Swap it, mark equipment you don't have, or never plan it again")
     }
 
-    private var details: some View {
+    /// "3 × 6–8 · 2 in reserve · 60 kg": the one line that matters.
+    private var prescription: String {
+        let reserve = ReserveText.text(rpe: exercise.rpe)
+        var line = "\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · \(reserve)"
+        if let load = exercise.load {
+            line += " · \(load.formatted(.number.precision(.fractionLength(0...2)))) \(unit.rawValue)"
+        }
+        return line
+    }
+
+    private var summary: some View {
         HStack(alignment: .top, spacing: 12) {
             Text(label ?? "\(index)")
                 .font(.headline)
@@ -708,45 +744,50 @@ struct PlannedExerciseRow: View {
                 Text(exercise.name)
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
-                if let muscleLine {
-                    Text(muscleLine)
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                Text("\(exercise.sets) × \(exercise.reps.lowerBound)–\(exercise.reps.upperBound) · stop with \(exercise.repsInReserve.replacingOccurrences(of: " in reserve", with: " left"))")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-                if let load = exercise.load {
-                    Text("\(load.formatted(.number.precision(.fractionLength(0...2)))) \(unit.rawValue)")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.strainTextColor)
-                }
-                // How the weight moved since last time (double progression, `WorkoutPlanner.suggestedLoad`).
-                if let progression = exercise.progressionNote {
-                    Text(progression)
-                        .font(.caption)
-                        .foregroundStyle(Theme.liftingText)
-                }
-                if let note = exercise.note {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                // Drop stages or mini-sets after the set (`TimeSaver`), drops rounded to the gym.
-                if let stages = TimeSaver.describe(exercise, unit: unit) {
-                    Text(stages)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.liftingText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                // Ramp sets rounded to the gym's loads (`WarmUp`; Ribeiro et al. 2020).
-                if let warmUps = exercise.warmUpSets, !warmUps.isEmpty {
-                    Text("Warm-up: \(WarmUp.summary(warmUps))")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
+                Text(prescription)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.strainTextColor)
             }
         }
+    }
+
+    /// Everything else, behind the ⓘ: how the weight moved (double
+    /// progression, `WorkoutPlanner.suggestedLoad`), plates and notes, drop
+    /// stages or mini-sets (`TimeSaver`), ramp sets (`WarmUp`; Ribeiro et al.
+    /// 2020) and the muscles.
+    private var detailLines: [String] {
+        var lines: [String] = []
+        if let progression = exercise.progressionNote { lines.append(progression) }
+        if let note = exercise.note { lines.append(note) }
+        if let stages = TimeSaver.describe(exercise, unit: unit) { lines.append(stages) }
+        if let warmUps = exercise.warmUpSets, !warmUps.isEmpty { lines.append("Warm-up: \(WarmUp.summary(warmUps))") }
+        if let muscleLine { lines.append(muscleLine) }
+        return lines
+    }
+
+    private var detailsList: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(detailLines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var infoButton: some View {
+        Button {
+            withAnimation(.snappy) { showingDetails.toggle() }
+        } label: {
+            Image(systemName: showingDetails ? "info.circle.fill" : "info.circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(showingDetails ? "Hide details" : "Show details")
+        .accessibilityHint("How the weight moved, plates, warm-up and muscles")
     }
 }
 
@@ -758,9 +799,27 @@ struct PainGuardRow: View {
     let neverAgainCount: Int
     let action: () -> Void
 
+    /// Pain the trainer acts on (3/10 and up, `PainGuard.response`).
+    private var acted: [PainReport] { pains.filter { PainGuard.response(to: $0) != .unchanged } }
+
+    /// "Something hurts?", "Working around pain", or for 1-2/10 only
+    /// "Logged: knee 2/10", where nothing in the plan changes.
+    private var title: String {
+        if pains.isEmpty { return "Something hurts?" }
+        if !acted.isEmpty { return "Working around pain" }
+        let logged = pains.map { "\($0.area.title.lowercased()) \($0.level)/10" }.joined(separator: ", ")
+        return "Logged: " + logged
+    }
+
     private var summary: String {
-        var parts = pains.map { report in "\(report.area.title) \(report.level)/10" }
-        if parts.isEmpty { parts.append("Log a sore joint and the trainer works around it") }
+        var parts: [String] = []
+        if pains.isEmpty {
+            parts.append("Log a sore joint and the trainer works around it")
+        } else if acted.isEmpty {
+            parts.append("No changes below \(PainGuard.regressFrom)/10")
+        } else {
+            parts = acted.map { report in "\(report.area.title) \(report.level)/10" }
+        }
         if neverAgainCount > 0 {
             let plural = neverAgainCount == 1 ? "" : "s"
             parts.append("\(neverAgainCount) never-again exercise\(plural)")
@@ -773,19 +832,13 @@ struct PainGuardRow: View {
             HStack(alignment: .top, spacing: 12) {
                 IconBadge(systemName: "bandage.fill", color: Theme.recoveryLow, size: 42)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(pains.isEmpty ? "Something hurts?" : "Working around pain")
+                    Text(title)
                         .font(.headline)
                         .foregroundStyle(Theme.primaryText)
                     Text(summary)
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
                         .multilineTextAlignment(.leading)
-                    if !pains.isEmpty {
-                        Text(PainGuard.shortRuleText)
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                            .multilineTextAlignment(.leading)
-                    }
                     ForEach(clinicianAreas) { area in
                         Text(PainGuard.clinicianText(area))
                             .font(.caption.weight(.semibold))
@@ -847,12 +900,19 @@ struct PainLogView: View {
         }
     }
 
-    /// Only what's new or different, so opening and saving doesn't renew old answers.
+    /// Only what's new or different, so opening and saving doesn't renew old
+    /// answers. An area you deselected is saved as 0/10, which clears it
+    /// (`PainGuard.active`); otherwise it would stay avoided for 7 days.
     private var changed: [PainReport] {
-        (draft ?? []).filter { report in
+        let reports = draft ?? []
+        let edited = reports.filter { report in
             guard let before = current.first(where: { $0.area == report.area }) else { return true }
             return before.level != report.level || (before.worseAfterTraining ?? false) != (report.worseAfterTraining ?? false)
         }
+        let cleared = current
+            .filter { before in !reports.contains { $0.area == before.area } }
+            .map { PainReport(area: $0.area, level: 0, loggedAt: .now) }
+        return edited + cleared
     }
 
     private var neverAgainSection: some View {

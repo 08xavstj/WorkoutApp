@@ -47,6 +47,7 @@ nonisolated extension HealthKitClient {
     /// whose quantity isn't a count is skipped (and logged) instead.
     @concurrent
     func breathingDisturbances(days: Int) async throws -> [DatedValue] {
+        if let demo = DemoHealth.active { return demo.dailySeries(.breathingDisturbances, days: days) }
         guard isAvailable else { return [] }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)

@@ -266,14 +266,92 @@ struct CoachAnswersTests {
         #expect(CoachAnswers.strain(f)!.action == "You're past today's range; make the rest of the day easy.")
     }
 
-    @Test func fallbackPicksTheNearestAnswer() {
-        #expect(CoachAnswers.fallback(for: .nutrition, facts: facts)?.question == .eatingEnough)
-        #expect(CoachAnswers.fallback(for: .training, facts: facts)?.question == .planWorkout)
-        #expect(CoachAnswers.fallback(for: .recovery, facts: facts)?.question == .whyRecovery)
-        #expect(CoachAnswers.fallback(for: .general, facts: facts)?.question == .trainToday)
-        var noPlan = facts
-        noPlan.plannedSession = nil
-        #expect(CoachAnswers.fallback(for: .training, facts: noPlan)?.question == .trainToday)
+    @Test func fallbackAnswersOnlyTheSameQuestion() {
+        #expect(CoachAnswers.fallback(for: "What should I have for dinner?", facts: facts)?.question == .eatingEnough)
+        #expect(CoachAnswers.fallback(for: "Does my recovery depend on stress?", facts: facts)?.question == .whyRecovery)
+        // An open general question has no data stand-in: the chat shows the model's error instead.
+        #expect(CoachAnswers.fallback(for: "What's a good warm-up song?", facts: facts) == nil)
+    }
+
+    @Test func whyRecoveryKeepsContextOutOfTheReasons() {
+        var f = facts
+        f.recoveryContributors.append(RecoveryContributor(id: "sleepDebt", name: "Sleep debt", detail: "4.0 h behind your need.", effect: .lowers))
+        f.recoveryContributors.append(RecoveryContributor(id: "alcohol", name: "Alcohol", detail: "2 drinks last night.", effect: .lowers))
+        let answer = CoachAnswers.whyRecovery(f)!
+        #expect(answer.text.contains("Pulling it down: hrv (48 ms, 5% under your baseline)."))
+        #expect(answer.text.contains("Also worth knowing: sleep debt: 4.0 h behind your need; alcohol: 2 drinks last night."))
+    }
+
+    @Test func aRestDayGetsNoPlanUnlessAsked() {
+        var f = facts
+        f.plannedSession = nil
+        f.dayGuidance = TrainingDayPlanner.Guidance(kind: .rest, strainRange: 0...25, title: "Rest day", reason: "Rest day in your plan.")
+        let answer = CoachAnswers.planWorkout(f)!
+        #expect(answer.text.hasPrefix("Rest day: Rest day in your plan."))
+        #expect(answer.text.contains("anyway"))
+        // Asked anyway: the card is there and the text explains it.
+        f.dayGuidance = TrainingDayPlanner.Guidance(kind: .rest, strainRange: 0...25, title: "Rest day", reason: "Rest day in your plan.")
+        f.plannedSession = facts.plannedSession
+        #expect(CoachAnswers.planWorkout(f)!.text.hasPrefix("Push Day"))
+    }
+
+    @Test func restModeWithARequestedPlanSaysKeepItEasy() {
+        var f = facts
+        f.restMode = true
+        #expect(CoachAnswers.planWorkout(f)!.text.contains("You asked anyway"))
+        f.plannedSession = nil
+        #expect(CoachAnswers.planWorkout(f)!.text.contains("Workouts can wait"))
+    }
+
+    @Test func restBetweenSetsFollowsTheGoalAndTimer() {
+        var f = facts
+        f.trainingStyle = .muscle
+        let muscle = CoachAnswers.restBetweenSets(f)!.text
+        #expect(muscle.contains("about 2 min between sets of big lifts"))
+        #expect(muscle.contains("90 s on smaller ones"))
+        f.trainingStyle = .strength
+        #expect(CoachAnswers.restBetweenSets(f)!.text.contains("about 3 min"))
+        f.trainingStyle = nil
+        #expect(CoachAnswers.restBetweenSets(f)!.text.contains("2.5 min"))
+        f.restTimerSeconds = 120
+        #expect(CoachAnswers.restBetweenSets(f)!.text.contains("set to 2 min for every exercise"))
+    }
+
+    @Test func energyBurnedIsEnergyOut() {
+        var f = facts
+        f.caloriesBurnedSoFar = 1850
+        f.activeCaloriesSoFar = 620
+        f.caloriesProjectedBurn = 2600
+        let answer = CoachAnswers.energyBurned(f)!
+        #expect(answer.text.hasPrefix("You've burned about 1850 kcal so far today, 620 of them from movement and exercise."))
+        #expect(answer.text.contains("about 2600 kcal"))
+        #expect(!answer.text.contains("eaten"))
+        f.caloriesHidden = true
+        #expect(!CoachAnswers.energyBurned(f)!.text.contains("1850"))
+    }
+
+    @Test func lastWorkoutSummarisesTheSession() {
+        var f = facts
+        f.lastWorkout = CoachFacts.LastWorkout(name: "Pull Day", daysAgo: 1, minutes: 52, workingSets: 16,
+                                               exerciseNames: ["Deadlift", "Row", "Pulldown", "Curl", "Face pull"], sessionRPE: 8, volumeText: "9,200 kg")
+        let text = CoachAnswers.lastWorkout(f)!.text
+        #expect(text.hasPrefix("Your last gym session was Pull Day, yesterday: about 52 min with 16 working sets."))
+        #expect(text.contains("Deadlift, Row, Pulldown, Curl and 1 more."))
+        #expect(text.contains("8/10"))
+    }
+
+    @Test func readingsComeFromTheData() {
+        var f = facts
+        f.restingHeartRateChange = 3
+        #expect(CoachAnswers.restingHeartRate(f)!.text.hasPrefix("Your resting heart rate is 52 bpm today (+3.0 vs your usual)."))
+        #expect(CoachAnswers.hrv(f)!.text.hasPrefix("Last night's HRV was 48 ms."))
+        f.steps = 6200
+        f.stepGoal = 8000
+        #expect(CoachAnswers.steps(f)!.text.contains("1,800 short of your 8,000 goal") || CoachAnswers.steps(f)!.text.contains("1800 short"))
+        f.vo2Max = 44.6
+        #expect(CoachAnswers.vo2Max(f)!.text.contains("44.6 ml/kg/min"))
+        f.bodyWeightText = "187.4 lb"
+        #expect(CoachAnswers.bodyWeight(f)!.text.hasPrefix("Your latest weigh-in is 187.4 lb."))
     }
 
     @Test func factLinesStayShortAndOnTopic() {

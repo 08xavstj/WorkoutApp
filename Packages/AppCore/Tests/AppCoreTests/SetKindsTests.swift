@@ -70,10 +70,17 @@ struct SetKindsTests {
         #expect(SetStructure.title(at: 2, in: items) == "Mini-set 1 of 1")
     }
 
-    @Test func aDropSetCountsOneAndAHalfHardSets() {
+    @Test func aClusterCountsAsTheStraightSetsItStandsIn() {
+        // Changed from 1.5: a converted session must meet its planned sets.
         #expect(SetStructure.hardSetCredit(stages: 0) == 1)
-        #expect(SetStructure.hardSetCredit(stages: 2) == 1.5)
-        #expect(SetStructure.hardSetCredit(stages: 3) == 1.5)
+        #expect(SetStructure.hardSetCredit(stages: 1) == 2)
+        #expect(SetStructure.hardSetCredit(stages: 2) == 3)
+        #expect(SetStructure.hardSetCredit(stages: 3) == 3)
+        // Three straight curls → one drop set with two drops: still three hard sets.
+        var exercise = curl()
+        let planned = Double(exercise.sets)
+        TimeSaver.convert(&exercise, to: .drop, gym: gym)
+        #expect(SetStructure.hardSetCredit(stages: exercise.stages?.count ?? 0) == planned)
     }
 
     @Test func weeklySetsCountTheCreditButFatigueCountsOneSet() {
@@ -83,7 +90,7 @@ struct SetKindsTests {
         var drop = plain
         drop.volumeCredit = SetStructure.hardSetCredit(stages: 2)
         #expect(MuscleCoverage.setsThisWeek([plain], weekStart: weekStart, now: now)[.biceps] == 1)
-        #expect(MuscleCoverage.setsThisWeek([drop], weekStart: weekStart, now: now)[.biceps] == 1.5)
+        #expect(MuscleCoverage.setsThisWeek([drop], weekStart: weekStart, now: now)[.biceps] == 3)
         let tired = MuscleRecovery.evaluate(sets: [plain], now: now)[.biceps]?.recovery
         let tiredByDrop = MuscleRecovery.evaluate(sets: [drop], now: now)[.biceps]?.recovery
         #expect(tired == tiredByDrop)
@@ -136,9 +143,14 @@ struct SetKindsTests {
         #expect(!TimeSaver.isEligible(curl(sets: 1), at: 1, kind: .drop, gym: gym))
         #expect(!TimeSaver.isEligible(curl(load: 2), at: 1, kind: .drop, gym: gym))
         #expect(TimeSaver.isEligible(curl(load: 2), at: 1, kind: .restPause, gym: gym))
-        // First time (no load yet): still a drop set, with "about a quarter lighter".
+        // First time (no load yet): still a drop set, with "at least 20% lighter".
         #expect(TimeSaver.isEligible(curl(load: nil), at: 1, kind: .drop, gym: gym))
         #expect(!TimeSaver.isEligible(curl(), at: 1, kind: .straight, gym: gym))
+        // A superset partner keeps straight sets: no drop chain inside "one set of each, then rest".
+        var paired = curl()
+        paired.supersetGroup = 1
+        #expect(!TimeSaver.isEligible(paired, at: 1, kind: .drop, gym: gym))
+        #expect(!TimeSaver.isEligible(paired, at: 1, kind: .restPause, gym: gym))
     }
 
     @Test func threeStraightSetsBecomeOneDropSetWithTwoDrops() {
@@ -161,7 +173,7 @@ struct SetKindsTests {
         var unknown = curl(load: nil)
         TimeSaver.convert(&unknown, to: .drop, gym: gym)
         #expect(unknown.stages == [.init(load: nil, reps: 10), .init(load: nil, reps: 10)])
-        #expect(TimeSaver.describe(unknown, unit: .kg)?.contains("about a quarter lighter") == true)
+        #expect(TimeSaver.describe(unknown, unit: .kg)?.contains("at least 20% lighter") == true)
     }
 
     @Test func stagesCountInTheTimeEstimate() {

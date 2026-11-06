@@ -65,10 +65,11 @@ public enum Autoregulation {
             self.targetRIR = targetRIR
         }
 
-        /// "Next set 62.5 kg (you had 3 in reserve)"; nil for `hold`.
+        /// "Next set 62.5 kg (you had 3 in reserve)"; nil for `hold`. Reps in
+        /// reserve are written by `ReserveText`, as everywhere on the phone.
         public func message(unit: String) -> String? {
-            let had = "you had \(Autoregulation.reserveText(repsInReserve)) in reserve"
-            let plan = "the plan is \(Autoregulation.reserveText(targetRIR))"
+            let had = repsInReserve < 0.25 ? "you went to failure" : "you had \(ReserveText.text(repsInReserve))"
+            let plan = "plan: \(ReserveText.text(targetRIR))"
             switch change {
             case .hold:
                 return nil
@@ -77,9 +78,9 @@ public enum Autoregulation {
             case .loadDown:
                 return "Next set \(Autoregulation.format(load)) \(unit) (\(had); \(plan))"
             case .trimReps:
-                return "Next set \(reps) reps at the same weight (\(had); \(plan))"
+                return "Next set \(reps) reps, same weight (\(had); \(plan))"
             case .addReps:
-                return "Next set \(reps) reps at the same weight (\(had))"
+                return "Next set \(reps) reps, same weight (\(had))"
             }
         }
     }
@@ -184,8 +185,8 @@ public enum ProgressionMode: String, Codable, Sendable, CaseIterable, Identifiab
     public var summary: String {
         switch self {
         case .load: "Add weight once you reach the top of the rep range."
-        case .reps: "Keep the weight and add reps; move up once you're 2 past the range."
-        case .sets: "Keep the weight and reps and add a set; move up once you're 2 reps past the range."
+        case .reps: "Keep the weight and add a rep each time; move up once you're 2 past the range."
+        case .sets: "Keep the weight and add a set each time you reach the top of the range, up to 5; then move up."
         }
     }
 

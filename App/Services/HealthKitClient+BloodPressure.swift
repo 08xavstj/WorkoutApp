@@ -57,6 +57,7 @@ nonisolated extension HealthKitClient {
     /// Blood pressure readings from the last `days` days, newest first.
     @concurrent
     func bloodPressureReadings(days: Int) async throws -> [BloodPressureReading] {
+        if let demo = DemoHealth.active { return demo.bloodPressureReadings(days: days) }
         let start = Calendar.current.date(byAdding: .day, value: -days, to: .now) ?? .now
         let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
         let descriptor = HKSampleQueryDescriptor(

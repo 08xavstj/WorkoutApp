@@ -9,16 +9,20 @@ extension RepDetection {
     /// squat (Achermann B, et al. Sports 2023;11(7):125) [E18]. Leg presses,
     /// dumbbell and kettlebell work, swings and single-leg lifts are left out:
     /// the wrist doesn't travel with a bar there, or the motion is ballistic.
+    /// An explicit list, not "any barbell squat or hinge slot": that slot
+    /// also holds hip thrusts and glute bridges, where the wrist barely moves
+    /// with the bar and the studies above didn't test.
     public static func supports(exerciseID: String) -> Bool {
-        if libraryExerciseIDs.contains(exerciseID) { return true }
-        guard let slot = ExerciseCatalog.slot(for: exerciseID), slot == .squat || slot == .hinge else { return false }
-        return ExerciseCatalog.exercise(id: exerciseID)?.load == .barbell
+        supportedExerciseIDs.contains(exerciseID)
     }
 
-    /// Barbell squat and deadlift variants from the exercise library that the
-    /// planner's catalog (`ExerciseCatalog.options`) doesn't list.
-    static let libraryExerciseIDs: Set<String> = [
-        "Barbell_Deadlift", "Sumo_Deadlift", "Deficit_Deadlift", "Trap_Bar_Deadlift",
-        "Barbell_Full_Squat", "Front_Barbell_Squat", "Box_Squat",
+    /// Barbell squat and deadlift variants, from the planner's catalog
+    /// (`ExerciseCatalog.options`, pain regressions included) and the
+    /// exercise library.
+    static let supportedExerciseIDs: Set<String> = [
+        // Squats
+        "Barbell_Squat", "Barbell_Full_Squat", "Front_Barbell_Squat", "Box_Squat",
+        // Deadlifts
+        "Barbell_Deadlift", "Romanian_Deadlift", "Sumo_Deadlift", "Deficit_Deadlift", "Trap_Bar_Deadlift",
     ]
 }

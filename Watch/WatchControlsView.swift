@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Pause/resume, skip the exercise, finish (asks the session effort) and discard.
+/// Pause/resume, skip to the next exercise, finish (asks the session effort) and discard.
 struct WatchControlsView: View {
     @Environment(WatchWorkoutModel.self) private var model
+    @Binding var page: WatchPage
     @State private var finishing = false
     @State private var discarding = false
 
@@ -26,9 +27,12 @@ struct WatchControlsView: View {
                     }
                     .tint(WatchTheme.strain)
                 }
-                if model.snapshot != nil {
+                if model.exerciseAfterShown != nil {
+                    // Moves on without deleting: the skipped sets stay open, and
+                    // Finish drops any still unticked.
                     Button {
                         model.skipExercise()
+                        page = .live
                     } label: {
                         Label("Skip exercise", systemImage: "forward.fill")
                             .frame(maxWidth: .infinity)

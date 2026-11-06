@@ -95,6 +95,7 @@ private struct ScoreRings: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(hint)
+        .accessibilityIdentifier("ring-\(which.rawValue)") // UI tests (ScreenshotTests)
     }
 
     private func strainRing(size: CGFloat) -> some View {
@@ -132,6 +133,7 @@ private struct ScoreRings: View {
 
     private var recoverySubtitle: String? {
         metrics.recovery.map { result in
+            if let note = metrics.recoveryNote { return note }
             guard !result.isCalibrated else { return RecoveryWording.label(for: result.status) }
             let left = max(1, RecoveryCalculator().minimumBaselineDays - (metrics.baseline?.nights ?? 0))
             return "Learning · \(left) more night\(left == 1 ? "" : "s")"
@@ -212,9 +214,11 @@ private struct CoachingSection: View {
 // MARK: - The one button
 
 /// One button chosen by state (ux-audit.md 4.6): "Start Push · 45 min" when a
-/// session is planned today and not done yet; "Start workout" when today is
-/// below its range, nothing is planned and you haven't trained; otherwise
-/// none. Nothing in rest mode, which pauses workout nudges. The full choice
+/// session is planned today and not done yet ("Start Push (short) · 15 min" on
+/// an easy day); on a rest or recovery day the plan's guidance wins, so a
+/// planned session only gets a quiet "Train anyway" option; "Start workout"
+/// when today is below its range, nothing is planned and you haven't trained;
+/// otherwise none. Nothing in rest mode, which pauses workout nudges. The full choice
 /// (short version, other sessions) stays in the Strain sheet and Fitness ›
 /// This week.
 private struct ScoresPrimaryButton: View {
@@ -230,6 +234,8 @@ private struct ScoresPrimaryButton: View {
         var title: String
         var focus: WorkoutFocus?
         var minutes: Int?
+        /// A quiet option (rest and recovery days), not the main call to action.
+        var secondary = false
     }
 
     var body: some View {
@@ -239,34 +245,54 @@ private struct ScoresPrimaryButton: View {
             } label: {
                 Label(choice.title, systemImage: "play.fill")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(choice.secondary ? Theme.strainTextColor : Color.white)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, minHeight: 50)
                     .padding(.horizontal, 12)
-                    .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
+                    .background(Self.fill(secondary: choice.secondary), in: .capsule)
             }
             .buttonStyle(.plain)
             .accessibilityHint("Opens the workout builder")
         }
     }
 
+    private static func fill(secondary: Bool) -> AnyShapeStyle {
+        secondary
+            ? AnyShapeStyle(Theme.cardRaised)
+            : AnyShapeStyle(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing))
+    }
+
+    /// "Start Push · 45 min", or the short version on an easy day.
+    private static func start(_ day: PlannedDay, short: Bool) -> Choice {
+        let minutes = short ? min(day.shortVersionMinutes, day.minutes) : day.minutes
+        let name = short ? day.focus.shortTitle + " (short)" : day.focus.shortTitle
+        return Choice(title: "Start \(name) · \(minutes) min", focus: day.focus, minutes: minutes)
+    }
+
     private var choice: Choice? {
         guard !metrics.restMode else { return nil }
+        // The plan's rest or recovery day comes first (`TrainingDayPlanner`): a
+        // session still planned today is only a quiet, short "Train anyway".
+        if metrics.dayGuidance?.isRestDay == true {
+            guard let planned = plannedToday else { return nil }
+            let minutes = min(planned.shortVersionMinutes, planned.minutes)
+            let name = planned.focus.shortTitle
+            return Choice(title: "Train anyway · \(name) (short) · \(minutes) min", focus: planned.focus, minutes: minutes, secondary: true)
+        }
+        let short = metrics.dayGuidance?.kind == .easyTraining
         if let planned = plannedToday {
-            return Choice(title: "Start \(planned.focus.shortTitle) · \(planned.minutes) min", focus: planned.focus, minutes: planned.minutes)
+            return Self.start(planned, short: short)
         }
         // A flexible week (`WeeklyPlan.Mode.flexible`): the next session, with the coverage rule's focus.
         if let next = flexibleNext {
-            return Choice(title: "Start \(next.focus.shortTitle) · \(next.minutes) min", focus: next.focus, minutes: next.minutes)
+            return Self.start(next, short: short)
         }
         // A session missed in the last two days moved to today (`TrainingDayPlanner`).
         if let guidance = metrics.dayGuidance, guidance.kind == .makeUp, let focus = guidance.focus,
            metrics.activities.isEmpty {
             return Choice(title: "Start \(focus.shortTitle) (moved)", focus: focus, minutes: nil)
         }
-        // Rest days in the plan offer no workout button.
-        if metrics.dayGuidance?.isRestDay == true { return nil }
         guard metrics.activities.isEmpty, let target = metrics.targetStrain else { return nil }
         let status = StrainPlanner().status(current: metrics.strain?.strain ?? 0, target: target)
         guard case .below = status else { return nil }
@@ -278,15 +304,13 @@ private struct ScoresPrimaryButton: View {
     /// In a flexible week, the session to do next (`WeeklyPlanStore.nextSession`:
     /// focus from `MuscleCoverage`), unless the quota is met, a session was
     /// logged today, or today's guidance is a rest day. On an easy day the
-    /// button offers the short version.
+    /// button offers the short version (`start(_:short:)`).
     private var flexibleNext: PlannedDay? {
         guard plans.current?.isFlexible == true, metrics.activities.isEmpty,
               metrics.dayGuidance?.isRestDay != true,
               let progress = plans.progress(sessions: sessions, extra: metrics.recentTrainingDays), !progress.trainedToday,
               let next = plans.nextSession(sessions: sessions, extra: metrics.recentTrainingDays, muscles: muscles) else { return nil }
-        var day = next.day
-        if metrics.dayGuidance?.kind == .easyTraining { day.minutes = day.shortVersionMinutes }
-        return day
+        return next.day
     }
 
     /// Today's planned session from this week's plan, unless a session was

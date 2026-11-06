@@ -40,6 +40,13 @@ final class WatchWorkoutModel: NSObject {
     private(set) var setsCompletedHere = 0
     /// The exercise on the live page; nil follows the next set to do.
     var selectedExercise: Int?
+    /// Records from the exercise just finished here, shown for a few seconds.
+    private(set) var recordNote: WatchRecordNote?
+    /// Record notes already shown (each rides along in a minute of snapshots).
+    @ObservationIgnored private var shownRecordIDs: Set<String> = []
+    @ObservationIgnored private var recordTask: Task<Void, Never>?
+    /// How long the record banner stays up (app choice: long enough to read two short lines).
+    private static let recordSeconds = 6.0
 
     @ObservationIgnored private let store = HKHealthStore()
     @ObservationIgnored private var workoutSession: HKWorkoutSession?
@@ -257,34 +264,103 @@ final class WatchWorkoutModel: NSObject {
     // MARK: Sets
 
     /// Ticks a set with what was done; the phone logs it and the rest timer starts here.
-    func completeSet(exerciseIndex: Int, setIndex: Int, reps: Int, weightKg: Double, rpe: Double?) {
-        guard var current = snapshot, exerciseIndex < current.exercises.count,
-              setIndex < current.exercises[exerciseIndex].sets.count else { return }
+    /// The set is found by its stable ids, so a snapshot that arrived while the
+    /// effort sheet was open (a set added on the phone) can't shift it.
+    func completeSet(_ pending: PendingSet, reps: Int, weightKg: Double, rpe: Double?) {
+        guard var current = snapshot,
+              let (exerciseIndex, setIndex) = current.locate(exerciseID: pending.exerciseID, setOrder: pending.setOrder,
+                                                            exerciseIndex: pending.exerciseIndex, setIndex: pending.setIndex)
+        else { return }
         var set = current.exercises[exerciseIndex].sets[setIndex]
+        // Ticked on the phone meanwhile: nothing to do here.
+        guard !set.isCompleted else { return }
+        // Only values changed on the wrist (Edit, the adjuster or the rep counter)
+        // overwrite the phone's: an untouched one may be older than an edit there.
+        let repsEdited = reps != pending.baseReps
+        let weightEdited = abs(weightKg - pending.baseWeightKg) > 0.001
         set.reps = reps
         set.weightKg = weightKg
         set.rpe = rpe ?? set.rpe
         set.isCompleted = true
         current.exercises[exerciseIndex].sets[setIndex] = set
-        // Point at the next set now, before the phone answers.
+        // Point at the next set now, before the phone answers (the superset
+        // partner after the first half, as the phone does).
         current.currentExercise = nil
         current.currentSet = nil
-        if let next = current.nextExerciseIndex {
-            current.currentExercise = next
-            current.currentSet = current.exercises[next].sets.firstIndex { !$0.isCompleted }
+        if let next = current.upNext() {
+            current.currentExercise = next.exercise
+            current.currentSet = next.set
+        }
+        if selectedExercise == exerciseIndex, let partner = supersetNext(after: exerciseIndex, in: current) {
+            selectedExercise = partner
         }
         lastLocalEdit = .now
         snapshot = current
         setsCompletedHere += 1
-        send(.completeSet(exerciseIndex: exerciseIndex, setIndex: setIndex, reps: reps, weightKg: weightKg, rpe: rpe))
+        send(.completeSet(exerciseIndex: exerciseIndex, setIndex: setIndex, reps: reps, weightKg: weightKg, rpe: rpe,
+                          exerciseOrder: current.exercises[exerciseIndex].id, setOrder: set.order,
+                          repsEdited: repsEdited, weightEdited: weightEdited))
         WKInterfaceDevice.current().play(.success)
         if !set.isWarmup { startRestIfNeeded(after: exerciseIndex, in: current) }
     }
 
-    /// Skips the rest of the current exercise on the phone.
+    /// The superset partner to show after a set of `index`, when you picked the
+    /// exercise yourself: A2 after A1 once A1 is a round ahead, A1 after A2.
+    /// Nil when there's no partner set left, or a drop stage of this set is next.
+    private func supersetNext(after index: Int, in session: WatchSession) -> Int? {
+        guard let partner = session.partnerIndex(of: index),
+              session.exercises[partner].sets.contains(where: { !$0.isCompleted }),
+              session.exercises[index].sets.first(where: { !$0.isCompleted })?.isStage != true else { return nil }
+        if partner > index { return session.roundsDone(index) > session.roundsDone(partner) ? partner : nil }
+        return partner
+    }
+
+    /// The exercise the live page shows (picked, or the next set to do).
+    var shownExercise: Int? {
+        guard let snapshot, let index = selectedExercise ?? snapshot.nextExerciseIndex,
+              index < snapshot.exercises.count else { return nil }
+        return index
+    }
+
+    /// The next exercise after the shown one that has a set left, wrapping
+    /// round; nil when there's no other.
+    var exerciseAfterShown: Int? {
+        guard let snapshot, let shown = shownExercise else { return nil }
+        let count = snapshot.exercises.count
+        for step in 1..<max(1, count) {
+            let index = (shown + step) % count
+            if snapshot.exercises[index].sets.contains(where: { !$0.isCompleted }) { return index }
+        }
+        return nil
+    }
+
+    /// "Skip exercise": moves the live page to the next exercise with a set
+    /// left. Nothing is deleted; the skipped sets stay open, and Finish drops
+    /// any that are still unticked.
     func skipExercise() {
-        send(.nextExercise)
-        selectedExercise = nil
+        guard let next = exerciseAfterShown else { return }
+        selectedExercise = next
+        RepCounter.shared.stop()
+        WKInterfaceDevice.current().play(.click)
+    }
+
+    /// Shows a record note from the phone once, with a tap.
+    private func showRecords(_ note: WatchRecordNote) {
+        guard !shownRecordIDs.contains(note.id) else { return }
+        shownRecordIDs.insert(note.id)
+        recordNote = note
+        WKInterfaceDevice.current().play(.notification)
+        recordTask?.cancel()
+        recordTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.recordSeconds))
+            guard !Task.isCancelled, let self, self.recordNote?.id == note.id else { return }
+            self.recordNote = nil
+        }
+    }
+
+    func dismissRecords() {
+        recordTask?.cancel()
+        recordNote = nil
     }
 
     // MARK: Warm-up
@@ -424,6 +500,9 @@ final class WatchWorkoutModel: NSObject {
         }
         snapshot = incoming
         if previous?.id != incoming.id { selectedExercise = nil }
+        if let selectedExercise, selectedExercise >= incoming.exercises.count { self.selectedExercise = nil }
+        // Records for an exercise just finished on the wrist (`WatchSync.noteRecords`).
+        if let note = incoming.records { showRecords(note) }
         // The phone moved the warm-up on (its countdown ended, or a tap there): a tick on the wrist.
         if let previous, previous.id == incoming.id, previous.warmUp != nil,
            previous.warmUpStepIndex != incoming.warmUpStepIndex {

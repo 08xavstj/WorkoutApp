@@ -48,10 +48,19 @@ struct VolumeTargetsCard: View {
                     VolumeTargetRow(target: target, done: muscles.weekSets[target.muscle] ?? 0)
                 }
                 VolumeTargetNotes(targets: targets.notable)
-                Text(Self.explanation)
+                Text("Up one set a session only when last week went to plan.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup("How targets work") {
+                    Text(Self.explanation)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                }
+                .font(.caption)
+                .tint(Theme.secondaryText)
             } else {
                 Text("Save a weekly plan and each muscle gets a set target for every week of the training block, moved by how the week before went.")
                     .font(.subheadline)
@@ -64,7 +73,7 @@ struct VolumeTargetsCard: View {
 
     // Schoenfeld, Ogborn & Krieger 2017 (10-20 band); Pelland et al. 2024 preprint (Sports Med 2026),
     // secondary figures; Halperin 2022 (RIR misjudged by ~1 rep); Israetel / RP volume landmarks as practice.
-    static let explanation = "A target goes up by one set per session only when last week's sets for that muscle were all done at the effort target, your reps held, and the muscle had recovered; otherwise it holds. Pump and soreness aren't used: neither tracks growth reliably. The 10-20 range comes from research (Schoenfeld 2017; Pelland 2024, preprint); the size of each step and \"landmarks\" like MEV and MRV are coaching rules of thumb, not measured values."
+    static let explanation = "A target goes up by one set per session only when last week's sets for that muscle were all done at the effort target, your reps held, and the muscle had recovered; otherwise it holds. Pump and soreness aren't used: neither tracks growth reliably. The 10-20 range comes from research (Schoenfeld 2017; Pelland 2024, preprint); the size of each step and \"landmarks\" like MEV and MRV are coaching rules of thumb, not measured values. A hard set is a working set at RPE 7 or harder (or with no RPE logged); easier sets count 0.6, helper muscles half, and a drop or rest-pause set as the sets it replaces, up to 3. Those weights are the app's choices."
 }
 
 /// "Chest · 12-14 sets · 6 so far".

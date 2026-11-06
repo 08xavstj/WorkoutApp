@@ -377,6 +377,7 @@ struct MetricRow<Destination: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(hint)
+            .accessibilityIdentifier("metric-\(title)") // UI tests (ScreenshotTests)
         } else if let action {
             Button(action: action) {
                 content(showsChevron: true)

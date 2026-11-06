@@ -70,9 +70,10 @@ struct LiftGoalCard: View {
 
     @Environment(UserSettings.self) private var settings
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(GymStore.self) private var gym
     @Query(sort: \WorkoutSession.startedAt) private var sessions: [WorkoutSession]
 
-    private var unit: WeightUnit { settings.weightUnit }
+    private var unit: WeightUnit { gym.liftingUnit }
     private var bodyMassKg: Double { metrics.bodyMassKg ?? settings.weightKg }
 
     var body: some View {
@@ -100,12 +101,23 @@ struct LiftGoalCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             // e1RM accuracy about ±3 kg from 3-5RM (watch-features.md 3.6 [B22]).
-            Text(LiftGoalProjection.evidenceNote + " Estimated 1RMs are good to about ±" + LiftGoalHistory.weightText(LiftGoalProjection.minimumSpreadKg, unit: unit) + ".")
-                .font(.caption2)
-                .foregroundStyle(Theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("About the projection") {
+                Text(evidence)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+            }
+            .font(.caption)
+            .tint(Theme.secondaryText)
         }
         .card()
+    }
+
+    private var evidence: String {
+        let accuracy = LiftGoalHistory.weightText(LiftGoalProjection.minimumSpreadKg, unit: unit)
+        return LiftGoalProjection.evidenceNote + " Estimated 1RMs are good to about ±" + accuracy + "."
     }
 }
 
@@ -117,6 +129,7 @@ private struct LiftGoalStatusChip: View {
         switch status {
         case .reached: Chip(text: "Reached", color: Theme.recoveryHigh)
         case .onTrend: Chip(text: "On the current trend", color: Theme.lifting)
+        case .possible: Chip(text: "Possible", color: Theme.secondaryText)
         case .notOnTrend: Chip(text: "Open", color: Theme.secondaryText)
         case .needsMoreData: Chip(text: "Building history", color: Theme.secondaryText)
         }
@@ -230,6 +243,7 @@ struct LiftGoalProgressSection: View {
 /// Fitness › Progress row: progress toward the first lift goal.
 struct LiftGoalsMetricRow: View {
     @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
     @Environment(DailyMetricsModel.self) private var metrics
     @Query(sort: \WorkoutSession.startedAt) private var sessions: [WorkoutSession]
 
@@ -241,7 +255,7 @@ struct LiftGoalsMetricRow: View {
                                        trainingStatus: metrics.trainingStatus)
         }
         let percent = projection?.progress.map { "\(Int(($0 * 100).rounded()))%" }
-        let unitText = first.map { "of " + LiftGoalHistory.title($0, unit: settings.weightUnit) } ?? "Set a target lift"
+        let unitText = first.map { "of " + LiftGoalHistory.title($0, unit: gym.liftingUnit) } ?? "Set a target lift"
         return MetricRow(
             title: goals.count > 1 ? "Lift goals (\(goals.count))" : "Lift goal",
             value: percent,

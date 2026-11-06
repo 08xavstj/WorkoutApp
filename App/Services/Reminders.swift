@@ -194,7 +194,8 @@ nonisolated enum Reminders {
     /// - Returns: the day whose morning reminder carries the weigh-in line, if any.
     @discardableResult
     static func scheduleCheckIns(enabled: Bool, morningMinutes: Int, eveningMinutes: Int, morningDone: Bool, eveningDone: Bool,
-                                 hrvMissing: Bool = false, weighInNudge: Bool = false, bedByTonight: String? = nil) async -> Date? {
+                                 hrvMissing: Bool = false, logsHRV: Bool = true, weighInNudge: Bool = false,
+                                 bedByTonight: String? = nil) async -> Date? {
         let center = UNUserNotificationCenter.current()
         let ids = (0..<7).flatMap { ["checkin|m|\($0)", "checkin|e|\($0)"] }
         center.removePendingNotificationRequests(withIdentifiers: ids)
@@ -208,7 +209,7 @@ nonisolated enum Reminders {
             if !skipMorning, let fire = fireDate(day: day, minutes: morningMinutes, calendar: calendar), fire > .now {
                 let withNudge = weighInNudge && nudgeDay == nil
                 if withNudge { nudgeDay = day }
-                let content = morningContent(hrvOnly: offset == 0 && morningDone && hrvMissing, weighIn: withNudge)
+                let content = morningContent(hrvOnly: offset == 0 && morningDone && hrvMissing, weighIn: withNudge, asksForHRV: logsHRV)
                 await add(content, identifier: "checkin|m|\(offset)", at: fire, center: center, calendar: calendar)
             }
             let skipEvening = offset == 0 && eveningDone
@@ -221,14 +222,16 @@ nonisolated enum Reminders {
     }
 
     /// "Morning check-in: HRV and how you feel", or only the HRV when the rest is done.
-    static func morningContent(hrvOnly: Bool, weighIn: Bool) -> UNMutableNotificationContent {
+    /// - Parameter asksForHRV: false for people who don't log HRV in the app
+    ///   (their watch writes it to Apple Health), so they aren't asked for it.
+    static func morningContent(hrvOnly: Bool, weighIn: Bool, asksForHRV: Bool = true) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = "Morning check-in"
         if hrvOnly {
             content.body = "Add last night's HRV; the rest of the check-in is done."
             content.userInfo = ["link": "workoutapp://hrv"]
         } else {
-            content.body = "Last night's HRV and how you feel. 30 seconds."
+            content.body = asksForHRV ? "Last night's HRV and how you feel. 30 seconds." : "How you feel this morning. 30 seconds."
             content.userInfo = ["link": "workoutapp://checkin/morning"]
         }
         if weighIn {

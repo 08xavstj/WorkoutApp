@@ -19,25 +19,33 @@ struct WeeklySetsCard: View {
     private static let scale = 25.0
 
     var body: some View {
-        let states = Self.shown.compactMap { muscles.states[$0] }
-        let anyTrained = states.contains { $0.weeklySets >= 0.5 }
         // This block week's target per muscle (`VolumeProgression`), drawn as a tick on each bar.
         let targets = plans.volumeTargets(muscles: muscles)?.sets ?? [:]
+        // Block targets are per calendar week, so with them the bars count
+        // since Monday (`MuscleModel.weekSets`); without, the last 7 days.
+        let sinceMonday = !targets.isEmpty
+        let states = Self.shown.compactMap { muscles.states[$0] }.map { state in
+            var shown = state
+            if sinceMonday { shown.weeklySets = muscles.weekSets[state.muscle] ?? 0 }
+            return shown
+        }
+        let anyTrained = states.contains { $0.weeklySets >= 0.5 }
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                CardLabel(text: "Hard sets this week", color: Theme.lifting)
+                CardLabel(text: sinceMonday ? "Hard sets since Monday" : "Hard sets, last 7 days", color: Theme.lifting)
                 Spacer()
-                Text("Target 10-20")
+                Text(Self.targetChip(targets))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.recoveryHighText)
             }
             if !anyTrained {
-                Text("Log a gym session and each muscle's sets for the last 7 days show here.")
+                Text(sinceMonday ? "Log a gym session and each muscle's sets since Monday show here."
+                                 : "Log a gym session and each muscle's sets for the last 7 days show here.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             } else {
                 ForEach(states) { state in
-                    row(state, target: targets[state.muscle])
+                    row(state, target: targets[state.muscle], period: sinceMonday ? "since Monday" : "in the last 7 days")
                 }
                 Text("A hard set is one taken within about 4 reps of failure. About 10-20 a week per muscle builds the most muscle for most people (Schoenfeld et al., J Sports Sci 2017); more still helps a little, with diminishing returns past 20 (Pelland et al., Sports Med 2026). Sets for helper muscles (e.g. triceps on bench press) count as half.")
                     .font(.caption)
@@ -52,7 +60,15 @@ struct WeeklySetsCard: View {
         .card()
     }
 
-    private func row(_ state: MuscleRecovery.State, target: Int?) -> some View {
+    /// "Block target 8-12" for this week's per-muscle targets (the ticks);
+    /// "Target 10-20" without a block (Schoenfeld et al. 2017).
+    private static func targetChip(_ targets: [Muscle: Int]) -> String {
+        let values = shown.compactMap { targets[$0] }
+        guard let low = values.min(), let high = values.max() else { return "Target 10-20" }
+        return low == high ? "Block target \(low)" : "Block target \(low)-\(high)"
+    }
+
+    private func row(_ state: MuscleRecovery.State, target: Int?, period: String) -> some View {
         let sets = state.weeklySets
         let color: Color = switch state.volume {
         case .none, .low: Theme.oxygen
@@ -80,7 +96,7 @@ struct WeeklySetsCard: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(state.muscle.name): \(sets.formatted(.number.precision(.fractionLength(0...1)))) hard sets this week, \(state.volume.rawValue.lowercased())\(targetText)")
+        .accessibilityLabel("\(state.muscle.name): \(sets.formatted(.number.precision(.fractionLength(0...1)))) hard sets \(period), \(state.volume.rawValue.lowercased())\(targetText)")
     }
 
     private func bar(sets: Double, color: Color, target: Int?) -> some View {
@@ -434,6 +450,7 @@ struct StrengthForHealthCard: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @Environment(UserSettings.self) private var settings
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(GymStore.self) private var gym
 
     var body: some View {
         let results = StrengthForHealth.assess(lifts: bestLifts, bodyMassKg: bodyMassKg, sex: settings.sex, age: settings.age)
@@ -477,7 +494,8 @@ struct StrengthForHealthCard: View {
     }
 
     private func liftRow(_ result: StrengthForHealth.Result) -> some View {
-        let unit = settings.weightUnit
+        // Lifts in the gym's unit, as on every lifting screen (`GymStore.liftingUnit`).
+        let unit = gym.liftingUnit
         let e1RM = unit.display(result.estimatedOneRepMaxKg).formatted(.number.precision(.fractionLength(0)))
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {

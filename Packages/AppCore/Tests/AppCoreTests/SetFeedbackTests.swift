@@ -10,7 +10,8 @@ struct SetFeedbackTests {
     @Test func shortOfThePlanHoldsTheLoad() {
         let verdict = SetFeedback.verdict(logged: set(60, 6, 9), last: set(60, 8, 8), targetReps: 8, targetRPE: 8)
         #expect(verdict == .short(reps: 2))
-        #expect(verdict?.message(unit: "kg") == "2 short: the planner will hold the load")
+        #expect(verdict?.message(unit: "kg") == "2 short · no weight added next session")
+        #expect(verdict?.message(unit: "kg", targetReps: 8) == "2 short of 8 · no weight added next session")
         #expect(verdict?.isCaution == true)
     }
 
@@ -72,5 +73,16 @@ struct SetFeedbackTests {
             return false
         }
         #expect(!hasRepRecord)
+    }
+}
+
+struct BodyweightRecordTests {
+    @Test func bodyweightLiftsGetARepRecord() {
+        let earlier = [LiftProgress.LoggedSession(date: .now.addingTimeInterval(-86_400), sets: [.init(weight: 0, reps: 12)])]
+        let records = SetFeedback.records(today: [.init(weight: 0, reps: 14)], earlier: earlier)
+        #expect(records.contains(.reps(weight: 0, reps: 14)))
+        #expect(SetFeedback.Record.reps(weight: 0, reps: 14).message(unit: "kg") == "Most reps in a set: 14")
+        // Matching the old best isn't a record.
+        #expect(SetFeedback.records(today: [.init(weight: 0, reps: 12)], earlier: earlier).isEmpty)
     }
 }

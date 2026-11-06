@@ -5,6 +5,8 @@ import AppCore
 /// Asks how hard the session felt (this feeds strain), then saves it.
 struct FinishWorkoutSheet: View {
     @Bindable var session: WorkoutSession
+    /// Personal records not shown during the workout (`SetFeedback.records`).
+    var records: [RecordBanner] = []
     let onFinished: () -> Void
 
     @Environment(\.modelContext) private var modelContext
@@ -25,6 +27,9 @@ struct FinishWorkoutSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !records.isEmpty {
+                    recordsSection
+                }
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         effortHeader
@@ -110,6 +115,24 @@ struct FinishWorkoutSheet: View {
                 .foregroundStyle(Theme.liftingText)
         }
         .accessibilityHidden(true)
+    }
+
+    /// Quiet and factual, like the banner during the workout (behaviour-change.md).
+    private var recordsSection: some View {
+        Section("Personal records") {
+            ForEach(records, id: \.order) { record in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(record.exercise)
+                        .font(.headline)
+                    ForEach(record.lines, id: \.self) { line in
+                        Text(line)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 
     /// Sets the user filled in but didn't tick.

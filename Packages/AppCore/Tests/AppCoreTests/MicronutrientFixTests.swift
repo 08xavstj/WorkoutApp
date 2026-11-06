@@ -75,6 +75,15 @@ struct MicronutrientFixTests {
         #expect(Micronutrients.summaryLine(findings: two) == "2 low this week: iron and magnesium")
     }
 
+    @Test func fibreUsesTheAppsSpellingAndAPlainLowEffect() throws {
+        // The app's copy is British English ("fibre", "behaviour"); the name matches it.
+        #expect(Micronutrients.Nutrient.fiber.name == "Fibre")
+        let low = Micronutrients.assess(averages: [.fiber: 10], daysLogged: 7, sex: .male)
+        let effect = try #require(low.first { $0.nutrient == .fiber }?.effect)
+        #expect(effect.hasPrefix("Fibre helps you feel full"))
+        #expect(effect.contains("Reynolds"))
+    }
+
     @Test func athleteNotesOnlyWhereTheIOCConsensusSaysSo() {
         #expect(Micronutrients.athleteNote(.iron, sex: .female, focuses: [.endurance])?.contains("ferritin") == true)
         #expect(Micronutrients.athleteNote(.iron, sex: .male, focuses: [.muscle]) == nil)

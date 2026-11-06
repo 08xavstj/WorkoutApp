@@ -144,10 +144,13 @@ struct CardioPlannerTests {
                                                    lowRecovery: true, liftedHeavyLowerToday: false))
         #expect(low.minutes == 15)
         #expect(low.title == "Easy ride · 15 min")
+        #expect(low.detail.hasPrefix("Recovery is low"))
         // A strain range 30 minutes would pass also shortens it.
         let tight = try #require(CardioPlanner.today(slots: fixed, doneSlots: [], doneToday: false, weekday: 4, goals: muscle,
                                                      lowRecovery: false, liftedHeavyLowerToday: false, strainRange: 0...10))
         #expect(tight.minutes == 15)
+        // …and says why: the strain range, not recovery.
+        #expect(tight.detail == "30 minutes would pass today's strain range: keep it to 15 easy minutes")
 
         let flexible = [CardioPlanner.Slot(index: 0, weekday: nil, kind: .row, minutes: 30),
                         CardioPlanner.Slot(index: 1, weekday: nil, kind: .row, minutes: 30)]

@@ -43,6 +43,7 @@ struct HealthNavigationRow<Destination: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(hint)
+        .accessibilityIdentifier("row-\(title)") // UI tests (ScreenshotTests)
     }
 }
 

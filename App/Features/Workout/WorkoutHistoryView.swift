@@ -4,7 +4,7 @@ import SwiftData
 /// Past gym sessions, newest first.
 struct WorkoutHistoryView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
     @Environment(\.healthClient) private var health
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
@@ -24,7 +24,7 @@ struct WorkoutHistoryView: View {
             }
             ForEach(finished) { session in
                 NavigationLink(value: session) {
-                    SessionRow(session: session, unit: settings.weightUnit)
+                    SessionRow(session: session, unit: gym.liftingUnit)
                 }
             }
             .onDelete { pendingDelete = $0 }

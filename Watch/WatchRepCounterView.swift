@@ -9,31 +9,49 @@ import AppCore
 /// dot per rep shaded by bar speed, and one tap with "Slowing" once the bar has
 /// slowed about 20 % (Hickmott 2022, see `RepDetection`). Shown only when the
 /// phone says the setting is on and the exercise is a barbell squat or
-/// deadlift. Counting runs only while the set is in progress: not during rest
-/// or a pause.
+/// deadlift. Counting starts only when you tap "Start set" under the bar (so
+/// walking out and unracking aren't counted, app choice) and runs only while
+/// the set is in progress: not during rest or a pause.
 struct WatchRepCounterView: View {
     @Environment(WatchWorkoutModel.self) private var model
-    /// "exercise-set" index key of the set being done.
+    /// `WatchSession.setKey` of the set being done.
     let setKey: String
+    /// The set "Start set" was tapped for, and how many taps (a tap after the
+    /// counter stopped on its own starts it again).
+    @State private var startedKey: String?
+    @State private var starts = 0
 
     private var counter: RepCounter { RepCounter.shared }
 
     private nonisolated struct RunKey: Hashable {
         var setKey: String
         var active: Bool
+        var starts: Int
     }
 
+    private var canRun: Bool { model.restEndsAt == nil && model.phase == .running }
+
     private var runKey: RunKey {
-        RunKey(setKey: setKey, active: model.restEndsAt == nil && model.phase == .running)
+        RunKey(setKey: setKey, active: canRun && startedKey == setKey, starts: starts)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Experimental · squat and deadlift only")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
             WatchRepCountLine(count: shownCount, isRunning: isRunningHere, isAvailable: counter.isAvailable)
+            if counter.isAvailable, canRun, !isRunningHere {
+                Button {
+                    startedKey = setKey
+                    starts += 1
+                } label: {
+                    Label("Start set", systemImage: "play.fill")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(WatchTheme.lifting)
+                .accessibilityHint("Starts the experimental rep counter")
+            }
             if shownCount != nil {
                 WatchRepDots(speeds: speeds, losses: losses)
             }
@@ -44,7 +62,7 @@ struct WatchRepCounterView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
         .background(WatchTheme.lifting.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .task(id: runKey) {
             await run(runKey)
         }
@@ -57,8 +75,8 @@ struct WatchRepCounterView: View {
     private var speeds: [Double] { isThisSet ? counter.analysis.relativeSpeeds : [] }
     private var losses: [Double] { isThisSet ? counter.analysis.losses : [] }
 
-    /// Counts while the set is in progress; stops when it isn't, or when the
-    /// view goes away (the task is cancelled).
+    /// Counts once started while the set is in progress; stops when it isn't,
+    /// or when the view goes away (the task is cancelled).
     private func run(_ key: RunKey) async {
         guard key.active else {
             counter.stop()
@@ -86,6 +104,9 @@ private struct WatchRepCountLine: View {
             Text(title)
                 .font(.headline)
                 .monospacedDigit()
+            Text("Beta")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             Text(status)
                 .font(.caption2)
@@ -103,7 +124,7 @@ private struct WatchRepCountLine: View {
     private var status: String {
         guard isAvailable else { return "" }
         if isRunning { return count == nil ? "Counts from rep 3" : "Counting" }
-        return count == nil ? "Starts with the set" : "Edit if wrong"
+        return count == nil ? "" : "Edit if wrong"
     }
 }
 

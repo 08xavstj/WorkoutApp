@@ -193,8 +193,22 @@ struct RepDetectionTests {
             #expect(RepDetection.supports(exerciseID: id), "\(id)")
         }
         for id in ["Barbell_Bench_Press_-_Medium_Grip", "Leg_Press", "Goblet_Squat", "One-Arm_Kettlebell_Swings",
-                   "Stiff-Legged_Dumbbell_Deadlift", "Barbell_Lunge", "unknown"] {
+                   "Stiff-Legged_Dumbbell_Deadlift", "Barbell_Lunge", "unknown",
+                   // Barbell hinge-slot lifts where the wrist doesn't travel with the bar.
+                   "Barbell_Hip_Thrust", "Barbell_Glute_Bridge"] {
             #expect(!RepDetection.supports(exerciseID: id), "\(id)")
+        }
+    }
+
+    /// Every supported id is a real exercise: a barbell lift in the planner's
+    /// catalog, or one of the library's squat and deadlift variants.
+    @Test func supportedIDsAreBarbellSquatsAndDeadlifts() {
+        let library: Set<String> = ["Barbell_Deadlift", "Sumo_Deadlift", "Deficit_Deadlift", "Trap_Bar_Deadlift",
+                                    "Barbell_Full_Squat", "Front_Barbell_Squat"]
+        for id in RepDetection.supportedExerciseIDs where !library.contains(id) {
+            #expect(ExerciseCatalog.exercise(id: id)?.load == .barbell, "\(id)")
+            let slot = ExerciseCatalog.slot(for: id)
+            #expect(slot == .squat || slot == .hinge, "\(id)")
         }
     }
 }

@@ -50,4 +50,38 @@ public struct HeartRateProfile: Sendable, Equatable {
         guard fraction >= 0.5 else { return nil }
         return min(5, Int((fraction - 0.5) / 0.1) + 1)
     }
+
+    /// The light band below zone 1: 30-50% of reserve. 30% is where strain
+    /// starts counting (`StrainCalculator.minimumReserveFraction`, the bottom
+    /// of ACSM's "light" 30-39% HRR) and 50% is zone 1's floor; ACSM calls
+    /// 40-59% "moderate" (ACSM's Guidelines for Exercise Testing and
+    /// Prescription, 10th ed. 2018), so the upper half of this band is
+    /// moderate effort. Lifting often sits here between sets.
+    public static let lightBand = 0.3..<0.5
+
+    /// True for heart rate in `lightBand`.
+    public func isLight(_ bpm: Double) -> Bool {
+        Self.lightBand.contains(reserveFraction(for: bpm))
+    }
+
+    /// Heart rate at a fraction of reserve (for band edges in bpm).
+    public func heartRate(atReserve fraction: Double) -> Double {
+        restingHeartRate + fraction * (maxHeartRate - restingHeartRate)
+    }
+
+    /// Minutes of light (30-50% HRR) heart rate in a series, counted the way
+    /// `StrainCalculator` counts zone minutes: each reading stands for the
+    /// time to the next, at most 2 minutes, and gaps over 10 minutes count
+    /// for nothing.
+    public func lightMinutes(_ heartRate: [HeartRateSample], maxSampleGap: TimeInterval = 10 * 60,
+                             maxMinutesPerSample: Double = 2) -> Double {
+        let samples = heartRate.sorted { $0.date < $1.date }
+        var total = 0.0
+        for (current, next) in zip(samples, samples.dropFirst()) {
+            let gap = next.date.timeIntervalSince(current.date)
+            guard gap > 0, gap <= maxSampleGap, isLight(current.bpm) else { continue }
+            total += min(gap / 60, maxMinutesPerSample)
+        }
+        return total
+    }
 }

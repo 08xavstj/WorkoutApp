@@ -285,8 +285,23 @@ struct CheckInView: View {
     private func load() {
         if let saved = store.morning() { morning = saved }
         if let saved = store.evening() { evening = saved }
+        if kind == .morning { carryOverPains() }
         hrv = todayHRV?.milliseconds
         hrvSource = todayHRV?.source ?? "Garmin"
+    }
+
+    /// Pain still current from earlier days (`PainGuard.active`, 7 days) is
+    /// listed as it was ("from Mon"), so it can be updated or set to 0 to
+    /// clear it. Left as it is, it keeps its old date and still expires on time.
+    private func carryOverPains() {
+        let startOfToday = Calendar.current.startOfDay(for: .now)
+        let reports = PainLogStore.shared.allReports(checkIns: store, health: [])
+        let earlier = PainGuard.active(reports, today: .now).filter { $0.loggedAt < startOfToday }
+        var pains = morning.pains ?? []
+        for report in earlier where !pains.contains(where: { $0.area == report.area }) {
+            pains.append(report)
+        }
+        morning.pains = pains.isEmpty ? nil : pains
     }
 
     private func save() {
@@ -326,7 +341,8 @@ struct CheckInView: View {
                 let symptoms = morning.symptoms
                 Task { try? await health.saveSymptoms(symptoms, date: .now) }
                 // Lower back pain → Apple Health's symptom type, the only area it has.
-                let backPain = morning.pains?.first { $0.area == .lowerBack }?.level
+                // Only an answer from today: an unchanged carry-over isn't a new sample.
+                let backPain = morning.pains?.first { $0.area == .lowerBack && Calendar.current.isDateInToday($0.loggedAt) }?.level
                 Task { try? await health.saveLowerBackPain(level: backPain, date: .now) }
             }
             // Late hard workout last night is filled in from your data, not asked.
@@ -390,13 +406,20 @@ struct PainQuestions: View {
         Section {
             ChipFlow(options: PainArea.allCases, selection: areas, label: \.title, color: Theme.recoveryLow)
             ForEach(pains ?? []) { report in
-                PainLevelRow(area: report.area, level: level(for: report.area), worse: worse(for: report.area))
+                PainLevelRow(area: report.area, level: level(for: report.area), worse: worse(for: report.area),
+                             from: Self.fromText(report.loggedAt))
             }
         } header: {
             Text("Something hurts?")
         } footer: {
             Text(PainGuard.ruleText + " 0 clears an area. This isn't a diagnosis.")
         }
+    }
+
+    /// "from Mon" for an answer carried over from an earlier day; nil for today's.
+    static func fromText(_ loggedAt: Date) -> String? {
+        guard !Calendar.current.isDateInToday(loggedAt) else { return nil }
+        return "from " + loggedAt.formatted(.dateTime.weekday(.abbreviated))
     }
 
     private func level(for area: PainArea) -> Binding<Int?> {
@@ -426,12 +449,21 @@ private struct PainLevelRow: View {
     let area: PainArea
     @Binding var level: Int?
     @Binding var worse: Bool
+    /// "from Mon" when the answer is from an earlier day; set it to 0 to clear it.
+    var from: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(area.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.primaryText)
+            HStack(spacing: 6) {
+                Text(area.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                if let from {
+                    Text(from)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
             ScalePicker(value: $level, range: 0...10, color: Theme.recoveryLow, endLabels: ("None", "Worst"))
             Toggle("Worse after training or the next day?", isOn: $worse)
                 .font(.subheadline)

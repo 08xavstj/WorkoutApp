@@ -84,7 +84,7 @@ public enum SetKind: String, Codable, Sendable, CaseIterable, Identifiable {
     public var howTo: String {
         switch self {
         case .straight: "Rest, then the next set."
-        case .drop: "Straight after the set before: about a quarter lighter, no rest, as many good reps as you can."
+        case .drop: "Straight after the set before: at least 20% lighter, no rest, as many good reps as you can."
         case .restPause: "Same weight after about \(SetKind.restPauseRestSeconds) s, as many good reps as you can."
         case .myoRep: "Same weight after 3-5 deep breaths, about \(SetKind.myoRepRestSeconds) s: a few reps, stop before form slips."
         case .failure: "Keep going until you can't do another rep with good form."
@@ -212,17 +212,24 @@ public enum SetStructure {
         return "Set \(position.number ?? 1) of \(total)"
     }
 
-    /// Extra hard-set credit for a set followed by stages: a drop set,
-    /// rest-pause or myo-rep set counts as one hard set plus a half, the way
-    /// indirect (helper-muscle) sets already count half (feature spec §3.3).
-    /// An app rule, not a trial result: the trials found growth similar to
-    /// several straight sets, so this undercounts rather than overcounts.
-    public static let stageBonus = 0.5
+    /// The most hard sets one set and its stages count for. The trials
+    /// compared a drop or rest-pause cluster with about three straight sets
+    /// and found similar growth (Coleman 2022; Sødal 2023; Carvalho 2022), so
+    /// a cluster counts as the straight sets it stands in for: the set plus
+    /// one per stage, up to three. That is also exactly what "Same work, less
+    /// time" (`TimeSaver`) replaces (stages = sets − 1), so a converted
+    /// session meets its planned sets. The cap and the one-per-stage rule are
+    /// the app's reading of those trials, not a trial result; myo-reps are
+    /// untested and counted the same way. (This replaces the feature spec's
+    /// first "one and a half", which made a converted session look 1.5 sets
+    /// short of its plan per exercise and held the weekly volume back.)
+    public static let maximumClusterCredit = 3.0
 
-    /// Hard sets for a working set and its stages, for weekly volume.
-    /// Fatigue (`MuscleRecovery`) and session effort count it as one set.
+    /// Hard sets for a working set and its stages, for weekly volume: 1 + one
+    /// per stage, at most `maximumClusterCredit`. Fatigue (`MuscleRecovery`)
+    /// and session effort count it as one set.
     public static func hardSetCredit(stages: Int) -> Double {
-        stages > 0 ? 1 + stageBonus : 1
+        min(maximumClusterCredit, 1 + Double(max(0, stages)))
     }
 }
 
@@ -246,7 +253,7 @@ public enum TimeSaver {
 
     /// Each drop takes off at least this share of the weight: drop-set
     /// trials mostly cut about 20-30% a stage (protocols in Sødal 2023; not
-    /// re-verified here, so the UI says "about a quarter").
+    /// re-verified here). The UI says "at least 20%": the drop is rounded down to the gym.
     public static let dropFraction = 0.2
     /// At most two drops: 1-3 is the usual range in the trials (not
     /// re-verified); two keeps the stages short. An app choice.
@@ -315,8 +322,9 @@ public enum TimeSaver {
     /// True when the exercise can take the style: not the first exercise
     /// (fatigue carries over into everything after it, feature spec §3.3),
     /// an isolation movement (never a multi-joint lift, see below), not core,
-    /// two or more straight sets, and for drops a load the gym can make
-    /// lighter.
+    /// not in a superset (a no-rest chain doesn't fit "one set of each, then
+    /// rest"), two or more straight sets, and for drops a load the gym can
+    /// make lighter.
     ///
     /// Multi-joint lifts (squats, presses, rows, deadlifts) always keep
     /// straight sets. That's a safety choice, not a trial result: stages and
@@ -324,7 +332,7 @@ public enum TimeSaver {
     /// strength gains little from going that close to failure (Robinson et
     /// al., Sports Med 2024).
     public static func isEligible(_ exercise: PlannedExercise, at index: Int, kind: SetKind, gym: GymProfile) -> Bool {
-        guard kind.isStage, index > 0, exercise.lastSetKind == nil, exercise.sets >= 2,
+        guard kind.isStage, index > 0, exercise.lastSetKind == nil, exercise.supersetGroup == nil, exercise.sets >= 2,
               let slot = ExerciseCatalog.slot(for: exercise.exerciseID), !slot.isCompound, slot != .core else { return false }
         guard kind == .drop else { return true }
         guard let loadKind = exercise.loadKind, gym.has(loadKind), !gym.achievableLoads(for: loadKind).isEmpty else { return false }
@@ -334,7 +342,7 @@ public enum TimeSaver {
 
     /// Makes the exercise's straight sets one set plus stages of `kind`.
     /// Drop loads are rounded to the gym; with no planned load (first time)
-    /// the stages say "about a quarter lighter" and carry no load.
+    /// the stages say "at least 20% lighter" and carry no load.
     /// Rest-pause and myo-rep stages keep the set's load (`load` nil = same).
     public static func convert(_ exercise: inout PlannedExercise, to kind: SetKind, gym: GymProfile) {
         let count = stageCount(for: kind, replacingSets: exercise.sets)
@@ -440,7 +448,7 @@ public enum TimeSaver {
                 let chain = ([load] + loads).map(fmt).joined(separator: " → ")
                 return "Drop set: \(chain) \(unit.rawValue), no rest between"
             }
-            return "Drop set: then \(stages.count) drop\(plural), each about a quarter lighter, no rest between"
+            return "Drop set: then \(stages.count) drop\(plural), each at least 20% lighter, no rest between"
         case .restPause:
             return "Rest-pause: then \(stages.count) mini-set\(plural) of about \(reps), \(SetKind.restPauseRestSeconds) s apart"
         case .myoRep:

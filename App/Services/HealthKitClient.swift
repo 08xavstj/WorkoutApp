@@ -8,8 +8,10 @@ import os
 // HKHealthStore is documented as thread-safe, hence @unchecked.
 nonisolated final class HealthKitClient: @unchecked Sendable {
     let store = HKHealthStore()
-    /// Beat-to-beat RMSSD for finished nights, so they're read only once.
-    private let rmssdCache = RMSSDCache()
+    /// Beat-to-beat RMSSD for finished nights, so they're read only once (kept on disk).
+    private let rmssdCache = NightlyValueCache(fileName: "rmssd-nights.json")
+    /// Average sleeping heart rate for finished nights (`nightlySleepingHeartRate`).
+    let sleepingHeartRateCache = NightlyValueCache(fileName: "sleeping-hr-nights.json")
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -109,6 +111,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     @concurrent
     func requestAuthorization() async throws {
+        if DemoHealth.active != nil { return } // demo mode: no Health sheet
         guard isAvailable else { return }
         try await store.requestAuthorization(toShare: shareTypes, read: readTypes)
     }
@@ -122,6 +125,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     @concurrent
     @discardableResult
     func requestAuthorizationIfNeeded() async -> Bool {
+        if DemoHealth.active != nil { return false } // demo mode: no Health sheet
         guard isAvailable else { return false }
         let status: HKAuthorizationRequestStatus
         do {
@@ -142,6 +146,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     /// Age and sex from the Health profile, if the user allowed it.
     func profileCharacteristics() -> (age: Int?, sex: BiologicalSex?) {
+        if let demo = DemoHealth.active { return (demo.age, .male) }
         var age: Int?
         if let birthday = try? store.dateOfBirthComponents(),
            let date = Calendar.current.date(from: birthday) {
@@ -160,6 +165,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     @concurrent
     func heartRateSamples(from start: Date, to end: Date) async throws -> [HeartRateSample] {
+        if let demo = DemoHealth.active { return demo.heartRate(from: start, to: end) }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: HKQuantityType(.heartRate), predicate: predicate)],
@@ -175,6 +181,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// the watch records. Much lighter than raw samples for multi-day ranges.
     @concurrent
     func heartRatePerMinute(from start: Date, to end: Date) async throws -> [HeartRateSample] {
+        if let demo = DemoHealth.active { return demo.heartRate(from: start, to: end) }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKStatisticsCollectionQueryDescriptor(
             predicate: .quantitySample(type: HKQuantityType(.heartRate), predicate: predicate),
@@ -196,6 +203,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// ring: about brisk-walk intensity or harder), one per minute.
     @concurrent
     func exerciseMinutes(from start: Date, to end: Date) async throws -> [Date] {
+        if let demo = DemoHealth.active { return demo.exerciseMinutes(from: start, to: end) }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKStatisticsCollectionQueryDescriptor(
             predicate: .quantitySample(type: HKQuantityType(.appleExerciseTime), predicate: predicate),
@@ -217,6 +225,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// (e.g. "AirPods Pro" via this app vs. "Garmin Connect").
     @concurrent
     func heartRateBySource(from start: Date, to end: Date) async throws -> [HeartRateSource] {
+        if let demo = DemoHealth.active { return demo.heartRateSources(from: start, to: end) }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: HKQuantityType(.heartRate), predicate: predicate)],
@@ -245,6 +254,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// device name so labels match `heartRateBySource` ("AirPods Pro (Tensile)").
     @concurrent
     func heartRatePerMinuteBySource(from start: Date, to end: Date) async throws -> [HeartRateSource] {
+        if let demo = DemoHealth.active { return demo.heartRateSources(from: start, to: end) }
         let type = HKQuantityType(.heartRate)
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKStatisticsCollectionQueryDescriptor(
@@ -297,6 +307,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// reflects sleep rather than daytime stress. Returned newest first.
     @concurrent
     func nightlyVitals(days: Int, endingOn day: Date) async throws -> [DailyVitals] {
+        if let demo = DemoHealth.active { return demo.nightlyVitals(days: days, endingOn: day) }
         let calendar = Calendar.current
         let lastNight = calendar.startOfDay(for: day)
         guard let end = calendar.date(byAdding: .day, value: 1, to: lastNight),
@@ -345,6 +356,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Sleep samples for the night ending on the morning of `day` (6 pm the day before to 2 pm).
     @concurrent
     func sleepSamples(forNightEnding day: Date) async throws -> [SleepSample] {
+        if let demo = DemoHealth.active { return demo.sleepSamples(forNightEnding: day) }
         let calendar = Calendar.current
         let morning = calendar.startOfDay(for: day)
         let start = morning.addingTimeInterval(-6 * 3600)
@@ -366,7 +378,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             case .asleepUnspecified: stage = .unspecified
             @unknown default: return nil
             }
-            return SleepSample(stage: stage, start: sample.startDate, end: sample.endDate)
+            return SleepSample(stage: stage, start: sample.startDate, end: sample.endDate, source: sample.sourceRevision.source.name)
         }
     }
 
@@ -375,8 +387,9 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Empty for watches that don't share beat-to-beat data (e.g. Garmin).
     @concurrent
     func nightlyRMSSD(nights allNights: [SleepNight]) async -> [Date: Double] {
+        if DemoHealth.active != nil { return [:] } // demo mode: SDNN only
         let today = Calendar.current.startOfDay(for: .now)
-        var known = rmssdCache.values(for: allNights.map(\.date))
+        var known = rmssdCache.values(for: allNights)
         // Only nights not read before (today's is always re-read: the watch syncs late).
         let nights = allNights.filter { known[$0.date] == nil || $0.date >= today }
         guard let first = nights.map(\.bedtime).min(), let last = nights.map(\.wake).max() else {
@@ -396,12 +409,14 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
         // Apple records about a minute at a time; RMSSD needs ~3 minutes of
         // clean beats, so a night needs several recordings.
+        var finished: [(night: SleepNight, value: Double?)] = []
         for night in nights {
             let values = valuesByNight[night.date] ?? []
             let value: Double? = values.count >= 3 ? values.sorted()[values.count / 2] : nil
             known[night.date] = .some(value)
-            if night.date < today { rmssdCache.store(value, for: night.date) }
+            if night.date < today { finished.append((night, value)) }
         }
+        rmssdCache.store(finished)
         return known.compactMapValues { $0 }
     }
 
@@ -450,9 +465,11 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         for (nutrient, identifier, unit) in types {
             let series = (try? await dailySeries(identifier, unit: unit, days: days + 1, cumulative: true)) ?? []
             let logged = series.filter { loggedDays.contains($0.date) }
-            // Nothing at all usually means the food app doesn't export this nutrient.
-            guard !logged.isEmpty else { continue }
-            averages[nutrient] = logged.map(\.value).reduce(0, +) / Double(loggedDays.count)
+            // A nutrient on only some logged days is usually one the food app exports
+            // for some foods only; it's left out ("not tracked") rather than read as
+            // low (`NutrientCoverage`: on 80% of logged days, averaged over those days).
+            guard let average = NutrientCoverage.average(logged.map(\.value), loggedDays: loggedDays.count) else { continue }
+            averages[nutrient] = average
         }
         return (averages, loggedDays.count)
     }
@@ -471,6 +488,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// when it started and ended. Nights under 2 hours are left out.
     @concurrent
     func sleepHistory(nights: Int) async throws -> [SleepNight] {
+        if let demo = DemoHealth.active { return demo.sleepHistory(nights: nights) }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         guard let start = calendar.date(byAdding: .day, value: -nights, to: today)?.addingTimeInterval(-6 * 3600) else { return [] }
@@ -528,6 +546,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Most recent body weight in kilograms.
     @concurrent
     func latestBodyMassKg() async throws -> Double? {
+        if let demo = DemoHealth.active { return demo.latest(.bodyMass, since: nil) }
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: HKQuantityType(.bodyMass))],
             sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
@@ -538,6 +557,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     @concurrent
     private func dailySum(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, start: Date, end: Date) async throws -> Double? {
+        if let demo = DemoHealth.active { return demo.sum(DemoHealth.metric(identifier), from: start, to: end) }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKStatisticsQueryDescriptor(
             predicate: .quantitySample(type: HKQuantityType(identifier), predicate: predicate),
@@ -555,6 +575,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Most recent value of a quantity (height, body fat, VO2 max...).
     @concurrent
     func latest(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, since: Date? = nil) async throws -> Double? {
+        if let demo = DemoHealth.active { return demo.latest(DemoHealth.metric(identifier), since: since) }
         let predicate = since.map { HKQuery.predicateForSamples(withStart: $0, end: nil) }
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: HKQuantityType(identifier), predicate: predicate)],
@@ -568,6 +589,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Days without data are left out.
     @concurrent
     func dailySeries(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, days: Int, cumulative: Bool) async throws -> [DatedValue] {
+        if let demo = DemoHealth.active { return demo.dailySeries(DemoHealth.metric(identifier), days: days) }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         guard let end = calendar.date(byAdding: .day, value: 1, to: today),
@@ -593,6 +615,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Average breathing rate during the night ending on the morning of `day`.
     @concurrent
     func overnightRespiratoryRate(forNightEnding day: Date) async throws -> Double? {
+        if let demo = DemoHealth.active { return demo.overnightRespiratoryRate(forNightEnding: day) }
         let morning = Calendar.current.startOfDay(for: day)
         let predicate = HKQuery.predicateForSamples(withStart: morning.addingTimeInterval(-6 * 3600), end: morning.addingTimeInterval(12 * 3600))
         let descriptor = HKSampleQueryDescriptor(
@@ -608,6 +631,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Workouts recorded by other apps (Garmin Connect, Strava...) in a time range.
     @concurrent
     func externalWorkouts(from start: Date, to end: Date) async throws -> [ExternalWorkout] {
+        if let demo = DemoHealth.active { return demo.externalWorkouts(from: start, to: end) }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.workout(predicate)],
@@ -636,6 +660,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// heart-rate recovery and to leave workouts out of the stress estimate).
     @concurrent
     func workoutIntervals(from start: Date, to end: Date) async throws -> [DateInterval] {
+        if let demo = DemoHealth.active { return demo.workoutIntervals(from: start, to: end) }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.workout(predicate)],
@@ -649,6 +674,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Total mindful minutes per day (breathing or meditation sessions).
     @concurrent
     func mindfulMinutes(days: Int) async throws -> [DatedValue] {
+        if let demo = DemoHealth.active { return demo.mindfulMinutes(days: days) }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) else { return [] }
@@ -694,6 +720,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// for movement-break and post-meal-walk nudges (`MovementBreaks`).
     @concurrent
     func hourlySteps(for day: Date) async throws -> [MovementBreaks.HourSteps] {
+        if let demo = DemoHealth.active { return demo.hourlySteps(for: day) }
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: day)
         let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
@@ -741,6 +768,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// user hasn't allowed looks exactly like a deleted workout.
     @concurrent
     func workoutsStillPresent(_ ids: Set<UUID>, readableSince: Date) async throws -> (present: Set<UUID>, canRead: Bool) {
+        if DemoHealth.active != nil { return (ids, true) } // demo mode: never drop a session
         let byID = HKSampleQueryDescriptor(
             predicates: [.workout(HKQuery.predicateForObjects(with: ids))],
             sortDescriptors: []
@@ -810,6 +838,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Saves a finished gym session to Apple Health as Traditional Strength Training.
     @concurrent
     func saveStrengthWorkout(start: Date, end: Date) async throws {
+        if DemoHealth.active != nil { return } // demo mode: nothing is written to Health
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = .traditionalStrengthTraining
         configuration.locationType = .indoor
@@ -889,6 +918,7 @@ extension HealthKitClient {
     /// caffeine or protein entry a food app wrote. Values in `unit`.
     @concurrent
     func timedSamples(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, from start: Date, to end: Date) async throws -> [DatedValue] {
+        if let demo = DemoHealth.active { return demo.timedSamples(DemoHealth.metric(identifier), from: start, to: end) }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: HKQuantityType(identifier), predicate: predicate)],
@@ -923,26 +953,5 @@ nonisolated private final class BeatCollector: @unchecked Sendable {
         finished = true
         lock.unlock()
         if first { resume() }
-    }
-}
-
-/// Remembers each finished night's RMSSD (or that there was none).
-nonisolated private final class RMSSDCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: [Date: Double?] = [:]
-
-    /// Known nights only; a stored nil means "read, no beat-to-beat data".
-    func values(for nights: [Date]) -> [Date: Double?] {
-        lock.lock(); defer { lock.unlock() }
-        var result: [Date: Double?] = [:]
-        for night in nights {
-            if let value = storage[night] { result[night] = value }
-        }
-        return result
-    }
-
-    func store(_ value: Double?, for night: Date) {
-        lock.lock(); defer { lock.unlock() }
-        storage[night] = .some(value)
     }
 }
