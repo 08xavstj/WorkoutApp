@@ -173,7 +173,7 @@ final class ScreenshotTests: XCTestCase {
             (["row-Body measurements", "Body measurements"], "body-measurements"),
             (["row-Progress photos", "Progress photos"], "progress-photos"),
             (["row-Medications", "Medications"], "medications"),
-            (["row-Supplements", "Supplements"], "supplements"),
+            (["row-Supplement evidence", "Supplement evidence", "row-Supplements", "Supplements"], "supplements"),
             (["row-What affects you", "What affects you"], "patterns"),
             (["row-Alcohol and your sleep", "Alcohol and your sleep"], "alcohol-sleep"),
             (["metric-Mood", "Mood"], "mood"),
@@ -459,6 +459,9 @@ final class ScreenshotTests: XCTestCase {
         }.first
         if let backButton {
             backButton.tap()
+        } else if let cancel = bars.lazy.map({ $0.buttons["Cancel"] }).first(where: { $0.exists && $0.isHittable }) {
+            // A page opened as its own sheet (Goals, Gym equipment): close it.
+            cancel.tap()
         } else {
             // Edge swipe, like a person going back.
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
