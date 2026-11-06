@@ -151,6 +151,8 @@ targets:
       # other Shared files need ActivityKit.
       - path: Shared/WatchSession.swift
       - path: Shared/WatchFaceData.swift
+      # The experimental rep counter's signal maths (pure Swift).
+      - path: Packages/AppCore/Sources/AppCore/RepDetection.swift
     dependencies:
       - sdk: HealthKit.framework
       - sdk: WatchConnectivity.framework
@@ -186,6 +188,9 @@ targets:
           them on your wrist.
         NSHealthUpdateUsageDescription: >-
           Tensile saves your gym workouts, with heart rate and calories, to Apple Health.
+        NSMotionUsageDescription: >-
+          Tensile reads your wrist's motion during squat and deadlift sets to count
+          reps, only when rep counting is on.
     settings:
       base:
         SDKROOT: watchos

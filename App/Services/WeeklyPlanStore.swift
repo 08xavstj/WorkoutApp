@@ -16,6 +16,9 @@ final class WeeklyPlanStore {
         var plans: [WeeklyPlan] = []
         /// The current training block (`TrainingBlock`); nil until the first plan is confirmed.
         var block: TrainingBlock? = nil
+        /// Per-muscle weekly set targets, this week and last (`VolumeProgression`).
+        /// Optional so files saved before it existed still decode.
+        var volume: [VolumeProgression.WeekTargets]? = nil
     }
 
     /// Weeks of plans kept (this week included).
@@ -120,7 +123,7 @@ final class WeeklyPlanStore {
     /// Sessions done against this week's target, days left and whether today
     /// had one (`WeeklyPlan.progress`); nil without a plan this week.
     func progress(sessions: [WorkoutSession], extra: Set<Date> = [], now: Date = .now) -> WeeklyPlan.Progress? {
-        plan(containing: now)?.progress(trainingDays: Self.trainingDays(sessions: sessions, extra: extra), now: now)
+        plan(containing: now)?.progress(trainingDays: Self.trainingDays(sessions: sessions, extra: liftingExtra(extra, now: now)), now: now)
     }
 
     /// In a flexible week, the session to do next: the next template's time
@@ -215,7 +218,10 @@ final class WeeklyPlanStore {
 
     /// Starts over from week 1 this week (e.g. after changing goals).
     func restartBlock(now: Date = .now) {
-        saved.block = TrainingBlock(start: WeeklyPlan.weekStart(containing: now), style: trainingStyle)
+        let thisWeek = WeeklyPlan.weekStart(containing: now)
+        saved.block = TrainingBlock(start: thisWeek, style: trainingStyle)
+        // A new block starts every muscle again at week 1's sets.
+        saved.volume?.removeAll { Calendar.current.isDate($0.weekStart, inSameDayAs: thisWeek) }
         write()
     }
 
@@ -258,7 +264,7 @@ final class WeeklyPlanStore {
     /// Days this week with a session so far.
     func sessionsDone(sessions: [WorkoutSession], extra: Set<Date> = [], now: Date = .now) -> Int {
         let plan = self.plan(containing: now) ?? WeeklyPlan(weekStart: WeeklyPlan.weekStart(containing: now))
-        return WeekRecord.make(plan: plan, trainingDays: Self.trainingDays(sessions: sessions, extra: extra)).done
+        return WeekRecord.make(plan: plan, trainingDays: Self.trainingDays(sessions: sessions, extra: liftingExtra(extra, now: now))).done
     }
 
     /// Weekdays this week that had a session.
@@ -269,7 +275,7 @@ final class WeeklyPlanStore {
 
     /// Planned and done counts for every saved week.
     func records(sessions: [WorkoutSession], extra: Set<Date> = []) -> [WeekRecord] {
-        let days = Self.trainingDays(sessions: sessions, extra: extra)
+        let days = Self.trainingDays(sessions: sessions, extra: liftingExtra(extra, now: .now))
         return plans.map { WeekRecord.make(plan: $0, trainingDays: days) }
     }
 
@@ -281,6 +287,125 @@ final class WeeklyPlanStore {
     /// Whole days since the last training day; nil if there has never been one.
     func daysOff(sessions: [WorkoutSession], extra: Set<Date> = [], now: Date = .now) -> Int? {
         RestartPlan.daysOff(lastTrained: Self.trainingDays(sessions: sessions, extra: extra).last, now: now)
+    }
+
+    // MARK: Per-muscle volume (`VolumeProgression`)
+
+    private func savedVolume(for weekStart: Date) -> VolumeProgression.WeekTargets? {
+        saved.volume?.first { Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) }
+    }
+
+    /// This week's per-muscle set targets: the saved ones once the week has
+    /// them, else worked out from last week's targets and sets
+    /// (`VolumeProgression.week`), with the sessions from this week's plan (or
+    /// last week's as the template). Works the same for fixed and flexible
+    /// weeks: the coverage rule picks each session's focus, this sets the
+    /// volume. Nil without a block or plan, or before `MuscleModel` has loaded.
+    func volumeTargets(muscles: MuscleModel, now: Date = .now) -> VolumeProgression.WeekTargets? {
+        let calendar = Calendar.current
+        let thisWeek = WeeklyPlan.weekStart(containing: now)
+        if let stored = savedVolume(for: thisWeek) { return stored }
+        guard muscles.hasRefreshed, let current = saved.block else { return nil }
+        let block = current.covers(weekStart: thisWeek) ? current.week : current.advanced(to: now, style: trainingStyle).week
+        let days = (plan(for: thisWeek) ?? lastPlan(before: thisWeek))?.plannedDays ?? []
+        guard !days.isEmpty else { return nil }
+        let lastMonday = calendar.date(byAdding: .day, value: -7, to: thisWeek) ?? thisWeek
+        let previous = savedVolume(for: lastMonday)
+        // Last week's effort target: as saved with its targets, else the block's week if it was last week's.
+        var lastRPE = block.targetRPE
+        if let previous {
+            lastRPE = previous.targetRPE
+        } else if current.covers(weekStart: lastMonday) {
+            lastRPE = current.week.targetRPE
+        }
+        let style = current.style
+        let lastWeek = VolumeProgression.summarize(muscles.loggedSets, weekStart: lastMonday, targetRPE: lastRPE, style: style)
+        return VolumeProgression.week(weekStart: thisWeek, block: block, style: style, days: days,
+                                      previous: previous, lastWeek: lastWeek, states: muscles.states)
+    }
+
+    /// Saves this week's targets the first time they can be worked out from
+    /// real data (they then hold for the week), keeping this week and last;
+    /// also notes which recent days were only easy cardio (`liftingExtra`).
+    /// Call from a task once `MuscleModel.refresh` has run.
+    func refreshVolume(muscles: MuscleModel, now: Date = .now) {
+        let calendar = Calendar.current
+        if let kind = current?.cardio?.kind {
+            let names = kind.workoutNames
+            cardioOnlyDays = Set(muscles.recentCardio
+                .filter { names.contains($0.name) && $0.minutes >= CardioPlanner.minimumDoneMinutes }
+                .map { calendar.startOfDay(for: $0.start) })
+        } else {
+            cardioOnlyDays = []
+        }
+        let thisWeek = WeeklyPlan.weekStart(containing: now)
+        guard savedVolume(for: thisWeek) == nil, let targets = volumeTargets(muscles: muscles, now: now) else { return }
+        let lastMonday = calendar.date(byAdding: .day, value: -7, to: thisWeek) ?? thisWeek
+        var weeks = (saved.volume ?? []).filter { $0.weekStart >= lastMonday && $0.weekStart < thisWeek }
+        weeks.append(targets)
+        saved.volume = weeks
+        write()
+    }
+
+    /// Direct sets for each muscle today's session trains (`VolumeProgression.sessionGoals`),
+    /// for `WorkoutPlanner.plan(muscleSetGoals:)`: what the week still owes it,
+    /// shared over the sessions left that train it. Empty without targets.
+    func sessionSetGoals(focus: WorkoutFocus, minutes: Int, muscles: MuscleModel, sessions: [WorkoutSession],
+                         extra: Set<Date> = [], now: Date = .now) -> [Muscle: Int] {
+        guard let targets = volumeTargets(muscles: muscles, now: now), let plan = plan(containing: now) else { return [:] }
+        var later: [PlannedDay] = []
+        if plan.isFlexible {
+            // The sessions after this one, from the templates (the days aren't fixed).
+            if let progress = progress(sessions: sessions, extra: extra, now: now) {
+                let templates = plan.sortedDays
+                let after = max(0, progress.remaining - (progress.trainedToday ? 0 : 1))
+                if !templates.isEmpty {
+                    later = (0..<after).map { templates[min(progress.done + 1 + $0, templates.count - 1)] }
+                }
+            }
+        } else {
+            let today = WeeklyPlan.order(Calendar.current.component(.weekday, from: now))
+            later = plan.sortedDays.filter { WeeklyPlan.order($0.weekday) > today }
+        }
+        return VolumeProgression.sessionGoals(targets: targets, doneThisWeek: muscles.weekSets, focus: focus,
+                                              minutes: minutes, laterSessions: later)
+    }
+
+    // MARK: Easy cardio (`CardioPlanner`)
+
+    /// Recent days with a workout of this week's easy-cardio type (set by `refreshVolume`).
+    private(set) var cardioOnlyDays: Set<Date> = []
+
+    /// Watch training days that count toward the lifting quota: in a
+    /// flexible week with easy cardio, days that were only that cardio don't
+    /// (a gym session that day still counts, from `sessions`).
+    private func liftingExtra(_ extra: Set<Date>, now: Date) -> Set<Date> {
+        guard let plan = plan(containing: now), plan.isFlexible, (plan.cardio?.sessionsPerWeek ?? 0) > 0 else { return extra }
+        let calendar = Calendar.current
+        return Set(extra.map { calendar.startOfDay(for: $0) }).subtracting(cardioOnlyDays)
+    }
+
+    /// This week's easy-cardio slots (`CardioPlanner.slots`).
+    func cardioSlots(goals: Goals?, now: Date = .now) -> [CardioPlanner.Slot] {
+        guard let plan = plan(containing: now) else { return [] }
+        return CardioPlanner.slots(for: plan, goals: goals)
+    }
+
+    /// Slots done this week, from Apple Health workouts of that type.
+    func cardioDone(slots: [CardioPlanner.Slot], workouts: [CardioPlanner.Workout], now: Date = .now) -> Set<Int> {
+        guard let kind = slots.first?.kind else { return [] }
+        let weekStart = WeeklyPlan.weekStart(containing: now)
+        let days = CardioPlanner.doneDays(kind: kind, workouts: workouts, weekStart: weekStart)
+        return CardioPlanner.done(slots: slots, doneDays: days, weekStart: weekStart)
+    }
+
+    /// Cardio workouts to tick slots with: the last 10 days from `MuscleModel`
+    /// and today's from `DailyMetricsModel.activities` (refreshed more often).
+    static func cardioWorkouts(muscles: MuscleModel, metrics: DailyMetricsModel) -> [CardioPlanner.Workout] {
+        let today = metrics.activities
+            .filter { !$0.isStrength }
+            .map { CardioPlanner.Workout(name: $0.name, start: $0.start, minutes: $0.minutes) }
+        return muscles.recentCardio + today
     }
 
     // MARK: Coach
@@ -307,6 +432,11 @@ final class WeeklyPlanStore {
         line += "."
         // Training block (`TrainingBlock.coachLine`): week, RIR target, deload or held ramp.
         if let block = saved.block { line += " " + block.coachLine }
+        // Easy cardio (`CardioPlanner`): not part of the lifting sessions above.
+        if let cardio = plan.cardio, cardio.sessionsPerWeek > 0 {
+            let kind = cardio.kind.label.lowercased()
+            line += " Easy cardio: \(cardio.sessionsPerWeek) × \(cardio.minutes) min \(kind)."
+        }
         return line
     }
 }

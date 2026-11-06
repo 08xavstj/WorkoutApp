@@ -20,6 +20,9 @@ struct UpNextCard: View {
     @Environment(MedicationsModel.self) private var meds
     // Builder B: for the hypertension-notification row (watch-features.md 1.1).
     @Environment(VitalsModel.self) private var vitals
+    // Easy cardio from the weekly plan (`CardioPlanner`).
+    @Environment(WeeklyPlanStore.self) private var plans
+    @Environment(MuscleModel.self) private var muscles
 
     /// Most rows shown at once (ux-audit.md 4.6).
     private static let maximumRows = 4
@@ -57,6 +60,7 @@ struct UpNextCard: View {
             items.append(UpNextItem(id: "breathing", minutes: now, kind: .breathing))
         }
         if let bedtime = bedtimeItem() { items.append(bedtime) }
+        if let cardio = cardioItem(now: now) { items.append(cardio) }
         // Builder B: the watch flagged possible hypertension and no 7-day home
         // check has been done since (`HomeBloodPressure.pendingHypertensionEvent`;
         // Apple's validation: sensitivity 41%, specificity 92%, watch-features.md 1.1).
@@ -124,6 +128,30 @@ struct UpNextCard: View {
         return UpNextItem(id: "bedtime", minutes: minutes, kind: .bedtime(
             title: "In bed by \(window.windowText) tonight",
             detail: "Sleep debt \(SleepText.hours(debt.hours))"))
+    }
+
+    /// The weekly plan's easy cardio on its day (any day in a flexible week)
+    /// until a workout of that type is in Apple Health (`CardioPlanner.today`):
+    /// the 15-minute version on a low-recovery day, nothing after a heavy leg
+    /// session when strength is a goal (Schumann 2022).
+    private func cardioItem(now: Int) -> UpNextItem? {
+        let slots = plans.cardioSlots(goals: metrics.goals)
+        guard let kind = slots.first?.kind else { return nil }
+        let workouts = WeeklyPlanStore.cardioWorkouts(muscles: muscles, metrics: metrics)
+        let calendar = Calendar.current
+        let doneToday = CardioPlanner.doneDays(kind: kind, workouts: workouts, weekStart: WeeklyPlan.weekStart(containing: .now))
+            .contains(calendar.startOfDay(for: .now))
+        let heavyLowerToday = muscles.loggedSets.contains { set in
+            calendar.isDateInToday(set.sessionStart) && set.isCompound && set.primary.contains(where: \.isLowerBody)
+        }
+        let lowRecovery = (metrics.recovery?.score ?? 100) < 34 || metrics.trainEasyToday
+        guard let today = CardioPlanner.today(
+            slots: slots, doneSlots: plans.cardioDone(slots: slots, workouts: workouts), doneToday: doneToday,
+            weekday: calendar.component(.weekday, from: .now), goals: metrics.goals, lowRecovery: lowRecovery,
+            liftedHeavyLowerToday: heavyLowerToday, strainRange: metrics.targetStrain
+        ) else { return nil }
+        return UpNextItem(id: "cardio", minutes: now, kind: .info(
+            icon: today.kind.systemImage, color: Theme.oxygen, title: today.title, detail: today.detail))
     }
 
     private static func minutesNow() -> Int {

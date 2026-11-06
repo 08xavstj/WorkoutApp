@@ -27,6 +27,16 @@ struct WorkoutBuilderView: View {
     @State private var showingGym = false
     @State private var didSetUp = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    // Pain and "never again" (`PainGuard`, `ExerciseFilter`).
+    @Environment(\.healthClient) private var health
+    @State private var exclusions = ExerciseExclusions.shared
+    @State private var painLog = PainLogStore.shared
+    /// Lower back pain other apps logged in Apple Health.
+    @State private var healthPains: [PainReport] = []
+    @State private var showingPainLog = false
+    /// Current pain and areas hurting 2+ weeks, worked out in `rebuild` (not on every redraw).
+    @State private var activePains: [PainReport] = []
+    @State private var clinicianAreas: [PainArea] = []
 
     /// Session length. Short sessions are fitted with fewer sets, then paired
     /// exercises (`Supersets`).
@@ -47,6 +57,10 @@ struct WorkoutBuilderView: View {
                     }
                     focusPicker
                     durationPicker
+                    // "Something hurts?": the trainer avoids or eases lifts that load it.
+                    PainGuardRow(pains: activePains, clinicianAreas: clinicianAreas, neverAgainCount: exclusions.items.count) {
+                        showingPainLog = true
+                    }
                     if let plan {
                         if plan.exercises.isEmpty {
                             ContentUnavailableView(
@@ -62,7 +76,10 @@ struct WorkoutBuilderView: View {
                                 PlannedExerciseRow(
                                     index: index + 1, exercise: exercise, unit: plan.unit,
                                     onSwap: canSwap(at: index, in: plan) ? { swap(at: index) } : nil,
-                                    label: Supersets.label(for: index, in: plan.exercises)
+                                    label: Supersets.label(for: index, in: plan.exercises),
+                                    onNeverAgain: { neverAgain(exercise) },
+                                    equipment: equipment(for: exercise),
+                                    onMissingEquipment: { removeEquipment($0) }
                                 )
                             }
                         }
@@ -115,6 +132,15 @@ struct WorkoutBuilderView: View {
             .onChange(of: showingGym) { _, showing in
                 if !showing { rebuild() }
             }
+            .navigationDestination(isPresented: $showingPainLog) {
+                PainLogView(current: activePains, exclusions: exclusions) { changed in
+                    logPain(changed)
+                }
+            }
+            .onChange(of: showingPainLog) { _, showing in
+                if !showing { rebuild() }
+            }
+            .task { await loadHealthPains() }
             .onAppear {
                 // Only once, so coming back from Gym equipment doesn't reset your choices.
                 guard !didSetUp else { return }
@@ -157,6 +183,7 @@ struct WorkoutBuilderView: View {
     }
 
     private func rebuild() {
+        refreshPains()
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
         // This week in the training block scales the sets and sets the RIR target;
         // recovery still lowers the effort on a low day (`TrainingBlock`, `WorkoutPlanner.targetRPE`).
@@ -169,26 +196,31 @@ struct WorkoutBuilderView: View {
                                 prioritySlots: coverage?.prioritySlots ?? [],
                                 bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,
                                 trainingStatus: metrics.trainingStatus ?? .novice,
-                                warmUpMinutes: warmUpMinutes)
+                                warmUpMinutes: warmUpMinutes,
+                                exerciseFilter: exerciseFilter.isEmpty ? nil : exerciseFilter,
+                                muscleSetGoals: plans.sessionSetGoals(focus: resolvedFocus, minutes: minutes, muscles: muscles,
+                                                                      sessions: sessions, extra: metrics.recentTrainingDays))
     }
 
     /// True when there's another exercise for the same movement to swap to.
     private func canSwap(at index: Int, in plan: PlannedWorkout) -> Bool {
         guard index < plan.exercises.count,
               let slot = ExerciseCatalog.slot(for: plan.exercises[index].exerciseID) else { return false }
-        return gym.planner.alternatives(for: slot).count > 1
+        return planner.alternatives(for: slot).count > 1
     }
 
     /// Replaces an exercise with the next option for the same movement.
     private func swap(at index: Int) {
         guard var current = plan, index < current.exercises.count,
               let slot = ExerciseCatalog.slot(for: current.exercises[index].exerciseID) else { return }
-        let options = gym.planner.alternatives(for: slot)
+        let options = planner.alternatives(for: slot)
         guard options.count > 1,
               let position = options.firstIndex(where: { $0.id == current.exercises[index].exerciseID }) else { return }
         let next = options[(position + 1) % options.count]
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
-        var replacement = gym.planner.prescribe(next, slot: slot, minutes: minutes, sessionRPE: current.targetRPE, history: history)
+        var replacement = planner.prescribe(next, slot: slot, minutes: minutes, sessionRPE: current.targetRPE, history: history)
+        // A lighter load on a lift that loads a 3-5/10 area (`PainGuard`).
+        exerciseFilter.capLoad(&replacement, slot: slot, gym: gym.profile)
         // Keep the fitted set count and any superset pairing; redo the warm-up ramp for the new lift.
         replacement.sets = current.exercises[index].sets
         replacement.supersetGroup = current.exercises[index].supersetGroup
@@ -196,6 +228,70 @@ struct WorkoutBuilderView: View {
         gym.planner.addWarmUps(&current.exercises)
         current.estimatedMinutes = WorkoutPlanner.estimatedMinutes(current.exercises, style: gym.style, warmUpMinutes: warmUpMinutes)
         plan = current
+    }
+
+    // MARK: Pain and never again
+
+    /// Everything logged: the trainer's pain log, the morning check-ins and Apple Health.
+    private var painReports: [PainReport] {
+        painLog.allReports(checkIns: checkIns, health: healthPains)
+    }
+
+    /// Pain still current (newest per area, 7 days; `PainGuard.active`) and
+    /// areas that have hurt for 2+ weeks (the clinician line).
+    private func refreshPains() {
+        let reports = painReports
+        let active = PainGuard.active(reports, today: .now)
+        activePains = active
+        clinicianAreas = active.map(\.area).filter { PainGuard.seeClinician($0, reports: reports, today: .now) }
+    }
+
+    private var exerciseFilter: ExerciseFilter {
+        ExerciseFilter(neverAgain: exclusions.ids, pains: activePains)
+    }
+
+    /// The gym's planner with the filter set, so swaps skip never-again and painful lifts.
+    private var planner: WorkoutPlanner {
+        var planner = gym.planner
+        planner.exerciseFilter = exerciseFilter
+        return planner
+    }
+
+    private func loadHealthPains() async {
+        guard let health else { return }
+        let start = Calendar.current.date(byAdding: .day, value: -PainLogStore.keepDays, to: .now) ?? .now
+        let found = (try? await health.reportedPain(from: start, to: .now)) ?? []
+        guard !found.isEmpty else { return }
+        healthPains = found
+        rebuild()
+    }
+
+    private func logPain(_ changed: [PainReport]) {
+        painLog.log(changed)
+        // Lower back pain → Apple Health's symptom type, the only area it has.
+        if let back = changed.first(where: { $0.area == .lowerBack }), let health {
+            let level = back.level
+            Task { try? await health.saveLowerBackPain(level: level, date: .now) }
+        }
+    }
+
+    private func neverAgain(_ exercise: PlannedExercise) {
+        exclusions.add(id: exercise.exerciseID, name: exercise.name)
+        rebuild()
+    }
+
+    /// What an exercise needs, for "Needs equipment I don't have".
+    private func equipment(for exercise: PlannedExercise) -> [EquipmentKind] {
+        let needs = ExerciseCatalog.exercise(id: exercise.exerciseID)?.requires ?? []
+        return needs.filter { $0 != .bodyweight }.sorted { $0.label < $1.label }
+    }
+
+    /// Takes equipment out of the gym profile (it can go back under Gym equipment).
+    private func removeEquipment(_ kind: EquipmentKind) {
+        var profile = gym.profile
+        profile.equipment.remove(kind)
+        gym.save(profile)
+        rebuild()
     }
 
     /// Saved workouts or an empty one, as a plain row after the plan (ux-audit 4.6, 4.7).
@@ -408,6 +504,11 @@ struct PlannedExerciseRow: View {
     var onSwap: (() -> Void)?
     /// "A1" / "A2" when the exercise is in a superset; the number otherwise.
     var label: String? = nil
+    /// "Never again": the trainer never plans or offers it again.
+    var onNeverAgain: (() -> Void)? = nil
+    /// What the exercise needs, for "Needs equipment I don't have".
+    var equipment: [EquipmentKind] = []
+    var onMissingEquipment: ((EquipmentKind) -> Void)? = nil
 
     /// Supersets are shown in the sleep colour so the pair stands out from the numbering.
     private var badgeColor: Color { label == nil ? Theme.lifting : Theme.sleep }
@@ -441,22 +542,42 @@ struct PlannedExerciseRow: View {
             .buttonStyle(.plain)
             .accessibilityHint("Shows how to do it, with form videos")
             Spacer(minLength: 0)
-            if let onSwap {
-                Button(action: onSwap) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                        .frame(width: 44, height: 44)
-                        .background(Theme.cardRaised, in: .circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Swap \(exercise.name)")
+            if onSwap != nil || onNeverAgain != nil {
+                optionsMenu
             }
         }
         .card()
         .sheet(isPresented: $showingGuide) {
             ExerciseGuideSheet(exerciseID: exercise.exerciseID, name: exercise.name)
         }
+    }
+
+    /// Swap, "Needs equipment I don't have" and "Never again".
+    private var optionsMenu: some View {
+        Menu {
+            if let onSwap {
+                Button("Swap for another", systemImage: "arrow.triangle.2.circlepath", action: onSwap)
+            }
+            if let onMissingEquipment, !equipment.isEmpty {
+                Menu("Needs equipment I don't have", systemImage: "wrench.and.screwdriver") {
+                    ForEach(equipment) { kind in
+                        Button("Remove \(kind.label.lowercased()) from my gym") { onMissingEquipment(kind) }
+                    }
+                }
+            }
+            if let onNeverAgain {
+                Button("Never again", systemImage: "nosign", role: .destructive, action: onNeverAgain)
+            }
+        } label: {
+            Image(systemName: onSwap == nil ? "ellipsis" : "arrow.triangle.2.circlepath")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 44, height: 44)
+                .background(Theme.cardRaised, in: .circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Options for \(exercise.name)")
+        .accessibilityHint("Swap it, mark equipment you don't have, or never plan it again")
     }
 
     private var details: some View {
@@ -501,6 +622,131 @@ struct PlannedExerciseRow: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
             }
+        }
+    }
+}
+
+/// "Something hurts?" above the plan: what the trainer is working around,
+/// or the prompt to log it.
+struct PainGuardRow: View {
+    let pains: [PainReport]
+    let clinicianAreas: [PainArea]
+    let neverAgainCount: Int
+    let action: () -> Void
+
+    private var summary: String {
+        var parts = pains.map { report in "\(report.area.title) \(report.level)/10" }
+        if parts.isEmpty { parts.append("Log a sore joint and the trainer works around it") }
+        if neverAgainCount > 0 {
+            let plural = neverAgainCount == 1 ? "" : "s"
+            parts.append("\(neverAgainCount) never-again exercise\(plural)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 12) {
+                IconBadge(systemName: "bandage.fill", color: Theme.recoveryLow, size: 42)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(pains.isEmpty ? "Something hurts?" : "Working around pain")
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                    Text(summary)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                        .multilineTextAlignment(.leading)
+                    if !pains.isEmpty {
+                        Text(PainGuard.shortRuleText)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                            .multilineTextAlignment(.leading)
+                    }
+                    ForEach(clinicianAreas) { area in
+                        Text(PainGuard.clinicianText(area))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Theme.recoveryLowText)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").foregroundStyle(Theme.secondaryText)
+            }
+            .card()
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Log pain so the trainer can work around it")
+    }
+}
+
+/// Log pain from the trainer, the 5/10 rule in plain words, and the
+/// never-again list. Pushed inside the builder's stack (no sheet on a sheet).
+struct PainLogView: View {
+    let current: [PainReport]
+    let exclusions: ExerciseExclusions
+    /// Reports that are new or changed, to save.
+    let onSave: ([PainReport]) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: [PainReport]?
+
+    init(current: [PainReport], exclusions: ExerciseExclusions, onSave: @escaping ([PainReport]) -> Void) {
+        self.current = current
+        self.exclusions = exclusions
+        self.onSave = onSave
+        _draft = State(initialValue: current.isEmpty ? nil : current)
+    }
+
+    var body: some View {
+        Form {
+            PainQuestions(pains: $draft)
+            Section("Where the rule comes from") {
+                Text(PainGuard.sourceText)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if !exclusions.items.isEmpty {
+                neverAgainSection
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
+        .navigationTitle("Something hurts?")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    onSave(changed)
+                    dismiss()
+                }
+            }
+        }
+    }
+
+    /// Only what's new or different, so opening and saving doesn't renew old answers.
+    private var changed: [PainReport] {
+        (draft ?? []).filter { report in
+            guard let before = current.first(where: { $0.area == report.area }) else { return true }
+            return before.level != report.level || (before.worseAfterTraining ?? false) != (report.worseAfterTraining ?? false)
+        }
+    }
+
+    private var neverAgainSection: some View {
+        Section {
+            ForEach(exclusions.items) { item in
+                HStack {
+                    Text(item.name)
+                        .foregroundStyle(Theme.primaryText)
+                    Spacer(minLength: 8)
+                    Button("Allow again") { exclusions.remove(id: item.id) }
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(.borderless)
+                }
+            }
+        } header: {
+            Text("Never again")
+        } footer: {
+            Text("The trainer won't plan or offer these. Allow one again to bring it back.")
         }
     }
 }

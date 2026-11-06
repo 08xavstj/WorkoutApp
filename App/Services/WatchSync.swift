@@ -232,6 +232,7 @@ final class WatchSync: NSObject {
         let ordered = session.orderedExercises
         var current: (exercise: Int, set: Int)?
         var exercises: [WatchSession.ExerciseSnapshot] = []
+        let repCounting = UserDefaults.standard.bool(forKey: "watchRepCounting")
         for (index, exercise) in ordered.enumerated() {
             let sets = exercise.orderedSets
             if current == nil, let setIndex = sets.firstIndex(where: { !$0.isCompleted }) {
@@ -242,11 +243,11 @@ final class WatchSync: NSObject {
                 id: exercise.order,
                 name: exercise.name,
                 supersetLabel: SupersetRegistry.label(order: exercise.order, groups: groups),
-                sets: sets.map { set in
-                    WatchSession.SetSnapshot(reps: set.reps, weightKg: set.weightKg, isCompleted: set.isCompleted,
-                                             isWarmup: set.isWarmup, rpe: set.rpe)
-                },
-                achievableLoadsKg: loads(for: exercise.exerciseID, around: planned, profile: profile)
+                // Each set with last time's matching set, the plan's target and any
+                // set-by-set load change (`LiveSetCoach.watchSets`).
+                sets: LiveSetCoach.watchSets(for: exercise, sessionStart: session.startedAt, context: context),
+                achievableLoadsKg: loads(for: exercise.exerciseID, around: planned, profile: profile),
+                repCounting: repCounting && RepDetection.supports(exerciseID: exercise.exerciseID)
             ))
         }
         let restSeconds: Int
@@ -344,6 +345,10 @@ final class WatchSync: NSObject {
             guard !set.isCompleted else { return }
             set.completedAt = .now
             try? context.save()
+            if !set.isWarmup, let profile = gym?.profile {
+                LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: session.startedAt, gym: profile)
+                try? context.save()
+            }
             if set.isWarmup {
                 // Short rest after a ramp set, as on the phone (`RestTimer.warmUpRestSeconds`).
                 RestTimerStore.start(seconds: Double(RestTimer.warmUpRestSeconds))

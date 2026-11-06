@@ -12,6 +12,40 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         var isWarmup: Bool
         /// The set's effort (planned, or logged once completed), 1-10.
         var rpe: Double?
+        /// Last session's same working set, for the ghost line under the
+        /// target (`LiveSetCoach.watchSets`). All the fields below are
+        /// optional so snapshots from older phones still decode.
+        var lastWeightKg: Double? = nil
+        var lastReps: Int? = nil
+        var lastRPE: Double? = nil
+        /// The plan's reps and reps in reserve for this set (`SessionTargets`).
+        var targetReps: Int? = nil
+        var targetRIR: Double? = nil
+        /// A note from the phone for this set, e.g. the set-by-set load change
+        /// ("Next set 62.5 kg (you had 3 in reserve)", `Autoregulation`).
+        var note: String? = nil
+
+        /// "Last 60 kg × 8 · RPE 8", or nil without a matching set last time.
+        func ghostLine(unit: String) -> String? {
+            guard let lastReps, lastReps > 0, let lastWeightKg else { return nil }
+            let value = unit == "lb" ? lastWeightKg * 2.20462 : lastWeightKg
+            let weight = value.formatted(.number.precision(.fractionLength(0...1)))
+            var line = lastWeightKg > 0 ? "Last \(weight) \(unit) × \(lastReps)" : "Last \(lastReps) reps"
+            if let lastRPE { line += " · RPE \(lastRPE.formatted())" }
+            return line
+        }
+
+        /// "Target 8 · 2 in reserve", or nil without a plan.
+        var targetLine: String? {
+            guard targetReps != nil || targetRIR != nil else { return nil }
+            var parts: [String] = []
+            if let targetReps { parts.append("Target \(targetReps)") }
+            if let targetRIR {
+                let reserve = targetRIR < 0.25 ? "none" : targetRIR.formatted(.number.precision(.fractionLength(0...1)))
+                parts.append("\(reserve) in reserve")
+            }
+            return parts.joined(separator: " · ")
+        }
     }
 
     nonisolated struct ExerciseSnapshot: Codable, Sendable, Equatable, Identifiable {
@@ -25,6 +59,8 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         /// (a window around the planned weight). Empty or missing: step by
         /// `WatchSession.weightStepKg`.
         var achievableLoadsKg: [Double]?
+        /// Run the experimental rep counter: the setting is on and this is a barbell squat or deadlift (`RepDetection.supports`). Missing on older phones.
+        var repCounting: Bool? = nil
     }
 
     /// Stable id for the session: its start time in whole seconds, the same

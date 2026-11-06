@@ -107,6 +107,8 @@ struct CheckInView: View {
         } footer: {
             Text("The trainer works around sore muscles.")
         }
+        // Joint pain, not muscle soreness: the trainer avoids or eases the lifts that load it (`PainGuard`).
+        PainQuestions(pains: $morning.pains)
         MoodQuestions(mood: $morning.mood, feelings: $morning.feelings, associations: $morning.associations)
         Section {
             ChipFlow(options: MorningCheckIn.Symptom.allCases, selection: $morning.symptoms, label: \.rawValue, color: Theme.recoveryLow)
@@ -323,6 +325,9 @@ struct CheckInView: View {
             if let health {
                 let symptoms = morning.symptoms
                 Task { try? await health.saveSymptoms(symptoms, date: .now) }
+                // Lower back pain → Apple Health's symptom type, the only area it has.
+                let backPain = morning.pains?.first { $0.area == .lowerBack }?.level
+                Task { try? await health.saveLowerBackPain(level: backPain, date: .now) }
             }
             // Late hard workout last night is filled in from your data, not asked.
             let yesterday = Calendar.current.date(byAdding: .day, value: -2, to: .now) ?? .now
@@ -357,6 +362,95 @@ struct CheckInView: View {
             }
         }
         dismiss()
+    }
+}
+
+/// "Something hurts?": body areas, then 0-10 and "worse after training?" for
+/// each. The trainer leaves out lifts that load a 6+/10 area, eases a
+/// 3-5/10 one, and forgets an answer after 7 days unless it's logged again
+/// (`PainGuard`). 0 clears an area. Used by the morning check-in and the
+/// trainer's "Something hurts?" sheet.
+struct PainQuestions: View {
+    @Binding var pains: [PainReport]?
+
+    private var areas: Binding<[PainArea]> {
+        Binding(
+            get: { (pains ?? []).map(\.area) },
+            set: { newAreas in
+                var kept = (pains ?? []).filter { newAreas.contains($0.area) }
+                for area in newAreas where !kept.contains(where: { $0.area == area }) {
+                    kept.append(PainReport(area: area, level: 0, loggedAt: .now))
+                }
+                pains = kept.isEmpty ? nil : kept
+            }
+        )
+    }
+
+    var body: some View {
+        Section {
+            ChipFlow(options: PainArea.allCases, selection: areas, label: \.title, color: Theme.recoveryLow)
+            ForEach(pains ?? []) { report in
+                PainLevelRow(area: report.area, level: level(for: report.area), worse: worse(for: report.area))
+            }
+        } header: {
+            Text("Something hurts?")
+        } footer: {
+            Text(PainGuard.ruleText + " 0 clears an area. This isn't a diagnosis.")
+        }
+    }
+
+    private func level(for area: PainArea) -> Binding<Int?> {
+        Binding(
+            get: { pains?.first { $0.area == area }?.level },
+            set: { value in update(area) { $0.level = value ?? 0 } }
+        )
+    }
+
+    private func worse(for area: PainArea) -> Binding<Bool> {
+        Binding(
+            get: { pains?.first { $0.area == area }?.worseAfterTraining ?? false },
+            set: { value in update(area) { $0.worseAfterTraining = value } }
+        )
+    }
+
+    private func update(_ area: PainArea, _ change: (inout PainReport) -> Void) {
+        guard var list = pains, let index = list.firstIndex(where: { $0.area == area }) else { return }
+        change(&list[index])
+        list[index].loggedAt = .now
+        pains = list
+    }
+}
+
+/// One painful area: 0-10 and "worse after training?".
+private struct PainLevelRow: View {
+    let area: PainArea
+    @Binding var level: Int?
+    @Binding var worse: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(area.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.primaryText)
+            ScalePicker(value: $level, range: 0...10, color: Theme.recoveryLow, endLabels: ("None", "Worst"))
+            Toggle("Worse after training or the next day?", isOn: $worse)
+                .font(.subheadline)
+            if let note = note {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+    }
+
+    /// What the trainer will do with this answer.
+    private var note: String? {
+        let report = PainReport(area: area, level: level ?? 0, worseAfterTraining: worse, loggedAt: .now)
+        switch PainGuard.response(to: report) {
+        case .avoid: return "The trainer leaves out lifts that load \(area.possessive)."
+        case .regress: return "The trainer picks easier variants and about 20% lighter loads for \(area.possessive)."
+        case .unchanged: return nil
+        }
     }
 }
 

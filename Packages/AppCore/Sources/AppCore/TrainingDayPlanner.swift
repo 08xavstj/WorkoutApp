@@ -80,7 +80,9 @@ public enum TrainingDayPlanner {
         public var isRestDay: Bool { kind == .rest || kind == .recovery }
     }
 
-    /// Light movement only: about an hour's brisk walk is ≈ 20%.
+    /// Light movement only: about an hour's brisk walk is ≈ 20%. The weekly
+    /// plan's easy cardio (30 min at about 45% of heart-rate reserve ≈ 15%,
+    /// `CardioPlanner.estimatedStrain`) fits inside it, so a rest day can take it.
     public static let restDayRange: ClosedRange<Double> = 0...25
     /// A day at or above this strain counted as a training day (as `recentTrainingDays`).
     public static let trainingDayStrain = 25.0

@@ -10,7 +10,10 @@ struct LiftProgressView: View {
     let name: String
 
     @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
     @Query(sort: \WorkoutSession.startedAt) private var sessions: [WorkoutSession]
+    /// How the planner moves this lift forward (`ProgressionPreferences`).
+    @State private var progression: ProgressionMode = .load
     @State private var showVolume = false
     @State private var selectedDate: Date?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -43,11 +46,13 @@ struct LiftProgressView: View {
                 } else {
                     summary(points)
                     chartCard(points)
+                    LiftGoalProgressSection(exerciseID: exerciseID)
                     sessionList(points)
                     Text("Estimated 1RM is the most you could lift once, worked out from your best set and how many reps you had left (Epley formula with RPE). It's a way to compare sessions, not a test.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
+                progressionCard
             }
             .padding()
             .lockedToScreenWidth()
@@ -55,6 +60,48 @@ struct LiftProgressView: View {
         .background(Theme.background)
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { progression = ProgressionPreferences.resolved(for: exerciseID, gym: gym.profile, atKilograms: latestWeightKg) }
+    }
+
+    // MARK: Progression
+
+    /// Load, reps or sets: how the planner moves this lift forward. Load and
+    /// rep progression built similar muscle and strength (Plotkin et al.,
+    /// PeerJ 2022); the suggestion follows the equipment (`ProgressionMode.suggested`).
+    private var progressionCard: some View {
+        let suggested = ProgressionPreferences.suggested(for: exerciseID, gym: gym.profile, atKilograms: latestWeightKg)
+        return VStack(alignment: .leading, spacing: 10) {
+            CardLabel(text: "How it progresses", color: Theme.liftingText)
+            Picker("Progress by", selection: progressionBinding) {
+                ForEach(ProgressionMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(progression.summary)
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+            Text("Adding weight and adding reps built about the same muscle and strength in a 2022 study, so pick what suits the equipment. Adding sets is the volume route; there's less direct evidence for it as a progression rule. Suggested here: \(suggested.title.lowercased()).")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .card()
+    }
+
+    /// The latest session's best working weight, in kg, for judging the gym's next jump.
+    private var latestWeightKg: Double {
+        guard let last = points.last else { return 0 }
+        return unit.toKilograms(last.bestWeight)
+    }
+
+    private var progressionBinding: Binding<ProgressionMode> {
+        Binding(
+            get: { progression },
+            set: { mode in
+                ProgressionPreferences.set(mode, for: exerciseID)
+                progression = mode
+            }
+        )
     }
 
     private func number(_ value: Double) -> String {

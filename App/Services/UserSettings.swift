@@ -102,6 +102,8 @@ final class UserSettings {
     var hideCalories: Bool { didSet { defaults.set(hideCalories, forKey: "hideCalories") } }
     /// Start the Watch's workout recording whenever a workout starts on the phone.
     var startWatchWithWorkout: Bool { didSet { defaults.set(startWatchWithWorkout, forKey: "startWatchWithWorkout") } }
+    /// Experimental Watch rep counter for barbell squats and deadlifts; off by default. WatchSync reads the same key.
+    var watchRepCounting: Bool { didSet { defaults.set(watchRepCounting, forKey: "watchRepCounting") } }
     var checkInRemindersOn: Bool { didSet { defaults.set(checkInRemindersOn, forKey: "checkInRemindersOn") } }
     var morningCheckInMinutes: Int { didSet { defaults.set(morningCheckInMinutes, forKey: "morningCheckInMinutes") } }
     var eveningCheckInMinutes: Int { didSet { defaults.set(eveningCheckInMinutes, forKey: "eveningCheckInMinutes") } }
@@ -181,6 +183,7 @@ final class UserSettings {
         restModeUntil = defaults.object(forKey: "restModeUntil") as? Date
         hideCalories = defaults.bool(forKey: "hideCalories")
         startWatchWithWorkout = defaults.object(forKey: "startWatchWithWorkout") as? Bool ?? true
+        watchRepCounting = defaults.bool(forKey: "watchRepCounting")
         checkInRemindersOn = defaults.bool(forKey: "checkInRemindersOn")
         morningCheckInMinutes = defaults.object(forKey: "morningCheckInMinutes") as? Int ?? 8 * 60
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30

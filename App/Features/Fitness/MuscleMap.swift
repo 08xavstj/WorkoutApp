@@ -10,6 +10,15 @@ final class MuscleModel {
     /// Hard sets per muscle since Monday (`MuscleCoverage.setsThisWeek`), for
     /// the coverage-driven focus; `states[].weeklySets` is the rolling 7 days.
     private(set) var weekSets: [Muscle: Double] = [:]
+    /// Working sets from the last few weeks, with what the per-muscle volume
+    /// rule needs (`VolumeProgression.summarize`: sets done, effort, reps).
+    private(set) var loggedSets: [VolumeProgression.LoggedSet] = []
+    /// Cardio workouts from Apple Health in the last 10 days, for the weekly
+    /// plan's easy-cardio ticks (`CardioPlanner.doneDays`).
+    private(set) var recentCardio: [CardioPlanner.Workout] = []
+    /// True once `refresh` has run, so the volume targets are only saved
+    /// from real data (`WeeklyPlanStore.refreshVolume`).
+    private(set) var hasRefreshed = false
 
     var suggestedFocus: WorkoutFocus? { MuscleRecovery.suggestedFocus(states) }
 
@@ -47,9 +56,12 @@ final class MuscleModel {
                 }
             }
         }
+        loggedSets = Self.makeLoggedSets(sessions: sessions, library: library, now: now)
         var cardio: [MuscleRecovery.Cardio] = []
+        var easyCardio: [CardioPlanner.Workout] = []
         if let health, let workouts = try? await health.externalWorkouts(from: cutoff, to: now) {
             for workout in workouts where !workout.isStrength {
+                easyCardio.append(CardioPlanner.Workout(name: workout.name, start: workout.start, minutes: workout.minutes))
                 let kind: MuscleRecovery.Cardio.Kind? = switch workout.name {
                 case "Run": .run
                 case "Ride": .ride
@@ -64,6 +76,37 @@ final class MuscleModel {
         }
         states = MuscleRecovery.evaluate(sets: sets, cardio: cardio, now: now)
         weekSets = MuscleCoverage.setsThisWeek(sets, weekStart: WeeklyPlan.weekStart(containing: now), now: now)
+        recentCardio = easyCardio
+        hasRefreshed = true
+    }
+
+    /// Working sets (warm-ups left out, unfinished ones kept so the volume
+    /// rule can see them) since three weeks before last Monday: last week to
+    /// judge, and the sessions before it to compare reps against. Superset
+    /// pairing is only known for the last two days (`SupersetRegistry`).
+    private static func makeLoggedSets(sessions: [WorkoutSession], library: ExerciseLibrary, now: Date) -> [VolumeProgression.LoggedSet] {
+        let thisWeek = WeeklyPlan.weekStart(containing: now)
+        let start = Calendar.current.date(byAdding: .day, value: -28, to: thisWeek) ?? thisWeek
+        var result: [VolumeProgression.LoggedSet] = []
+        for session in sessions where session.startedAt >= start && !session.isActive {
+            let groups = SupersetRegistry.groups(for: session.startedAt)
+            for exercise in session.exercises {
+                guard let info = library.exercise(id: exercise.exerciseID) else { continue }
+                let primary = info.primaryMuscles.compactMap { Muscle(rawValue: $0.lowercased()) }
+                let secondary = info.secondaryMuscles.compactMap { Muscle(rawValue: $0.lowercased()) }
+                let compound = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound ?? (info.mechanic == "compound")
+                let working = exercise.orderedSets.filter { !$0.isWarmup }
+                for (index, set) in working.enumerated() {
+                    result.append(VolumeProgression.LoggedSet(
+                        exerciseID: exercise.exerciseID, name: exercise.name, sessionStart: session.startedAt,
+                        order: index, primary: primary, secondary: secondary, weightKg: set.weightKg, reps: set.reps,
+                        rpe: set.rpe ?? session.sessionRPE.map(Double.init), isCompleted: set.isCompleted,
+                        isCompound: compound, supersetGroup: groups[exercise.order]
+                    ))
+                }
+            }
+        }
+        return result
     }
 }
 

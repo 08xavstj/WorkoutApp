@@ -14,7 +14,13 @@ struct ActiveWorkoutView: View {
     @Environment(GymStore.self) private var gym
     @Environment(LiveWorkoutRecorder.self) private var recorder
     @Environment(WorkoutLauncher.self) private var launcher
+    /// The training block's RIR target, when the session has no planned effort (`LiveSetCoach`).
+    @Environment(WeeklyPlanStore.self) private var weeklyPlans
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
+    /// The quiet PR banner at the end of an exercise (`SetFeedback.records`).
+    @State private var recordBanner: RecordBanner?
+    /// Exercise orders whose records were already shown this visit.
+    @State private var shownRecords: Set<Int> = []
     @State private var showingPicker = false
     @State private var showingFinish = false
     @State private var showingDiscard = false
@@ -56,6 +62,10 @@ struct ActiveWorkoutView: View {
                     WarmUpPhaseCard(sessionStart: session.startedAt) {
                         WatchSync.shared.update(from: session)
                     }
+                    if let recordBanner {
+                        RecordBannerView(banner: recordBanner) { self.recordBanner = nil }
+                            .transition(.opacity)
+                    }
                     ForEach(session.orderedExercises) { exercise in
                         exerciseCard(exercise)
                     }
@@ -92,6 +102,14 @@ struct ActiveWorkoutView: View {
             }
             .background(Theme.background)
             .toolbarVisibility(.hidden, for: .navigationBar)
+            // PR at the end of an exercise: one firm tap and a banner that
+            // fades after a few seconds; no confetti (behaviour-change.md).
+            .sensoryFeedback(.impact(weight: .heavy), trigger: recordBanner) { _, banner in banner != nil }
+            .task(id: recordBanner) {
+                guard recordBanner != nil else { return }
+                try? await Task.sleep(for: .seconds(8))
+                withAnimation { recordBanner = nil }
+            }
             .sheet(isPresented: $showingPicker) {
                 ExercisePickerView { exercise in add(exercise) }
             }
@@ -341,9 +359,14 @@ struct ActiveWorkoutView: View {
                 bestBefore: LiftHistory.bestOneRepMax(for: exercise.exerciseID, before: session.startedAt, in: sessions),
                 unit: workoutUnit,
                 gym: gym.profile,
-                onSetCompleted: { afterWarmUp in startRest(for: exercise, afterWarmUp: afterWarmUp) },
+                onSetCompleted: { afterWarmUp in
+                    startRest(for: exercise, afterWarmUp: afterWarmUp)
+                    if !afterWarmUp { showRecords(for: exercise) }
+                },
                 onCollapse: { expanded.remove(exercise.persistentModelID) },
-                supersetLabel: supersetLabel(exercise)
+                supersetLabel: supersetLabel(exercise),
+                sessionStart: session.startedAt,
+                blockRIR: weeklyPlans.blockWeek?.targetRIR
             )
         } else {
             Button {
@@ -424,6 +447,20 @@ struct ActiveWorkoutView: View {
         return ("All sets done", "Tap Finish when you're ready")
     }
 
+    /// Once every set of an exercise is ticked: e1RM, rep and volume PRs
+    /// against earlier sessions, as a short banner (once per exercise).
+    private func showRecords(for exercise: ExerciseLog) {
+        guard !exercise.sets.isEmpty, exercise.sets.allSatisfy(\.isCompleted),
+              !shownRecords.contains(exercise.order) else { return }
+        let records = LiveSetCoach.records(for: exercise, sessionStart: session.startedAt, sessions: sessions, unit: workoutUnit)
+        guard !records.isEmpty else { return }
+        shownRecords.insert(exercise.order)
+        let banner = RecordBanner(order: exercise.order, exercise: exercise.name,
+                                  lines: records.map { $0.message(unit: workoutUnit.rawValue) })
+        withAnimation { recordBanner = banner }
+        AccessibilityNotification.Announcement(banner.spokenText).post()
+    }
+
     private func add(_ exercise: Exercise) {
         let log = ExerciseLog(exerciseID: exercise.id, name: exercise.name, order: session.exercises.count)
         log.session = session
@@ -450,9 +487,19 @@ private struct ExerciseCard: View {
     let onCollapse: () -> Void
     /// "A1" / "A2" when this exercise is half of a superset.
     var supersetLabel: String? = nil
+    /// The session's start, the key for its planned targets (`SessionTargets`).
+    var sessionStart: Date = .distantPast
+    /// The training block's RIR target, used when the session has no planned effort.
+    var blockRIR: Int? = nil
 
     @Environment(\.modelContext) private var modelContext
     @Environment(ExerciseLibrary.self) private var library
+    /// The plan's reps and effort for this exercise (`SessionTargets`).
+    @State private var target: SessionTargets.Target?
+    /// The one set-by-set load change made this session (`Autoregulation`).
+    @State private var adjustment: AutoregulationLog.Entry?
+    /// How the planner progresses this lift (`ProgressionPreferences`).
+    @State private var progression: ProgressionMode = .load
     /// The set open in the editor (defaults to the next set to do).
     @State private var focusedSetID: PersistentIdentifier?
     @State private var showingRPEGuide = false
@@ -534,6 +581,15 @@ private struct ExerciseCard: View {
                             Button(RestPreferences.label(seconds)) { setRest(seconds) }
                         }
                     }
+                    // Load, reps or sets (Plotkin et al., PeerJ 2022); the planner uses it next time.
+                    Picker(selection: progressionBinding) {
+                        ForEach(ProgressionMode.allCases) { mode in
+                            Text(progressionLabel(mode)).tag(mode)
+                        }
+                    } label: {
+                        Label("Progress by", systemImage: "chart.bar.xaxis")
+                    }
+                    .pickerStyle(.menu)
                     Button("Remove exercise", systemImage: "trash", role: .destructive) {
                         confirmingRemove = true
                     }
@@ -574,7 +630,9 @@ private struct ExerciseCard: View {
                     onTap: { focusedSetID = set.persistentModelID },
                     onToggle: { toggle(set) },
                     previousSet: set.isWarmup ? nil : previousSet(index: workingNumber(set, in: sets) - 1),
-                    warmUp: set.isWarmup ? warmUpPosition(set, in: sets) : nil
+                    warmUp: set.isWarmup ? warmUpPosition(set, in: sets) : nil,
+                    targetText: set.isWarmup ? nil : targetText(for: set),
+                    verdict: set.isWarmup ? nil : verdict(for: set, index: workingNumber(set, in: sets) - 1)
                 )
                 .contextMenu {
                     Button(set.isWarmup ? "Make working set" : "Make warm-up set") { set.isWarmup.toggle() }
@@ -583,6 +641,10 @@ private struct ExerciseCard: View {
                         try? modelContext.save()
                     }
                 }
+            }
+
+            if let note = adjustmentNote(in: sets) {
+                AdjustmentNote(text: note)
             }
 
             if let editing {
@@ -631,6 +693,83 @@ private struct ExerciseCard: View {
             RPEGuideView()
                 .presentationDetents([.medium, .large])
         }
+        .onAppear(perform: loadLiveState)
+        // A set ticked on the Watch can make the change too (`LiveSetCoach.autoregulate`).
+        .onChange(of: completedCount) { _, _ in
+            adjustment = AutoregulationLog.entry(for: sessionStart, order: exercise.order)
+        }
+    }
+
+    private var completedCount: Int { exercise.sets.filter(\.isCompleted).count }
+
+    private func loadLiveState() {
+        target = SessionTargets.target(for: sessionStart, order: exercise.order)
+        adjustment = AutoregulationLog.entry(for: sessionStart, order: exercise.order)
+        progression = ProgressionPreferences.resolved(for: exercise.exerciseID, gym: gym, atKilograms: workingWeightKg)
+    }
+
+    // MARK: Targets and feedback
+
+    /// The first working set's weight, for judging the gym's next jump.
+    private var workingWeightKg: Double {
+        exercise.orderedSets.first { !$0.isWarmup && $0.weightKg > 0 }?.weightKg ?? 0
+    }
+
+    /// Reps in reserve the plan asks for: the session's planned effort, else the block's week.
+    private var targetRIR: Double? {
+        target?.targetRIR ?? blockRIR.map { Double($0) }
+    }
+
+    /// "Target 8 · 2 in reserve" beside last time's set (feature spec §3.1:
+    /// the RIR target shows with the ghost so last time isn't the only goal).
+    private func targetText(for set: SetLog) -> String? {
+        let reps = LiveSetCoach.targetReps(for: set, target: target, entry: adjustment)
+        var parts: [String] = []
+        if let reps { parts.append("Target \(reps)") }
+        if let targetRIR { parts.append(Self.reserveText(targetRIR)) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// "2 in reserve", "2-3 in reserve" (as `PlannedExercise.repsInReserve`).
+    static func reserveText(_ reserve: Double) -> String {
+        let low = Int(reserve.rounded(.down))
+        let high = Int(reserve.rounded(.up))
+        if high == 0 { return "to failure" }
+        return low == high ? "\(low) in reserve" : "\(low)-\(high) in reserve"
+    }
+
+    /// The verdict once a working set is ticked (`SetFeedback.verdict`).
+    private func verdict(for set: SetLog, index: Int) -> SetFeedback.Verdict? {
+        guard set.isCompleted, !set.isWarmup else { return nil }
+        let logged = LiftProgress.LoggedSet(weight: unit.display(set.weightKg), reps: set.reps, rpe: set.rpe)
+        let last = previousSet(index: index).map { LiftProgress.LoggedSet(weight: unit.display($0.weightKg), reps: $0.reps, rpe: $0.rpe) }
+        let targetRPE = targetRIR.map { 10 - $0 }
+        return SetFeedback.verdict(logged: logged, last: last,
+                                   targetReps: LiveSetCoach.targetReps(for: set, target: target, entry: adjustment),
+                                   targetRPE: targetRPE)
+    }
+
+    /// The set-by-set change, while the set it changed is still to do.
+    private func adjustmentNote(in sets: [SetLog]) -> String? {
+        guard let adjustment,
+              let changed = sets.first(where: { $0.order == adjustment.setOrder }),
+              !changed.isCompleted else { return nil }
+        return adjustment.message
+    }
+
+    private func progressionLabel(_ mode: ProgressionMode) -> String {
+        let suggested = ProgressionPreferences.suggested(for: exercise.exerciseID, gym: gym, atKilograms: workingWeightKg)
+        return mode == suggested ? "\(mode.title) (suggested)" : mode.title
+    }
+
+    private var progressionBinding: Binding<ProgressionMode> {
+        Binding(
+            get: { progression },
+            set: { mode in
+                ProgressionPreferences.set(mode, for: exercise.exerciseID)
+                progression = mode
+            }
+        )
     }
 
     private func setRest(_ seconds: Int?) {
@@ -644,6 +783,12 @@ private struct ExerciseCard: View {
         set.completedAt = set.isCompleted ? nil : .now
         try? modelContext.save()
         if set.isCompleted {
+            // Set-by-set effort check: may move the next set's load (`Autoregulation`).
+            if !set.isWarmup, let entry = LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: sessionStart,
+                                                                    gym: gym, blockRIR: blockRIR) {
+                adjustment = entry
+                try? modelContext.save()
+            }
             focusedSetID = nil
             onSetCompleted(set.isWarmup)
         }
@@ -701,7 +846,8 @@ private struct ExerciseCard: View {
         let working = previous.filter { !$0.isWarmup }
         guard index >= 0, index < working.count else { return "" }
         let set = working[index]
-        return "\(unit.format(set.weightKg)) × \(set.reps)"
+        let effort = set.rpe.map { " · RPE \($0.formatted())" } ?? ""
+        return "\(unit.format(set.weightKg)) × \(set.reps)\(effort)"
     }
 
     /// The same set from last session, for VoiceOver.
@@ -759,6 +905,10 @@ private struct SetRow: View {
     var previousSet: SetLog? = nil
     /// For a warm-up ramp set: its place in the ramp and its share of the working weight.
     var warmUp: WarmUpPosition? = nil
+    /// "Target 8 · 2 in reserve", shown beside last time until the set is ticked.
+    var targetText: String? = nil
+    /// The one-line verdict once the set is ticked (`SetFeedback`).
+    var verdict: SetFeedback.Verdict? = nil
 
     struct WarmUpPosition {
         var number: Int
@@ -816,11 +966,12 @@ private struct SetRow: View {
                     .font(.headline)
                     .monospacedDigit()
                     .foregroundStyle(isFilled ? Theme.primaryText : Theme.secondaryText)
-                if !previous.isEmpty {
-                    Text("Last: \(previous)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                ghostLine
+                if let verdictText {
+                    Text(verdictText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(verdict?.isCaution == true ? Theme.recoveryModerateText : Theme.liftingText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if dynamicTypeSize.isAccessibilitySize {
                     rpePill
@@ -831,6 +982,50 @@ private struct SetRow: View {
                 rpePill
             }
         }
+    }
+
+    /// Last session's same set in grey, with the target beside it (under it
+    /// when they don't fit). Once ticked, the verdict takes the target's place.
+    @ViewBuilder
+    private var ghostLine: some View {
+        let target = set.isCompleted ? nil : targetText
+        if !previous.isEmpty || target != nil {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    lastText
+                    targetLabel(target)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    lastText
+                    targetLabel(target)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var lastText: some View {
+        if !previous.isEmpty {
+            Text("Last: \(previous)")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+        }
+    }
+
+    @ViewBuilder
+    private func targetLabel(_ target: String?) -> some View {
+        if let target {
+            Text(target)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.liftingText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+        }
+    }
+
+    private var verdictText: String? {
+        guard set.isCompleted, let verdict else { return nil }
+        return verdict.message(unit: unit.rawValue)
     }
 
     @ViewBuilder
@@ -884,6 +1079,11 @@ private struct SetRow: View {
         parts.append(set.isCompleted ? "done" : "not done")
         if let previousSet, let last = spokenLoad(weightKg: previousSet.weightKg, reps: previousSet.reps) {
             parts.append("last time \(last)")
+        }
+        if let verdictText {
+            parts.append(verdictText)
+        } else if !set.isCompleted, let targetText {
+            parts.append(targetText)
         }
         return parts.joined(separator: ", ")
     }
@@ -1386,5 +1586,75 @@ private struct LiveHeartRateBar: View {
         guard let profile else { return "Live" }
         guard let zone = profile.zone(for: bpm) else { return "Below zone 1" }
         return "Zone \(zone) · \(whole(profile.reserveFraction(for: bpm) * 100))% of reserve"
+    }
+}
+
+// MARK: - Set feedback
+
+/// The PRs shown when an exercise's last set is ticked.
+struct RecordBanner: Equatable {
+    /// The exercise's order in the session.
+    var order: Int
+    var exercise: String
+    /// "Best estimated 1RM: 103 kg", "Most reps at 80 kg: 9"...
+    var lines: [String]
+
+    var spokenText: String {
+        "Personal record, \(exercise). " + lines.joined(separator: ". ")
+    }
+}
+
+/// A short, factual PR banner: no confetti, no streak (behaviour-change.md;
+/// feature spec §3.1). It goes after a few seconds or on tap of ×.
+private struct RecordBannerView: View {
+    let banner: RecordBanner
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            IconBadge(systemName: "star.fill", color: Theme.lifting, size: 40)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Personal record · \(banner.exercise)")
+                    .font(.headline)
+                    .foregroundStyle(Theme.primaryText)
+                ForEach(banner.lines, id: \.self) { line in
+                    Text(line)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .card()
+    }
+}
+
+/// "Next set 62.5 kg (you had 3 in reserve)": the set-by-set change
+/// (`Autoregulation`), already applied to the next set and editable there.
+private struct AdjustmentNote: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label(text, systemImage: "arrow.up.arrow.down")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.liftingText)
+            Text("From your effort rating, which can be a rep or so off. Change the weight below if it feels wrong.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }

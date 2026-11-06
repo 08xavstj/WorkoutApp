@@ -254,7 +254,10 @@ struct CoachView: View {
                 sex: metrics.sex,
                 trainingStatus: metrics.trainingStatus ?? .novice,
                 warmUpMinutes: WarmUpRoutine.make(tier: settings.warmUpTier(for: resolvedFocus),
-                                                  firstSlots: resolvedFocus.slots, gym: gym.profile).minutes
+                                                  firstSlots: resolvedFocus.slots, gym: gym.profile).minutes,
+                exerciseFilter: ExerciseFilter(neverAgain: ExerciseExclusions.shared.ids,
+                                               reports: PainLogStore.shared.allReports(checkIns: checkIns, health: []),
+                                               today: .now)
             )
         }
         await coach.send(text, facts: makeFacts(plan: plan), plan: plan)

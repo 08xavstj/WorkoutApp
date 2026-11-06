@@ -221,6 +221,7 @@ final class WatchWorkoutModel: NSObject {
         self.workoutSession = nil
         self.builder = nil
         clearRest()
+        RepCounter.shared.reset()
         if let data = WatchMessage.encode(summary) {
             connection?.transferUserInfo([WatchMessage.summary: data])
         }
@@ -236,6 +237,7 @@ final class WatchWorkoutModel: NSObject {
         builder = nil
         phase = .idle
         clearRest()
+        RepCounter.shared.reset()
         send(.recordingStopped, sessionID: recordingSessionID)
         recordingSessionID = nil
         selectedExercise = nil
@@ -249,6 +251,7 @@ final class WatchWorkoutModel: NSObject {
         recordingSessionID = nil
         setsCompletedHere = 0
         if snapshot?.isFinished == true { snapshot = nil }
+        RepCounter.shared.reset()
     }
 
     // MARK: Sets
@@ -360,6 +363,7 @@ final class WatchWorkoutModel: NSObject {
     }
 
     private func startRest(until ends: Date, length: Int) {
+        RepCounter.shared.stop()
         restEndsAt = ends
         restLength = max(1, length)
         restStartedAt = .now
@@ -519,6 +523,7 @@ final class WatchWorkoutModel: NSObject {
         builder = nil
         phase = .idle
         clearRest()
+        RepCounter.shared.reset()
         send(.recordingStopped, sessionID: recordingSessionID)
         recordingSessionID = nil
     }

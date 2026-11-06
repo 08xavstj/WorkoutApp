@@ -346,6 +346,7 @@ struct RootView: View {
         conditions.heatTrainingDays = conditions.heatAcclimation.heatTrainingDays
         metrics.heatAdjustment = HeatAdvice.targetAdjustment(wbgtC: conditions.forecastWBGT, acclimation: conditions.heatAcclimation)
         await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
+        weeklyPlans.refreshVolume(muscles: muscles)
         let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
         Reminders.updateWidget(WidgetSnapshot(
             updated: .now,

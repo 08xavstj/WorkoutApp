@@ -27,7 +27,11 @@ final class GymStore {
 
     /// Set from the user's goals (rep ranges and effort).
     var style: TrainingStyle = .balanced
-    var planner: WorkoutPlanner { WorkoutPlanner(gym: profile, style: style) }
+    var planner: WorkoutPlanner {
+        var planner = WorkoutPlanner(gym: profile, style: style)
+        planner.progressionModes = ProgressionPreferences.overrides()
+        return planner
+    }
 
     func save(_ profile: GymProfile) {
         self.profile = profile
@@ -163,6 +167,7 @@ final class WorkoutLauncher {
         }
         // Superset pairs (`Supersets`) for the live view: exercise order → group.
         SupersetRegistry.save(SupersetRegistry.groups(in: exercises), for: session.startedAt)
+        SessionTargets.save(exercises, for: session.startedAt)
         try? context.save()
         activeSession = session
     }

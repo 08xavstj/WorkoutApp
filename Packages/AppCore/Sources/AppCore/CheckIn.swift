@@ -45,6 +45,9 @@ public struct MorningCheckIn: Codable, Sendable, Equatable {
     public var feelings: [String]?
     /// Optional "what's affecting it", as `MoodAssociation` raw values (Apple association names).
     public var associations: [String]?
+    /// "Something hurts?": area, 0-10 and worse after training (`PainGuard`).
+    /// Optional so check-ins saved before it existed still decode.
+    public var pains: [PainReport]?
 
     public init(day: Date) {
         self.day = day

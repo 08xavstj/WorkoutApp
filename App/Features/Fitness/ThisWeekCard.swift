@@ -24,6 +24,7 @@ struct ThisWeekCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
     @Environment(AppRouter.self) private var router
+    @Environment(MuscleModel.self) private var muscles
 
     private var thisWeek: Date { WeeklyPlan.weekStart(containing: .now) }
 
@@ -43,6 +44,7 @@ struct ThisWeekCard: View {
             } else {
                 noPlan
             }
+            if plan != nil { CardioWeekRows() }
             ThisWeekDeloadLine()
             if let note = consistency.note {
                 Text(note)
@@ -57,6 +59,10 @@ struct ThisWeekCard: View {
         // The Monday review reminder follows its settings (one repeating notification, "review|weekly").
         .task(id: "\(settings.weeklyReviewOn)|\(settings.weeklyReviewMinutes)") {
             await Reminders.scheduleWeeklyReview(enabled: settings.weeklyReviewOn, minutes: settings.weeklyReviewMinutes)
+        }
+        // This week's per-muscle set targets (`VolumeProgression`) and the cardio-only days, once muscles have loaded.
+        .task(id: muscles.hasRefreshed) {
+            store.refreshVolume(muscles: muscles)
         }
     }
 
@@ -88,7 +94,7 @@ struct ThisWeekCard: View {
                 if let last = store.lastPlan(before: thisWeek), !last.plannedDays.isEmpty {
                     PlanButton(title: last.isFlexible ? "Same as last week" : "Same days as last week", filled: false) {
                         store.save(WeeklyPlan(weekStart: thisWeek, plannedDays: last.plannedDays,
-                                              mode: last.mode, sessionsPerWeek: last.sessionsPerWeek))
+                                              mode: last.mode, sessionsPerWeek: last.sessionsPerWeek, cardio: last.cardio))
                     }
                 }
                 PlanButton(title: "Plan your week", filled: true) { router.showWeeklyPlan = true }
@@ -141,7 +147,8 @@ struct ThisWeekCard: View {
                         let template = store.current ?? store.lastPlan(before: thisWeek)
                         store.save(WeeklyPlan(weekStart: thisWeek, plannedDays: lighter.plannedDays, changes: store.current?.changes ?? [],
                                               mode: template?.mode ?? .fixedDays,
-                                              sessionsPerWeek: template?.isFlexible == true ? lighter.plannedDays.count : nil))
+                                              sessionsPerWeek: template?.isFlexible == true ? lighter.plannedDays.count : nil,
+                                              cardio: template?.cardio))
                     }
                 }
             }
@@ -194,9 +201,12 @@ private struct FlexibleWeekRow: View {
     let sessions: [WorkoutSession]
 
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(WeeklyPlanStore.self) private var store
 
     var body: some View {
-        let progress = plan.progress(trainingDays: WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays))
+        // Through the store, so days that were only easy cardio don't count toward the lifting quota.
+        let progress = store.progress(sessions: sessions, extra: metrics.recentTrainingDays)
+            ?? plan.progress(trainingDays: WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays))
         HStack(alignment: .center, spacing: 14) {
             HStack(spacing: 8) {
                 ForEach(0..<max(progress.target, 0), id: \.self) { index in
@@ -277,6 +287,58 @@ private struct FlexibleNextSlot: View {
             parts.append(guidance.reason)
         }
         return parts.joined(separator: " ")
+    }
+}
+
+/// The week's easy cardio (`CardioPlanner`): "Easy ride · 30 min" with its
+/// day (or "Any day") and a tick once Apple Health has a workout of that type
+/// that day, then the minutes toward the 150-300 band (WHO 2020, Bull et al.).
+private struct CardioWeekRows: View {
+    @Environment(WeeklyPlanStore.self) private var store
+    @Environment(MuscleModel.self) private var muscles
+    @Environment(DailyMetricsModel.self) private var metrics
+
+    var body: some View {
+        let slots = store.cardioSlots(goals: metrics.goals)
+        if !slots.isEmpty {
+            let done = store.cardioDone(slots: slots, workouts: WeeklyPlanStore.cardioWorkouts(muscles: muscles, metrics: metrics))
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(slots) { slot in
+                    CardioSlotRow(slot: slot, isDone: done.contains(slot.index))
+                }
+                if let line = CardioPlanner.bandLine(store.current?.cardio, goals: metrics.goals) {
+                    Text(line)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+private struct CardioSlotRow: View {
+    let slot: CardioPlanner.Slot
+    let isDone: Bool
+
+    var body: some View {
+        let day = slot.weekday.map { WeeklyPlan.weekdayName($0) } ?? "Any day"
+        let status = isDone ? "done" : "planned"
+        HStack(spacing: 10) {
+            Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isDone ? Theme.recoveryHigh : Theme.secondaryText)
+            Label("\(slot.kind.title) · \(slot.minutes) min", systemImage: slot.kind.systemImage)
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+            Spacer(minLength: 8)
+            Text(day)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .frame(minHeight: 28)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(slot.kind.title), \(slot.minutes) minutes, \(day): \(status)")
     }
 }
 

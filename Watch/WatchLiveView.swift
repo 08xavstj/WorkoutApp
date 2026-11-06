@@ -121,11 +121,12 @@ struct WatchLiveView: View {
         let set = session.exercises[index].sets[setIndex]
         let edit = edits["\(index)-\(setIndex)"]
         return PendingSet(session: session, exerciseIndex: index, setIndex: setIndex,
-                          reps: edit?.reps ?? set.reps, weightKg: edit?.weightKg ?? set.weightKg)
+                          reps: edit?.reps ?? RepCounter.shared.countedReps(forSet: "\(index)-\(setIndex)") ?? set.reps, weightKg: edit?.weightKg ?? set.weightKg)
     }
 
     /// Working sets ask how hard it was first; warm-ups are ticked straight away.
     private func complete(_ session: WatchSession, _ index: Int) {
+        RepCounter.shared.stop()
         guard let set = pending(session, index) else { return }
         if set.isWarmup {
             model.completeSet(exerciseIndex: set.exerciseIndex, setIndex: set.setIndex, reps: set.reps, weightKg: set.weightKg, rpe: nil)
@@ -249,6 +250,12 @@ private struct WatchExerciseBlock: View {
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
         }
+        if !set.isWarmup {
+            WatchSetGhost(set: set, unit: session.unit)
+        }
+        if exercise.repCounting == true, !set.isWarmup {
+            WatchRepCounterView(setKey: "\(index)-\(setIndex)")
+        }
         if exercise.supersetLabel?.hasSuffix("1") == true, let partner = session.partnerIndex(of: index) {
             Text("then \(session.exercises[partner].name)")
                 .font(.caption2)
@@ -274,6 +281,32 @@ private struct WatchExerciseBlock: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+        }
+    }
+}
+
+/// Under the target: the plan's reps and reps in reserve, last session's
+/// same set in grey ("ghost"), and the phone's set-by-set change, if any.
+private struct WatchSetGhost: View {
+    let set: WatchSession.SetSnapshot
+    let unit: String
+
+    var body: some View {
+        if let target = set.targetLine {
+            Text(target)
+                .font(.caption2.weight(.semibold))
+        }
+        if let ghost = set.ghostLine(unit: unit) {
+            Text(ghost)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        if let note = set.note {
+            Text(note)
+                .font(.caption2)
+                .foregroundStyle(WatchTheme.lifting)
+                .lineLimit(3)
         }
     }
 }

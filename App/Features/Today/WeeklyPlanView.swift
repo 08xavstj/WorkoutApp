@@ -29,6 +29,9 @@ struct WeeklyPlanView: View {
     @State private var loaded = false
     /// Fixed days or a quota on any days; new plans start flexible.
     @State private var mode: WeeklyPlan.Mode = .flexible
+    /// Easy cardio sessions a week (0-2) and their type (`EasyCardio`).
+    @State private var cardioCount = 0
+    @State private var cardioKind: EasyCardio.Kind = .bike
 
     private var weekStart: Date { WeeklyPlan.weekStart(containing: .now) }
 
@@ -55,6 +58,7 @@ struct WeeklyPlanView: View {
                     PlannedDaySection(day: $day, title: sectionTitle(for: day), flexible: mode == .flexible)
                 }
                 ifThenSection
+                cardioSection
                 blockSection
                 Section {
                     Toggle("Monday review reminder", isOn: $settings.weeklyReviewOn)
@@ -176,6 +180,65 @@ struct WeeklyPlanView: View {
         }
     }
 
+    /// Goals as the planner reads them (nil before they're set).
+    private var goals: Goals? { settings.goalsSet ? settings.goals : nil }
+
+    /// "Easy cardio: none / 1 / 2 a week, ~30 min, bike / row / incline walk",
+    /// placed by `CardioPlanner` (Schumann 2022; Lundberg 2022; WHO 2020).
+    private var cardioSection: some View {
+        Section {
+            Picker("Easy cardio", selection: $cardioCount) {
+                Text("None").tag(0)
+                Text("1 a week").tag(1)
+                Text("2 a week").tag(2)
+            }
+            .pickerStyle(.segmented)
+            if cardioCount > 0 {
+                Picker("Type", selection: $cardioKind) {
+                    ForEach(EasyCardio.Kind.allCases) { kind in
+                        Text(kind.label).tag(kind)
+                    }
+                }
+                Text(cardioPlacement)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+            }
+        } header: {
+            Text("Easy cardio")
+        } footer: {
+            Text(cardioFooter)
+        }
+    }
+
+    /// Where the sessions land this week, from the days as they stand.
+    private var cardioPlacement: String {
+        let draft = WeeklyPlan(weekStart: weekStart, plannedDays: days, mode: mode,
+                               sessionsPerWeek: mode == .flexible ? days.count : nil,
+                               cardio: EasyCardio(sessionsPerWeek: cardioCount, kind: cardioKind))
+        let slots = CardioPlanner.slots(for: draft, goals: goals)
+        let length = "About \(EasyCardio.standardMinutes) min at an easy pace"
+        if mode == .flexible {
+            return "\(length), on any day. It doesn't count toward your \(days.count) lifting sessions."
+        }
+        let names = slots.compactMap(\.weekday).map { WeeklyPlan.weekdayName($0) }
+        if names.isEmpty { return "\(length). No day suits it this week: every day has heavy leg work, and your strength goal keeps cardio off those days." }
+        return "\(length), on " + names.joined(separator: " and ") + "."
+    }
+
+    private var cardioFooter: String {
+        // Schumann et al., Sports Med 2022 (43 studies); Lundberg et al., Sports Med 2022; Bull et al., Br J Sports Med 2020 (WHO).
+        var text = "Rest days first, not the day before a leg session"
+        if goals?.focuses.contains(.strength) == true {
+            text += ", and never on a heavy leg day for your strength goal"
+        }
+        text += ". Easy cardio alongside lifting didn't cost muscle or strength across 43 studies (Schumann 2022); doing both in one session may blunt explosive strength. Cycling went with better muscle-fibre growth than running (Lundberg 2022)"
+        if CardioPlanner.recommendedKind(goals: goals) == .bike {
+            text += ", so the bike suits your goal"
+        }
+        text += ". It counts toward the WHO's 150-300 active minutes a week (Bull 2020). On a low-recovery day it shrinks to 15 minutes."
+        return text
+    }
+
     private var ifThenSection: some View {
         Section {
             TextField("If I'm late, the 15-minute version", text: $ifThen, axis: .vertical)
@@ -223,6 +286,10 @@ struct WeeklyPlanView: View {
             }
         }
         ifThen = days.compactMap(\.ifThen).first ?? ""
+        // Easy cardio carries over from this week's or last week's plan; the type defaults to the goal's.
+        let template = store.plan(for: weekStart) ?? store.lastPlan(before: weekStart)
+        cardioKind = template?.cardio?.kind ?? CardioPlanner.recommendedKind(goals: goals)
+        cardioCount = template?.cardio?.sessionsPerWeek ?? 0
     }
 
     /// The focus that has rested longest, so the rotation starts there, unless
@@ -278,6 +345,7 @@ struct WeeklyPlanView: View {
         }
         plan.mode = mode
         plan.sessionsPerWeek = mode == .flexible ? days.count : nil
+        plan.cardio = cardioCount > 0 ? EasyCardio(sessionsPerWeek: cardioCount, kind: cardioKind) : nil
         // The first confirmed plan starts a training block in the goal's style (`WeeklyPlanStore.save`).
         store.trainingStyle = style
         store.save(plan)

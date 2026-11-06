@@ -8,6 +8,7 @@ import AppCore
 /// muscles counted as half a set (Pelland et al., Sports Med 2026).
 struct WeeklySetsCard: View {
     @Environment(MuscleModel.self) private var muscles
+    @Environment(WeeklyPlanStore.self) private var plans
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .subheadline) private var nameWidth: CGFloat = 84
     @ScaledMetric(relativeTo: .subheadline) private var countWidth: CGFloat = 36
@@ -20,6 +21,8 @@ struct WeeklySetsCard: View {
     var body: some View {
         let states = Self.shown.compactMap { muscles.states[$0] }
         let anyTrained = states.contains { $0.weeklySets >= 0.5 }
+        // This block week's target per muscle (`VolumeProgression`), drawn as a tick on each bar.
+        let targets = plans.volumeTargets(muscles: muscles)?.sets ?? [:]
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 CardLabel(text: "Hard sets this week", color: Theme.lifting)
@@ -34,17 +37,22 @@ struct WeeklySetsCard: View {
                     .foregroundStyle(Theme.secondaryText)
             } else {
                 ForEach(states) { state in
-                    row(state)
+                    row(state, target: targets[state.muscle])
                 }
                 Text("A hard set is one taken within about 4 reps of failure. About 10-20 a week per muscle builds the most muscle for most people (Schoenfeld et al., J Sports Sci 2017); more still helps a little, with diminishing returns past 20 (Pelland et al., Sports Med 2026). Sets for helper muscles (e.g. triceps on bench press) count as half.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
+                if !targets.isEmpty {
+                    Text("The tick on each bar is this block week's target for that muscle.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
             }
         }
         .card()
     }
 
-    private func row(_ state: MuscleRecovery.State) -> some View {
+    private func row(_ state: MuscleRecovery.State, target: Int?) -> some View {
         let sets = state.weeklySets
         let color: Color = switch state.volume {
         case .none, .low: Theme.oxygen
@@ -53,6 +61,7 @@ struct WeeklySetsCard: View {
         }
         // Name beside the bar normally; above it at accessibility sizes.
         let stacked = dynamicTypeSize.isAccessibilitySize
+        let targetText = target.map { ", target \($0) sets" } ?? ""
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
         return layout {
             Text(state.muscle.name)
@@ -62,7 +71,7 @@ struct WeeklySetsCard: View {
                 .lineLimit(stacked ? 2 : 1)
                 .minimumScaleFactor(0.8)
             HStack(spacing: 10) {
-                bar(sets: sets, color: color)
+                bar(sets: sets, color: color, target: target)
                 Text(sets.formatted(.number.precision(.fractionLength(0...1))))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
@@ -71,10 +80,10 @@ struct WeeklySetsCard: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(state.muscle.name): \(sets.formatted(.number.precision(.fractionLength(0...1)))) hard sets this week, \(state.volume.rawValue.lowercased())")
+        .accessibilityLabel("\(state.muscle.name): \(sets.formatted(.number.precision(.fractionLength(0...1)))) hard sets this week, \(state.volume.rawValue.lowercased())\(targetText)")
     }
 
-    private func bar(sets: Double, color: Color) -> some View {
+    private func bar(sets: Double, color: Color, target: Int?) -> some View {
         GeometryReader { geo in
             let width = geo.size.width
             ZStack(alignment: .leading) {
@@ -87,6 +96,12 @@ struct WeeklySetsCard: View {
                 Capsule()
                     .fill(color)
                     .frame(width: max(6, width * min(1, sets / Self.scale)))
+                if let target {
+                    Rectangle()
+                        .fill(Theme.primaryText)
+                        .frame(width: 2, height: 14)
+                        .offset(x: width * min(1, Double(target) / Self.scale) - 1)
+                }
             }
         }
         .frame(height: 10)

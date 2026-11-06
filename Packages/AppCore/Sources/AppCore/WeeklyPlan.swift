@@ -104,18 +104,22 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
     /// Sessions to do this week in `flexible` mode; nil means one per
     /// `plannedDays` entry.
     public var sessionsPerWeek: Int?
+    /// Easy cardio sessions this week (`EasyCardio`, placed by `CardioPlanner`).
+    /// They never count toward the lifting quota: `sessionTarget` is lifting only.
+    public var cardio: EasyCardio?
 
     public init(weekStart: Date, plannedDays: [PlannedDay] = [], changes: [String] = [],
-                mode: Mode = .fixedDays, sessionsPerWeek: Int? = nil) {
+                mode: Mode = .fixedDays, sessionsPerWeek: Int? = nil, cardio: EasyCardio? = nil) {
         self.weekStart = weekStart
         self.plannedDays = plannedDays
         self.changes = changes
         self.mode = mode
         self.sessionsPerWeek = sessionsPerWeek
+        self.cardio = cardio
     }
 
     private enum CodingKeys: String, CodingKey {
-        case weekStart, plannedDays, changes, mode, sessionsPerWeek
+        case weekStart, plannedDays, changes, mode, sessionsPerWeek, cardio
     }
 
     /// Plans saved before `mode` existed are fixed-day plans.
@@ -126,6 +130,8 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
         changes = try container.decodeIfPresent([String].self, forKey: .changes) ?? []
         mode = try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .fixedDays
         sessionsPerWeek = try container.decodeIfPresent(Int.self, forKey: .sessionsPerWeek)
+        // Plans saved before easy cardio existed have none.
+        cardio = try container.decodeIfPresent(EasyCardio.self, forKey: .cardio)
     }
 
     public var isFlexible: Bool { mode == .flexible }

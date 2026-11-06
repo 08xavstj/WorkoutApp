@@ -17,6 +17,11 @@ import Foundation
 ///   is capped at 5 sets per exercise, because more sets keep adding muscle
 ///   only with diminishing returns (Pelland et al., Sports Med 2026;
 ///   Schoenfeld et al., J Sports Sci 2017).
+///   Per muscle, `VolumeProgression` turns the block week into a weekly set
+///   target (10 → 12 → 14 → 16, deload about half) that moves only when last
+///   week's sets were done at the effort target and the muscle recovered; the
+///   planner follows those targets (`WorkoutPlanner.plan(muscleSetGoals:)`)
+///   and `setMultiplier` stays the fallback for muscles without one.
 /// - The day-to-day HRV guidance stays on top: a low-recovery day lowers the
 ///   RPE inside the block (`WorkoutPlanner.targetRPE(recovery:block:)`), and
 ///   a week that starts with HRV below normal repeats the previous week's
