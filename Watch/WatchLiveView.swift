@@ -124,11 +124,13 @@ struct WatchLiveView: View {
                           reps: edit?.reps ?? RepCounter.shared.countedReps(forSet: "\(index)-\(setIndex)") ?? set.reps, weightKg: edit?.weightKg ?? set.weightKg)
     }
 
-    /// Working sets ask how hard it was first; warm-ups are ticked straight away.
+    /// Working sets ask how hard it was first; warm-ups, drop stages and
+    /// mini-sets (no rest, no effort of their own) are ticked straight away.
     private func complete(_ session: WatchSession, _ index: Int) {
         RepCounter.shared.stop()
         guard let set = pending(session, index) else { return }
-        if set.isWarmup {
+        let isStage = session.exercises[set.exerciseIndex].sets[set.setIndex].isStage
+        if set.isWarmup || isStage {
             model.completeSet(exerciseIndex: set.exerciseIndex, setIndex: set.setIndex, reps: set.reps, weightKg: set.weightKg, rpe: nil)
         } else {
             rating = set
@@ -236,9 +238,11 @@ private struct WatchExerciseBlock: View {
         let number = exercise.sets[..<setIndex].filter { $0.isWarmup == set.isWarmup }.count + 1
         let reps = edit?.reps ?? set.reps
         let weightKg = edit?.weightKg ?? set.weightKg
-        Text("\(set.isWarmup ? "Warm-up" : "Set") \(number) of \(same.count)")
+        // "Drop 1 of 2" for a drop stage or mini-set (from the phone); older phones send no title.
+        let fallback = "\(set.isWarmup ? "Warm-up" : "Set") \(number) of \(same.count)"
+        Text(set.title ?? fallback)
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(set.isStage ? WatchTheme.lifting : .secondary)
         HStack {
             Text(reps > 0 || weightKg > 0 ? "\(reps) × \(watchFormat(weightKg, unit: session.unit))" : "Not set")
                 .font(.title3.weight(.bold))

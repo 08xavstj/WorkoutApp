@@ -24,6 +24,17 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         /// A note from the phone for this set, e.g. the set-by-set load change
         /// ("Next set 62.5 kg (you had 3 in reserve)", `Autoregulation`).
         var note: String? = nil
+        /// The set type's raw value (`SetKind` on the phone: "drop", "restPause",
+        /// "myoRep", "failure"); nil for a straight set or an older phone.
+        var kind: String? = nil
+        /// For a drop stage or mini-set: the rest before it, in seconds (0 for a
+        /// drop: the timer is skipped). Nil for a normal set, which rests as usual.
+        var restBeforeSeconds: Int? = nil
+        /// "Set 2 of 3", "Drop 1 of 2", "Warm-up 1 of 3", from the phone; nil on older phones.
+        var title: String? = nil
+
+        /// A drop stage or mini-set that carries on from the set before it.
+        var isStage: Bool { restBeforeSeconds != nil }
 
         /// "Last 60 kg × 8 · RPE 8", or nil without a matching set last time.
         func ghostLine(unit: String) -> String? {
@@ -120,12 +131,13 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
 
     var step: Double { weightStepKg ?? (unit == "lb" ? 5 / 2.20462 : 2.5) }
 
+    /// Working sets; a drop set or rest-pause set counts once, not once per stage.
     var completedSets: Int {
-        exercises.flatMap(\.sets).filter { $0.isCompleted && !$0.isWarmup }.count
+        exercises.flatMap(\.sets).filter { $0.isCompleted && !$0.isWarmup && !$0.isStage }.count
     }
 
     var totalSets: Int {
-        exercises.flatMap(\.sets).filter { !$0.isWarmup }.count
+        exercises.flatMap(\.sets).filter { !$0.isWarmup && !$0.isStage }.count
     }
 
     /// Index of the exercise with the next set to do (`currentExercise`, or

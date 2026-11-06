@@ -83,7 +83,7 @@ private struct SessionRow: View {
                 .lineLimit(1)
             HStack(spacing: 12) {
                 Label(Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)), systemImage: "clock")
-                Label("\(session.workingSets.count) sets", systemImage: "square.stack.3d.up")
+                Label("\(session.effortSets.count) sets", systemImage: "square.stack.3d.up")
                 Label("\(unit.format(session.totalVolumeKg)) \(unit.rawValue)", systemImage: "scalemass")
                 if let source = session.linkedWorkoutSource {
                     Label(source, systemImage: "applewatch")

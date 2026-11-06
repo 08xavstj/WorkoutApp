@@ -50,7 +50,8 @@ enum LiftHistory {
         // Oldest first so the newest session wins for "last" values.
         for session in sessions.filter({ !$0.isActive }).sorted(by: { $0.startedAt < $1.startedAt }) {
             for exercise in session.exercises {
-                let working = exercise.sets.filter { $0.isCompleted && !$0.isWarmup && $0.reps > 0 }
+                // Drop stages and mini-sets are lighter or fatigued by design: not the lift's top set.
+                let working = exercise.sets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage && $0.reps > 0 }
                 guard let top = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) else { continue }
                 let e1RM = unit.fromKilograms(top.estimatedOneRepMax)
                 let previousBest = result[exercise.exerciseID]?.bestEstimatedOneRepMax ?? 0
@@ -82,7 +83,7 @@ enum LiftHistory {
         sessions
             .filter { !$0.isActive && $0.startedAt < date }
             .flatMap { $0.exercises.filter { $0.exerciseID == exerciseID } }
-            .flatMap { $0.sets.filter { $0.isCompleted && !$0.isWarmup } }
+            .flatMap { $0.sets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage } }
             .map(\.estimatedOneRepMax)
             .max() ?? 0
     }
@@ -163,6 +164,16 @@ final class WorkoutLauncher {
                 let set = SetLog(order: warmUps.count + index, weightKg: weightKg, reps: planned.reps.upperBound, rpe: nil)
                 set.exercise = log
                 context.insert(set)
+            }
+            // Time-saving sets (`TimeSaver`): the drop stages or mini-sets after the last set.
+            if let kind = planned.lastSetKind, let stages = planned.stages {
+                let first = warmUps.count + max(1, planned.sets)
+                for (index, stage) in stages.enumerated() {
+                    let stageKg = stage.load.map { unit.toKilograms($0) } ?? weightKg
+                    let set = SetLog(order: first + index, weightKg: stageKg, reps: stage.reps, rpe: nil, kind: kind)
+                    set.exercise = log
+                    context.insert(set)
+                }
             }
         }
         // Superset pairs (`Supersets`) for the live view: exercise order → group.

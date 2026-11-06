@@ -77,10 +77,12 @@ struct WorkoutDetailView: View {
     }
 
     private func exerciseSection(_ exercise: ExerciseLog) -> some View {
-        let working = exercise.orderedSets.filter { !$0.isWarmup }
+        let sets = exercise.orderedSets
+        // Drop stages and mini-sets carry their set's number (`SetStructure`).
+        let positions = SetStructure.positions(LiveSetCoach.structureItems(sets))
         return Section {
-            ForEach(exercise.orderedSets) { set in
-                setRow(set, number: (working.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) ?? 0) + 1)
+            ForEach(Array(sets.enumerated()), id: \.element.persistentModelID) { index, set in
+                setRow(set, position: positions[index])
             }
             NavigationLink {
                 LiftProgressView(exerciseID: exercise.exerciseID, name: exercise.name)
@@ -102,14 +104,21 @@ struct WorkoutDetailView: View {
 
     /// One set; VoiceOver hears "Set 2, 8 reps at 60 kilograms, RPE 8"
     /// (ux-audit.md 4.8, P27).
-    private func setRow(_ set: SetLog, number: Int) -> some View {
-        HStack {
-            Text(set.isWarmup ? "W" : "\(number)")
+    private func setRow(_ set: SetLog, position: SetStructure.Position) -> some View {
+        let number = position.number ?? 1
+        let label = set.isWarmup ? "W" : (position.isStage ? set.kind.shortLabel : "\(number)")
+        return HStack {
+            Text(label)
                 // Text colour for the amber accent (ux-audit.md X4, P24).
                 .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.secondaryText)
                 .frame(width: numberWidth, alignment: .leading)
             Text("\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)")
                 .monospacedDigit()
+            if set.kind != .straight {
+                Text(set.kind.title)
+                    .font(.caption)
+                    .foregroundStyle(Theme.liftingText)
+            }
             Spacer()
             if let rpe = set.rpe {
                 Text("RPE \(rpe.formatted())")
@@ -118,11 +127,12 @@ struct WorkoutDetailView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenSet(set, number: number))
+        .accessibilityLabel(spokenSet(set, number: number, isStage: position.isStage))
     }
 
-    private func spokenSet(_ set: SetLog, number: Int) -> String {
-        var parts = [set.isWarmup ? "Warm-up set" : "Set \(number)"]
+    private func spokenSet(_ set: SetLog, number: Int, isStage: Bool) -> String {
+        var parts = [set.isWarmup ? "Warm-up set" : (isStage ? "\(set.kind.stageName) after set \(number)" : "Set \(number)")]
+        if set.kind != .straight, !isStage { parts.append(set.kind.title) }
         let reps = set.reps == 1 ? "1 rep" : "\(set.reps) reps"
         parts.append(set.weightKg > 0 ? "\(reps) at \(unit.format(set.weightKg)) \(unit.spokenName)" : reps)
         if let rpe = set.rpe { parts.append("RPE \(rpe.formatted())") }

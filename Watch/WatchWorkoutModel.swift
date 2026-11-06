@@ -354,6 +354,17 @@ final class WatchWorkoutModel: NSObject {
     /// Superset: no rest between the first lift and its partner, one rest after
     /// both (the phone applies the same rule).
     private func startRestIfNeeded(after index: Int, in session: WatchSession) {
+        // Next up is a drop stage or mini-set: no rest for a drop, a short one for
+        // rest-pause and myo-reps (`SetKind.restBeforeSeconds` on the phone).
+        if let next = session.exercises[index].sets.first(where: { !$0.isCompleted }),
+           let seconds = next.restBeforeSeconds {
+            if seconds > 0 {
+                startRest(until: Date.now.addingTimeInterval(Double(seconds)), length: seconds)
+            } else {
+                clearRest()
+            }
+            return
+        }
         if session.exercises[index].supersetLabel?.hasSuffix("1") == true,
            let partner = session.partnerIndex(of: index),
            session.exercises[partner].sets.contains(where: { !$0.isCompleted }) {

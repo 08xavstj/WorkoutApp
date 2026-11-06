@@ -82,10 +82,14 @@ public enum VolumeProgression {
         public var isCompound: Bool
         /// Superset group within the session, if the set was paired.
         public var supersetGroup: Int?
+        /// Hard sets it counts as: 1, or 1.5 for a set followed by drop stages
+        /// or mini-sets, which aren't logged sets of their own here
+        /// (`SetStructure.hardSetCredit`).
+        public var setCredit: Double
 
         public init(exerciseID: String, name: String, sessionStart: Date, order: Int, primary: [Muscle],
                     secondary: [Muscle] = [], weightKg: Double, reps: Int, rpe: Double?, isCompleted: Bool = true,
-                    isCompound: Bool, supersetGroup: Int? = nil) {
+                    isCompound: Bool, supersetGroup: Int? = nil, setCredit: Double = 1) {
             self.exerciseID = exerciseID
             self.name = name
             self.sessionStart = sessionStart
@@ -98,6 +102,7 @@ public enum VolumeProgression {
             self.isCompleted = isCompleted
             self.isCompound = isCompound
             self.supersetGroup = supersetGroup
+            self.setCredit = setCredit
         }
     }
 
@@ -167,7 +172,7 @@ public enum VolumeProgression {
                     creditedRounds.insert(key)
                 }
                 touch(muscle)
-                result[muscle]?.sets += weight * effort
+                result[muscle]?.sets += weight * effort * set.setCredit
             }
             if let rpe = set.rpe, rpe > effortCeiling(targetRPE: targetRPE, compound: set.isCompound, style: style) {
                 for muscle in set.primary where result[muscle]?.overEffort.contains(set.name) == false {

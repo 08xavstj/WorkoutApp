@@ -60,7 +60,8 @@ extension WorkoutTemplate {
         let template = WorkoutTemplate(name: session.name)
         context.insert(template)
         for (order, exercise) in session.orderedExercises.enumerated() {
-            let working = exercise.orderedSets.filter { !$0.isWarmup }
+            // Drop stages and mini-sets aren't sets of their own (`SetKind.isStage`).
+            let working = exercise.orderedSets.filter { !$0.isWarmup && !$0.kind.isStage }
             let done = working.filter { $0.reps > 0 }
             let reps = done.map(\.reps)
             let rpes = done.compactMap(\.rpe)

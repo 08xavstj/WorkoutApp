@@ -24,6 +24,13 @@ struct WorkoutBuilderView: View {
     @State private var focus: WorkoutFocus?
     @State private var minutes = 45
     @State private var plan: PlannedWorkout?
+    /// The plan before any time-saving sets (`TimeSaver`); `plan` is this, or
+    /// this with the small lifts' sets as one drop / rest-pause / myo-rep set.
+    @State private var basePlan: PlannedWorkout?
+    @State private var useTimeSaver = false
+    @State private var timeSaverKind: SetKind = .drop
+    /// What the short session can offer (`TimeSaver.options`), worked out with the plan.
+    @State private var timeSaverOptions: [TimeSaver.Option] = []
     @State private var showingGym = false
     @State private var didSetUp = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -70,6 +77,7 @@ struct WorkoutBuilderView: View {
                             )
                         } else {
                             summaryCard(plan)
+                            timeSaverSection
                             // Optional movement warm-up before the first lift (`WarmUpRoutine`).
                             WarmUpPlanRow(focus: plan.focus, slots: WarmUpRoutine.slots(of: plan))
                             ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { index, exercise in
@@ -151,6 +159,8 @@ struct WorkoutBuilderView: View {
             }
             .onChange(of: focus) { rebuild() }
             .onChange(of: minutes) { rebuild() }
+            .onChange(of: useTimeSaver) { applyTimeSaver() }
+            .onChange(of: timeSaverKind) { applyTimeSaver() }
             .onChange(of: settings.warmUpTier(for: resolvedFocus)) { rebuild() }
         }
     }
@@ -191,7 +201,7 @@ struct WorkoutBuilderView: View {
         let block = plans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
         // Body weight, sex and training status give first-time lifts a starting weight (`LoadEstimator`);
         // the warm-up tier's minutes count toward the time.
-        plan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history, block: block,
+        basePlan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history, block: block,
                                 focusReason: focus == nil ? autoReason : nil,
                                 prioritySlots: coverage?.prioritySlots ?? [],
                                 bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,
@@ -200,6 +210,49 @@ struct WorkoutBuilderView: View {
                                 exerciseFilter: exerciseFilter.isEmpty ? nil : exerciseFilter,
                                 muscleSetGoals: plans.sessionSetGoals(focus: resolvedFocus, minutes: minutes, muscles: muscles,
                                                                       sessions: sessions, extra: metrics.recentTrainingDays))
+        applyTimeSaver()
+    }
+
+    // MARK: Time-saving sets
+
+    /// The goals the evidence is tailored to (nil until you've set them).
+    private var goals: Goals? { settings.goalsSet ? settings.goals : nil }
+
+    /// `plan` from `basePlan`: with the time-saving style when it's on and on
+    /// offer for this session (short, a goal it suits, eligible small lifts).
+    private func applyTimeSaver() {
+        guard let basePlan else {
+            plan = nil
+            timeSaverOptions = []
+            return
+        }
+        let options = TimeSaver.options(for: basePlan, minutes: minutes, goals: goals, gym: gym.profile,
+                                        style: gym.style, warmUpMinutes: warmUpMinutes)
+        timeSaverOptions = options
+        if let first = options.first, !options.contains(where: { $0.kind == timeSaverKind }) {
+            timeSaverKind = first.kind
+        }
+        if useTimeSaver, options.contains(where: { $0.kind == timeSaverKind }) {
+            plan = TimeSaver.apply(timeSaverKind, to: basePlan, gym: gym.profile, style: gym.style, warmUpMinutes: warmUpMinutes)
+        } else {
+            plan = basePlan
+        }
+    }
+
+    /// "Same work, less time" on a short session, or why a strength-only
+    /// goal keeps straight sets.
+    @ViewBuilder
+    private var timeSaverSection: some View {
+        if !timeSaverOptions.isEmpty {
+            TimeSaverCard(options: timeSaverOptions, isOn: $useTimeSaver, kind: $timeSaverKind,
+                          strengthNote: TimeSaver.strengthNote(goals))
+        } else if minutes <= TimeSaver.shortSessionMinutes, !TimeSaver.suitsGoals(goals),
+                  let note = TimeSaver.strengthNote(goals) {
+            Text(note)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// True when there's another exercise for the same movement to swap to.
@@ -211,7 +264,7 @@ struct WorkoutBuilderView: View {
 
     /// Replaces an exercise with the next option for the same movement.
     private func swap(at index: Int) {
-        guard var current = plan, index < current.exercises.count,
+        guard var current = basePlan, index < current.exercises.count,
               let slot = ExerciseCatalog.slot(for: current.exercises[index].exerciseID) else { return }
         let options = planner.alternatives(for: slot)
         guard options.count > 1,
@@ -227,7 +280,9 @@ struct WorkoutBuilderView: View {
         current.exercises[index] = replacement
         gym.planner.addWarmUps(&current.exercises)
         current.estimatedMinutes = WorkoutPlanner.estimatedMinutes(current.exercises, style: gym.style, warmUpMinutes: warmUpMinutes)
-        plan = current
+        // Swaps change the plan before time-saving sets, which are then redone (`TimeSaver`).
+        basePlan = current
+        applyTimeSaver()
     }
 
     // MARK: Pain and never again
@@ -474,6 +529,68 @@ struct WorkoutBuilderView: View {
     }
 }
 
+/// "Same work, less time": the short session's small lifts as one drop set,
+/// rest-pause or myo-rep set each, with the time it saves and how good the
+/// evidence is (`TimeSaver`, `SetKind.evidence`).
+struct TimeSaverCard: View {
+    let options: [TimeSaver.Option]
+    @Binding var isOn: Bool
+    @Binding var kind: SetKind
+    var strengthNote: String?
+
+    private var selected: TimeSaver.Option? {
+        options.first { $0.kind == kind } ?? options.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CardLabel(text: "Same work, less time", color: Theme.liftingText)
+            Toggle(isOn: $isOn) {
+                Text(headline)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .tint(Theme.lifting)
+            if options.count > 1 {
+                Picker("Style", selection: $kind) {
+                    ForEach(options) { option in
+                        Text(option.kind.title).tag(option.kind)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            if let selected {
+                Text(selected.kind.evidence)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Safety: multi-joint lifts keep straight sets (`TimeSaver.isEligible`).
+            Text("Squats, presses, rows and deadlifts keep straight sets: going to failure with no rest under a heavy bar is where form slips.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            if let strengthNote {
+                Text(strengthNote)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .card()
+    }
+
+    /// "Lateral Raise as one drop set: about 2 min less (planner's estimate)".
+    private var headline: String {
+        guard let selected else { return "" }
+        let names = selected.exerciseNames.joined(separator: ", ")
+        let style = selected.kind.title.lowercased()
+        let each = selected.exerciseNames.count > 1 ? " each" : ""
+        return "\(names) as one \(style)\(each): about \(selected.minutesSaved) min less"
+    }
+}
+
 struct SelectChip: View {
     let title: String
     let isSelected: Bool
@@ -614,6 +731,13 @@ struct PlannedExerciseRow: View {
                     Text(note)
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
+                }
+                // Drop stages or mini-sets after the set (`TimeSaver`), drops rounded to the gym.
+                if let stages = TimeSaver.describe(exercise, unit: unit) {
+                    Text(stages)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.liftingText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 // Ramp sets rounded to the gym's loads (`WarmUp`; Ribeiro et al. 2020).
                 if let warmUps = exercise.warmUpSets, !warmUps.isEmpty {

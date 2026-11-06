@@ -241,7 +241,8 @@ extension CoachSnapshot {
                     name: session.name,
                     minutes: Int(session.duration / 60),
                     sessionRPE: session.sessionRPE,
-                    workingSets: session.workingSets.count,
+                    // A drop set counts once, not once per stage (`WorkoutSession.effortSets`).
+                    workingSets: session.effortSets.count,
                     volume: unit.format(session.totalVolumeKg),
                     highlights: session.orderedExercises.compactMap { exercise in
                         let best = exercise.sets

@@ -45,6 +45,13 @@ final class WorkoutSession {
         exercises.flatMap(\.sets).filter { $0.isCompleted && !$0.isWarmup }
     }
 
+    /// Working sets without drop stages and mini-sets: a drop, rest-pause or
+    /// myo-rep set counts as one effortful set for session effort and strain,
+    /// not three (feature spec §3.3). Their reps still count in the volume.
+    var effortSets: [SetLog] {
+        workingSets.filter { !$0.kind.isStage }
+    }
+
     var totalVolumeKg: Double {
         workingSets.reduce(0) { $0 + $1.weightKg * Double($1.reps) }
     }
@@ -56,8 +63,8 @@ final class WorkoutSession {
             start: startedAt,
             end: endedAt ?? .now,
             sessionRPE: sessionRPE.map(Double.init),
-            setRPEs: workingSets.compactMap(\.rpe),
-            workingSets: workingSets.count,
+            setRPEs: effortSets.compactMap(\.rpe),
+            workingSets: effortSets.count,
             totalVolumeKg: totalVolumeKg,
             linkedWorkoutUUID: linkedWorkoutUUID,
             linkedWorkoutSource: linkedWorkoutSource
@@ -97,16 +104,28 @@ final class SetLog {
     var isWarmup: Bool
     var completedAt: Date?
     var exercise: ExerciseLog?
+    /// The set type (`SetKind`: drop, rest-pause, myo-rep, failure) as its raw
+    /// value; nil for a straight set, so sets logged before set types existed
+    /// read as straight. Added in schema 1.3.0.
+    var setKindRaw: String?
 
-    init(order: Int, weightKg: Double = 0, reps: Int = 0, rpe: Double? = nil, isWarmup: Bool = false) {
+    init(order: Int, weightKg: Double = 0, reps: Int = 0, rpe: Double? = nil, isWarmup: Bool = false,
+         kind: SetKind = .straight) {
         self.order = order
         self.weightKg = weightKg
         self.reps = reps
         self.rpe = rpe
         self.isWarmup = isWarmup
+        self.setKindRaw = kind == .straight ? nil : kind.rawValue
     }
 
     var isCompleted: Bool { completedAt != nil }
+
+    /// Straight, a drop stage or mini-set that continues the set before it, or to failure.
+    var kind: SetKind {
+        get { SetKind(storedValue: setKindRaw) }
+        set { setKindRaw = newValue == .straight ? nil : newValue.rawValue }
+    }
 
     /// Estimated one-rep max (Epley, counting reps left from the set's RPE).
     var estimatedOneRepMax: Double {
@@ -134,7 +153,8 @@ final class HRVReading {
 // in that version. Versions that point at the same live classes get identical
 // checksums and SwiftData aborts at launch ("Duplicate version checksums
 // detected"). So 1.0.0 and 1.1.0 use frozen copies of the workout models from
-// before 1.2.0 (below); only the current version uses the live classes.
+// before 1.2.0 (below), 1.2.0 its own frozen copies from before 1.3.0, and
+// only the current version (1.3.0) uses the live classes.
 
 nonisolated enum WorkoutSchema: VersionedSchema {
     static let versionIdentifier = Schema.Version(1, 0, 0)
@@ -235,14 +255,104 @@ nonisolated enum WorkoutSchemaV3: VersionedSchema {
         [WorkoutSession.self, ExerciseLog.self, SetLog.self, HRVReading.self,
          WorkoutTemplate.self, TemplateExercise.self]
     }
+
+    // Frozen: the workout models as stored in 1.2.0. Don't edit these; change
+    // the live classes and add a new schema version instead. The templates
+    // haven't changed since 1.1.0, so they're still the live classes.
+
+    @Model
+    final class WorkoutSession {
+        var startedAt: Date
+        var endedAt: Date?
+        var name: String
+        var sessionRPE: Int?
+        var notes: String
+        var savedToHealth: Bool
+        var linkedWorkoutUUID: UUID?
+        var linkedWorkoutSource: String?
+        var watchWorkoutUUID: UUID?
+
+        @Relationship(deleteRule: .cascade, inverse: \ExerciseLog.session)
+        var exercises: [ExerciseLog] = []
+
+        init(name: String, startedAt: Date) {
+            self.name = name
+            self.startedAt = startedAt
+            self.notes = ""
+            self.savedToHealth = false
+        }
+    }
+
+    @Model
+    final class ExerciseLog {
+        var exerciseID: String
+        var name: String
+        var order: Int
+        var session: WorkoutSession?
+
+        @Relationship(deleteRule: .cascade, inverse: \SetLog.exercise)
+        var sets: [SetLog] = []
+
+        init(exerciseID: String, name: String, order: Int) {
+            self.exerciseID = exerciseID
+            self.name = name
+            self.order = order
+        }
+    }
+
+    @Model
+    final class SetLog {
+        var order: Int
+        var weightKg: Double
+        var reps: Int
+        var rpe: Double?
+        var isWarmup: Bool
+        var completedAt: Date?
+        var exercise: ExerciseLog?
+
+        init(order: Int, weightKg: Double, reps: Int, rpe: Double?, isWarmup: Bool) {
+            self.order = order
+            self.weightKg = weightKg
+            self.reps = reps
+            self.rpe = rpe
+            self.isWarmup = isWarmup
+        }
+    }
+
+    @Model
+    final class HRVReading {
+        var date: Date
+        var milliseconds: Double
+        var source: String
+
+        init(date: Date, milliseconds: Double, source: String) {
+            self.date = date
+            self.milliseconds = milliseconds
+            self.source = source
+        }
+    }
+}
+
+/// Adds set types (`SetLog.setKindRaw`: drop, rest-pause, myo-rep, failure):
+/// an optional property on `SetLog`, nil (a straight set) by default, so
+/// another lightweight migration.
+nonisolated enum WorkoutSchemaV4: VersionedSchema {
+    static let versionIdentifier = Schema.Version(1, 3, 0)
+    static var models: [any PersistentModel.Type] {
+        [WorkoutSession.self, ExerciseLog.self, SetLog.self, HRVReading.self,
+         WorkoutTemplate.self, TemplateExercise.self]
+    }
 }
 
 nonisolated enum WorkoutMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [WorkoutSchema.self, WorkoutSchemaV2.self, WorkoutSchemaV3.self] }
+    static var schemas: [any VersionedSchema.Type] {
+        [WorkoutSchema.self, WorkoutSchemaV2.self, WorkoutSchemaV3.self, WorkoutSchemaV4.self]
+    }
     static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: WorkoutSchema.self, toVersion: WorkoutSchemaV2.self),
-            .lightweight(fromVersion: WorkoutSchemaV2.self, toVersion: WorkoutSchemaV3.self)
+            .lightweight(fromVersion: WorkoutSchemaV2.self, toVersion: WorkoutSchemaV3.self),
+            .lightweight(fromVersion: WorkoutSchemaV3.self, toVersion: WorkoutSchemaV4.self)
         ]
     }
 }

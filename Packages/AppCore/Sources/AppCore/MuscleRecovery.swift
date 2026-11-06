@@ -60,12 +60,18 @@ public enum MuscleRecovery {
         public var primary: [String]
         public var secondary: [String]
         public var rpe: Double?
+        /// Hard sets this counts as in the weekly volume (`MuscleCoverage.setsThisWeek`):
+        /// 1, or 1.5 for a set followed by drop stages or mini-sets
+        /// (`SetStructure.hardSetCredit`). Fatigue here counts it as one set
+        /// either way (feature spec §3.3: one effortful set, not three).
+        public var volumeCredit: Double
 
-        public init(date: Date, primary: [String], secondary: [String] = [], rpe: Double? = nil) {
+        public init(date: Date, primary: [String], secondary: [String] = [], rpe: Double? = nil, volumeCredit: Double = 1) {
             self.date = date
             self.primary = primary
             self.secondary = secondary
             self.rpe = rpe
+            self.volumeCredit = volumeCredit
         }
     }
 

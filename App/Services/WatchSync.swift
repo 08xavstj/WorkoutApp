@@ -302,9 +302,8 @@ final class WatchSync: NSObject {
             let sets = exercise.orderedSets
             guard let index = sets.firstIndex(where: { !$0.isCompleted }) else { continue }
             let set = sets[index]
-            let same = sets.filter { $0.isWarmup == set.isWarmup }
-            let number = (same.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1
-            var detail = "\(set.isWarmup ? "Warm-up" : "Set") \(number) of \(same.count)"
+            // "Set 2 of 3", "Warm-up 1 of 3", "Drop 1 of 2" (`SetStructure`).
+            var detail = LiveSetCoach.title(for: set, in: sets)
             if set.weightKg > 0 || set.reps > 0 {
                 let weight = unit.fromKilograms(set.weightKg).formatted(.number.precision(.fractionLength(0...1)))
                 detail += " · \(weight) \(unit.rawValue) × \(set.reps)"
@@ -392,9 +391,21 @@ final class WatchSync: NSObject {
         update(from: session)
     }
 
-    /// Rest after a set, the way the workout screen starts it: none between the
-    /// two halves of a superset (`Supersets`), else the exercise's rest preference.
+    /// Rest after a set, the way the workout screen starts it: the stage's
+    /// short rest (none for a drop) when a drop stage or mini-set is next
+    /// (`SetKind`), none between the two halves of a superset (`Supersets`),
+    /// else the exercise's rest preference.
     private func startRest(after exercise: ExerciseLog, in session: WorkoutSession) {
+        if let seconds = LiveSetCoach.stageRest(before: exercise) {
+            if seconds > 0 {
+                RestTimerStore.start(seconds: Double(seconds))
+            } else {
+                RestTimerStore.stop()
+            }
+            let next = nextSetText(session)
+            Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
+            return
+        }
         let groups = SupersetRegistry.groups(for: session.startedAt)
         if let mateOrder = SupersetRegistry.partner(of: exercise.order, groups: groups), mateOrder > exercise.order,
            let mate = session.exercises.first(where: { $0.order == mateOrder }),

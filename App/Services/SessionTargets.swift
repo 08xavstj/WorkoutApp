@@ -105,6 +105,8 @@ enum LiveSetCoach {
     /// Target reps for a set: the planned top of the range, or the reps an
     /// autoregulation change set from this set on.
     static func targetReps(for set: SetLog, target: SessionTargets.Target?, entry: AutoregulationLog.Entry?) -> Int? {
+        // A drop stage or mini-set is "as many good reps as you can", not a target (`SetKind`).
+        if set.kind.isStage { return nil }
         if let entry, let reps = entry.reps, set.order >= entry.setOrder { return reps }
         return target?.repsHigh
     }
@@ -112,14 +114,17 @@ enum LiveSetCoach {
     /// After a working set is ticked: compares its RPE with the target and,
     /// when the gap is two reps or more, changes the remaining sets that are
     /// still at the same weight (ones you've edited are left alone). At most
-    /// once per exercise per session; never off the first working set.
+    /// once per exercise per session; never off the first working set. Only
+    /// straight sets count (`SetKind.allowsAutoregulation`): a set to failure is
+    /// RPE 10 on purpose and drop stages or mini-sets are fatigued by design, so
+    /// neither moves the load, and stages are never changed.
     @discardableResult
     static func autoregulate(after set: SetLog, in exercise: ExerciseLog, sessionStart: Date,
                              gym: GymProfile, blockRIR: Int? = nil) -> AutoregulationLog.Entry? {
-        guard set.isCompleted, !set.isWarmup,
+        guard set.isCompleted, !set.isWarmup, set.kind.allowsAutoregulation,
               AutoregulationLog.entry(for: sessionStart, order: exercise.order) == nil,
               let rir = targetRIR(sessionStart: sessionStart, order: exercise.order, blockRIR: blockRIR) else { return nil }
-        let working = exercise.orderedSets.filter { !$0.isWarmup }
+        let working = exercise.orderedSets.filter { !$0.isWarmup && !$0.kind.isStage }
         guard let index = working.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) else { return nil }
         let remaining = working.dropFirst(index + 1).filter { !$0.isCompleted }
         guard let next = remaining.first else { return nil }
@@ -167,7 +172,7 @@ enum LiveSetCoach {
         descriptor.fetchLimit = 60
         let sessions = (try? context.fetch(descriptor)) ?? []
         let sets = LiftHistory.previousSets(for: exerciseID, before: start, in: sessions)
-            .filter { !$0.isWarmup }
+            .filter { !$0.isWarmup && !$0.kind.isStage }
             .map { LiftProgress.LoggedSet(weight: $0.weightKg, reps: $0.reps, rpe: $0.rpe) }
         ghostCache[exerciseID] = sets
         return sets
@@ -181,10 +186,19 @@ enum LiveSetCoach {
         let entry = AutoregulationLog.entry(for: sessionStart, order: exercise.order)
         var result: [WatchSession.SetSnapshot] = []
         var workingIndex = 0
-        for set in exercise.orderedSets {
+        let ordered = exercise.orderedSets
+        let items = structureItems(ordered)
+        let positions = SetStructure.positions(items)
+        for (index, set) in ordered.enumerated() {
             var snapshot = WatchSession.SetSnapshot(reps: set.reps, weightKg: set.weightKg, isCompleted: set.isCompleted,
                                                     isWarmup: set.isWarmup, rpe: set.rpe)
-            if !set.isWarmup {
+            // Set type (`SetKind`): the Watch labels it and runs the stage's short rest (none for a drop).
+            snapshot.title = SetStructure.title(at: index, in: items)
+            if set.kind != .straight { snapshot.kind = set.kind.rawValue }
+            if positions[index].isStage {
+                snapshot.restBeforeSeconds = set.kind.restBeforeSeconds
+                if !set.isCompleted { snapshot.note = set.kind.howTo }
+            } else if !set.isWarmup {
                 if workingIndex < ghosts.count {
                     let ghost = ghosts[workingIndex]
                     snapshot.lastWeightKg = ghost.weight
@@ -195,6 +209,8 @@ enum LiveSetCoach {
                 snapshot.targetRIR = target?.targetRIR
                 if let entry, entry.setOrder == set.order, !set.isCompleted {
                     snapshot.note = entry.message
+                } else if set.kind == .failure, !set.isCompleted {
+                    snapshot.note = set.kind.howTo
                 }
                 workingIndex += 1
             }
@@ -207,9 +223,11 @@ enum LiveSetCoach {
 
     /// e1RM, rep and volume records for an exercise once its sets are done,
     /// against every earlier session of it, in the workout's unit (`SetFeedback.records`).
+    /// Drop stages and mini-sets are left out on both sides: a first-ever
+    /// light drop weight isn't a rep record, and fatigued stages aren't e1RM evidence.
     static func records(for exercise: ExerciseLog, sessionStart: Date, sessions: [WorkoutSession], unit: WeightUnit) -> [SetFeedback.Record] {
         let today = exercise.orderedSets
-            .filter { $0.isCompleted && !$0.isWarmup }
+            .filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage }
             .map { LiftProgress.LoggedSet(weight: unit.display($0.weightKg), reps: $0.reps, rpe: $0.rpe) }
         let earlier = sessions
             .filter { !$0.isActive && $0.startedAt < sessionStart }
@@ -217,10 +235,34 @@ enum LiveSetCoach {
                 let sets = session.exercises
                     .filter { $0.exerciseID == exercise.exerciseID }
                     .flatMap(\.sets)
-                    .filter { $0.isCompleted && !$0.isWarmup }
+                    .filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage }
                     .map { LiftProgress.LoggedSet(weight: unit.display($0.weightKg), reps: $0.reps, rpe: $0.rpe) }
                 return sets.isEmpty ? nil : LiftProgress.LoggedSession(date: session.startedAt, sets: sets)
             }
         return SetFeedback.records(today: today, earlier: earlier)
+    }
+
+    // MARK: Set types
+
+    /// The sets as `SetStructure` sees them (warm-up flag and `SetKind`), in order.
+    static func structureItems(_ sets: [SetLog]) -> [SetStructure.Item] {
+        sets.map { SetStructure.Item(isWarmup: $0.isWarmup, kind: $0.kind) }
+    }
+
+    /// "Warm-up 1 of 3", "Set 2 of 3", "Drop 1 of 2" for a set of an exercise.
+    static func title(for set: SetLog, in sets: [SetLog]) -> String {
+        let index = sets.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0
+        return SetStructure.title(at: index, in: structureItems(sets))
+    }
+
+    /// The rest before the exercise's next set when that set is a drop stage
+    /// or mini-set (`SetKind.restBeforeSeconds`: 0 for a drop, about 20 s for
+    /// rest-pause, 15 s for myo-reps); nil when it's a normal set or there is none.
+    static func stageRest(before exercise: ExerciseLog) -> Int? {
+        let sets = exercise.orderedSets
+        guard let index = sets.firstIndex(where: { !$0.isCompleted }) else { return nil }
+        let positions = SetStructure.positions(structureItems(sets))
+        guard positions[index].isStage else { return nil }
+        return sets[index].kind.restBeforeSeconds
     }
 }

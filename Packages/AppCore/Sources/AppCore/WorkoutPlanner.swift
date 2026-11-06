@@ -302,6 +302,28 @@ public struct PlannedExercise: Codable, Sendable, Equatable, Identifiable {
     /// How the load moved since last time ("+5 lb from last time: you hit 8
     /// reps at RPE 7"), so the gradual increase is visible. Nil without history.
     public var progressionNote: String? = nil
+    /// A time-saving style for the last (here: only) working set (`TimeSaver`):
+    /// drop set, rest-pause or myo-reps, followed by `stages`. Nil for straight sets.
+    /// Optional, so plans saved before set types still decode.
+    public var lastSetKind: SetKind? = nil
+    /// The drop stages or mini-sets after that set, in order.
+    public var stages: [Stage]? = nil
+}
+
+extension PlannedExercise {
+    /// One drop stage or mini-set (`SetKind.isStage`).
+    public struct Stage: Codable, Sendable, Equatable {
+        /// In the gym's unit; nil = the same weight as the set before (rest-pause,
+        /// myo-reps) or not known yet (a drop with no planned load).
+        public var load: Double?
+        /// A starting point for the reps (`TimeSaver.stageReps`); log what you do.
+        public var reps: Int
+
+        public init(load: Double?, reps: Int) {
+            self.load = load
+            self.reps = reps
+        }
+    }
 }
 
 extension PlannedExercise {
@@ -932,7 +954,8 @@ public struct WorkoutPlanner: Sendable {
     ///   for this `style` (`RestTimer.defaultSeconds`; balanced: 3.25 min for
     ///   big lifts, 2.25 for small ones), at about 60% in a superset
     ///   (`Supersets.timeFraction`: the pair shares one rest);
-    /// - `transitionMinutes` between exercises.
+    /// - `transitionMinutes` between exercises;
+    /// - drop stages and mini-sets (`TimeSaver.stageSeconds`), with no rest of their own.
     /// Counting rest by style matters: the timer runs the style's rest, so an
     /// estimate at the longer balanced rest trimmed muscle-style sessions
     /// short (a 60-min plan that took 40).
@@ -947,6 +970,10 @@ public struct WorkoutPlanner: Sendable {
             let fraction = exercise.supersetGroup == nil ? 1 : Supersets.timeFraction
             total += Double(exercise.sets) * perSet * fraction
             total += Double(exercise.warmUpSets?.count ?? 0) * ramp
+            // Drop stages and mini-sets (`TimeSaver`): their reps plus the weight change or short rest.
+            if let kind = exercise.lastSetKind, let stages = exercise.stages {
+                total += Double(stages.reduce(0) { $0 + TimeSaver.stageSeconds(for: kind, reps: $1.reps) }) / 60
+            }
         }
         return Int(total.rounded())
     }

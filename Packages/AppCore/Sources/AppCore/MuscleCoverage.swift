@@ -57,12 +57,13 @@ public enum MuscleCoverage {
     // MARK: Sets this week
 
     /// Hard sets per muscle since `weekStart` (helper muscles count half, easy
-    /// sets under RPE 7 count 0.6, as in `MuscleRecovery.evaluate`), so the
+    /// sets under RPE 7 count 0.6, as in `MuscleRecovery.evaluate`; a drop,
+    /// rest-pause or myo-rep set counts its `volumeCredit`, 1.5), so the
     /// gap is this calendar week's, not a rolling seven days'.
     public static func setsThisWeek(_ sets: [MuscleRecovery.WorkSet], weekStart: Date, now: Date = .now) -> [Muscle: Double] {
         var weekly: [Muscle: Double] = [:]
         for set in sets where set.date >= weekStart && set.date <= now {
-            let effort = (set.rpe ?? 8) >= 7 ? 1.0 : 0.6
+            let effort = ((set.rpe ?? 8) >= 7 ? 1.0 : 0.6) * set.volumeCredit
             for name in set.primary {
                 if let muscle = Muscle(rawValue: name.lowercased()) { weekly[muscle, default: 0] += effort }
             }

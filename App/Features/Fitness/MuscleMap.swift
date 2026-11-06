@@ -46,12 +46,18 @@ final class MuscleModel {
         for session in sessions where session.startedAt >= cutoff {
             for exercise in session.exercises {
                 guard let info = library.exercise(id: exercise.exerciseID) else { continue }
-                for set in exercise.sets where set.isCompleted && !set.isWarmup {
+                // A drop, rest-pause or myo-rep set is one effortful set for fatigue and
+                // one and a half for weekly volume; its stages add no sets of their own
+                // (`SetStructure.hardSetCredit`, feature spec §3.3).
+                let ordered = exercise.orderedSets
+                let positions = SetStructure.positions(LiveSetCoach.structureItems(ordered))
+                for (index, set) in ordered.enumerated() where set.isCompleted && !set.isWarmup && !positions[index].isStage {
                     sets.append(MuscleRecovery.WorkSet(
                         date: set.completedAt ?? session.startedAt,
                         primary: info.primaryMuscles,
                         secondary: info.secondaryMuscles,
-                        rpe: set.rpe ?? session.sessionRPE.map(Double.init)
+                        rpe: set.rpe ?? session.sessionRPE.map(Double.init),
+                        volumeCredit: SetStructure.hardSetCredit(stages: positions[index].stages)
                     ))
                 }
             }
@@ -95,13 +101,20 @@ final class MuscleModel {
                 let primary = info.primaryMuscles.compactMap { Muscle(rawValue: $0.lowercased()) }
                 let secondary = info.secondaryMuscles.compactMap { Muscle(rawValue: $0.lowercased()) }
                 let compound = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound ?? (info.mechanic == "compound")
-                let working = exercise.orderedSets.filter { !$0.isWarmup }
-                for (index, set) in working.enumerated() {
+                // Drop stages and mini-sets aren't sets of their own here: the set they
+                // follow counts one and a half (`SetStructure.hardSetCredit`), and their
+                // lighter, fatigued reps stay out of the reps-dropped comparison.
+                let ordered = exercise.orderedSets
+                let positions = SetStructure.positions(LiveSetCoach.structureItems(ordered))
+                let working = ordered.indices.filter { !ordered[$0].isWarmup && !positions[$0].isStage }
+                for (index, setIndex) in working.enumerated() {
+                    let set = ordered[setIndex]
                     result.append(VolumeProgression.LoggedSet(
                         exerciseID: exercise.exerciseID, name: exercise.name, sessionStart: session.startedAt,
                         order: index, primary: primary, secondary: secondary, weightKg: set.weightKg, reps: set.reps,
                         rpe: set.rpe ?? session.sessionRPE.map(Double.init), isCompleted: set.isCompleted,
-                        isCompound: compound, supersetGroup: groups[exercise.order]
+                        isCompound: compound, supersetGroup: groups[exercise.order],
+                        setCredit: SetStructure.hardSetCredit(stages: positions[setIndex].stages)
                     ))
                 }
             }

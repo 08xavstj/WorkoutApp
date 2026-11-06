@@ -415,6 +415,18 @@ struct ActiveWorkoutView: View {
             Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
             return
         }
+        // A drop stage or mini-set is next (`SetKind`): no rest before a drop (the
+        // timer is skipped between drop stages), a short one for rest-pause and myo-reps.
+        if let seconds = LiveSetCoach.stageRest(before: exercise) {
+            if seconds > 0 {
+                RestTimerStore.start(seconds: Double(seconds))
+            } else {
+                RestTimerStore.stop()
+            }
+            let next = nextSetText()
+            Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
+            return
+        }
         // Superset: no rest between the first lift and its partner, one rest after both
         // (paired sets, Iversen et al., Sports Med 2021; `Supersets`).
         if let mate = partner(of: exercise), mate.order > exercise.order,
@@ -436,9 +448,8 @@ struct ActiveWorkoutView: View {
             let sets = exercise.orderedSets
             guard let index = sets.firstIndex(where: { !$0.isCompleted }) else { continue }
             let set = sets[index]
-            let same = sets.filter { $0.isWarmup == set.isWarmup }
-            let number = (same.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1
-            var detail = "\(set.isWarmup ? "Warm-up" : "Set") \(number) of \(same.count)"
+            // "Set 3 of 4", "Warm-up 2 of 3", "Drop 1 of 2" (`SetStructure`).
+            var detail = LiveSetCoach.title(for: set, in: sets)
             if set.weightKg > 0 || set.reps > 0 {
                 detail += " · \(workoutUnit.format(set.weightKg)) \(workoutUnit.rawValue) × \(set.reps)"
             }
@@ -621,26 +632,7 @@ private struct ExerciseCard: View {
             }
 
             ForEach(sets, id: \.persistentModelID) { set in
-                SetRow(
-                    set: set,
-                    label: set.isWarmup ? "W" : "\(workingNumber(set, in: sets))",
-                    previous: set.isWarmup ? "" : previousText(index: workingNumber(set, in: sets) - 1),
-                    unit: unit,
-                    isEditing: set.persistentModelID == editing?.persistentModelID,
-                    onTap: { focusedSetID = set.persistentModelID },
-                    onToggle: { toggle(set) },
-                    previousSet: set.isWarmup ? nil : previousSet(index: workingNumber(set, in: sets) - 1),
-                    warmUp: set.isWarmup ? warmUpPosition(set, in: sets) : nil,
-                    targetText: set.isWarmup ? nil : targetText(for: set),
-                    verdict: set.isWarmup ? nil : verdict(for: set, index: workingNumber(set, in: sets) - 1)
-                )
-                .contextMenu {
-                    Button(set.isWarmup ? "Make working set" : "Make warm-up set") { set.isWarmup.toggle() }
-                    Button("Delete set", role: .destructive) {
-                        modelContext.delete(set)
-                        try? modelContext.save()
-                    }
-                }
+                setRow(set, in: sets, editing: editing)
             }
 
             if let note = adjustmentNote(in: sets) {
@@ -650,7 +642,7 @@ private struct ExerciseCard: View {
             if let editing {
                 SetEditor(
                     set: editing,
-                    title: editing.isWarmup ? "Warm-up" : "Set \(workingNumber(editing, in: sets))",
+                    title: editorTitle(for: editing, in: sets),
                     unit: unit,
                     step: { up in step(editing, up: up) },
                     plateHint: plateHint(for: editing),
@@ -659,17 +651,7 @@ private struct ExerciseCard: View {
                 )
             }
 
-            Button {
-                addSet()
-            } label: {
-                Text("+ Add set")
-                    .font(.headline)
-                    .foregroundStyle(Theme.primaryText)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Theme.cardRaised, in: .rect(cornerRadius: 14))
-            }
-            .buttonStyle(.plain)
+            AddSetButtons(canAddStage: canAddStage(to: sets), onAddSet: addSet, onAddStage: addStage)
 
             if needsWeightFinding(sets) {
                 // No history and nothing to estimate from, so no ramp sets: the first set finds the weight.
@@ -701,6 +683,119 @@ private struct ExerciseCard: View {
     }
 
     private var completedCount: Int { exercise.sets.filter(\.isCompleted).count }
+
+    // MARK: Set rows and set types
+
+    /// One set's row with its context menu (warm-up, set type, delete).
+    private func setRow(_ set: SetLog, in sets: [SetLog], editing: SetLog?) -> some View {
+        let position = structurePosition(of: set, in: sets)
+        let ghostIndex = (position.number ?? 1) - 1
+        let isWorking = !set.isWarmup && !position.isStage
+        return SetRow(
+            set: set,
+            label: rowLabel(set, position: position),
+            previous: isWorking ? previousText(index: ghostIndex) : "",
+            unit: unit,
+            isEditing: set.persistentModelID == editing?.persistentModelID,
+            onTap: { focusedSetID = set.persistentModelID },
+            onToggle: { toggle(set) },
+            previousSet: isWorking ? previousSet(index: ghostIndex) : nil,
+            warmUp: set.isWarmup ? warmUpPosition(set, in: sets) : nil,
+            targetText: isWorking ? targetText(for: set) : nil,
+            verdict: isWorking ? verdict(for: set, index: ghostIndex) : nil,
+            kindLine: Self.kindLine(set.kind, isStage: position.isStage)
+        )
+        .contextMenu {
+            Button(set.isWarmup ? "Make working set" : "Make warm-up set") { set.isWarmup.toggle() }
+            if !set.isWarmup {
+                Picker(selection: kindBinding(for: set)) {
+                    ForEach(SetKind.allCases) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                } label: {
+                    Label("Set type", systemImage: "square.stack.3d.down.right")
+                }
+                .pickerStyle(.menu)
+            }
+            Button("Delete set", role: .destructive) {
+                modelContext.delete(set)
+                try? modelContext.save()
+            }
+        }
+    }
+
+    private func structurePosition(of set: SetLog, in sets: [SetLog]) -> SetStructure.Position {
+        let positions = SetStructure.positions(LiveSetCoach.structureItems(sets))
+        let index = sets.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0
+        return index < positions.count ? positions[index] : SetStructure.Position(number: 1)
+    }
+
+    /// "W", the set number, or "D" / "RP" / "M" for a drop stage or mini-set.
+    private func rowLabel(_ set: SetLog, position: SetStructure.Position) -> String {
+        if set.isWarmup { return "W" }
+        if position.isStage { return set.kind.shortLabel }
+        return "\(position.number ?? 1)"
+    }
+
+    /// "Drop · no rest", "Mini-set · about 20 s rest", "To failure"; nil for a normal set.
+    static func kindLine(_ kind: SetKind, isStage: Bool) -> String? {
+        switch kind {
+        case .straight: return nil
+        case .failure: return "To failure"
+        case .drop: return isStage ? "Drop · no rest, lighter" : "Drop set"
+        case .restPause: return isStage ? "Rest-pause · about \(SetKind.restPauseRestSeconds) s rest" : "Rest-pause"
+        case .myoRep: return isStage ? "Myo-rep mini-set · 3-5 breaths (untested in trials)" : "Myo-reps (untested in trials)"
+        }
+    }
+
+    /// "Set 2", "Warm-up" or "Drop 1 of 2" above the editor.
+    private func editorTitle(for set: SetLog, in sets: [SetLog]) -> String {
+        if set.isWarmup { return "Warm-up" }
+        let position = structurePosition(of: set, in: sets)
+        if position.isStage { return LiveSetCoach.title(for: set, in: sets) }
+        return "Set \(position.number ?? 1)"
+    }
+
+    /// The set type from the context menu. Marking a set "to failure" fills its effort as 10.
+    private func kindBinding(for set: SetLog) -> Binding<SetKind> {
+        Binding(
+            get: { set.kind },
+            set: { kind in
+                set.kind = kind
+                if kind == .failure, set.rpe == nil { set.rpe = 10 }
+                try? modelContext.save()
+            }
+        )
+    }
+
+    /// A drop stage or mini-set needs a working set to follow.
+    private func canAddStage(to sets: [SetLog]) -> Bool {
+        sets.last.map { !$0.isWarmup } ?? false
+    }
+
+    /// Adds a drop stage (about a quarter lighter, rounded to the gym's
+    /// loads: `TimeSaver.dropLoads`) or a rest-pause / myo-rep mini-set at the
+    /// same weight after the last set.
+    private func addStage(_ kind: SetKind) {
+        guard let last = exercise.orderedSets.last, !last.isWarmup else { return }
+        var weightKg = last.weightKg
+        var reps = TimeSaver.stageReps(for: kind, reps: max(1, last.reps)...max(1, last.reps))
+        if kind == .drop {
+            reps = last.reps
+            let loadKind = ExerciseCatalog.exercise(id: exercise.exerciseID)?.load ?? libraryLoadKind
+            let current = gym.unit.fromKilograms(last.weightKg)
+            if let loadKind, gym.has(loadKind),
+               let lighter = TimeSaver.dropLoads(from: current, kind: loadKind, gym: gym, stages: 1).first {
+                weightKg = gym.unit.toKilograms(lighter)
+            } else {
+                weightKg = last.weightKg * (1 - 0.25)
+            }
+        }
+        let set = SetLog(order: last.order + 1, weightKg: weightKg, reps: reps, rpe: nil, kind: kind)
+        set.exercise = exercise
+        modelContext.insert(set)
+        try? modelContext.save()
+    }
 
     private func loadLiveState() {
         target = SessionTargets.target(for: sessionStart, order: exercise.order)
@@ -740,10 +835,11 @@ private struct ExerciseCard: View {
 
     /// The verdict once a working set is ticked (`SetFeedback.verdict`).
     private func verdict(for set: SetLog, index: Int) -> SetFeedback.Verdict? {
-        guard set.isCompleted, !set.isWarmup else { return nil }
+        guard set.isCompleted, !set.isWarmup, !set.kind.isStage else { return nil }
         let logged = LiftProgress.LoggedSet(weight: unit.display(set.weightKg), reps: set.reps, rpe: set.rpe)
         let last = previousSet(index: index).map { LiftProgress.LoggedSet(weight: unit.display($0.weightKg), reps: $0.reps, rpe: $0.rpe) }
-        let targetRPE = targetRIR.map { 10 - $0 }
+        // A set to failure is RPE 10 on purpose: no "harder than planned".
+        let targetRPE = set.kind == .failure ? nil : targetRIR.map { 10 - $0 }
         return SetFeedback.verdict(logged: logged, last: last,
                                    targetReps: LiveSetCoach.targetReps(for: set, target: target, entry: adjustment),
                                    targetRPE: targetRPE)
@@ -833,17 +929,13 @@ private struct ExerciseCard: View {
 
     private var isNewPR: Bool {
         guard bestBefore > 0 else { return false }
-        let best = exercise.sets.filter { $0.isCompleted && !$0.isWarmup }.map(\.estimatedOneRepMax).max() ?? 0
+        let best = exercise.sets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage }.map(\.estimatedOneRepMax).max() ?? 0
         return best > bestBefore + 0.01
     }
 
-    private func workingNumber(_ set: SetLog, in sets: [SetLog]) -> Int {
-        (sets.filter { !$0.isWarmup }.firstIndex { $0.persistentModelID == set.persistentModelID } ?? 0) + 1
-    }
-
-    /// Last session's working set with the same number (warm-ups don't count).
+    /// Last session's working set with the same number (warm-ups, drop stages and mini-sets don't count).
     private func previousText(index: Int) -> String {
-        let working = previous.filter { !$0.isWarmup }
+        let working = previous.filter { !$0.isWarmup && !$0.kind.isStage }
         guard index >= 0, index < working.count else { return "" }
         let set = working[index]
         let effort = set.rpe.map { " · RPE \($0.formatted())" } ?? ""
@@ -852,7 +944,7 @@ private struct ExerciseCard: View {
 
     /// The same set from last session, for VoiceOver.
     private func previousSet(index: Int) -> SetLog? {
-        let working = previous.filter { !$0.isWarmup }
+        let working = previous.filter { !$0.isWarmup && !$0.kind.isStage }
         guard index >= 0, index < working.count else { return nil }
         return working[index]
     }
@@ -888,6 +980,53 @@ private struct ExerciseCard: View {
     }
 }
 
+/// "+ Add set", and beside it a menu to add a drop stage, rest-pause or
+/// myo-rep mini-set after the last set (`SetKind`), with what each one is
+/// and how good the evidence is.
+private struct AddSetButtons: View {
+    let canAddStage: Bool
+    let onAddSet: () -> Void
+    let onAddStage: (SetKind) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onAddSet) {
+                Text("+ Add set")
+                    .font(.headline)
+                    .foregroundStyle(Theme.primaryText)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Theme.cardRaised, in: .rect(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            if canAddStage {
+                stageMenu
+            }
+        }
+    }
+
+    private var stageMenu: some View {
+        Menu {
+            ForEach(SetKind.stageKinds) { kind in
+                Button {
+                    onAddStage(kind)
+                } label: {
+                    Text(kind.title)
+                    Text(kind.evidence)
+                }
+            }
+        } label: {
+            Label("Drop", systemImage: "arrow.down.right")
+                .font(.headline)
+                .foregroundStyle(Theme.liftingText)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(Theme.lifting.opacity(0.12), in: .rect(cornerRadius: 14))
+        }
+        .accessibilityLabel("Add a drop set, rest-pause or myo-rep mini-set")
+    }
+}
+
 /// One set as a compact line; tap to edit it in the SetEditor.
 ///
 /// VoiceOver reads the set as one element, e.g. "Set 2, 8 reps at 60
@@ -909,6 +1048,8 @@ private struct SetRow: View {
     var targetText: String? = nil
     /// The one-line verdict once the set is ticked (`SetFeedback`).
     var verdict: SetFeedback.Verdict? = nil
+    /// "Drop · no rest, lighter", "To failure": the set type (`SetKind`); nil for a normal set.
+    var kindLine: String? = nil
 
     struct WarmUpPosition {
         var number: Int
@@ -953,6 +1094,9 @@ private struct SetRow: View {
                     .font(.headline)
                     // Text colour for the amber accent (ux-audit.md X4, P24).
                     .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.primaryText)
+                    // "RP" for a rest-pause mini-set fits the number's width.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .frame(width: labelWidth, alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 1) {
@@ -961,6 +1105,12 @@ private struct SetRow: View {
                     Text(warmUpTitle(warmUp))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.recoveryModerateText)
+                }
+                if let kindLine {
+                    Text(kindLine)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.liftingText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Text(isFilled ? "\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)" : "Not set")
                     .font(.headline)
@@ -1074,7 +1224,9 @@ private struct SetRow: View {
 
     /// "Set 2, 8 reps at 60 kilograms, RPE 8, done".
     private var spokenSummary: String {
-        var parts = [spokenName, spokenLoad(weightKg: set.weightKg, reps: set.reps) ?? "not set"]
+        var parts = [spokenName]
+        if let kindLine { parts.append(kindLine) }
+        parts.append(spokenLoad(weightKg: set.weightKg, reps: set.reps) ?? "not set")
         if let rpe = set.rpe { parts.append("RPE \(rpe.formatted())") }
         parts.append(set.isCompleted ? "done" : "not done")
         if let previousSet, let last = spokenLoad(weightKg: previousSet.weightKg, reps: previousSet.reps) {
@@ -1137,7 +1289,14 @@ private struct SetEditor: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.secondaryText)
             }
-            if !set.isWarmup {
+            // A drop stage or mini-set is as many good reps as you can: no effort of its own.
+            if set.kind != .straight, !set.isWarmup {
+                Text(set.kind.howTo)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !set.isWarmup, !set.kind.isStage {
                 RPEPicker(rpe: $set.rpe, onShowGuide: onShowGuide)
             }
             Button(action: {
@@ -1404,7 +1563,7 @@ private struct CollapsedExerciseRow: View {
     }
 
     private var summary: String {
-        let working = exercise.sets.filter { !$0.isWarmup }
+        let working = exercise.sets.filter { !$0.isWarmup && !$0.kind.isStage }
         if isDone, let best = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) {
             return "\(working.count) sets · \(unit.format(best.weightKg)) \(unit.rawValue) × \(best.reps) · done"
         }
