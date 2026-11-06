@@ -68,6 +68,7 @@ struct WorkoutBuilderView: View {
                     PainGuardRow(pains: activePains, clinicianAreas: clinicianAreas, neverAgainCount: exclusions.items.count) {
                         showingPainLog = true
                     }
+                    .accessibilityIdentifier("builder-pain")
                     if let plan {
                         if plan.exercises.isEmpty {
                             ContentUnavailableView(

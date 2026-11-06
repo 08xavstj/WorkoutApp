@@ -265,14 +265,10 @@ final class ScreenshotTests: XCTestCase {
             opened = tap(app, ["Start workout"], name: "Log start workout")
         }
         guard opened else { return }
-        capture(app, "workout-builder", pages: 2)
-        // The pain row sits near the top: scroll back up, then tap it in place
-        // (a scrolling search swiped past it and shot the builder again).
-        for _ in 0..<3 {
-            (mainScrollContainer(app) ?? app).swipeDown(velocity: .fast)
-        }
+        // The pain row first, while the builder is still at the top: swiping
+        // down to get back there would close the sheet.
         sleep(1)
-        if tap(app, ["Working around pain", "Something hurts?", "Logged: "], name: "Builder pain row", type: .button, scroll: false) {
+        if tap(app, ["builder-pain", "Working around pain", "Something hurts?", "Logged: "], name: "Builder pain row", scroll: false) {
             // Only capture when the pain page really opened.
             if app.navigationBars["Something hurts?"].waitForExistence(timeout: 3) {
                 capture(app, "pain-log", pages: 1)
@@ -281,6 +277,7 @@ final class ScreenshotTests: XCTestCase {
                 note("MISSING pain page after tapping the pain row")
             }
         }
+        capture(app, "workout-builder", pages: 2)
         guard tap(app, ["builder-start", "Start workout"], name: "Builder start", type: .button, scroll: false) else { return }
         sleep(3)
         dismissSystemAlerts()
