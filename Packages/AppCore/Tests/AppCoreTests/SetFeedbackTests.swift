@@ -49,11 +49,14 @@ struct SetFeedbackTests {
         let earlier = [LiftProgress.LoggedSession(date: .now.addingTimeInterval(-86_400 * 3), sets: [set(60, 8, 8), set(60, 8, 8)])]
         let today = [set(62.5, 8, 8), set(60, 9, 8)]
         let records = SetFeedback.records(today: today, earlier: earlier)
-        #expect(records == [
-            .estimatedOneRepMax(OneRepMax.estimate(weight: 62.5, reps: 8, rpe: 8)),
+        let best: Double = OneRepMax.estimate(weight: 62.5, reps: 8, rpe: 8)
+        let volume: Double = 62.5 * 8 + 60 * 9
+        let expected: [SetFeedback.Record] = [
+            .estimatedOneRepMax(best),
             .reps(weight: 60, reps: 9),
-            .volume(62.5 * 8 + 60 * 9),
-        ])
+            .volume(volume),
+        ]
+        #expect(records == expected)
         #expect(SetFeedback.Record.reps(weight: 60, reps: 9).message(unit: "kg") == "Most reps at 60 kg: 9")
         #expect(SetFeedback.Record.estimatedOneRepMax(83.3).message(unit: "kg") == "Best estimated 1RM: 83 kg")
     }
