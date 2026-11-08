@@ -679,7 +679,7 @@ private struct VO2EstimatesSection: View {
                     "Heart rate: VO₂ max ≈ 15.3 × max HR ÷ resting HR (Uth et al., Eur J Appl Physiol 2004). Built in trained men; less accurate in other groups and with an age-based max.",
                     "Activity: the NASA non-exercise model from age, sex, body size and a 0-7 activity level (Jackson et al., Med Sci Sports Exerc 1990). Its scale counts weight lifting as moderate activity; hard heart-rate minutes from any workout, lifting included, count as hard exercise.",
                     "Lifting on its own raises VO₂ max only a little, mostly in older or untrained people (Ozaki et al., Eur Rev Aging Phys Act 2013).",
-                ])
+                ], title: "About these estimates")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
