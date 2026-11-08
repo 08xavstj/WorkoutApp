@@ -19,6 +19,8 @@ struct FitnessView: View {
                 VStack(spacing: 16) {
                     WeekStrip(days: metrics.weekStrain)
                     ThisWeekCard()
+                    SectionHeader("Lift goals", linkTitle: "See all", destination: LiftGoalsDetailView())
+                    LiftGoalRingsCard()
                     SectionHeader("Today")
                     FitnessTodayCard()
                     SectionHeader("Training load")
@@ -388,8 +390,6 @@ private struct FitnessProgressCard: View {
             strengthRow
             Divider().overlay(Theme.separator)
             musclesRow
-            Divider().overlay(Theme.separator)
-            LiftGoalsMetricRow()
         }
         .card()
     }

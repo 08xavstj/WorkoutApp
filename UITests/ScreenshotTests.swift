@@ -104,7 +104,7 @@ final class ScreenshotTests: XCTestCase {
             ("metric-Cardio fitness (VO₂ max)", "cardio-fitness"),
             ("metric-Strength", "strength"),
             ("metric-Muscles", "muscles"),
-            ("metric-Lift goals (2) · Bench Press", "lift-goals"),
+            ("lift-goal-rings", "lift-goals"),
         ]
         for page in pages {
             openTab(app, "Fitness")

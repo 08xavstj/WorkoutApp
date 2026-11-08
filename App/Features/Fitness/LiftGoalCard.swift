@@ -474,3 +474,71 @@ private struct LiftGoalProgressBar: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+/// Fitness page: one ring per lift goal (up to three), filled to how close
+/// today's estimated 1RM is to the target. Tap opens the goal cards.
+struct LiftGoalRingsCard: View {
+    @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Query(sort: \WorkoutSession.startedAt) private var sessions: [WorkoutSession]
+
+    var body: some View {
+        let goals = Array(settings.goals.liftGoals.prefix(3))
+        if goals.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Set a target, like a 100 kg bench or a 2× body-weight squat, and see how close you are.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                AddLiftGoalButton(title: "Add a lift goal")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .card()
+        } else {
+            NavigationLink {
+                LiftGoalsDetailView()
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(goals) { goal in
+                        ring(goal, size: goals.count == 1 ? 120 : (goals.count == 2 ? 104 : 88))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .card()
+            .accessibilityIdentifier("lift-goal-rings")
+            .accessibilityHint("Shows your lift goals and where the trend is heading")
+        }
+    }
+
+    private func ring(_ goal: LiftGoal, size: CGFloat) -> some View {
+        let unit = gym.liftingUnit
+        let projection = LiftGoalHistory.projection(for: goal, sessions: sessions,
+                                                    bodyMassKg: metrics.bodyMassKg ?? settings.weightKg,
+                                                    trainingStatus: metrics.trainingStatus)
+        let target = projection.map { LiftGoalHistory.weightText($0.targetKg, unit: unit) }
+            ?? LiftGoalHistory.targetText(goal, unit: unit)
+        let progress = projection?.progress
+        let reached = (progress ?? 0) >= 1
+        let subtitle: String
+        if let latest = projection?.latestKg {
+            subtitle = "\(LiftGoalHistory.weightText(latest, unit: unit).replacingOccurrences(of: " \(unit.rawValue)", with: "")) of \(target)"
+        } else {
+            subtitle = "Goal \(target) · log it to start"
+        }
+        return ScoreRing(
+            title: goal.name,
+            value: progress.map { "\(Int(($0 * 100).rounded()))" } ?? "–",
+            unit: progress == nil ? "" : "%",
+            subtitle: subtitle,
+            progress: progress ?? 0,
+            colors: reached ? [Theme.recoveryHighLight, Theme.recoveryHigh] : Theme.liftingColors,
+            size: size
+        )
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("\(goal.name) goal: \(progress.map { "\(Int(($0 * 100).rounded())) percent" } ?? "no data yet"), \(subtitle)")
+    }
+}
