@@ -385,12 +385,14 @@ struct CardioFitnessCard: View {
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                VO2SourceNote(lastReading: history.last?.date)
                 // Each study once, folded away, instead of citations in every line.
                 EvidenceDisclosure(points: Self.evidence)
             } else {
                 Text("No VO₂ max yet. Your watch estimates it from outdoor walks and runs with heart rate; it appears here once it's in Apple Health.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
+                VO2SourceNote(lastReading: nil)
             }
         }
         .card(tint: Theme.oxygen)
@@ -595,5 +597,50 @@ private struct BandDots: View {
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// Where VO₂ max comes from, so a lifter isn't left wondering why their
+/// sessions don't move it. Apple Watch estimates VO₂ max only from outdoor
+/// walks, runs and hikes (about 20 minutes or more, with GPS and heart rate:
+/// Apple, "Using Apple Watch to estimate cardio fitness", 2021); strength
+/// workouts give no reading. Lifting heart rate still counts toward the weekly
+/// minutes. Resistance training raised VO₂ max in older adults but not clearly
+/// in younger ones (Ozaki et al., Eur Rev Aging Phys Act 2013, meta-analysis).
+private struct VO2SourceNote: View {
+    let lastReading: Date?
+
+    /// Two weeks without a reading: say how to get a new one (app choice).
+    private static let staleDays = 14
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("Where it comes from", systemImage: "figure.walk")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.primaryText)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Theme.track.opacity(0.6), in: .rect(cornerRadius: 12))
+    }
+
+    private var text: String {
+        var parts = ["Apple Watch only measures VO₂ max on outdoor walks, runs and hikes. Lifting doesn't give a reading, though its heart-rate minutes still count toward your weekly minutes."]
+        if let lastReading {
+            let days = Calendar.current.dateComponents([.day], from: lastReading, to: .now).day ?? 0
+            let date = lastReading.formatted(.dateTime.month(.abbreviated).day())
+            if days >= Self.staleDays {
+                parts.append("Last reading \(date), \(days) days ago. For a new one, walk briskly or run outdoors for 20+ minutes with your Watch.")
+            } else {
+                parts.append("Last reading \(date).")
+            }
+        } else {
+            parts.append("For a first reading, walk briskly or run outdoors for 20+ minutes with your Watch.")
+        }
+        return parts.joined(separator: " ")
     }
 }

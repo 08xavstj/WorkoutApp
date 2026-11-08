@@ -97,11 +97,13 @@ struct LiftGoalCard: View {
                 if let projection {
                     LiftGoalStatusChip(status: projection.status)
                 }
+                EditLiftGoalLink(goal: goal)
             }
             Text(LiftGoalHistory.title(goal, unit: unit))
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)
             if let projection {
+                LiftGoalProgressBar(projection: projection, unit: unit, liftName: goal.name)
                 LiftGoalProjectionText(projection: projection, unit: unit)
                 if !projection.band.isEmpty || projection.recent.count > 1 {
                     LiftGoalChart(projection: projection, unit: unit)
@@ -233,24 +235,21 @@ struct LiftGoalsSection: View {
     var body: some View {
         let goals = settings.goals.liftGoals
         if goals.isEmpty {
-            NavigationLink {
-                GoalsView(pushed: true)
-            } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    CardLabel(text: "Lift goal", color: Theme.liftingText)
-                    Text("Set a target lift in Goals to see where your trend is heading.")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .card()
+            VStack(alignment: .leading, spacing: 10) {
+                CardLabel(text: "Lift goal", color: Theme.liftingText)
+                Text("Pick a lift and a target, like a 100 kg bench. You'll see how close you are and where your last 12 weeks are heading.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                AddLiftGoalButton(title: "Add a lift goal")
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .card()
         } else {
             ForEach(goals) { goal in
                 LiftGoalCard(goal: goal)
             }
+            AddLiftGoalButton(title: "Add another lift goal")
         }
     }
 }
@@ -276,7 +275,11 @@ struct LiftGoalsLink: View {
     var body: some View {
         let all = settings.goals.liftGoals
         let goals = exerciseID.map { id in all.filter { $0.exerciseID == id } } ?? all
-        if exerciseID == nil || !goals.isEmpty {
+        if let exerciseID, goals.isEmpty {
+            // No goal for this lift yet: set one starting on this lift.
+            AddLiftGoalButton(title: "Set a goal for this lift", exerciseID: exerciseID)
+                .card()
+        } else {
             NavigationLink {
                 LiftGoalsDetailView()
             } label: {
@@ -377,5 +380,97 @@ enum LiftGoalReview {
             let detail = LiftGoalHistory.headline(projection, unit: unit)
             return Line(id: "lift-\(goal.id.uuidString)", title: "\(goal.name) goal", value: value, detail: detail)
         }
+    }
+}
+
+/// Opens the lift-goal editor and saves the new goal straight to settings.
+struct AddLiftGoalButton: View {
+    var title: String
+    var exerciseID: String?
+    @Environment(UserSettings.self) private var settings
+
+    var body: some View {
+        NavigationLink {
+            LiftGoalEditor(goal: nil, exerciseID: exerciseID) { goal in
+                LiftGoalStore.save(goal, in: settings)
+            }
+        } label: {
+            Label(title, systemImage: "plus.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.liftingText)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(exerciseID == nil ? "add-lift-goal" : "add-lift-goal-for-exercise")
+    }
+}
+
+/// "Edit" on a goal card: change the target or date, or delete it.
+private struct EditLiftGoalLink: View {
+    let goal: LiftGoal
+    @Environment(UserSettings.self) private var settings
+
+    var body: some View {
+        NavigationLink {
+            LiftGoalEditor(goal: goal, onDelete: { LiftGoalStore.remove(goal.id, in: settings) }) { updated in
+                LiftGoalStore.save(updated, in: settings)
+            }
+        } label: {
+            Text("Edit")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.liftingText)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit \(goal.name) goal")
+    }
+}
+
+/// How far today's estimated 1RM is toward the target, as a bar and in words.
+private struct LiftGoalProgressBar: View {
+    let projection: LiftGoalProjection.Projection
+    let unit: WeightUnit
+    let liftName: String
+
+    var body: some View {
+        let target = LiftGoalHistory.weightText(projection.targetKg, unit: unit)
+        VStack(alignment: .leading, spacing: 6) {
+            if let latest = projection.latestKg, let progress = projection.progress {
+                let now = LiftGoalHistory.weightText(latest, unit: unit)
+                let percent = Int((progress * 100).rounded())
+                let left = max(0, projection.targetKg - latest)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Now \(now) of \(target)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                    Spacer(minLength: 8)
+                    Text("\(percent)%")
+                        .font(.subheadline.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(progress >= 1 ? Theme.recoveryHigh : Theme.liftingText)
+                }
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.track)
+                        Capsule()
+                            .fill(progress >= 1 ? Theme.recoveryHigh : Theme.liftingText)
+                            .frame(width: max(8, proxy.size.width * progress))
+                    }
+                }
+                .frame(height: 8)
+                .accessibilityHidden(true)
+                Text(left > 0 ? "\(LiftGoalHistory.weightText(left, unit: unit)) to go · estimated 1RM from your best recent set" : "Goal reached")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            } else {
+                Text("Log \(liftName) (a set of 10 reps or fewer) and your progress toward \(target) shows here.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }

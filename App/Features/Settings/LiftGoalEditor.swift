@@ -13,25 +13,53 @@ struct LiftGoalsFormSection: View {
         Section {
             ForEach(goals) { goal in
                 NavigationLink {
-                    LiftGoalEditor(goal: goal) { updated in
+                    LiftGoalEditor(goal: goal, onDelete: { remove(goal.id) }) { updated in
                         if let index = goals.firstIndex(where: { $0.id == updated.id }) {
                             goals[index] = updated
                         }
+                        LiftGoalStore.save(updated, in: settings)
                     }
                 } label: {
                     Text(LiftGoalHistory.title(goal, unit: gym.liftingUnit))
                 }
             }
-            .onDelete { goals.remove(atOffsets: $0) }
+            .onDelete { offsets in
+                for index in offsets { remove(goals[index].id) }
+            }
             NavigationLink("Add a lift goal") {
-                LiftGoalEditor(goal: nil) { goals.append($0) }
+                LiftGoalEditor(goal: nil) { goal in
+                    goals.append(goal)
+                    LiftGoalStore.save(goal, in: settings)
+                }
             }
         } header: {
             Text("Lift goals")
         } footer: {
             // McEwan 2016 (goal setting, d ≈ 0.55); Swann 2021 (out-of-reach specific goals can backfire).
-            Text("A target for a lift's estimated 1RM. Fitness › Strength shows where your last 12 weeks are heading. Goals help most when they feel reachable, so treat it as a direction rather than a test (McEwan 2016; Swann 2021).")
+            Text("A target for a lift's estimated 1RM, saved as soon as you tap Done. Fitness › Lift goals shows your progress and where your last 12 weeks are heading. Goals help most when they feel reachable, so treat it as a direction rather than a test (McEwan 2016; Swann 2021).")
         }
+    }
+
+    private func remove(_ id: UUID) {
+        goals.removeAll { $0.id == id }
+        LiftGoalStore.remove(id, in: settings)
+    }
+}
+
+/// Lift goals are saved straight to settings (not only into the Goals form's
+/// draft), so a goal added from Fitness, or in Goals and then left with Cancel
+/// or a swipe, is never lost.
+enum LiftGoalStore {
+    static func save(_ goal: LiftGoal, in settings: UserSettings) {
+        if let index = settings.goals.liftGoals.firstIndex(where: { $0.id == goal.id }) {
+            settings.goals.liftGoals[index] = goal
+        } else {
+            settings.goals.liftGoals.append(goal)
+        }
+    }
+
+    static func remove(_ id: UUID, in settings: UserSettings) {
+        settings.goals.liftGoals.removeAll { $0.id == id }
     }
 }
 
@@ -39,6 +67,8 @@ struct LiftGoalsFormSection: View {
 /// target weight or body-weight multiple, and an optional date.
 struct LiftGoalEditor: View {
     private let original: LiftGoal?
+    private let initialExerciseID: String?
+    private let onDelete: (() -> Void)?
     private let onSave: (LiftGoal) -> Void
 
     @Environment(UserSettings.self) private var settings
@@ -54,8 +84,13 @@ struct LiftGoalEditor: View {
     @State private var loaded = false
     @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 90
 
-    init(goal: LiftGoal?, onSave: @escaping (LiftGoal) -> Void) {
+    /// - Parameters:
+    ///   - exerciseID: the lift to start on for a new goal (e.g. from that lift's progress page).
+    ///   - onDelete: shows a Delete button for an existing goal.
+    init(goal: LiftGoal?, exerciseID: String? = nil, onDelete: (() -> Void)? = nil, onSave: @escaping (LiftGoal) -> Void) {
         self.original = goal
+        self.initialExerciseID = exerciseID
+        self.onDelete = onDelete
         self.onSave = onSave
     }
 
@@ -89,6 +124,10 @@ struct LiftGoalEditor: View {
         }
         if let original, !result.contains(where: { $0.id == original.exerciseID }) {
             result.insert(LiftOption(id: original.exerciseID, name: original.name), at: 0)
+        }
+        if let initialExerciseID, !result.contains(where: { $0.id == initialExerciseID }) {
+            let name = ExerciseCatalog.exercise(id: initialExerciseID)?.name ?? initialExerciseID
+            result.insert(LiftOption(id: initialExerciseID, name: name), at: 0)
         }
         return result
     }
@@ -142,6 +181,14 @@ struct LiftGoalEditor: View {
             } footer: {
                 Text("Optional. The projection looks at most 6 months ahead; a later date still works as a direction.")
             }
+            if let onDelete {
+                Section {
+                    Button("Delete goal", role: .destructive) {
+                        onDelete()
+                        dismiss()
+                    }
+                }
+            }
         }
         .navigationTitle(original == nil ? "New lift goal" : "Lift goal")
         .navigationBarTitleDisplayMode(.inline)
@@ -158,7 +205,7 @@ struct LiftGoalEditor: View {
         guard !loaded else { return }
         loaded = true
         guard let original else {
-            exerciseID = options.first?.id ?? ""
+            exerciseID = initialExerciseID ?? options.first?.id ?? ""
             return
         }
         exerciseID = original.exerciseID
