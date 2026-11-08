@@ -633,7 +633,7 @@ struct WorkoutBuilderView: View {
             .replacingOccurrences(of: " in reserve", with: "")
         return layout {
             // "~60 + 5 min" with the abs finisher on top.
-            StatView(label: "Time", value: extraMinutes > 0 ? "~\(minutes) + \(extraMinutes) min" : "~\(minutes) min")
+            StatView(label: "Time", value: "~\(minutes + extraMinutes) min", detail: extraMinutes > 0 ? "incl. \(extraMinutes) min abs" : nil)
             StatView(label: "In reserve", value: reserve)
             StatView(label: "Strain after", value: "≈\(strainText(landsAt))",
                      color: inRange ? Theme.recoveryHighText : Theme.strainTextColor)
