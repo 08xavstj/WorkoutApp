@@ -24,11 +24,20 @@ enum RestPreferences {
         UserDefaults.standard.set(saved, forKey: perExerciseKey)
     }
 
-    static func resolved(for exerciseID: String, style: TrainingStyle) -> Int {
+    static func resolved(for exerciseID: String, style: TrainingStyle, planned: Int? = nil) -> Int {
         if let own = seconds(for: exerciseID), own > 0 { return own }
+        // The plan's own rest (the abs finisher's short circuit rest, `AbsFinisher.restSeconds`).
+        if let planned, planned > 0 { return planned }
         if global > 0 { return global }
         let compound = ExerciseCatalog.slot(for: exerciseID)?.isCompound ?? false
         return RestTimer.defaultSeconds(style: style, compound: compound)
+    }
+
+    /// The rest after a set of the exercise at `order` in a live session:
+    /// the plan's rest for it (`SessionTargets.Target.restSeconds`) counts.
+    static func resolved(for exerciseID: String, style: TrainingStyle, sessionStart: Date, order: Int) -> Int {
+        let planned = SessionTargets.target(for: sessionStart, order: order)?.restSeconds
+        return resolved(for: exerciseID, style: style, planned: planned)
     }
 
     static func label(_ seconds: Int) -> String {

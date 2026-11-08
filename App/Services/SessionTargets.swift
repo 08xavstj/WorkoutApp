@@ -25,6 +25,9 @@ enum SessionTargets {
         /// How the weight moved since last time ("Same weight, aim for 7 reps"),
         /// shown under the exercise name. Nil without history.
         var progressionNote: String? = nil
+        /// The plan's own rest after a set (`PlannedExercise.restSeconds`: the
+        /// abs finisher's short circuit rest). Nil = the usual rest timer.
+        var restSeconds: Int? = nil
 
         /// Reps each working set aims for today.
         var repsToday: Int { targetReps ?? repsHigh }
@@ -44,14 +47,33 @@ enum SessionTargets {
         all = all.filter { WatchSession.startDate(for: $0.key).map { $0 >= cutoff } ?? false }
         var entry: [String: Target] = [:]
         for (index, exercise) in exercises.enumerated() {
-            var loadKg: Double?
-            if let unit, let load = exercise.load, load > 0 { loadKg = unit.toKilograms(load) }
-            entry[String(index)] = Target(repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound,
-                                          rpe: exercise.rpe, loadKg: loadKg, maxLoadKg: exercise.maxLoadKg,
-                                          targetReps: exercise.targetReps, progressionNote: exercise.progressionNote)
+            entry[String(index)] = target(for: exercise, unit: unit)
         }
         if !entry.isEmpty { all[WatchSession.id(for: sessionStart)] = entry }
         store(all)
+    }
+
+    /// Adds targets for exercises appended to a running session (the abs
+    /// finisher), at their `orders`, keeping the session's other targets.
+    static func add(_ exercises: [PlannedExercise], orders: [Int], for sessionStart: Date, unit: LoadUnit? = nil) {
+        var all = load()
+        let id = WatchSession.id(for: sessionStart)
+        var entry = all[id] ?? [:]
+        for (exercise, order) in zip(exercises, orders) {
+            entry[String(order)] = target(for: exercise, unit: unit)
+        }
+        guard !entry.isEmpty else { return }
+        all[id] = entry
+        store(all)
+    }
+
+    private static func target(for exercise: PlannedExercise, unit: LoadUnit?) -> Target {
+        var loadKg: Double?
+        if let unit, let load = exercise.load, load > 0 { loadKg = unit.toKilograms(load) }
+        return Target(repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound,
+                      rpe: exercise.rpe, loadKg: loadKg, maxLoadKg: exercise.maxLoadKg,
+                      targetReps: exercise.targetReps, progressionNote: exercise.progressionNote,
+                      restSeconds: exercise.restSeconds)
     }
 
     static func target(for sessionStart: Date, order: Int) -> Target? {

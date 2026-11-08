@@ -212,10 +212,27 @@ public enum ExerciseCatalog {
             ex("Standing_Calf_Raises", "Standing Calf Raise", .machine),
             ex("Calf_Raise_On_A_Dumbbell", "Dumbbell Calf Raise", .dumbbell)
         ],
+        // The first three are the planner's long-standing picks for the core
+        // slot; the rest give the abs finisher (`AbsFinisher`) one option per
+        // trunk pattern in most gyms. Patterns, holds and per-side moves are
+        // tagged in `CoreMoves`; library IDs from free-exercise-db (guides,
+        // images and muscles come from there). Holds are named with
+        // "(seconds)": a set's reps are logged as seconds held.
         .core: [
             ex("Hanging_Leg_Raise", "Hanging Leg Raise", nil, .pullUpBar),
             ex("Cable_Crunch", "Cable Crunch", .cable),
-            ex("Plank", "Plank", nil)
+            ex("Plank", "Plank (seconds)", nil),
+            ex("Crunches", "Crunch", nil),
+            ex("Decline_Crunch", "Decline Crunch", nil, .bench),
+            ex("Air_Bike", "Bicycle Crunch", nil),
+            ex("Cable_Reverse_Crunch", "Cable Reverse Crunch", .cable),
+            ex("Knee_Hip_Raise_On_Parallel_Bars", "Captain's Chair Knee Raise", nil, .dipStation),
+            ex("Reverse_Crunch", "Reverse Crunch", nil),
+            ex("Dead_Bug", "Dead Bug", nil),
+            ex("Barbell_Ab_Rollout_-_On_Knees", "Barbell Rollout (knees)", nil, .barbell),
+            ex("Pallof_Press", "Pallof Press", .cable),
+            ex("Dumbbell_Side_Bend", "Dumbbell Side Bend", .dumbbell),
+            ex("Side_Bridge", "Side Plank (seconds)", nil)
         ]
     ]
 
@@ -346,6 +363,14 @@ public struct PlannedExercise: Codable, Sendable, Equatable, Identifiable {
     /// after a step up). Nil = the top of `reps` (no history, a fixed weight).
     /// Optional, so older plans decode.
     public var targetReps: Int? = nil
+    /// Rest after a set (after both halves of a superset), in seconds, when the
+    /// plan sets its own: the abs finisher's short circuit rest
+    /// (`AbsFinisher.restSeconds`). Nil = the rest timer's usual choice.
+    /// Optional, so older plans decode.
+    public var restSeconds: Int? = nil
+    /// True for an exercise of the abs finisher (`AbsFinisher`), added on top
+    /// of the session's time. Optional, so older plans decode.
+    public var isFinisher: Bool? = nil
 }
 
 extension PlannedExercise {
@@ -545,7 +570,7 @@ public struct WorkoutPlanner: Sendable {
         // Effort: big lifts stop 2-3 reps short of failure; small lifts go
         // closer, since muscle growth benefits from proximity to failure while
         // strength barely does and failure adds fatigue (Robinson et al., Sports Med 2024).
-        let reps: ClosedRange<Int>
+        var reps: ClosedRange<Int>
         let setRPE: Double
         switch style {
         case .balanced:
@@ -560,6 +585,10 @@ public struct WorkoutPlanner: Sendable {
         case .endurance:
             reps = compound ? 10...15 : 12...20
             setRPE = compound ? min(rpe, 7.5) : min(8.5, rpe + 0.5)
+        }
+        // A hold (plank, side plank) is prescribed in seconds, logged as reps (`CoreMoves`).
+        if CoreMoves.move(id: choice.id)?.isHold == true {
+            reps = CoreMoves.holdSeconds
         }
         var planned = PlannedExercise(
             exerciseID: choice.id, name: choice.name, sets: sets, reps: reps,
@@ -718,6 +747,9 @@ public struct WorkoutPlanner: Sendable {
     /// `prioritySlots` (from `MuscleCoverage`) are movements for muscles
     /// behind on the week's sets: they go straight after the compound lifts,
     /// so a short session drops a default isolation movement instead of them.
+    /// `includeCore` false leaves the core movement out when the abs finisher
+    /// (`AbsFinisher`) is on: the finisher trains abs on top of the time, so
+    /// `fit` can't trim them away and they aren't trained twice.
     public func plan(
         focus: WorkoutFocus,
         minutes: Int,
@@ -731,7 +763,8 @@ public struct WorkoutPlanner: Sendable {
         trainingStatus: TrainingStatus = .novice,
         warmUpMinutes: Int = 0,
         exerciseFilter: ExerciseFilter? = nil,
-        muscleSetGoals: [Muscle: Int] = [:]
+        muscleSetGoals: [Muscle: Int] = [:],
+        includeCore: Bool = true
     ) -> PlannedWorkout {
         // Never-again exercises and pain (`PainGuard`): plan with the filter
         // set, then cap the loads on lifts that load a 3-5/10 area.
@@ -742,14 +775,14 @@ public struct WorkoutPlanner: Sendable {
             var workout = guarded.plan(focus: focus, minutes: minutes, recovery: recovery, history: history, block: block,
                                        focusReason: focusReason, prioritySlots: prioritySlots, bodyMassKg: bodyMassKg,
                                        sex: sex, trainingStatus: trainingStatus, warmUpMinutes: warmUpMinutes,
-                                       muscleSetGoals: muscleSetGoals)
+                                       muscleSetGoals: muscleSetGoals, includeCore: includeCore)
             exerciseFilter.capLoads(&workout, planner: guarded)
             return workout
         }
         let rpe = Self.targetRPE(recovery: recovery, block: block)
         let lifter = LoadEstimator.Lifter(bodyMassKg: bodyMassKg, sex: sex, status: trainingStatus)
         let exerciseCount = Self.exerciseCount(minutes: minutes)
-        let slots = Self.orderedSlots(focus: focus, minutes: minutes, priority: prioritySlots)
+        let slots = Self.orderedSlots(focus: focus, minutes: minutes, priority: prioritySlots, includeCore: includeCore)
         var exercises: [PlannedExercise] = []
         // Sets earned by set progression (`progressedSets`), by exercise.
         var earnedSets: [String: Int] = [:]
@@ -799,8 +832,13 @@ public struct WorkoutPlanner: Sendable {
     /// `extraSlot`), with any priority movements moved to directly after the
     /// leading compound lifts: multi-joint lifts stay first (Nunes et al.
     /// 2021), the lagging muscle's movement comes next, the defaults after.
-    static func orderedSlots(focus: WorkoutFocus, minutes: Int, priority: [MovementSlot]) -> [MovementSlot] {
+    /// With `includeCore` false (the abs finisher is on and covers the core,
+    /// `AbsFinisher`) the core movement is left out, so abs aren't trained twice.
+    static func orderedSlots(focus: WorkoutFocus, minutes: Int, priority: [MovementSlot],
+                             includeCore: Bool = true) -> [MovementSlot] {
         var base = minutes >= longSessionMinutes ? focus.slots + [focus.extraSlot] : focus.slots
+        if !includeCore { base.removeAll { $0 == .core } }
+        let priority = includeCore ? priority : priority.filter { $0 != .core }
         guard !priority.isEmpty else { return base }
         base.removeAll { priority.contains($0) }
         let leading = base.prefix { $0.isCompound }

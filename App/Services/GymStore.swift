@@ -214,32 +214,7 @@ final class WorkoutLauncher {
         let session = WorkoutSession(name: name)
         context.insert(session)
         for (order, planned) in exercises.enumerated() {
-            let log = ExerciseLog(exerciseID: planned.exerciseID, name: planned.name, order: order)
-            log.session = session
-            context.insert(log)
-            let weightKg = planned.load.map { unit.toKilograms($0) } ?? 0
-            // Warm-up ramp sets first (`WarmUp`), marked so they stay out of volume, strain and PRs.
-            let warmUps = planned.warmUpSets ?? []
-            for (index, ramp) in warmUps.enumerated() {
-                let set = SetLog(order: index, weightKg: unit.toKilograms(ramp.load), reps: ramp.reps, rpe: nil, isWarmup: true)
-                set.exercise = log
-                context.insert(set)
-            }
-            for index in 0..<max(1, planned.sets) {
-                let set = SetLog(order: warmUps.count + index, weightKg: weightKg, reps: planned.repsToday, rpe: nil)
-                set.exercise = log
-                context.insert(set)
-            }
-            // Time-saving sets (`TimeSaver`): the drop stages or mini-sets after the last set.
-            if let kind = planned.lastSetKind, let stages = planned.stages {
-                let first = warmUps.count + max(1, planned.sets)
-                for (index, stage) in stages.enumerated() {
-                    let stageKg = stage.load.map { unit.toKilograms($0) } ?? weightKg
-                    let set = SetLog(order: first + index, weightKg: stageKg, reps: stage.reps, rpe: nil, kind: kind)
-                    set.exercise = log
-                    context.insert(set)
-                }
-            }
+            Self.insertLog(planned, order: order, in: session, unit: unit, context: context)
         }
         // Superset pairs (`Supersets`) for the live view: exercise order → group.
         SupersetRegistry.save(SupersetRegistry.groups(in: exercises), for: session.startedAt)
@@ -247,6 +222,60 @@ final class WorkoutLauncher {
         try? context.save()
         running = session
         activeSession = session
+    }
+
+    /// One planned exercise as an `ExerciseLog` with its sets, in the session.
+    private static func insertLog(_ planned: PlannedExercise, order: Int, in session: WorkoutSession, unit: LoadUnit,
+                                  context: ModelContext) {
+        let log = ExerciseLog(exerciseID: planned.exerciseID, name: planned.name, order: order)
+        log.session = session
+        context.insert(log)
+        let weightKg = planned.load.map { unit.toKilograms($0) } ?? 0
+        // Warm-up ramp sets first (`WarmUp`), marked so they stay out of volume, strain and PRs.
+        let warmUps = planned.warmUpSets ?? []
+        for (index, ramp) in warmUps.enumerated() {
+            let set = SetLog(order: index, weightKg: unit.toKilograms(ramp.load), reps: ramp.reps, rpe: nil, isWarmup: true)
+            set.exercise = log
+            context.insert(set)
+        }
+        for index in 0..<max(1, planned.sets) {
+            let set = SetLog(order: warmUps.count + index, weightKg: weightKg, reps: planned.repsToday, rpe: nil)
+            set.exercise = log
+            context.insert(set)
+        }
+        // Time-saving sets (`TimeSaver`): the drop stages or mini-sets after the last set.
+        if let kind = planned.lastSetKind, let stages = planned.stages {
+            let first = warmUps.count + max(1, planned.sets)
+            for (index, stage) in stages.enumerated() {
+                let stageKg = stage.load.map { unit.toKilograms($0) } ?? weightKg
+                let set = SetLog(order: first + index, weightKg: stageKg, reps: stage.reps, rpe: nil, kind: kind)
+                set.exercise = log
+                context.insert(set)
+            }
+        }
+    }
+
+    /// Adds planned exercises (the abs finisher, `AbsFinisher`) to the end of a
+    /// running session: orders continue past the highest, and their targets
+    /// and superset pairs join the session's (`SessionTargets`, `SupersetRegistry`).
+    /// Returns the orders used.
+    @discardableResult
+    func append(_ exercises: [PlannedExercise], to session: WorkoutSession, unit: LoadUnit, in context: ModelContext) -> [Int] {
+        guard !exercises.isEmpty else { return [] }
+        // One past the highest order: targets, supersets, records and the Watch are keyed by it.
+        let first = (session.exercises.map(\.order).max() ?? -1) + 1
+        let orders = exercises.indices.map { first + $0 }
+        for (planned, order) in zip(exercises, orders) {
+            Self.insertLog(planned, order: order, in: session, unit: unit, context: context)
+        }
+        var groups = SupersetRegistry.groups(for: session.startedAt)
+        for (planned, order) in zip(exercises, orders) {
+            if let group = planned.supersetGroup { groups[order] = group }
+        }
+        SupersetRegistry.save(groups, for: session.startedAt)
+        SessionTargets.add(exercises, orders: orders, for: session.startedAt, unit: unit)
+        try? context.save()
+        return orders
     }
 
     func startEmpty(in context: ModelContext) {

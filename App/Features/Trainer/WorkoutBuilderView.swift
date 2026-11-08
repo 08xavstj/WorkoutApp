@@ -33,6 +33,11 @@ struct WorkoutBuilderView: View {
     @State private var timeSaverOptions: [TimeSaver.Option] = []
     @State private var showingGym = false
     @State private var didSetUp = false
+    /// The abs finisher for this session (`AbsFinisher`), from Settings › Training
+    /// at first; added on top of `minutes`.
+    @State private var finisherLength: AbsFinisher.Length = .five
+    /// The finisher's exercises, worked out with the plan.
+    @State private var finisher: AbsFinisher.Plan?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     // Pain and "never again" (`PainGuard`, `ExerciseFilter`).
     @Environment(\.healthClient) private var health
@@ -69,6 +74,8 @@ struct WorkoutBuilderView: View {
                         showingPainLog = true
                     }
                     .accessibilityIdentifier("builder-pain")
+                    // Abs on top of the time (`AbsFinisher`); kept after the pain row so that row stays put.
+                    finisherPicker
                     if let plan {
                         if plan.exercises.isEmpty {
                             ContentUnavailableView(
@@ -91,6 +98,7 @@ struct WorkoutBuilderView: View {
                                     onMissingEquipment: { removeEquipment($0) }
                                 )
                             }
+                            finisherSection(after: plan.exercises.count)
                         }
                     }
                     // The way out sits after the plan, so the plan comes first (ux-audit W1, 4.6).
@@ -117,7 +125,8 @@ struct WorkoutBuilderView: View {
             .safeAreaInset(edge: .bottom) {
                 Button {
                     guard let plan else { return }
-                    launcher.start(plan, in: modelContext)
+                    // The abs finisher goes after the session's own exercises (`AbsFinisher`).
+                    launcher.start(AbsFinisher.appending(finisher, to: plan), in: modelContext)
                     dismiss()
                 } label: {
                     Label("Start workout", systemImage: "play.fill")
@@ -165,10 +174,12 @@ struct WorkoutBuilderView: View {
                 didSetUp = true
                 focus = initialFocus
                 minutes = initialMinutes ?? 45
+                finisherLength = settings.absFinisher
                 rebuild()
             }
             .onChange(of: focus) { rebuild() }
             .onChange(of: minutes) { rebuild() }
+            .onChange(of: finisherLength) { rebuild() }
             .onChange(of: useTimeSaver) { applyTimeSaver() }
             .onChange(of: timeSaverKind) { applyTimeSaver() }
             .onChange(of: settings.warmUpTier(for: resolvedFocus)) { rebuild() }
@@ -219,7 +230,9 @@ struct WorkoutBuilderView: View {
                                 warmUpMinutes: warmUpMinutes,
                                 exerciseFilter: exerciseFilter.isEmpty ? nil : exerciseFilter,
                                 muscleSetGoals: plans.sessionSetGoals(focus: resolvedFocus, minutes: minutes, muscles: muscles,
-                                                                      sessions: sessions, extra: metrics.recentTrainingDays))
+                                                                      sessions: sessions, extra: metrics.recentTrainingDays),
+                                // With the abs finisher on, it covers the core (no abs twice).
+                                includeCore: finisherLength == .off)
         applyTimeSaver()
     }
 
@@ -231,6 +244,8 @@ struct WorkoutBuilderView: View {
     /// `plan` from `basePlan`: with the time-saving style when it's on and on
     /// offer for this session (short, a goal it suits, eligible small lifts).
     private func applyTimeSaver() {
+        // The finisher follows whatever the plan becomes (`refreshFinisher`).
+        defer { refreshFinisher() }
         guard let basePlan else {
             plan = nil
             timeSaverOptions = []
@@ -246,6 +261,82 @@ struct WorkoutBuilderView: View {
             plan = TimeSaver.apply(timeSaverKind, to: basePlan, gym: gym.profile, style: gym.style, warmUpMinutes: warmUpMinutes)
         } else {
             plan = basePlan
+        }
+    }
+
+    // MARK: Abs finisher
+
+    /// Exercises from this many days back count as recent, so the finisher
+    /// rotates its moves across about a week of sessions (app choice).
+    private static let finisherRotationDays = 10
+
+    /// The finisher for `plan`: moves the gym and the pain filter allow, none
+    /// already in the plan, rotating away from recent ones (`AbsFinisher.make`).
+    private func refreshFinisher() {
+        guard let plan, !plan.exercises.isEmpty, finisherLength != .off else {
+            finisher = nil
+            return
+        }
+        finisher = AbsFinisher.make(
+            length: finisherLength,
+            planner: planner,
+            history: LiftHistory.make(from: sessions, unit: gym.profile.unit),
+            recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions, days: Self.finisherRotationDays),
+            excluding: Set(plan.exercises.map(\.exerciseID)),
+            sessionRPE: plan.targetRPE,
+            firstGroup: AbsFinisher.nextGroup(after: plan.exercises)
+        )
+    }
+
+    /// Off / 5 / 10 minutes of abs on top of the session's time.
+    private var finisherPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CardLabel(text: "Abs finisher")
+            LazyVGrid(columns: chipColumns(AbsFinisher.Length.allCases.count), spacing: 8) {
+                ForEach(AbsFinisher.Length.allCases) { length in
+                    SelectChip(title: length.label, isSelected: finisherLength == length, fillsWidth: true,
+                               spokenTitle: length == .off ? "No abs finisher" : "\(length.minutes) minute abs finisher") {
+                        finisherLength = length
+                    }
+                }
+            }
+            Text(finisherCaption)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var finisherCaption: String {
+        if finisherLength == .off { return "No ab block. Pull, lower and full-body days keep one core exercise." }
+        return "Added on top of the time: \(minutes) + \(finisherLength.minutes) min, paired ab moves that rotate each session."
+    }
+
+    /// "Abs finisher · 5 min" and its exercises, numbered after the plan's.
+    @ViewBuilder
+    private func finisherSection(after count: Int) -> some View {
+        if let finisher {
+            VStack(alignment: .leading, spacing: 4) {
+                CardLabel(text: finisher.title, color: Theme.liftingText)
+                Text(finisher.summary)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .padding(.top, 6)
+            ForEach(Array(finisher.exercises.enumerated()), id: \.element.id) { index, exercise in
+                PlannedExerciseRow(
+                    index: count + index + 1, exercise: exercise, unit: gym.profile.unit,
+                    onSwap: nil,
+                    label: Supersets.label(for: index, in: finisher.exercises),
+                    onNeverAgain: { neverAgain(exercise) },
+                    equipment: equipment(for: exercise),
+                    onMissingEquipment: { removeEquipment($0) }
+                )
+            }
+            Text(AbsFinisher.evidenceNote)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -455,7 +546,9 @@ struct WorkoutBuilderView: View {
     private func summaryCard(_ plan: PlannedWorkout) -> some View {
         let planner = StrainPlanner()
         let estimated = plan.estimatedMinutes ?? WorkoutPlanner.estimatedMinutes(plan.exercises, style: gym.style)
-        let gain = metrics.strainGain(addedLoad: planner.liftingLoad(minutes: Double(estimated), rpe: plan.targetRPE))
+        // The abs finisher's minutes count toward the strain too.
+        let extra = finisher?.length.minutes ?? 0
+        let gain = metrics.strainGain(addedLoad: planner.liftingLoad(minutes: Double(estimated + extra), rpe: plan.targetRPE))
         let current = metrics.strain?.strain ?? 0
         let landsAt = current + gain
         return VStack(alignment: .leading, spacing: 12) {
@@ -463,7 +556,7 @@ struct WorkoutBuilderView: View {
             Text(plan.title)
                 .font(.title.weight(.bold))
                 .foregroundStyle(Theme.primaryText)
-            planStats(minutes: estimated, plan: plan, landsAt: landsAt,
+            planStats(minutes: estimated, extraMinutes: extra, plan: plan, landsAt: landsAt,
                       inRange: metrics.targetStrain.map { $0.contains(landsAt) } ?? false)
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
@@ -532,14 +625,15 @@ struct WorkoutBuilderView: View {
     /// the exercises actually ask for (not the session's number); strain is
     /// where today's total lands after the session, not the gain: green
     /// inside today's range.
-    private func planStats(minutes: Int, plan: PlannedWorkout, landsAt: Double, inRange: Bool) -> some View {
+    private func planStats(minutes: Int, extraMinutes: Int = 0, plan: PlannedWorkout, landsAt: Double, inRange: Bool) -> some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 18))
         let reserve = ReserveText.text(rpes: plan.exercises.map(\.rpe), fallback: plan.targetRPE)
             .replacingOccurrences(of: " in reserve", with: "")
         return layout {
-            StatView(label: "Time", value: "~\(minutes) min")
+            // "~60 + 5 min" with the abs finisher on top.
+            StatView(label: "Time", value: extraMinutes > 0 ? "~\(minutes) + \(extraMinutes) min" : "~\(minutes) min")
             StatView(label: "In reserve", value: reserve)
             StatView(label: "Strain after", value: "≈\(strainText(landsAt))",
                      color: inRange ? Theme.recoveryHighText : Theme.strainTextColor)

@@ -287,7 +287,9 @@ final class WatchSync: NSObject {
         if let current = snapshot.upNext() {
             snapshot.currentExercise = current.exercise
             snapshot.currentSet = current.set
-            snapshot.restSeconds = RestPreferences.resolved(for: ordered[current.exercise].exerciseID, style: gym?.style ?? .balanced)
+            let up = ordered[current.exercise]
+            snapshot.restSeconds = RestPreferences.resolved(for: up.exerciseID, style: gym?.style ?? .balanced,
+                                                            sessionStart: session.startedAt, order: up.order)
         } else {
             snapshot.restSeconds = RestPreferences.global > 0 ? RestPreferences.global : 90
         }
@@ -484,7 +486,8 @@ final class WatchSync: NSObject {
             Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
             return
         }
-        let seconds = RestPreferences.resolved(for: exercise.exerciseID, style: gym?.style ?? .balanced)
+        let seconds = RestPreferences.resolved(for: exercise.exerciseID, style: gym?.style ?? .balanced,
+                                               sessionStart: session.startedAt, order: exercise.order)
         RestTimerStore.start(seconds: Double(seconds))
         let next = nextSetText(session)
         Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }

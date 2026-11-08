@@ -194,6 +194,21 @@ public enum PainGuard {
         "Hanging_Leg_Raise": [.shoulder, .lowerBack],
         "Plank": [.lowerBack],
         "Floor_Press": [.wrist],
+        // Core (`CoreMoves`). Repeated or loaded spine flexion and rollouts are
+        // set aside for a sore lower back: McGill's caution (Strength Cond J
+        // 2010). Whether flexion harms a healthy spine is disputed (Contreras
+        // & Schoenfeld, Strength Cond J 2011), so this applies only to pain.
+        // Crunches pull on the neck when done with hands behind the head.
+        "Cable_Crunch": [.lowerBack],
+        "Crunches": [.lowerBack, .neck],
+        "Decline_Crunch": [.lowerBack, .neck],
+        "Air_Bike": [.lowerBack, .neck],
+        "Cable_Reverse_Crunch": [.lowerBack],
+        "Reverse_Crunch": [.lowerBack],
+        "Knee_Hip_Raise_On_Parallel_Bars": [.shoulder, .lowerBack],
+        "Barbell_Ab_Rollout_-_On_Knees": [.lowerBack, .shoulder],
+        "Dumbbell_Side_Bend": [.lowerBack],
+        "Side_Bridge": [.shoulder],
     ]
 
     /// Every area an exercise loads: its pattern's plus its own extras.
@@ -270,6 +285,12 @@ public enum PainGuard {
             R(.lowerBack, .squat, [
                 C.ex("Leg_Press", "Leg Press", .machine),
                 C.ex("Goblet_Squat", "Goblet Squat", .kettlebell),
+            ]),
+            // Core: a neutral spine that resists movement (McGill, Strength
+            // Cond J 2010) over crunches, leg raises and rollouts.
+            R(.lowerBack, .core, [
+                C.ex("Dead_Bug", "Dead Bug", nil),
+                C.ex("Pallof_Press", "Pallof Press", .cable),
             ]),
             // Knee: a box squat controls depth; the leg press lets you set the range.
             R(.knee, .squat, [

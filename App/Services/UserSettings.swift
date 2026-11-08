@@ -165,6 +165,14 @@ final class UserSettings {
         warmUpTierByFocus = byFocus
     }
 
+    // MARK: Abs finisher (Settings › Training; `AbsFinisher`)
+
+    /// The abs finisher the workout builder adds on top of a planned session:
+    /// off, 5 or 10 minutes. Default 5 min: 4 hard sets for abs, about 12 a
+    /// week over three sessions, inside the 10-20 weekly sets (Schoenfeld,
+    /// Ogborn & Krieger, J Sports Sci 2017). The builder can change it for one session.
+    var absFinisher: AbsFinisher.Length { didSet { defaults.set(absFinisher.rawValue, forKey: "absFinisher") } }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         age = defaults.object(forKey: "age") as? Int ?? 30
@@ -215,6 +223,8 @@ final class UserSettings {
         // Warm-up tier (Settings › Training).
         warmUpTier = defaults.string(forKey: "warmUpTier").flatMap(WarmUpRoutine.Tier.init(rawValue:)) ?? .rampOnly
         warmUpTierByFocus = defaults.dictionary(forKey: "warmUpTierByFocus") as? [String: String] ?? [:]
+        // Abs finisher (Settings › Training).
+        absFinisher = (defaults.object(forKey: "absFinisher") as? Int).flatMap(AbsFinisher.Length.init(rawValue:)) ?? .five
     }
 
     /// Fills the profile from Apple Health (only fields Health actually has).

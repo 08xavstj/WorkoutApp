@@ -182,7 +182,7 @@ private struct ProfileSettingsSection: View {
 // MARK: - Training
 
 /// Gym equipment (the canonical place for it, ux-audit.md 4.3), rest, the
-/// Watch, the RPE guide and lifting experience.
+/// Watch, the warm-up, the abs finisher, the RPE guide and lifting experience.
 private struct TrainingSettingsSection: View {
     @Environment(UserSettings.self) private var settings
     @Environment(GymStore.self) private var gym
@@ -223,6 +223,15 @@ private struct TrainingSettingsSection: View {
                 Text("Warm-up")
                 Text("Ramp sets have the best evidence")
             }
+            // Ab work on top of planned sessions (`AbsFinisher`); the builder can change it for one session.
+            Picker(selection: $settings.absFinisher) {
+                ForEach(AbsFinisher.Length.allCases) { length in
+                    Text(length.label).tag(length)
+                }
+            } label: {
+                Text("Abs finisher")
+                Text("Added on top of planned workouts")
+            }
             Button(action: showRPEGuide) {
                 LabeledContent("RPE guide", value: "What each number means")
             }
@@ -241,6 +250,7 @@ extension TrainingSettingsSection {
     fileprivate static let details = [
         "Rest: automatic is about 2 min on big lifts and 90 s on small ones for muscle, 3 min for strength. Change one exercise from its ••• menu.",
         "Warm-up: movement prep adds a small, mostly feel-based benefit. Pick a different warm-up for one focus in the planner.",
+        "Abs finisher: 5 or 10 minutes of paired ab moves after a planned workout, rotating crunches, leg raises and bracing. It builds the muscle; it won't burn belly fat on its own (Vispute 2011).",
         "Lifting experience picks your calorie equation and gain rate. After 8 weeks of logged workouts, your log sets it.",
         "Rep counting reads barbell squats and deadlifts from wrist motion and taps when the bar slows by about a fifth (1–2 reps left). Check it against how the set felt. Motion data stays on the Watch.",
     ]

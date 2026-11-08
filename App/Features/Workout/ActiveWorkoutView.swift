@@ -16,6 +16,8 @@ struct ActiveWorkoutView: View {
     @Environment(WorkoutLauncher.self) private var launcher
     /// The training block's RIR target, when the session has no planned effort (`LiveSetCoach`).
     @Environment(WeeklyPlanStore.self) private var weeklyPlans
+    /// Morning check-in pain, so an added abs finisher works around it (`PainGuard`).
+    @Environment(CheckInStore.self) private var checkIns
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     /// The quiet PR banner at the end of an exercise (`SetFeedback.records`).
     @State private var recordBanner: RecordBanner?
@@ -279,6 +281,12 @@ struct ActiveWorkoutView: View {
                     renaming = true
                 }
                 Button("Add exercise", systemImage: "plus") { showingPicker = true }
+                // 5 or 10 minutes of paired ab moves after the last exercise (`AbsFinisher`).
+                Menu("Add abs finisher", systemImage: "figure.core.training") {
+                    ForEach([AbsFinisher.Length.five, .ten]) { length in
+                        Button(length.label) { addFinisher(length) }
+                    }
+                }
                 if session.exercises.count > 1 {
                     Button("Reorder exercises", systemImage: "arrow.up.arrow.down") { reordering = true }
                 }
@@ -620,7 +628,8 @@ struct ActiveWorkoutView: View {
             Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
             return
         }
-        let seconds = RestPreferences.resolved(for: exercise.exerciseID, style: gym.style)
+        let seconds = RestPreferences.resolved(for: exercise.exerciseID, style: gym.style,
+                                               sessionStart: session.startedAt, order: exercise.order)
         RestTimerStore.start(seconds: Double(seconds))
         let next = nextSetText()
         Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
@@ -681,6 +690,32 @@ struct ActiveWorkoutView: View {
     /// Records not shown yet across the workout, for the finish sheet.
     private func pendingRecords() -> [RecordBanner] {
         session.orderedExercises.compactMap(newRecords(for:))
+    }
+
+    /// Appends an abs finisher (`AbsFinisher`): moves the gym and today's pain
+    /// allow, none already in the session, rotating away from recent ones; paired
+    /// as supersets with a short rest, then synced to the Watch.
+    private func addFinisher(_ length: AbsFinisher.Length) {
+        var planner = gym.planner
+        let reports = PainLogStore.shared.allReports(checkIns: checkIns, health: [])
+        planner.exerciseFilter = ExerciseFilter(neverAgain: ExerciseExclusions.shared.ids, reports: reports, today: .now)
+        let unit = gym.profile.unit
+        let finisher = AbsFinisher.make(
+            length: length,
+            planner: planner,
+            history: LiftHistory.make(from: sessions, unit: unit),
+            recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions, days: 10),
+            excluding: Set(session.exercises.map(\.exerciseID)),
+            firstGroup: (supersetGroups.values.max() ?? 0) + 1
+        )
+        guard let finisher else { return }
+        let orders = launcher.append(finisher.exercises, to: session, unit: unit, in: modelContext)
+        supersetGroups = SupersetRegistry.groups(for: session.startedAt)
+        // Show the first finisher exercise open.
+        if let first = orders.first, let log = session.exercises.first(where: { $0.order == first }) {
+            expanded.insert(log.persistentModelID)
+        }
+        WatchSync.shared.update(from: session)
     }
 
     private func add(_ exercise: Exercise) {
