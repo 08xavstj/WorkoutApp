@@ -386,6 +386,7 @@ struct CardioFitnessCard: View {
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 VO2SourceNote(lastReading: history.last?.date)
+                VO2EstimatesSection()
                 // Each study once, folded away, instead of citations in every line.
                 EvidenceDisclosure(points: Self.evidence)
             } else {
@@ -393,6 +394,7 @@ struct CardioFitnessCard: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                 VO2SourceNote(lastReading: nil)
+                VO2EstimatesSection()
             }
         }
         .card(tint: Theme.oxygen)
@@ -642,5 +644,119 @@ private struct VO2SourceNote: View {
             parts.append("For a first reading, walk briskly or run outdoors for 20+ minutes with your Watch.")
         }
         return parts.joined(separator: " ")
+    }
+}
+
+/// Two VO₂ max estimates that need no test (`VO2MaxEstimate`): from resting
+/// and max heart rate (Uth 2004), and from activity with lifting counted
+/// (Jackson 1990). Shown beside the watch value, never instead of it.
+private struct VO2EstimatesSection: View {
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(UserSettings.self) private var settings
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
+
+    var body: some View {
+        let heart = heartEstimate
+        let activity = activityEstimate
+        if heart != nil || activity != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Estimates without a test")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .textCase(.uppercase)
+                if let heart {
+                    EstimateRow(title: "From your heart rate", result: heart.result, detail: heart.detail)
+                }
+                if let activity {
+                    EstimateRow(title: "From your activity, lifting included", result: activity.result, detail: activity.detail)
+                }
+                Text("Rough guides, about ±5 mL/kg/min. A watch reading, when there is one, is closer to a lab test.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                EvidenceDisclosure(points: [
+                    "Heart rate: VO₂ max ≈ 15.3 × max HR ÷ resting HR (Uth et al., Eur J Appl Physiol 2004). Built in trained men; less accurate in other groups and with an age-based max.",
+                    "Activity: the NASA non-exercise model from age, sex, body size and a 0-7 activity level (Jackson et al., Med Sci Sports Exerc 1990). Its scale counts weight lifting as moderate activity; hard heart-rate minutes from any workout, lifting included, count as hard exercise.",
+                    "Lifting on its own raises VO₂ max only a little, mostly in older or untrained people (Ozaki et al., Eur Rev Aging Phys Act 2013).",
+                ])
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Awake resting heart rate: Apple Health's value averaged over the last
+    /// 7 readings (sleeping heart rate runs lower and would inflate the ratio).
+    private var restingHeartRate: Double? {
+        let recent = (vitals.stat("rhr")?.series ?? []).suffix(7).map(\.value)
+        if !recent.isEmpty { return recent.reduce(0, +) / Double(recent.count) }
+        return metrics.restingHeartRate
+    }
+
+    private var heartEstimate: (result: VO2MaxEstimate.Result, detail: String)? {
+        guard let resting = restingHeartRate, let profile = metrics.heartRateProfile else { return nil }
+        let measured = settings.maxHeartRate > 0 || settings.learnedMaxOverride != nil
+        guard let result = VO2MaxEstimate.heartRateRatio(maxHeartRate: profile.maxHeartRate, restingHeartRate: resting,
+                                                         measuredMax: measured) else { return nil }
+        let maxText = Int(profile.maxHeartRate.rounded())
+        let restText = Int(resting.rounded())
+        let source = measured ? "your max" : "age-based max"
+        return (result, "\(source) \(maxText) ÷ resting \(restText) bpm")
+    }
+
+    private var activityEstimate: (result: VO2MaxEstimate.Result, detail: String)? {
+        let minutes = vitals.intensityMinutes
+        let rating = VO2MaxEstimate.activityRating(vigorousMinutes: Double(minutes?.vigorous ?? 0),
+                                                   moderateMinutes: Double(minutes?.moderate ?? 0),
+                                                   liftingMinutes: liftingMinutesPerWeek)
+        let weight = metrics.bodyMassKg ?? settings.weightKg
+        let height = settings.heightCm / 100
+        let bmi = height > 0 && weight > 0 ? weight / (height * height) : nil
+        guard let result = VO2MaxEstimate.activity(rating: rating, age: settings.age, sex: settings.sex,
+                                                   bmi: bmi, bodyFatPercent: metrics.bodyFatPercent) else { return nil }
+        let lifting = Int(liftingMinutesPerWeek.rounded())
+        return (result, "Level \(rating) of 7: \(VO2MaxEstimate.ratingText(rating)) · lifting \(lifting) min a week")
+    }
+
+    /// Logged lifting over the last 4 weeks, per week.
+    private var liftingMinutesPerWeek: Double {
+        let start = Date.now.addingTimeInterval(-28 * 86_400)
+        let total = sessions.prefix(while: { $0.startedAt >= start })
+            .filter { !$0.isActive }
+            .reduce(0.0) { $0 + min($1.duration, 3 * 3_600) }
+        return total / 60 / 4
+    }
+}
+
+private struct EstimateRow: View {
+    let title: String
+    let result: VO2MaxEstimate.Result
+    let detail: String
+
+    var body: some View {
+        let value = Int(result.value.rounded())
+        let low = Int(result.range.lowerBound.rounded())
+        let high = Int(result.range.upperBound.rounded())
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                Spacer(minLength: 8)
+                Text("≈\(value)")
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.primaryText)
+                Text("(\(low)–\(high))")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
