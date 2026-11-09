@@ -227,6 +227,8 @@ public enum CardioFitness {
         /// FRIEND registry median for your age and sex.
         public var median: Double
         public var label: String
+        /// The FRIEND percentile band behind `label` (`VO2Norms`).
+        public var category: VO2Norms.Category
         /// Change over about 8 weeks (recent 2 weeks vs 6-10 weeks earlier), if there's data for both.
         public var change: Double?
         public var isPlateau: Bool
@@ -257,6 +259,7 @@ public enum CardioFitness {
             latest: latest,
             median: median,
             label: Biomarkers.vo2MaxLabel(latest, age: age, sex: sex),
+            category: VO2Norms.category(vo2: latest, age: age, sex: sex),
             change: change,
             isPlateau: change.map { $0 < meaningfulChange } ?? false
         )

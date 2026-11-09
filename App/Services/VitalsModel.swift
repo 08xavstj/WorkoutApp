@@ -355,7 +355,7 @@ final class VitalsModel {
         result.append(makeStat(
             "vo2", .heart, "VO₂ max", "lungs.fill", series: vo2Series, unit: "ml/kg/min", digits: 1,
             status: { Biomarkers.vo2MaxLabel($0, age: settings.age, sex: settings.sex) },
-            tone: { Biomarkers.vo2MaxLabel($0, age: settings.age, sex: settings.sex) == "Poor" ? .caution : .good }
+            tone: { VO2Norms.category(vo2: $0, age: settings.age, sex: settings.sex).isBelowAverage ? .caution : .good }
         ))
 
         // MARK: Breathing & temperature

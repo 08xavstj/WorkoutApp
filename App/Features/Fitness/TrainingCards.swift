@@ -361,43 +361,78 @@ struct MinutesBandBar: View {
 // MARK: - Cardio fitness
 
 /// The Fitness headline: VO₂ max with its 90-day trend, where it sits against
-/// people your age and sex, a fitness age from this one measure, and the
-/// interval nudge when the trend is flat or falling (`CardioFitness`;
-/// Mandsager 2018; Kokkinos 2022; Milanović 2015; Wen 2019).
+/// people your age and sex on a FRIEND percentile bar (`VO2Norms`, with the
+/// no-test estimates marked), a fitness age from this one measure, the
+/// interval nudge when the trend is flat or falling, and tips to raise it
+/// (`CardioFitness`; Mandsager 2018; Kokkinos 2022; Milanović 2015; Wen 2019).
 struct CardioFitnessCard: View {
     @Environment(VitalsModel.self) private var vitals
     @Environment(UserSettings.self) private var settings
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     var body: some View {
         let history = vitals.vo2MaxHistory
         let series = history.map { DayValue(date: $0.date, value: $0.value) }
         let result = CardioFitness.assess(series, age: settings.age, sex: settings.sex)
         let trend = CardioFitness.trend(series)
+        let estimates = VO2Estimates(vitals: vitals, settings: settings, metrics: metrics, sessions: sessions)
         VStack(alignment: .leading, spacing: 10) {
             header(result)
             if let result {
-                headline(result, trend: trend)
-                trendChart(history)
-                normsLine(result)
-                fitnessAgeLine(result)
-                adviceLabel(result, trend: trend)
-                Text("Watch VO₂ max is an estimate, about 10% low in fit people; watch the trend.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                VO2SourceNote(lastReading: history.last?.date)
-                VO2EstimatesSection()
-                // Each study once, folded away, instead of citations in every line.
-                EvidenceDisclosure(points: Self.evidence)
+                readingContent(result, trend: trend, history: history, estimates: estimates)
             } else {
-                Text("No VO₂ max yet. Your watch estimates it from outdoor walks and runs with heart rate; it appears here once it's in Apple Health.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-                VO2SourceNote(lastReading: nil)
-                VO2EstimatesSection()
+                noReadingContent(estimates)
             }
+            // Each study once, folded away, instead of citations in every line.
+            EvidenceDisclosure(points: Self.evidence)
         }
         .card(tint: Theme.oxygen)
+    }
+
+    @ViewBuilder
+    private func readingContent(_ result: CardioFitness.Result, trend: CardioFitness.Trend?, history: [DatedValue],
+                                estimates: VO2Estimates) -> some View {
+        headline(result, trend: trend)
+        comparison(watch: result.latest, estimates: estimates)
+        trendChart(history)
+        normsLine(result)
+        fitnessAgeLine(result)
+        adviceLabel(result, trend: trend)
+        Text("Watch VO₂ max is an estimate, about 10% low in fit people; watch the trend.")
+            .font(.caption)
+            .foregroundStyle(Theme.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
+        VO2SourceNote(lastReading: history.last?.date)
+        VO2EstimatesSection(estimates: estimates)
+        tips(result.category)
+    }
+
+    /// No watch reading: the bar still shows the norms, and the estimates
+    /// (when there are any) place you on it.
+    @ViewBuilder
+    private func noReadingContent(_ estimates: VO2Estimates) -> some View {
+        Text("No VO₂ max yet. Your watch estimates it from outdoor walks and runs with heart rate; it appears here once it's in Apple Health.")
+            .font(.subheadline)
+            .foregroundStyle(Theme.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
+        comparison(watch: nil, estimates: estimates)
+        VO2SourceNote(lastReading: nil)
+        VO2EstimatesSection(estimates: estimates)
+        // Without any value, the starting-out tips (app choice).
+        tips(estimates.average.map { VO2Norms.category(vo2: $0, age: settings.age, sex: settings.sex) } ?? .average)
+    }
+
+    private func comparison(watch: Double?, estimates: VO2Estimates) -> some View {
+        VO2Comparison(age: settings.age, sex: settings.sex, watch: watch, estimates: estimates.marks)
+    }
+
+    /// Tips by level; the lifting tip for muscle or strength goals (or before
+    /// goals are set: this is a gym app), the per-kilogram tip when losing weight.
+    private func tips(_ category: VO2Norms.Category) -> some View {
+        let goals: Goals? = settings.goalsSet ? settings.goals : nil
+        let lifts = goals.map { $0.focuses.contains(.muscle) || $0.focuses.contains(.strength) } ?? true
+        return VO2Tips(category: category, lifts: lifts, losingWeight: goals?.weight == .lose)
     }
 
     private func header(_ result: CardioFitness.Result?) -> some View {
@@ -405,7 +440,7 @@ struct CardioFitnessCard: View {
             CardLabel(text: "Cardio fitness (VO₂ max)", color: Theme.oxygen)
             Spacer()
             if let result {
-                Chip(text: result.label, color: result.label == "Poor" ? Theme.recoveryModerate : Theme.recoveryHigh)
+                Chip(text: result.label, color: result.category.chipColor)
             }
         }
     }
@@ -447,8 +482,11 @@ struct CardioFitnessCard: View {
         }
     }
 
+    /// The same FRIEND median as the bar's "Avg" tick (`VO2Norms.median`).
     private func normsLine(_ result: CardioFitness.Result) -> some View {
-        Text("The typical \(settings.sex == .male ? "man" : "woman") your age is about \(result.median.formatted(.number.precision(.fractionLength(0)))); you're at \(Int(result.percentOfMedian.rounded()))% of that.")
+        let noun = settings.sex == .male ? "man" : "woman"
+        let median = result.median.formatted(.number.precision(.fractionLength(0)))
+        return Text("You're at \(Int(result.percentOfMedian.rounded()))% of the typical \(noun) your age (\(median)).")
             .font(.subheadline)
             .foregroundStyle(Theme.primaryText)
             .fixedSize(horizontal: false, vertical: true)
@@ -486,7 +524,8 @@ struct CardioFitnessCard: View {
         "Higher fitness is strongly linked with longer life, with no upper limit found (Mandsager et al., JAMA Netw Open 2018; Kokkinos et al., J Am Coll Cardiol 2022).",
         "High-intensity intervals raised VO₂ max more than steady cardio in meta-analyses (Milanović et al., Sports Med 2015; Wen et al., J Sports Sci 2019).",
         "Easy cardio builds a base but isn't the main way to raise VO₂ max (Storoschuk et al. 2025).",
-        "Typical values by age and sex come from the FRIEND registry (Kaminsky et al., Mayo Clin Proc 2015).",
+        "Typical values and percentiles by age and sex: FRIEND registry, 7,783 treadmill lab tests of US adults 20–79 (Kaminsky et al., Mayo Clin Proc 2015). The percentile is approximate, read between the table's cut points; band names are the app's.",
+        "Average adult: FRIEND's all-ages means for men (37.9) and women (27.6), pooled by the app.",
     ]
 
     /// The 90-day trend decides: flat or falling → the interval nudge
@@ -651,14 +690,11 @@ private struct VO2SourceNote: View {
 /// and max heart rate (Uth 2004), and from activity with lifting counted
 /// (Jackson 1990). Shown beside the watch value, never instead of it.
 private struct VO2EstimatesSection: View {
-    @Environment(VitalsModel.self) private var vitals
-    @Environment(UserSettings.self) private var settings
-    @Environment(DailyMetricsModel.self) private var metrics
-    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
+    let estimates: VO2Estimates
 
     var body: some View {
-        let heart = heartEstimate
-        let activity = activityEstimate
+        let heart = estimates.heart
+        let activity = estimates.activity
         if heart != nil || activity != nil {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Estimates without a test")
@@ -684,6 +720,44 @@ private struct VO2EstimatesSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
+
+/// The two no-test estimates, worked out once for the bar and the rows.
+struct VO2Estimates {
+    let heart: (result: VO2MaxEstimate.Result, detail: String)?
+    let activity: (result: VO2MaxEstimate.Result, detail: String)?
+
+    init(vitals: VitalsModel, settings: UserSettings, metrics: DailyMetricsModel, sessions: [WorkoutSession]) {
+        let source = VO2EstimateSource(vitals: vitals, settings: settings, metrics: metrics, sessions: sessions)
+        heart = source.heartEstimate
+        activity = source.activityEstimate
+    }
+
+    /// For the scale bar: hollow marks with their ranges.
+    var marks: [VO2EstimateMark] {
+        var marks: [VO2EstimateMark] = []
+        if let heart = heart?.result {
+            marks.append(VO2EstimateMark(kind: .heartRate, value: heart.value, range: heart.range))
+        }
+        if let activity = activity?.result {
+            marks.append(VO2EstimateMark(kind: .activity, value: activity.value, range: activity.range))
+        }
+        return marks
+    }
+
+    /// The estimates' mean, when there's no watch reading.
+    var average: Double? {
+        let values = marks.map(\.value)
+        return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+    }
+}
+
+/// Reads the inputs for `VO2Estimates`.
+private struct VO2EstimateSource {
+    let vitals: VitalsModel
+    let settings: UserSettings
+    let metrics: DailyMetricsModel
+    let sessions: [WorkoutSession]
 
     /// Awake resting heart rate: Apple Health's value averaged over the last
     /// 7 readings (sleeping heart rate runs lower and would inflate the ratio).
@@ -693,7 +767,7 @@ private struct VO2EstimatesSection: View {
         return metrics.restingHeartRate
     }
 
-    private var heartEstimate: (result: VO2MaxEstimate.Result, detail: String)? {
+    var heartEstimate: (result: VO2MaxEstimate.Result, detail: String)? {
         guard let resting = restingHeartRate, let profile = metrics.heartRateProfile else { return nil }
         let measured = settings.maxHeartRate > 0 || settings.learnedMaxOverride != nil
         guard let result = VO2MaxEstimate.heartRateRatio(maxHeartRate: profile.maxHeartRate, restingHeartRate: resting,
@@ -704,7 +778,7 @@ private struct VO2EstimatesSection: View {
         return (result, "\(source) \(maxText) ÷ resting \(restText) bpm")
     }
 
-    private var activityEstimate: (result: VO2MaxEstimate.Result, detail: String)? {
+    var activityEstimate: (result: VO2MaxEstimate.Result, detail: String)? {
         let minutes = vitals.intensityMinutes
         let rating = VO2MaxEstimate.activityRating(vigorousMinutes: Double(minutes?.vigorous ?? 0),
                                                    moderateMinutes: Double(minutes?.moderate ?? 0),

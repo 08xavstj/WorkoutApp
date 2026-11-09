@@ -401,7 +401,7 @@ private struct FitnessProgressCard: View {
         let series = history.map { DayValue(date: $0.date, value: $0.value) }
         let result = CardioFitness.assess(series, age: settings.age, sex: settings.sex)
         let start = Date.now.addingTimeInterval(-Double(CardioFitness.trendDays) * 86_400)
-        let verdict = result.map { MetricVerdict($0.label, color: $0.label == "Poor" ? Theme.recoveryModerate : Theme.recoveryHigh) }
+        let verdict = result.map { MetricVerdict($0.label, color: $0.category.chipColor) }
         return MetricRow(
             title: "Cardio fitness (VO₂ max)",
             value: result.map { $0.latest.formatted(.number.precision(.fractionLength(1))) },

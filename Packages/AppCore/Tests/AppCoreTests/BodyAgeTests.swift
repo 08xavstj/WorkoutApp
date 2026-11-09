@@ -18,8 +18,8 @@ struct BodyAgeTests {
                 let median = Biomarkers.medianVO2Max(age: age, sex: sex)
                 for share in [0.95, 0.97, 1.0, 1.05, 1.09, 1.2, 1.4] {
                     let vo2 = median * share
-                    let label = Biomarkers.vo2MaxLabel(vo2, age: age, sex: sex)
-                    #expect(label != "Poor" && label != "Fair")
+                    // 95%+ of the median is "Average" (25th-50th) or better.
+                    #expect(VO2Norms.category(vo2: vo2, age: age, sex: sex) >= .average)
                     let result = try #require(BodyAge.estimate(BodyAge.Inputs(age: age, sex: sex, vo2Max: vo2, restingHeartRate: 60)))
                     let fitness = try #require(result.factors.first { $0.name == "Fitness (VO₂ max)" })
                     #expect(fitness.years <= 0, "\(sex) \(age) \(share)")

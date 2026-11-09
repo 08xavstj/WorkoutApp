@@ -107,10 +107,13 @@ public enum Biomarkers {
     }
 
     /// Median treadmill VO₂ max by age decade from the FRIEND registry
-    /// (Kaminsky et al., Mayo Clin Proc 2015): 20s, 30s, ... 70s.
+    /// (Kaminsky et al., Mayo Clin Proc 2015, Table 3): 20s, 30s, ... 70s.
+    /// Read from `VO2Norms.friendTreadmill` (its 50th percentile column) so
+    /// the medians, percentiles and fitness age share one table:
+    /// men 48.0, 42.4, 37.8, 32.6, 28.2, 24.4; women 37.6, 30.2, 26.7, 23.4, 20.0, 18.3.
     static let friendMedians: [BiologicalSex: [Double]] = [
-        .male: [48.0, 42.4, 37.8, 32.6, 28.2, 24.4],
-        .female: [37.6, 30.2, 26.7, 23.4, 20.0, 18.3],
+        .male: VO2Norms.column(3, sex: .male),
+        .female: VO2Norms.column(3, sex: .female),
     ]
 
     /// Median VO₂ max for an age, interpolated between decade midpoints.
@@ -157,21 +160,15 @@ public enum Biomarkers {
         return min(90, max(18, found))
     }
 
-    /// The bottom of the "Good" band, as a share of the median (`vo2MaxLabel`).
+    /// Body age's "about typical" floor, as a share of the median: from 95%
+    /// to 100% of the median VO₂ max adds no years (`BodyAge`; app choice).
+    /// It sits inside the FRIEND 25th-50th band ("Average") at every age.
     public static let goodVO2MaxFraction = 0.95
 
-    /// VO₂ max compared with people your age and sex: around the FRIEND
-    /// median is "Good". The band widths (80/95/110/125% of the median) are
-    /// the app's choice. Watch VO₂ max is an estimate.
+    /// VO₂ max compared with people your age and sex, named by the FRIEND
+    /// percentile band it falls in (`VO2Norms.category`: Low, Below average,
+    /// Average, Good, Excellent, Top 10%). Watch VO₂ max is an estimate.
     public static func vo2MaxLabel(_ value: Double, age: Int, sex: BiologicalSex) -> String {
-        let median = medianVO2Max(age: age, sex: sex)
-        let cut = [0.8, goodVO2MaxFraction, 1.1, 1.25].map { $0 * median }
-        switch value {
-        case ..<cut[0]: return "Poor"
-        case ..<cut[1]: return "Fair"
-        case ..<cut[2]: return "Good"
-        case ..<cut[3]: return "Excellent"
-        default: return "Superior"
-        }
+        VO2Norms.category(vo2: value, age: age, sex: sex).name
     }
 }

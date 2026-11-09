@@ -94,7 +94,7 @@ final class BiologyModel {
             let label = Biomarkers.vo2MaxLabel(last.value, age: settings.age, sex: settings.sex)
             result.append(Marker(
                 id: "vo2", name: "VO₂ max", value: fmt(last.value), unit: "", status: label,
-                tone: label == "Poor" ? .caution : .good, series: vo2
+                tone: VO2Norms.category(vo2: last.value, age: settings.age, sex: settings.sex).isBelowAverage ? .caution : .good, series: vo2
             ))
         }
         let protein = ((try? await proteinTask) ?? []).filter { $0.value > 0 }

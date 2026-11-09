@@ -10,9 +10,10 @@ import Foundation
 /// - Fitness (VO₂ max) is the biggest. "Fitness age": the age whose median
 ///   VO₂ max matches yours, on the FRIEND registry medians (Kaminsky et al.,
 ///   Mayo Clin Proc 2015; `Biomarkers.fitnessAge`), the same reference the
-///   "Good"/"Fair" label uses, so a "Good" VO₂ max can't add years. The
+///   percentile label uses (`VO2Norms`), so a "Good" VO₂ max (at or above
+///   the median) can't add years. The
 ///   fitness-age idea is Nes et al., Med Sci Sports Exerc 2011; Nes 2014 is
-///   the mortality follow-up. Within the "Good" band below the median
+///   the mortality follow-up. Just below the median
 ///   (95-100% of it) it adds nothing: watch VO₂ max is off by ~10%, so that
 ///   gap is noise (app choice). Below the band, years count from the band's
 ///   edge so the factor has no jump. It counts at 60% weight because the
