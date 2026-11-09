@@ -198,8 +198,9 @@ struct StrainCalculatorTests {
 
 struct RPEScaleTests {
     @Test func describesRepsLeft() {
-        #expect(RPEScale.summary(8) == "RPE 8 · 2 reps left")
-        #expect(RPEScale.summary(9) == "RPE 9 · 1 rep left")
+        // Changed on purpose: reps left lead, RPE is the secondary label.
+        #expect(RPEScale.summary(8) == "2 reps left · RPE 8")
+        #expect(RPEScale.summary(9) == "1 rep left · RPE 9")
         #expect(RPEScale.level(for: 6.5)?.rpe == 6 || RPEScale.level(for: 6.5)?.rpe == 7)
         // Foster's CR-10 anchors (Foster et al. 2001): 3 moderate, 5 hard, 7 very hard.
         #expect(RPEScale.sessionLabel(3) == "Moderate")

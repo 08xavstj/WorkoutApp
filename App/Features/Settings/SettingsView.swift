@@ -188,6 +188,8 @@ private struct TrainingSettingsSection: View {
     @Environment(GymStore.self) private var gym
     /// 0 = automatic (from your goal). See RestPreferences.
     @AppStorage(RestPreferences.globalKey) private var restSeconds = 0
+    /// How rest end is signalled (`RestAlertPolicy`); in the App Group for the Live Activity's buttons.
+    @AppStorage(RestAlertMode.key, store: SharedStore.defaults) private var restAlerts = RestAlertMode.watchFirst
     let showRPEGuide: () -> Void
 
     var body: some View {
@@ -206,6 +208,17 @@ private struct TrainingSettingsSection: View {
             } label: {
                 Text("Rest timer")
                 Text("Automatic follows your goal")
+            }
+            Picker(selection: $restAlerts) {
+                ForEach(RestAlertMode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            } label: {
+                Text("Rest timer alerts")
+                Text("No banner while the app is open")
+            }
+            .onChange(of: restAlerts) {
+                Task { await WorkoutLiveActivity.rescheduleRestAlert() }
             }
             Toggle("Start workouts on Apple Watch", isOn: $settings.startWatchWithWorkout)
             Toggle(isOn: $settings.watchRepCounting) {
@@ -249,6 +262,7 @@ extension TrainingSettingsSection {
     /// The details that used to fill the footer, one short point per control.
     fileprivate static let details = [
         "Rest: automatic is about 2 min on big lifts and 90 s on small ones for muscle, 3 min for strength. Change one exercise from its ••• menu.",
+        "Rest timer alerts: with the Watch app recording, only the Watch buzzes. Otherwise the phone alerts when the app is closed, and iOS passes it to the Watch while the phone is locked. With the app open, the timer turns green and taps once.",
         "Warm-up: movement prep adds a small, mostly feel-based benefit. Pick a different warm-up for one focus in the planner.",
         "Abs finisher: 5 or 10 minutes of paired ab moves after a planned workout, rotating crunches, leg raises and bracing. It builds the muscle; it won't burn belly fat on its own (Vispute 2011).",
         "Lifting experience picks your calorie equation and gain rate. After 8 weeks of logged workouts, your log sets it.",

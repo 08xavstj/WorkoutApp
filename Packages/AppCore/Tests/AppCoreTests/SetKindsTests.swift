@@ -177,13 +177,13 @@ struct SetKindsTests {
     }
 
     @Test func stagesCountInTheTimeEstimate() {
-        // Balanced isolation set: 45 s + 90 s rest = 2.25 min; three sets = 6.75 → 7.
+        // Balanced isolation sets: 45 s each, 90 s rest between them (not after the last) = 5.25 → 5.
         let straight = curl()
-        #expect(WorkoutPlanner.estimatedMinutes([straight]) == 7)
-        // One set (2.25 min) + two drops of 10 reps (40 s + 15 s change each) ≈ 4.1 → 4.
+        #expect(WorkoutPlanner.estimatedMinutes([straight]) == 5)
+        // One set (0.75 min) + two drops of 10 reps (40 s + 15 s change each) ≈ 2.6 → 3.
         var drop = straight
         TimeSaver.convert(&drop, to: .drop, gym: gym)
-        #expect(WorkoutPlanner.estimatedMinutes([drop]) == 4)
+        #expect(WorkoutPlanner.estimatedMinutes([drop]) == 3)
         #expect(TimeSaver.stageSeconds(for: .drop, reps: 10) == 55)
         #expect(TimeSaver.stageSeconds(for: .myoRep, reps: 4) == 31)
     }

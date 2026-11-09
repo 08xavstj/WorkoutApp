@@ -93,6 +93,13 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     // main actor.
     @objc(userNotificationCenter:willPresentNotification:withCompletionHandler:)
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // "Rest's over" while the app is open: no banner or sound; the workout
+        // screen turns its timer into "Rest done" with a tap instead (iOS only
+        // asks this while the app is in the foreground).
+        if notification.request.identifier == WorkoutLiveActivity.restNotificationID {
+            completionHandler([])
+            return
+        }
         completionHandler([.banner, .list, .sound])
     }
 

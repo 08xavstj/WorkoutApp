@@ -244,7 +244,9 @@ public enum CoachAnswers {
                           text: "I couldn't build a session for that request. Ask for a push, pull, legs, upper, lower or full-body day, with a length like 30 or 45 min.",
                           action: "Try “Plan a 45 min full body workout”.")
         }
-        var lines = ["\(plan.title), about \(plan.minutes) min with \(plan.exerciseCount) exercises at around RPE \(plan.targetRPE.formatted(.number.precision(.fractionLength(0...1))))."]
+        // Effort in the sets' plain words, not an RPE number (`ReserveText`).
+        let effort = ReserveText.text(rpe: plan.targetRPE)
+        var lines = ["\(plan.title), about \(plan.minutes) min with \(plan.exerciseCount) exercises; sets stop with \(effort)."]
         if !plan.rationale.isEmpty { lines.append(plan.rationale) }
         if let recovery = f.recovery {
             lines.append(recovery < RecoveryCalculator.moderateBand.lowerBound

@@ -27,11 +27,11 @@ struct TrainingBlockTests {
         #expect(weeks.map(\.targetRIR) == [3, 2, 1, 1, 3])
         #expect(weeks.map(\.isDeload) == [false, false, false, false, true])
         #expect(weeks[2].targetRPE == 9)
-        #expect(weeks[2].label == "Block week 3 of 5 · 1 in reserve")
-        #expect(weeks[4].label == "Deload week (5 of 5) · 3 in reserve")
+        #expect(weeks[2].label == "Block week 3 of 5 · 1 rep in the tank")
+        #expect(weeks[4].label == "Deload week (5 of 5) · 3 reps in the tank")
         // The note says when today's plan backs off from the block target.
         #expect(weeks[2].note(plannedRPE: 9) == weeks[2].note)
-        #expect(weeks[2].note(plannedRPE: 6.5).hasSuffix("Today eased to 3-4 in reserve."))
+        #expect(weeks[2].note(plannedRPE: 6.5).hasSuffix("Today eased to 3-4 reps in the tank."))
     }
 
     @Test func muscleRampsHigherAndLonger() {
@@ -138,14 +138,15 @@ struct BlockPlannerTests {
     @Test func blockScalesSetsAndTheDeloadHalvesThem() {
         // 120 minutes is a long session: seven exercises, four sets each (`WorkoutPlanner.baseSets`);
         // `fill` then adds a fifth set to the first two compound lifts and an eighth exercise
-        // (a second horizontal press, 2 sets) to reach 85% of the time.
+        // (a second horizontal press: 3 sets as a compound lift, then a fourth as time allows).
         let base = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:])
-        #expect(base.exercises.map(\.sets) == [5, 5, 4, 4, 4, 4, 4, 2])
+        #expect(base.exercises.map(\.sets) == [5, 5, 4, 4, 4, 4, 4, 4])
         #expect(base.exercises.last?.exerciseID == "Leverage_Chest_Press")
         #expect(base.blockWeek == nil)
         let week4 = TrainingBlock.weekState(4, style: .balanced, length: 5) // ×1.25, RIR 1
         let ramped = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:], block: week4)
-        #expect(ramped.exercises.map(\.sets) == [5, 5, 5, 5, 5, 5, 5])
+        // Fill runs to the time picked, so the eighth exercise joins here too.
+        #expect(ramped.exercises.map(\.sets) == [5, 5, 5, 5, 5, 5, 5, 4])
         #expect(ramped.targetRPE == 9)
         #expect(ramped.blockWeek == week4)
         let deload = TrainingBlock.weekState(5, style: .balanced, length: 5)
@@ -192,9 +193,10 @@ struct SupersetTests {
     @Test func pairedSetsCountAtSixtyPercent() {
         let straight = [exercise("Barbell_Squat"), exercise("Seated_Leg_Curl")]
         let paired = [exercise("Barbell_Squat", group: 1), exercise("Seated_Leg_Curl", group: 1)]
-        // One 2 min transition between the two exercises, then the sets.
-        #expect(WorkoutPlanner.estimatedMinutes(straight) == 13) // 2 + 2×3.25 + 2×2.25
-        #expect(WorkoutPlanner.estimatedMinutes(paired) == 9)    // 2 + 0.6 × 11 = 8.6
+        // One 2 min transition between the two exercises, then the sets: 45 s each, the rest
+        // only between sets (the transition stands in for the rest after the last).
+        #expect(WorkoutPlanner.estimatedMinutes(straight) == 9) // 2 + (1.5 + 2.5) + (1.5 + 1.5)
+        #expect(WorkoutPlanner.estimatedMinutes(paired) == 6)   // 2 + 0.6 × 7 = 6.2
     }
 
     @Test func orphansLoseTheirGroup() {
@@ -205,14 +207,18 @@ struct SupersetTests {
 
     @Test func shortSessionsPairBeforeDroppingExercises() {
         let planner = WorkoutPlanner(gym: .commercialPounds)
-        // 20 minutes: sets go to two each, then squat pairs with the leg curl, then one exercise goes.
+        // 20 minutes: isolation goes to two sets and compound lifts to three, then squat pairs
+        // with the leg curl, then the compound lifts go to two; that fits, so all four exercises
+        // stay (the estimate counts no rest after an exercise's last set), and `fill` gives
+        // the squat its third set back.
         let short = planner.plan(focus: .legs, minutes: 20, recovery: 70, history: [:])
         #expect(short.hasSupersets)
-        #expect(short.exercises.count == 3)
-        #expect(short.exercises.map(\.supersetGroup) == [1, 1, nil])
-        #expect(short.exercises.map(\.exerciseID) == ["Barbell_Squat", "Seated_Leg_Curl", "Romanian_Deadlift"])
+        #expect(short.exercises.count == 4)
+        #expect(short.exercises.map(\.supersetGroup) == [1, 1, nil, nil])
+        #expect(short.exercises.map(\.exerciseID) == ["Barbell_Squat", "Seated_Leg_Curl", "Romanian_Deadlift", "Split_Squat_with_Dumbbells"])
+        #expect(short.exercises.map(\.sets) == [3, 2, 2, 2])
         #expect(WorkoutPlanner.estimatedMinutes(short.exercises) <= 20)
-        #expect(short.estimatedMinutes == 17) // 2 transitions + 0.6 × 11 + 2 × 3.25
+        #expect(short.estimatedMinutes == 20)
         // 45 minutes: trimming sets is enough, so no supersets.
         let usual = planner.plan(focus: .legs, minutes: 45, recovery: 70, history: [:])
         #expect(!usual.hasSupersets)

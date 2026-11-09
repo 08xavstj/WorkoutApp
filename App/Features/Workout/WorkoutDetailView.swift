@@ -62,6 +62,13 @@ struct WorkoutDetailView: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
             summaryStats
+            // The end-of-workout summary (`WorkoutSummaryView`), as shown after Finish.
+            NavigationLink {
+                WorkoutSummaryView(session: session)
+            } label: {
+                Label("Workout summary", systemImage: "rosette")
+                    .font(.subheadline)
+            }
         }
         .listRowBackground(Theme.card)
     }

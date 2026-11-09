@@ -212,6 +212,8 @@ struct FinishWorkoutSheet: View {
             try? modelContext.save()
         }
         await WorkoutLiveActivity.endAll()
+        // The summary opens once the workout screen has closed (`WorkoutSummaryPresenter`).
+        WorkoutSummaryPresenter.shared.pending = session
         dismiss()
         onFinished()
     }

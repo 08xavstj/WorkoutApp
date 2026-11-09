@@ -47,16 +47,18 @@ struct SessionLengthTests {
     @Test func estimateCountsWarmUpRampsTransitionsAndStyle() {
         var squat = PlannedExercise(exerciseID: "Barbell_Squat", name: "Squat", sets: 3, reps: 6...8, rpe: 8, load: 185, loadKind: .barbell, note: nil)
         let curl = PlannedExercise(exerciseID: "Seated_Leg_Curl", name: "Leg Curl", sets: 3, reps: 10...12, rpe: 9, load: nil, loadKind: .machine, note: nil)
-        // Balanced, no movement warm-up: 2 min transition + 3 × 3.25 + 3 × 2.25 = 18.5 → 19 (rounded half up).
-        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 19)
+        // Balanced, no movement warm-up: 2 min transition + 3 × 45 s per exercise, with the rest
+        // (2.5 / 1.5 min) only between sets: the walk to the next exercise is the last set's rest.
+        // 2 + (2.25 + 5) + (2.25 + 3) = 14.5 → 15 (rounded half up).
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 15)
         // A 6-minute movement warm-up (short tier) is added as is.
-        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], warmUpMinutes: 6) == 25)
-        // Muscle style rests 2 min on big lifts: 2 + 3 × 2.75 + 3 × 2.25 = 17.
-        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], style: .muscle) == 17)
-        // Three ramp sets at 1.5 min each (30 s work + 60 s rest): 18.5 + 4.5 = 23.
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], warmUpMinutes: 6) == 21)
+        // Muscle style rests 2 min on big lifts: 2 + (2.25 + 4) + 5.25 = 13.5 → 14.
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], style: .muscle) == 14)
+        // Three ramp sets at 1.5 min each (30 s work + 60 s rest): 14.5 + 4.5 = 19.
         squat.warmUpSets = WarmUp.sets(workingLoad: 185, kind: .barbell, gym: .commercialPounds)
         #expect(squat.warmUpSets?.count == 3)
-        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 23)
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 19)
     }
 
     @Test func rampSetsOnlyWhenThereIsAWeight() {
@@ -91,7 +93,7 @@ struct SessionLengthTests {
         // range the exercises ask for (big lifts RPE 7.5, small ones 8.5 → 1-3),
         // not the session's RPE 7.5 alone ("2-3"), which no small lift used.
         let reserve = ReserveText.text(rpes: plan.exercises.map(\.rpe), fallback: plan.targetRPE)
-        #expect(reserve == "1-3 in reserve")
+        #expect(reserve == "1-3 reps in the tank")
         #expect(plan.rationale.contains(reserve))
         #expect(plan.rationale.contains("45 min"))
         let week3 = TrainingBlock.weekState(3, style: .balanced, length: 5)

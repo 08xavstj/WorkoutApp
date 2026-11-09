@@ -213,9 +213,10 @@ struct RootView: View {
         .sheet(item: $launcher.builderRequest) { request in
             WorkoutBuilderView(initialFocus: request.focus, initialMinutes: request.minutes)
         }
-        .fullScreenCover(item: $launcher.activeSession) { session in
+        .fullScreenCover(item: $launcher.activeSession, onDismiss: { WorkoutSummaryPresenter.shared.showPending() }) { session in
             ActiveWorkoutView(session: session)
         }
+        .modifier(WorkoutSummaryCover()) // the summary after Finish (`WorkoutSummaryPresenter`)
         .sheet(isPresented: Binding(
             get: { !settings.hasOnboarded },
             set: { if !$0 { settings.hasOnboarded = true } }

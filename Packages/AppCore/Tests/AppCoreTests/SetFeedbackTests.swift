@@ -19,7 +19,7 @@ struct SetFeedbackTests {
         // +1 rep on last time, but at RPE 10 on an RPE 8 plan.
         let verdict = SetFeedback.verdict(logged: set(60, 9, 10), last: set(60, 8, 8), targetReps: 8, targetRPE: 8)
         #expect(verdict == .pastEffort(targetRIR: 2))
-        #expect(verdict?.message(unit: "kg") == "Harder than planned: aim for 2 in reserve next set")
+        #expect(verdict?.message(unit: "kg") == "Harder than planned: aim for 2 reps in the tank next set")
         // One point over is within the RPE error: no warning.
         #expect(SetFeedback.verdict(logged: set(60, 9, 9), last: set(60, 8, 8), targetReps: 8, targetRPE: 8) == .moreReps(1))
     }

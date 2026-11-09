@@ -1,10 +1,11 @@
 import SwiftUI
 import WatchKit
 
-/// "How hard?" after Complete: effort buttons 6-10 (reps left underneath, as
-/// in the app's `RPEScale`), the plan's effort highlighted, reps and weight to
-/// adjust, and "No rating". One tap on an effort logs the set; the rest timer
-/// starts the moment this closes.
+/// "Reps left?" after Complete: 0 / 1 / 2 / 3 / 4+ reps left in the tank (as
+/// the phone's `ReserveText`), the plan's number marked, reps and weight to
+/// adjust, and "No rating". One tap logs the set with RPE = 10 − reps left
+/// (the RIR-based scale; Zourdos et al. 2016); the rest timer starts the
+/// moment this closes.
 struct WatchSetEffortSheet: View {
     @Environment(WatchWorkoutModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -22,8 +23,14 @@ struct WatchSetEffortSheet: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 8) {
-                Text("How hard?")
-                    .font(.headline)
+                VStack(spacing: 0) {
+                    Text("Reps left?")
+                        .font(.headline)
+                    Text("How many more could you have done?")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
                 if adjusting {
                     WatchSetAdjuster(reps: $reps, weightKg: $weightKg, loads: set.loads, unit: set.unit)
                 } else {
@@ -41,8 +48,8 @@ struct WatchSetEffortSheet: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Edit reps and weight")
                 }
-                WatchRPEGrid(choices: WatchRPEChoice.set, selected: set.suggestedRPE) { value in
-                    finish(rpe: Double(value))
+                WatchRepsLeftGrid(plan: set.suggestedRPE.map { min(4, max(0, 10 - $0)) }) { left in
+                    finish(rpe: Double(10 - left))
                 }
                 Button("No rating") { finish(rpe: nil) }
                     .buttonStyle(.bordered)
@@ -147,6 +154,50 @@ struct WatchSetAdjuster: View {
         .buttonStyle(.bordered)
         .tint(WatchTheme.lifting)
         .accessibilityLabel(label)
+    }
+}
+
+/// Reps-left buttons 0, 1, 2 / 3, 4+ (stored as RPE 10 … 6), the plan's
+/// number marked "plan". A tap clicks (haptic) and fires `action` with the reps left.
+struct WatchRepsLeftGrid: View {
+    /// The plan's reps left, 0-4; nil without one.
+    let plan: Int?
+    let action: (Int) -> Void
+    private static let rows: [[Int]] = [[0, 1, 2], [3, 4]]
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(Self.rows, id: \.self) { row in
+                HStack(spacing: 4) {
+                    ForEach(row, id: \.self) { left in
+                        button(left)
+                    }
+                }
+            }
+        }
+    }
+
+    private func button(_ left: Int) -> some View {
+        let isPlan = left == plan
+        let label = left >= 4 ? "4+" : "\(left)"
+        return Button {
+            WKInterfaceDevice.current().play(.click)
+            action(left)
+        } label: {
+            VStack(spacing: 1) {
+                Text(label)
+                    .font(.headline)
+                if isPlan {
+                    Text("plan")
+                        .font(.caption2)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(isPlan ? WatchTheme.lifting.opacity(0.55) : Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(left >= 4 ? "4 or more reps left" : (left == 1 ? "1 rep left" : "\(left) reps left"))
+        .accessibilityHint(isPlan ? "The plan's target" : "")
     }
 }
 

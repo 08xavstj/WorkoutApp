@@ -428,6 +428,10 @@ public struct PlannedWorkout: Codable, Sendable, Equatable {
     /// with the planner's rest style and warm-up). Nil for plans made
     /// without the planner.
     public var estimatedMinutes: Int? = nil
+    /// Why the plan runs shorter than the time picked, or fills it past this
+    /// week's set targets (`WorkoutPlanner.lengthNote`). Nil when neither.
+    /// Optional, so saved plans still decode.
+    public var lengthNote: String? = nil
 
     /// True when at least one superset was made to fit the time.
     public var hasSupersets: Bool { exercises.contains { $0.supersetGroup != nil } }
@@ -543,6 +547,28 @@ public struct WorkoutPlanner: Sendable {
         alternatives(for: slot).first
     }
 
+    /// The exercise a plan uses for a slot: one you've logged, most recently
+    /// done first, else the first option (`alternatives`). Keeping the
+    /// variant you actually do keeps its history, so double progression
+    /// works from your own numbers; a plan that swapped your dumbbell curl
+    /// for a barbell curl had to estimate a cautious first-time weight
+    /// (`LoadEstimator`, 85%, top of the range: about half the weight at 15
+    /// reps). A pain regression the filter put first (`ExerciseFilter.apply`)
+    /// still wins: a logged lift that loads a 3-5/10 area isn't preferred.
+    public func choose(_ slot: MovementSlot, excluding used: Set<String>,
+                       history: [String: ExerciseHistory]) -> CatalogExercise? {
+        let options = alternatives(for: slot).filter { !used.contains($0.id) }
+        guard let first = options.first else { return nil }
+        if let filter = exerciseFilter, filter.regressArea(forExerciseID: first.id, slot: slot) == nil,
+           PainGuard.regressionSlot(for: first.id) != nil {
+            return first
+        }
+        let logged = options.filter { option in
+            history[option.id] != nil && exerciseFilter?.regressArea(forExerciseID: option.id, slot: slot) == nil
+        }
+        return logged.max { (history[$0.id]?.lastDate ?? .distantPast) < (history[$1.id]?.lastDate ?? .distantPast) } ?? first
+    }
+
     /// Every catalog exercise for a slot that this gym supports, best first.
     public func alternatives(for slot: MovementSlot) -> [CatalogExercise] {
         let supported = (ExerciseCatalog.options[slot] ?? []).filter { exercise in
@@ -651,13 +677,14 @@ public struct WorkoutPlanner: Sendable {
         }
         let goal = reps.upperBound + Self.bigJumpExtraReps
         let today = rpe ?? history.lastRPE ?? 8
+        // An easier day at the same weight: a rep fewer than last time (`progression`).
+        guard isHeldAtLastWeight(load: load, history: history, rpe: today) else {
+            let count = max(reps.lowerBound, min(max(history.lastReps, reps.lowerBound), reps.upperBound) - 1)
+            return "Same weight, \(count) reps for today's effort"
+        }
         switch mode {
         case .load:
             // Double progression (`progression`): one more rep at the same weight.
-            guard isHeldAtLastWeight(load: load, history: history, rpe: today) else {
-                let count = min(max(history.lastReps, reps.lowerBound), reps.upperBound)
-                return "Same weight, \(count) reps for today's effort"
-            }
             var top = reps.upperBound
             if let kind = loadKind, let next = gym.nextLoad(above: load, on: kind), isBigJump(from: load, to: next) {
                 top += Self.bigJumpExtraReps
@@ -666,7 +693,8 @@ public struct WorkoutPlanner: Sendable {
             if target >= top { return "Same weight, aim for \(target) reps to move up" }
             return "Same weight, aim for \(target) reps; it moves up at \(top)"
         case .reps:
-            let target = repTarget(load: load, history: history, reps: reps, rpe: today) ?? reps.upperBound
+            let target = repTarget(load: load, history: history, reps: reps, rpe: today)
+                ?? max(reps.lowerBound, min(history.lastReps + 1, goal))
             return "Same weight as last time: aim for \(target) reps; it moves up at \(goal)"
         case .sets:
             let most = TrainingBlock.setRange.upperBound
@@ -736,7 +764,7 @@ public struct WorkoutPlanner: Sendable {
     /// warm-up ramp sets (`WarmUp`), then sessions that overrun the time are
     /// trimmed, paired into supersets, then shortened (`fit`), and sessions
     /// that come in well under it get sets or an extra exercise (`fill`), so
-    /// the estimate lands within `fillFraction`-100% of the time you picked.
+    /// the estimate lands as close under the time you picked as the sets allow.
     /// Long sessions (`longSessionMinutes`) add the focus's `extraSlot` and a
     /// fourth set on isolation work. `focusReason` ("because of the soreness
     /// you reported") goes into the plan's `rationale`. Body weight, sex and
@@ -790,7 +818,7 @@ public struct WorkoutPlanner: Sendable {
             // A repeated slot (the long session's extra) gets a different exercise.
             let used = Set(exercises.map(\.exerciseID))
             guard exercises.count < exerciseCount,
-                  let choice = alternatives(for: slot).first(where: { !used.contains($0.id) }) else { continue }
+                  let choice = choose(slot, excluding: used, history: history) else { continue }
             var planned = prescribe(choice, slot: slot, minutes: minutes, sessionRPE: rpe, history: history, lifter: lifter)
             var base = Self.baseSets(compound: slot.isCompound, minutes: minutes)
             if let block {
@@ -803,29 +831,47 @@ public struct WorkoutPlanner: Sendable {
             exercises.append(planned)
         }
         // This week's per-muscle targets (`VolumeProgression`) set the sets; `fit` still trims to the time.
-        Self.applySetGoals(&exercises, goals: muscleSetGoals)
+        let deload = block?.isDeload == true
+        Self.applySetGoals(&exercises, goals: muscleSetGoals, deload: deload)
         // Ramp sets first, so the time they take counts when fitting.
         addWarmUps(&exercises)
-        Self.fit(&exercises, minutes: minutes, style: style, warmUpMinutes: warmUpMinutes)
+        Self.fit(&exercises, minutes: minutes, style: style, warmUpMinutes: warmUpMinutes, deload: deload)
         // A muscle with a weekly target already has its sets; the others keep an earned set if time allows.
         let targeted = Set(muscleSetGoals.keys)
         earnedSets = earnedSets.filter { id, _ in
             guard let exercise = exercises.first(where: { $0.exerciseID == id }) else { return false }
             return VolumeProgression.primaryMuscle(exercise).map { !targeted.contains($0) } ?? true
         }
-        Self.keepEarnedSets(&exercises, earned: earnedSets, minutes: minutes, style: style, warmUpMinutes: warmUpMinutes)
+        Self.keepEarnedSets(&exercises, earned: earnedSets, minutes: minutes, style: style, warmUpMinutes: warmUpMinutes,
+                            deload: deload)
         // A deload week is meant to be short; every other session fills the time.
-        if block?.isDeload != true {
-            fill(&exercises, focus: focus, minutes: minutes, rpe: rpe, history: history, lifter: lifter, warmUpMinutes: warmUpMinutes,
-                 goals: muscleSetGoals)
+        var filledPastGoals = false
+        if !deload {
+            filledPastGoals = fill(&exercises, focus: focus, minutes: minutes, rpe: rpe, history: history, lifter: lifter,
+                                   warmUpMinutes: warmUpMinutes, goals: muscleSetGoals)
         }
         var workout = PlannedWorkout(focus: focus, title: focus.title, minutes: minutes, targetRPE: rpe, exercises: exercises, unit: gym.unit)
         workout.blockWeek = block
         workout.rationale = Self.rationale(focus: focus, focusReason: focusReason, minutes: minutes, recovery: recovery,
                                            rpe: rpe, block: block, exercises: exercises)
         workout.rationaleLead = Self.rationaleLead(focus: focus, focusReason: focusReason, block: block)
-        workout.estimatedMinutes = Self.estimatedMinutes(exercises, style: style, warmUpMinutes: warmUpMinutes)
+        let estimate = Self.estimatedMinutes(exercises, style: style, warmUpMinutes: warmUpMinutes)
+        workout.estimatedMinutes = estimate
+        workout.lengthNote = Self.lengthNote(minutes: minutes, estimate: estimate, deload: deload, filledPastGoals: filledPastGoals)
         return workout
+    }
+
+    /// Why the plan's length differs from the time picked, when it does: a
+    /// deload week is meant to be short, and this week's set targets can need
+    /// fewer sets than the time holds (`fill` then adds sets past them, within
+    /// `VolumeProgression.sessionCap`). Nil when the plan fills the time with
+    /// the week's own targets.
+    static func lengthNote(minutes: Int, estimate: Int, deload: Bool, filledPastGoals: Bool) -> String? {
+        let short = Double(estimate) < Double(minutes) * fillFraction
+        if deload, short { return "Deload week: about half the sets, so this runs about \(estimate) of your \(minutes) min." }
+        if short { return "About \(estimate) of your \(minutes) min: that's every set this plan can add today." }
+        if filledPastGoals { return "This week's set targets fit in less time, so extra sets fill your \(minutes) min." }
+        return nil
     }
 
     /// The focus's movements for the session length (the long session adds
@@ -847,43 +893,73 @@ public struct WorkoutPlanner: Sendable {
         return Array(leading) + unique + Array(base.dropFirst(leading.count))
     }
 
-    /// Below this share of the time you picked, `fill` adds work. The 60-min
-    /// session a user clocked at 40 min is what this guards against; the
-    /// 85% floor is the app's choice (a plan should land near, never over).
+    /// Below this share of the time you picked, `fill` goes past the week's
+    /// set goals, and a plan still under it says why (`lengthNote`). The
+    /// 60-min session a user clocked at 40 min is what this guards against;
+    /// the 85% floor is the app's choice (a plan should land near, never over).
     public static let fillFraction = 0.85
     /// Most working sets `fill` gives one exercise (`baseSets`' reasoning:
     /// about 6-8 sets per muscle in one session); the first two compound
     /// lifts may take a fifth before an extra exercise is added.
     public static let maximumSetsPerExercise = 4
 
-    /// Adds working sets, then an exercise for the focus's `extraSlot`, until
-    /// the estimate reaches `fillFraction` of `minutes`, never passing
-    /// `minutes`. Sets go to the exercise with the fewest first (the earlier
+    /// Adds working sets, then an exercise for the focus's `extraSlot`, while
+    /// one more still fits in `minutes` (never passing it). Sets go to the exercise with the fewest first (the earlier
     /// one on a tie), up to `maximumSetsPerExercise`, then a fifth on the
     /// first two compound lifts: more hard sets per muscle grow more muscle
     /// (Schoenfeld, Ogborn & Krieger, J Sports Sci 2017; Pelland et al.,
     /// Sports Med 2026), so spare time buys sets before variety.
     ///
     /// With per-muscle `goals` (`VolumeProgression.sessionGoals`), a set or
-    /// the extra exercise only goes to a muscle still under its goal (or one
-    /// without a goal), so spare time never pushes a muscle past the week's
-    /// target; superset rounds count once per muscle (`VolumeProgression.directSets`).
+    /// the extra exercise first goes only to a muscle still under its goal (or
+    /// one without a goal); superset rounds count once per muscle
+    /// (`VolumeProgression.directSets`). When the goals are met and the plan
+    /// is still short of `fillFraction` (week 1's 10 sets a muscle shared
+    /// over the week's sessions held a 75-min upper day to 18 sets), a second
+    /// pass adds sets past the goals, up to `VolumeProgression.sessionCap`
+    /// direct sets a muscle in this session: you picked the time, and more
+    /// weekly sets up to about 20 keep adding muscle with diminishing returns
+    /// (Schoenfeld, Ogborn & Krieger 2017; Pelland et al., Sports Med 2026).
+    /// Returns true when that second pass added anything.
+    @discardableResult
     func fill(_ exercises: inout [PlannedExercise], focus: WorkoutFocus, minutes: Int, rpe: Double,
               history: [String: ExerciseHistory], lifter: LoadEstimator.Lifter, warmUpMinutes: Int,
-              goals: [Muscle: Int] = [:]) {
-        /// True when one more set on this exercise's main muscle stays within its goal.
-        func underGoal(_ exercise: PlannedExercise, in list: [PlannedExercise]) -> Bool {
-            guard let muscle = VolumeProgression.primaryMuscle(exercise), let goal = goals[muscle] else { return true }
-            return (VolumeProgression.directSets(list)[muscle] ?? 0) < goal
+              goals: [Muscle: Int] = [:]) -> Bool {
+        let target = Int((Double(minutes) * Self.fillFraction).rounded(.up))
+        func estimate(_ list: [PlannedExercise]) -> Int {
+            Self.estimatedMinutes(list, style: style, warmUpMinutes: warmUpMinutes)
+        }
+        fillPass(&exercises, focus: focus, minutes: minutes, rpe: rpe, history: history, lifter: lifter,
+                 warmUpMinutes: warmUpMinutes, limits: goals)
+        guard !goals.isEmpty, estimate(exercises) < target else { return false }
+        let before = exercises
+        let cap = VolumeProgression.sessionCap(minutes: minutes)
+        var limits: [Muscle: Int] = [:]
+        for muscle in Muscle.allCases { limits[muscle] = cap }
+        fillPass(&exercises, focus: focus, minutes: minutes, rpe: rpe, history: history, lifter: lifter,
+                 warmUpMinutes: warmUpMinutes, limits: limits)
+        return exercises != before
+    }
+
+    /// One pass of `fill`: sets, then the extra exercise, while each muscle's
+    /// direct sets stay under `limits` (no entry: no limit).
+    private func fillPass(_ exercises: inout [PlannedExercise], focus: WorkoutFocus, minutes: Int, rpe: Double,
+                          history: [String: ExerciseHistory], lifter: LoadEstimator.Lifter, warmUpMinutes: Int,
+                          limits: [Muscle: Int]) {
+        /// True when one more set on this exercise's main muscle stays within its limit.
+        func underLimit(_ exercise: PlannedExercise, in list: [PlannedExercise]) -> Bool {
+            guard let muscle = VolumeProgression.primaryMuscle(exercise), let limit = limits[muscle] else { return true }
+            return (VolumeProgression.directSets(list)[muscle] ?? 0) < limit
         }
         func estimate(_ list: [PlannedExercise]) -> Int {
             Self.estimatedMinutes(list, style: style, warmUpMinutes: warmUpMinutes)
         }
-        let target = Int((Double(minutes) * Self.fillFraction).rounded(.up))
+        // Fill as close to the time picked as the sets allow: a plan that only
+        // reached the 85% floor still left a user 10+ minutes short.
         var triedExtra = false
-        while estimate(exercises) < target {
+        while estimate(exercises) < minutes {
             var added = false
-            for index in Self.fillCandidates(exercises) where underGoal(exercises[index], in: exercises) {
+            for index in Self.fillCandidates(exercises) where underLimit(exercises[index], in: exercises) {
                 var candidate = exercises
                 candidate[index].sets += 1
                 if estimate(candidate) <= minutes {
@@ -896,10 +972,10 @@ public struct WorkoutPlanner: Sendable {
             guard !triedExtra else { return }
             triedExtra = true
             let used = Set(exercises.map(\.exerciseID))
-            guard let choice = alternatives(for: focus.extraSlot).first(where: { !used.contains($0.id) }) else { return }
+            guard let choice = choose(focus.extraSlot, excluding: used, history: history) else { return }
             var extra = prescribe(choice, slot: focus.extraSlot, minutes: minutes, sessionRPE: rpe, history: history, lifter: lifter)
-            extra.sets = Self.minimumSetsWhenShort
-            guard underGoal(extra, in: exercises) else { return }
+            extra.sets = Self.setFloor(extra, deload: false)
+            guard underLimit(extra, in: exercises) else { return }
             var candidate = exercises + [extra]
             addWarmUps(&candidate)
             guard estimate(candidate) <= minutes else { return }
@@ -924,10 +1000,12 @@ public struct WorkoutPlanner: Sendable {
     /// Shares each muscle's set goal for the session (`VolumeProgression.sessionGoals`)
     /// over the exercises that train it as their main muscle, in session
     /// order (the compound lifts come first, so they get any spare set), each
-    /// kept to `TrainingBlock.setRange` (2-5). Exercises for muscles without a
-    /// goal keep the sets they were given. A goal of 0 (the week's target is
+    /// kept to `TrainingBlock.setRange` (2-5), and a compound lift to at least
+    /// `minimumCompoundSets` outside a deload (so a goal of 5 over a row and a
+    /// pulldown is 3 + 3, not 3 + 2). Exercises for muscles without a goal
+    /// keep the sets they were given. A goal of 0 (the week's target is
     /// already met) leaves those exercises at the minimum.
-    static func applySetGoals(_ exercises: inout [PlannedExercise], goals: [Muscle: Int]) {
+    static func applySetGoals(_ exercises: inout [PlannedExercise], goals: [Muscle: Int], deload: Bool = false) {
         guard !goals.isEmpty else { return }
         for (muscle, goal) in goals {
             let indices = exercises.indices.filter { VolumeProgression.primaryMuscle(exercises[$0]) == muscle }
@@ -936,7 +1014,8 @@ public struct WorkoutPlanner: Sendable {
             let spare = goal % indices.count
             for (position, index) in indices.enumerated() {
                 let sets = each + (position < spare ? 1 : 0)
-                exercises[index].sets = max(TrainingBlock.setRange.lowerBound, min(TrainingBlock.setRange.upperBound, sets))
+                let floor = max(TrainingBlock.setRange.lowerBound, setFloor(exercises[index], deload: deload))
+                exercises[index].sets = max(floor, min(TrainingBlock.setRange.upperBound, sets))
             }
         }
     }
@@ -1023,21 +1102,39 @@ public struct WorkoutPlanner: Sendable {
     /// stand, Med Sci Sports Exerc 2026), and per-session strength gains level
     /// off after about two sets (Remmert et al., SportRxiv 2025 preprint).
     static let minimumSetsWhenShort = 2
+    /// Fewest working sets a multi-joint lift keeps outside a deload, while
+    /// the time allows. Multiple sets gain more strength and size than one
+    /// (Ralston et al., Sports Med 2017; Schoenfeld, Ogborn & Krieger, J
+    /// Sports Sci 2017), and the ACSM's 2-3+ sets per exercise (position
+    /// stand, Med Sci Sports Exerc 2009 and 2026) leaves the main lifts at
+    /// the top of that; 3 rather than 2 is the app's choice for the lifts
+    /// that carry the most load. Isolation work may go down to 2.
+    public static let minimumCompoundSets = 3
+
+    /// The fewest sets `fit` cuts this exercise to before pairing or cutting
+    /// further: 3 for a compound lift (`minimumCompoundSets`, 2 in a deload), else 2.
+    static func setFloor(_ exercise: PlannedExercise, deload: Bool) -> Int {
+        guard !deload, ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound == true else { return minimumSetsWhenShort }
+        return minimumCompoundSets
+    }
 
     /// Cuts sets until the estimated length fits `minutes`: always from the
     /// exercise with the most sets, the later one on a tie, so the main lifts
-    /// keep theirs longest. If every exercise is down to two sets, the
+    /// keep theirs longest, and compound lifts keep 3 (`setFloor`). Then the
     /// exercises are paired into supersets (`Supersets.pair`), which keeps
-    /// the work and cuts the time; only then does the last exercise go
-    /// (keeping at least two). With little time, fewer sets of the big
-    /// multi-joint lifts and paired sets are the efficient choices (Iversen
-    /// et al., Sports Med 2021).
+    /// the work and cuts the time; then compound lifts go down to two; only
+    /// then does the last exercise go (keeping at least two). With little
+    /// time, fewer sets of the big multi-joint lifts and paired sets are the
+    /// efficient choices (Iversen et al., Sports Med 2021).
     static func fit(_ exercises: inout [PlannedExercise], minutes: Int, style: TrainingStyle = .balanced,
-                    warmUpMinutes: Int = 0) {
+                    warmUpMinutes: Int = 0, deload: Bool = false) {
         var triedPairing = exercises.contains { $0.supersetGroup != nil }
         while estimatedMinutes(exercises, style: style, warmUpMinutes: warmUpMinutes) > minutes {
+            let aboveFloor = exercises.indices.filter { exercises[$0].sets > setFloor(exercises[$0], deload: deload) }
             let trimmable = exercises.indices.filter { exercises[$0].sets > minimumSetsWhenShort }
-            if let index = trimmable.reversed().max(by: { exercises[$0].sets < exercises[$1].sets }) {
+            if let index = aboveFloor.reversed().max(by: { exercises[$0].sets < exercises[$1].sets }) {
+                exercises[index].sets -= 1
+            } else if triedPairing, let index = trimmable.reversed().max(by: { exercises[$0].sets < exercises[$1].sets }) {
                 exercises[index].sets -= 1
             } else if !triedPairing {
                 triedPairing = true
@@ -1056,14 +1153,14 @@ public struct WorkoutPlanner: Sendable {
     /// set at a time from the latest other straight exercise above two sets,
     /// as long as the session still fits the time; otherwise the trim stands.
     static func keepEarnedSets(_ exercises: inout [PlannedExercise], earned: [String: Int], minutes: Int,
-                               style: TrainingStyle = .balanced, warmUpMinutes: Int = 0) {
+                               style: TrainingStyle = .balanced, warmUpMinutes: Int = 0, deload: Bool = false) {
         for (id, goal) in earned.sorted(by: { $0.key < $1.key }) {
             guard let index = exercises.firstIndex(where: { $0.exerciseID == id }),
                   exercises[index].supersetGroup == nil else { continue }
             while exercises[index].sets < goal {
                 guard let donor = exercises.indices.reversed().first(where: { other in
                     other != index && earned[exercises[other].exerciseID] == nil &&
-                        exercises[other].supersetGroup == nil && exercises[other].sets > minimumSetsWhenShort
+                        exercises[other].supersetGroup == nil && exercises[other].sets > setFloor(exercises[other], deload: deload)
                 }) else { break }
                 var trial = exercises
                 trial[donor].sets -= 1
@@ -1082,6 +1179,15 @@ public struct WorkoutPlanner: Sendable {
     /// coarse stacks), earn it by beating the top of the range by this many
     /// reps first, as the ACSM's "1-2 reps over the desired number" rule does.
     static let bigJumpExtraReps = 2
+    /// The most an easier day (low recovery, a lower block RIR, the deload)
+    /// takes off last time's working weight. Easing means about one more rep
+    /// in reserve, and each rep in reserve is worth roughly 2-4% of 1RM on the
+    /// RIR-based RPE scale (Helms et al., Strength Cond J 2016; Zourdos et
+    /// al., J Strength Cond Res 2016), so even 2-3 extra reps in reserve stay
+    /// within 10%. A best e1RM from an older, lighter-RPE or high-rep set
+    /// otherwise could suggest far less. 10% is the app's cap; a pain cap
+    /// (`ExerciseFilter.capLoad`) applies on top.
+    public static let easedDropFraction = 0.10
 
     /// Today's weight and rep target for a lift with history (`progression`).
     public struct Progression: Sendable, Equatable {
@@ -1128,16 +1234,36 @@ public struct WorkoutPlanner: Sendable {
                             mode: ProgressionMode = .load) -> Progression? {
         let repsInReserve = max(0, 10 - rpe)
         let lastInRange = min(max(history.lastReps, reps.lowerBound), reps.upperBound)
-        /// The loadable weight for `count` reps at today's reps in reserve.
+        /// The loadable weight for `count` reps at today's reps in reserve,
+        /// never more than `easedDropFraction` under last time's weight (or
+        /// the one load step down where the gym's jumps are coarser).
         func estimate(_ count: Int) -> Double? {
-            gym.load(atMost: history.bestEstimatedOneRepMax / (1 + (Double(count) + repsInReserve) / 30), on: kind)
+            guard let raw = gym.load(atMost: history.bestEstimatedOneRepMax / (1 + (Double(count) + repsInReserve) / 30), on: kind) else {
+                return nil
+            }
+            // The lightest allowed: within 10% of last time; where the next
+            // weight down is a bigger step (coarse stacks, light dumbbells),
+            // last time's weight, eased by a rep instead (`easedReps`).
+            let lowest = history.lastWeight * (1 - Self.easedDropFraction)
+            let last = gym.load(atMost: history.lastWeight, on: kind) ?? history.lastWeight
+            let floor = min(last, gym.nextLoad(above: lowest - 0.002, on: kind) ?? last)
+            return max(raw, floor)
+        }
+        /// Reps on an easier day: as last time (kept in the range), one fewer
+        /// when the weight stays at last time's, so the set ends with about one
+        /// more rep in reserve (Helms et al. 2016).
+        func easedReps(_ load: Double) -> Int {
+            load >= history.lastWeight - 0.001 ? max(reps.lowerBound, lastInRange - 1) : lastInRange
         }
         // Today's effort target is at least last time's (RPE no higher than the target).
         let effortHeld = (history.lastRPE ?? rpe) <= rpe + 0.001
         if mode != .load {
             guard let estimated = estimate(lastInRange) else { return nil }
             let held = gym.load(atMost: history.recentHeaviestWeight, on: kind) ?? estimated
-            guard effortHeld else { return Progression(load: min(estimated, held), targetReps: lastInRange) }
+            guard effortHeld else {
+                let load = min(estimated, held)
+                return Progression(load: load, targetReps: easedReps(load))
+            }
             if history.lastWasLighter { return Progression(load: held, targetReps: lastInRange) }
             if earnedLoadStep(history, reps: reps, mode: mode), let next = gym.nextLoad(above: held, on: kind) {
                 return Progression(load: next, targetReps: reps.lowerBound)
@@ -1149,7 +1275,8 @@ public struct WorkoutPlanner: Sendable {
             guard let estimated = estimate(lastInRange) else { return nil }
             // An easier day: never heavier than last time.
             let cap = gym.load(atMost: history.lastWeight, on: kind) ?? estimated
-            return Progression(load: min(estimated, cap), targetReps: lastInRange)
+            let load = min(estimated, cap)
+            return Progression(load: load, targetReps: easedReps(load))
         }
         // After one easier session: back to the recent top weight, no step for the easy reps.
         if history.lastWasLighter, let back = gym.load(atMost: history.recentHeaviestWeight, on: kind) {
@@ -1223,25 +1350,31 @@ public struct WorkoutPlanner: Sendable {
     /// - the movement warm-up (`warmUpMinutes`: `WarmUpRoutine.Routine.minutes`
     ///   for the short and full tiers, 0 for off and ramp-only, the default);
     /// - each ramp set (`warmUpSets`): `rampWorkSeconds` + `RestTimer.warmUpRestSeconds`;
-    /// - each working set: `workSecondsPerSet` + the rest the timer will run
-    ///   for this `style` (`RestTimer.defaultSeconds`; balanced: 3.25 min for
-    ///   big lifts, 2.25 for small ones), at about 60% in a superset
-    ///   (`Supersets.timeFraction`: the pair shares one rest);
-    /// - `transitionMinutes` between exercises;
+    /// - each working set: `workSecondsPerSet`, and after every set but the
+    ///   exercise's last the rest the timer will run for this `style`
+    ///   (`RestTimer.defaultSeconds`; balanced: 2.5 min for big lifts, 1.5
+    ///   for small ones), at about 60% in a superset (`Supersets.timeFraction`:
+    ///   the pair shares one rest);
+    /// - `transitionMinutes` between exercises: walking over and setting up is
+    ///   the rest after the last set, so that rest isn't counted twice;
     /// - drop stages and mini-sets (`TimeSaver.stageSeconds`), with no rest of their own.
     /// Counting rest by style matters: the timer runs the style's rest, so an
     /// estimate at the longer balanced rest trimmed muscle-style sessions
-    /// short (a 60-min plan that took 40).
+    /// short (a 60-min plan that took 40). Counting the last set's rest as
+    /// well as the walk to the next exercise did the same: a 75-min upper
+    /// plan held 18 sets and took a user 42.5 min.
     public static func estimatedMinutes(_ exercises: [PlannedExercise], style: TrainingStyle = .balanced,
                                         warmUpMinutes: Int = 0) -> Int {
-        let compound = Double(RestTimer.defaultSeconds(style: style, compound: true) + workSecondsPerSet) / 60
-        let isolation = Double(RestTimer.defaultSeconds(style: style, compound: false) + workSecondsPerSet) / 60
+        let work = Double(workSecondsPerSet) / 60
+        let compoundRest = Double(RestTimer.defaultSeconds(style: style, compound: true)) / 60
+        let isolationRest = Double(RestTimer.defaultSeconds(style: style, compound: false)) / 60
         let ramp = Double(RestTimer.warmUpRestSeconds + rampWorkSeconds) / 60
         var total = Double(max(0, warmUpMinutes)) + transitionMinutes * Double(max(0, exercises.count - 1))
         for exercise in exercises {
-            let perSet = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound == true ? compound : isolation
+            let rest = ExerciseCatalog.slot(for: exercise.exerciseID)?.isCompound == true ? compoundRest : isolationRest
             let fraction = exercise.supersetGroup == nil ? 1 : Supersets.timeFraction
-            total += Double(exercise.sets) * perSet * fraction
+            let sets = Double(max(0, exercise.sets))
+            total += (sets * work + max(0, sets - 1) * rest) * fraction
             total += Double(exercise.warmUpSets?.count ?? 0) * ramp
             // Drop stages and mini-sets (`TimeSaver`): their reps plus the weight change or short rest.
             if let kind = exercise.lastSetKind, let stages = exercise.stages {

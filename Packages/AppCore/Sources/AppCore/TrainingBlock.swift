@@ -54,15 +54,15 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         /// The RIR target as an RPE on the reps-in-reserve scale (RIR 1 = RPE 9).
         public var targetRPE: Double { Double(10 - targetRIR) }
 
-        /// "Block week 3 of 5 · 1 in reserve" or "Deload week (5 of 5) · 3 in
-        /// reserve": the same words the sets and the builder's "In reserve" use.
+        /// "Block week 3 of 5 · 1 rep in the tank" or "Deload week (5 of 5) · 3
+        /// reps in the tank": the same words the sets and the builder use (`ReserveText`).
         public var label: String {
             isDeload
-                ? "Deload week (\(week) of \(length)) · \(targetRIR) in reserve"
-                : "Block week \(week) of \(length) · \(targetRIR) in reserve"
+                ? "Deload week (\(week) of \(length)) · \(ReserveText.text(Double(targetRIR)))"
+                : "Block week \(week) of \(length) · \(ReserveText.text(Double(targetRIR)))"
         }
 
-        /// The note, plus "Today eased to 3-4 in reserve." when the day's plan
+        /// The note, plus "Today eased to 3-4 reps in the tank." when the day's plan
         /// backs off from the block's target (low recovery).
         public func note(plannedRPE: Double) -> String {
             let reserve = 10 - plannedRPE

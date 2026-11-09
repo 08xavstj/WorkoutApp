@@ -272,13 +272,18 @@ struct VolumeProgressionTests {
         let planner = WorkoutPlanner(gym: .commercialKilograms, style: .muscle)
         let free = planner.plan(focus: .push, minutes: 60, recovery: 80, history: [:])
         let steered = planner.plan(focus: .push, minutes: 60, recovery: 80, history: [:], muscleSetGoals: [.chest: 4, .triceps: 2])
-        // Four chest sets over three chest movements: each keeps the 2-set minimum, and spare time
-        // doesn't add more (`fill` respects the goal).
+        // Four chest sets over the chest movements: compound presses keep 3 sets
+        // (`minimumCompoundSets`), isolation 2. The goals fit in far less than the hour, so
+        // `fill`'s second pass adds sets past them (up to `VolumeProgression.sessionCap` a muscle)
+        // and says so, instead of leaving a short session (a user's 75-min plan took 42.5).
         let chestMoves = steered.exercises.filter { VolumeProgression.primaryMuscle($0) == .chest }
         #expect(!chestMoves.isEmpty)
-        #expect(chestMoves.allSatisfy { $0.sets == 2 })
-        #expect((VolumeProgression.directSets(steered.exercises)[.triceps] ?? 0) == 2)
+        #expect(chestMoves.allSatisfy { $0.sets >= (ExerciseCatalog.slot(for: $0.exerciseID)?.isCompound == true ? 3 : 2) })
+        let direct = VolumeProgression.directSets(steered.exercises)
+        #expect(direct.values.allSatisfy { $0 <= VolumeProgression.sessionCap(minutes: 60) })
         #expect((steered.estimatedMinutes ?? 0) <= 60)
+        #expect(Double(steered.estimatedMinutes ?? 0) >= 0.85 * 60)
+        #expect(steered.lengthNote?.contains("extra sets") == true)
         // No goals: exactly the old plan.
         #expect(planner.plan(focus: .push, minutes: 60, recovery: 80, history: [:], muscleSetGoals: [:]) == free)
     }
@@ -292,7 +297,10 @@ struct VolumeProgressionTests {
         #expect(list.map(\.sets) == [3, 3, 2, 3])
         WorkoutPlanner.applySetGoals(&list, goals: [.chest: 20])
         #expect(list.map(\.sets) == [5, 5, 5, 3])
+        // A met goal leaves isolation at 2 and compound presses at 3 (`minimumCompoundSets`); 2 in a deload.
         WorkoutPlanner.applySetGoals(&list, goals: [.chest: 0])
+        #expect(list.map(\.sets) == [3, 3, 2, 3])
+        WorkoutPlanner.applySetGoals(&list, goals: [.chest: 0], deload: true)
         #expect(list.map(\.sets) == [2, 2, 2, 3])
     }
 

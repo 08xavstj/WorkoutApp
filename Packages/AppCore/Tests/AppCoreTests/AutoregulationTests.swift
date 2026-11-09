@@ -17,14 +17,14 @@ struct AutoregulationTests {
         #expect(up?.change == .loadUp)
         #expect(up?.load == 62.5)
         #expect(up?.reps == 8)
-        #expect(up?.message(unit: "kg") == "Next set 62.5 kg (you had 3 in reserve)")
+        #expect(up?.message(unit: "kg") == "Next set 62.5 kg (you had 3 reps in the tank)")
     }
 
     @Test func twoOrMoreRepsHarderGoesDownOneJump() {
         let down = next(60, 8, rpe: 10, target: 2)
         #expect(down?.change == .loadDown)
         #expect(down?.load == 57.5)
-        #expect(down?.message(unit: "kg") == "Next set 57.5 kg (you went to failure; plan: 2 in reserve)")
+        #expect(down?.message(unit: "kg") == "Next set 57.5 kg (you went to failure; plan: 2 reps in the tank)")
     }
 
     @Test func withinOneRepHolds() {
@@ -42,7 +42,7 @@ struct AutoregulationTests {
         #expect(trim?.change == .trimReps)
         #expect(trim?.load == 10)
         #expect(trim?.reps == 9)
-        #expect(trim?.message(unit: "kg") == "Next set 9 reps, same weight (you went to failure; plan: 2 in reserve)")
+        #expect(trim?.message(unit: "kg") == "Next set 9 reps, same weight (you went to failure; plan: 2 reps in the tank)")
         // Three reps past the target trims two.
         #expect(next(10, 10, rpe: 10, target: 3, kind: .dumbbell)?.reps == 8)
     }
@@ -106,8 +106,9 @@ struct ProgressionModeTests {
         var earned = bench
         earned.lastReps = 10
         #expect(planner.suggestedLoad(history: earned, reps: 6...8, rpe: 8, kind: .barbell, mode: .reps) == 190)
-        // An easier day than last time still goes lighter.
-        #expect(planner.suggestedLoad(history: bench, reps: 6...8, rpe: 6.5, kind: .barbell, mode: .reps) == 165)
+        // An easier day than last time still goes lighter, but at most 10% (`easedDropFraction`):
+        // the e1RM says 165, the floor is the first load at or over 166.5.
+        #expect(planner.suggestedLoad(history: bench, reps: 6...8, rpe: 6.5, kind: .barbell, mode: .reps) == 170)
     }
 
     @Test func progressionNotesFollowTheMode() {

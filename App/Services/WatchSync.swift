@@ -15,7 +15,9 @@ final class WatchSync: NSObject {
     static let shared = WatchSync()
 
     /// The session id the Watch is running an HKWorkoutSession for.
-    private(set) var recordingSessionID: String?
+    private(set) var recordingSessionID: String? {
+        didSet { if oldValue != recordingSessionID { updateRestAlertPolicy() } }
+    }
     /// Sessions finished on the phone whose Watch recording hasn't confirmed it
     /// stopped yet: the stop is sent again whenever the Watch reconnects.
     private var pendingStops: Set<String> = []
@@ -57,6 +59,16 @@ final class WatchSync: NSObject {
         session.delegate = self
         session.activate()
         connection = session
+        // +15s / Skip on the Lock Screen: the Watch's rest (and its buzz) moves too.
+        NotificationCenter.default.addObserver(forName: RestTimerStore.changedNotification, object: nil,
+                                               queue: .main) { _ in
+            Task { @MainActor in WatchSync.shared.restTimerChanged() }
+        }
+    }
+
+    private func restTimerChanged() {
+        guard let session = activeSession(matching: nil) else { return }
+        update(from: session)
     }
 
     /// A paired Watch with Tensile installed: starting it can happen without asking.
@@ -282,6 +294,8 @@ final class WatchSync: NSObject {
             sentAt: .now,
             weightStepKg: profile.unit == .kg ? 2.5 : profile.unit.toKilograms(5)
         )
+        // Settings › Rest timer alerts: whether the wrist buzzes when rest ends.
+        snapshot.restBuzz = RestAlertPolicy.watchBuzzes
         // The next set, with the superset partner up once the first half is a
         // round ahead (no rest between the halves, as `startRest` does).
         if let current = snapshot.upNext() {
@@ -386,6 +400,10 @@ final class WatchSync: NSObject {
             }
         case .skipRest:
             RestTimerStore.stop()
+            Task { await WorkoutLiveActivity.refresh() }
+        case let .adjustRest(seconds):
+            // +15s on the wrist: the phone's timer, Live Activity and alert move too.
+            RestTimerStore.adjust(by: Double(seconds))
             Task { await WorkoutLiveActivity.refresh() }
         case .nextExercise:
             // From older Watches. Nothing is deleted: it used to drop the first open
@@ -562,11 +580,22 @@ final class WatchSync: NSObject {
         return active.first { WatchSession.id(for: $0.startedAt) == id }
     }
 
+    /// The Watch buzzes at rest end while it records the workout, so the phone
+    /// then skips its own notification (`RestAlertPolicy`); rescheduled whenever
+    /// that changes, so an alert is never lost when the Watch stops or drops off.
+    private func updateRestAlertPolicy() {
+        let recording = recordingSessionID != nil && isReachable
+        guard RestAlertPolicy.watchIsRecording != recording else { return }
+        RestAlertPolicy.watchIsRecording = recording
+        Task { await WorkoutLiveActivity.rescheduleRestAlert() }
+    }
+
     private func refreshState() {
         guard let connection else { return }
         isPaired = connection.isPaired
         isWatchAppInstalled = connection.isWatchAppInstalled
         isReachable = connection.isReachable
+        updateRestAlertPolicy()
         // A freshly reachable Watch gets the latest state straight away.
         if isReachable, let lastSnapshot, let data = WatchMessage.encode(lastSnapshot) {
             connection.sendMessage([WatchMessage.snapshot: data], replyHandler: nil, errorHandler: nil)

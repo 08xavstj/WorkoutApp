@@ -1,9 +1,14 @@
 import SwiftUI
 import AppCore
 
-/// Explains RPE: what each number means for a set, how to pick one, and how
-/// the whole-workout rating on the finish screen differs.
+/// Explains effort in plain words first: "reps in the tank" (reps left, the
+/// RIR-based RPE scale), a worked example, why the app asks, the reps-left ↔
+/// RPE table, and how the whole-workout rating on the finish screen differs.
 struct RPEGuideView: View {
+    /// The plan's reps in reserve, so the top explains the number on screen
+    /// ("3 reps in the tank"); nil explains the usual 2.
+    var reserve: Double? = nil
+
     @Environment(\.dismiss) private var dismiss
     /// At accessibility text sizes the rows stack instead of squeezing the
     /// text beside the number (ux-audit.md 4.8, P22).
@@ -14,15 +19,38 @@ struct RPEGuideView: View {
     @ScaledMetric(relativeTo: .subheadline) private var rangeWidth: CGFloat = 40
 
     private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
+    private var shownReserve: Double { reserve ?? 2 }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text("RPE (rate of perceived exertion) is how hard a set was, measured by how many more good reps you could have done. RPE 8 means you stopped with 2 reps left.")
+                    Text(ReserveText.explainerBody(shownReserve))
+                        .font(.subheadline)
+                    Label(ReserveText.example(reps: 8, reserve: 2), systemImage: "lightbulb")
+                        .font(.subheadline)
+                        .symbolRenderingMode(.hierarchical)
+                } header: {
+                    Text(ReserveText.explainerTitle(shownReserve))
+                }
+
+                Section {
+                    // Helms et al., Strength Cond J 2016; Zourdos et al., J Strength Cond Res 2016;
+                    // Halperin et al., Sports Med 2022 (misjudged by about one rep, mostly too few).
+                    Text("Stopping a few reps short lets you do more good sets with less fatigue, and the reps you had left tell the app whether the weight was right. Guessing gets better with practice. Early on, most people think they have fewer reps left than they really do.")
                         .font(.subheadline)
                 } header: {
-                    Text("What it is")
+                    Text("Why")
+                }
+
+                Section {
+                    tip("Rate right after the set, before you rest.")
+                    tip("Ask: \"How many more clean reps could I have done?\" Tap that number.")
+                    tip("Most working sets should stop with 1-3 reps left. Going all the way (0 left) is for the occasional test set.")
+                    tip("Use ½ for in-between sets, e.g. sure of 2 more and maybe 3.")
+                    tip("New to lifting? If you've never gone to failure, your \"2 left\" is often 4 left.")
+                } header: {
+                    Text("How to choose")
                 }
 
                 Section {
@@ -30,17 +58,9 @@ struct RPEGuideView: View {
                         levelRow(level)
                     }
                 } header: {
-                    Text("Each set")
-                }
-
-                Section {
-                    tip("Rate right after the set, before you rest.")
-                    tip("Ask: \"How many more clean reps could I have done?\" Then pick the matching number.")
-                    tip("Most working sets should land at RPE 7-9. Save 10 for the occasional test set.")
-                    tip("Use the ½ for in-between sets, e.g. 8.5 when you'd surely get one more and maybe two.")
-                    tip("Beginners tend to underrate. If you've never gone to failure, your \"2 left\" is often 4 left.")
-                } header: {
-                    Text("How to choose")
+                    Text("Reps left and RPE")
+                } footer: {
+                    Text("RPE (rate of perceived exertion) is the same thing as a number: RPE = 10 minus reps left. The app stores it that way.")
                 }
 
                 Section {
@@ -58,7 +78,7 @@ struct RPEGuideView: View {
                 }
 
                 Section {
-                    Text("Zourdos et al., J Strength Cond Res 2016 (reps-in-reserve RPE scale). Helms et al., Strength Cond J 2016. Foster et al., J Strength Cond Res 2001 (session RPE).")
+                    Text("Helms et al., Strength Cond J 2016 (reps-in-reserve RPE scale). Zourdos et al., J Strength Cond Res 2016 (accuracy improves with training experience). Halperin et al., Sports Med 2022 (how far off guesses are). Foster et al., J Strength Cond Res 2001 (session RPE).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {
@@ -68,7 +88,7 @@ struct RPEGuideView: View {
             // Opaque at the medium detent (a part-height sheet is see-through glass by default).
             .scrollContentBackground(.hidden)
             .background(Theme.background)
-            .navigationTitle("RPE guide")
+            .navigationTitle("Reps in the tank")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -79,7 +99,7 @@ struct RPEGuideView: View {
         .presentationBackground(Theme.background)
     }
 
-    /// One RPE level: number badge, title, reps left and how it feels.
+    /// One level: reps-left badge, title and how it feels, RPE as the small label.
     private func levelRow(_ level: RPEScale.Level) -> some View {
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
@@ -88,17 +108,18 @@ struct RPEGuideView: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
             : AnyLayout(HStackLayout())
         return layout {
-            Text(level.rpe.formatted())
+            Text(level.repsLeft)
                 .font(.title3.weight(.bold))
                 .monospacedDigit()
                 .foregroundStyle(.white)
                 .frame(minWidth: badgeWidth, minHeight: badgeHeight)
                 .background(color(for: level.rpe).gradient, in: .rect(cornerRadius: 10))
+                .accessibilityLabel(repsLeftText(level.repsLeft))
             VStack(alignment: .leading, spacing: 2) {
                 titleLayout {
                     Text(level.title).font(.subheadline.weight(.semibold))
                     if !stacked { Spacer() }
-                    Text(repsLeftText(level.repsLeft))
+                    Text("RPE \(level.rpe.formatted())")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -113,7 +134,7 @@ struct RPEGuideView: View {
 
     private func repsLeftText(_ reps: String) -> String {
         switch reps {
-        case "0": "0 left"
+        case "0": "0 reps left"
         case "1": "1 rep left"
         default: "\(reps) reps left"
         }
@@ -149,5 +170,53 @@ struct RPEGuideView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// The first time a workout shows a reps-in-reserve target: a short card at
+/// the top saying what "3 reps in the tank" means, with Got it (never again,
+/// `seenKey`) and More (the full guide). The ⓘ beside each exercise's plan
+/// line opens the guide any time.
+struct RepsLeftIntroCard: View {
+    nonisolated static let seenKey = "workout.repsLeftIntroSeen"
+
+    let reserve: Double
+    let onDone: () -> Void
+    @State private var showingGuide = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(ReserveText.explainerTitle(reserve), systemImage: "fuelpump")
+                .font(.headline)
+                .foregroundStyle(Theme.liftingText)
+            Text(ReserveText.explainerBody(reserve))
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button(action: onDone) {
+                    Text("Got it")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.lifting, in: .capsule)
+                }
+                .buttonStyle(.plain)
+                Button { showingGuide = true } label: {
+                    Text("More")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.liftingText)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.lifting.opacity(0.12), in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the reps-left guide")
+            }
+        }
+        .card()
+        .sheet(isPresented: $showingGuide) {
+            RPEGuideView(reserve: reserve)
+                .presentationDetents([.medium, .large])
+        }
     }
 }

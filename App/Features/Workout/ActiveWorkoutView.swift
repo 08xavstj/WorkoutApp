@@ -47,6 +47,9 @@ struct ActiveWorkoutView: View {
     @State private var reordering = false
     /// Settings › Rest timer, also offered in the options menu. 0 = automatic.
     @AppStorage(RestPreferences.globalKey) private var globalRestSeconds = 0
+    /// The "what reps in the tank means" card shows once, the first time a
+    /// workout has a reserve target; the ⓘ by each plan line opens it again.
+    @AppStorage(RepsLeftIntroCard.seenKey) private var seenRepsLeftIntro = false
 
     var body: some View {
         NavigationStack {
@@ -219,6 +222,12 @@ struct ActiveWorkoutView: View {
     /// sets, heart rate and strain are in the pinned strip).
     private var workoutContent: some View {
         VStack(spacing: 16) {
+            // First workout with a reps-in-reserve target: what "3 reps in the tank" means, once.
+            if !seenRepsLeftIntro, let reserve = firstTargetRIR {
+                RepsLeftIntroCard(reserve: reserve) {
+                    withAnimation { seenRepsLeftIntro = true }
+                }
+            }
             // Movement warm-up before the first lift (`WarmUpStore`); the Watch
             // mirrors the current step and can advance it (`WatchSync`).
             WarmUpPhaseCard(sessionStart: session.startedAt) {
@@ -243,6 +252,25 @@ struct ActiveWorkoutView: View {
         .padding(.top, 8)
         .padding(.bottom, 32)
         .lockedToScreenWidth()
+    }
+
+    /// The first exercise's reps-in-reserve target, for the first-time explainer.
+    private var firstTargetRIR: Double? {
+        let blockRIR = weeklyPlans.blockWeek?.targetRIR
+        for exercise in session.orderedExercises {
+            if let rir = LiveSetCoach.targetRIR(sessionStart: session.startedAt, order: exercise.order, blockRIR: blockRIR) {
+                return rir
+            }
+        }
+        return nil
+    }
+
+    /// The plan's reps left for the set waiting on the "reps left" strip; none for a set to failure.
+    private func targetRepsLeft(for set: SetLog) -> Int? {
+        guard set.kind != .failure, let exercise = set.exercise,
+              let rir = LiveSetCoach.targetRIR(sessionStart: session.startedAt, order: exercise.order,
+                                               blockRIR: weeklyPlans.blockWeek?.targetRIR) else { return nil }
+        return ReserveText.choice(rpe: 10 - rir)
     }
 
     // MARK: Header
@@ -405,11 +433,14 @@ struct ActiveWorkoutView: View {
     @ViewBuilder
     private var restBar: some View {
         let ends = RestTimerStore.endsAt
+        // Ran out by itself a moment ago: "Rest done" for a few seconds (`RestDonePill`).
+        let done = ends == nil ? RestTimerStore.justFinishedAt : nil
         let asking = effortSet
-        if ends != nil || asking != nil {
+        if ends != nil || asking != nil || done != nil {
             VStack(spacing: 8) {
                 if let asking {
-                    RepsLeftStrip(onPick: { left in logEffort(left: left, for: asking) },
+                    RepsLeftStrip(target: targetRepsLeft(for: asking),
+                                  onPick: { left in logEffort(left: left, for: asking) },
                                   onDismiss: { pendingEffort = nil })
                 }
                 if let ends {
@@ -421,6 +452,11 @@ struct ActiveWorkoutView: View {
                         }
                         Task { await WorkoutLiveActivity.refresh() }
                         WatchSync.shared.update(from: session) // Apple Watch rest timer
+                    }
+                } else if done != nil {
+                    RestDonePill(next: restNextLine) {
+                        Task { await WorkoutLiveActivity.refresh() }
+                        WatchSync.shared.update(from: session)
                     }
                 }
             }
@@ -448,11 +484,11 @@ struct ActiveWorkoutView: View {
     }
 
     /// "Reps left" → RPE on the reps-in-reserve scale (RPE = 10 − reps left;
-    /// Zourdos et al., J Strength Cond Res 2016; "3+" logs as 7), then the
+    /// Zourdos et al., J Strength Cond Res 2016; "4+" logs as 6), then the
     /// set-by-set check runs as if it had been rated in the editor.
     private func logEffort(left: Int, for set: SetLog) {
         pendingEffort = nil
-        set.rpe = Double(10 - min(3, max(0, left)))
+        set.rpe = ReserveText.rpe(repsLeft: left)
         try? modelContext.save()
         if let exercise = set.exercise {
             LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: session.startedAt,
@@ -785,12 +821,18 @@ private struct ExerciseCard: View {
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Theme.primaryText)
             if let planLine {
-                // The plan once, here, instead of "Target 7 · 3 in reserve" on every row.
-                Text(planLine)
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.liftingText)
-                    .fixedSize(horizontal: false, vertical: true)
+                // The plan once, here, instead of "Target 7 · 3 reps in the tank" on every row,
+                // with an ⓘ that explains the reps left any time.
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(planLine)
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.liftingText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if targetRIR != nil {
+                        repsLeftInfoButton
+                    }
+                }
                 if let progressionNote = target?.progressionNote {
                     // How the weight moved since last time (`WorkoutPlanner.progression`).
                     Text(progressionNote)
@@ -812,6 +854,21 @@ private struct ExerciseCard: View {
                     .padding(.top, 2)
             }
         }
+    }
+
+    /// Opens the guide, which starts with what the plan's reps left mean.
+    private var repsLeftInfoButton: some View {
+        Button { showingRPEGuide = true } label: {
+            Image(systemName: "info.circle")
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+                .frame(minWidth: 44, minHeight: 44)
+                // A full-size target without making the plan line taller.
+                .padding(.vertical, -12)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("What reps in the tank means")
     }
 
     private var prLabel: some View {
@@ -924,7 +981,7 @@ private struct ExerciseCard: View {
         }
         .card()
         .sheet(isPresented: $showingRPEGuide) {
-            RPEGuideView()
+            RPEGuideView(reserve: targetRIR)
                 .presentationDetents([.medium, .large])
         }
         .onAppear(perform: loadLiveState)
@@ -1107,7 +1164,7 @@ private struct ExerciseCard: View {
     }
 
     /// The row's second line, kept in the editor's header: last time's same
-    /// set ("Last: 82.5 × 6 · RPE 7") or the ramp set's share of the working weight.
+    /// set ("Last: 82.5 × 6 · 3 left") or the ramp set's share of the working weight.
     private func editorSubtitle(for set: SetLog, in sets: [SetLog]) -> String? {
         if set.isWarmup {
             return warmUpPosition(set, in: sets).percent.map { "\($0)% of the working weight" }
@@ -1190,7 +1247,7 @@ private struct ExerciseCard: View {
         target?.targetRIR ?? blockRIR.map { Double($0) }
     }
 
-    /// "3 × 7 · 82.5 kg · 3 in reserve" under the exercise name (`Prescription`,
+    /// "3 × 7 · 82.5 kg · 3 reps in the tank" under the exercise name (`Prescription`,
     /// as in the builder): the plan's target shows once, beside last time's
     /// sets on the rows, so last time isn't the only goal (feature spec §3.1).
     /// Nil without a plan (an exercise added during the workout).
@@ -1328,7 +1385,8 @@ private struct ExerciseCard: View {
         let working = previous.filter { !$0.isWarmup && !$0.kind.isStage }
         guard index >= 0, index < working.count else { return "" }
         let set = working[index]
-        let effort = set.rpe.map { " · RPE \($0.formatted())" } ?? ""
+        // Reps left first, as the plan says it ("3 left"), not an RPE number.
+        let effort = set.rpe.map { " · \(ReserveText.short(rpe: $0))" } ?? ""
         return "\(unit.format(set.weightKg)) × \(set.reps)\(effort)"
     }
 
@@ -1619,7 +1677,7 @@ private struct SetRow: View {
         }
     }
 
-    /// Last session's same set in grey ("Last: 82.5 × 6 · RPE 7"); the
+    /// Last session's same set in grey ("Last: 82.5 × 6 · 3 left"); the
     /// target is said once under the exercise name.
     @ViewBuilder
     private var ghostLine: some View {
@@ -1639,7 +1697,7 @@ private struct SetRow: View {
     @ViewBuilder
     private var rpePill: some View {
         if let rpe = set.rpe {
-            Text("RPE \(rpe.formatted())")
+            Text(ReserveText.short(rpe: rpe))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.liftingText)
                 .padding(.horizontal, 8)
@@ -1675,12 +1733,12 @@ private struct SetRow: View {
         return self.set.isWarmup ? "Warm-up set" : "Set \(label)"
     }
 
-    /// "Set 2, 8 reps at 60 kilograms, RPE 8, done".
+    /// "Set 2, 8 reps at 60 kilograms, 2 reps left, done".
     private var spokenSummary: String {
         var parts = [spokenName]
         if let kindLine { parts.append(kindLine) }
         parts.append(spokenLoad(weightKg: set.weightKg, reps: set.reps) ?? "not set")
-        if let rpe = set.rpe { parts.append("RPE \(rpe.formatted())") }
+        if let rpe = set.rpe { parts.append(ReserveText.spoken(rpe: rpe)) }
         parts.append(set.isCompleted ? "done" : "not done")
         if let previousSet, let last = spokenLoad(weightKg: previousSet.weightKg, reps: previousSet.reps) {
             parts.append("last time \(last)")
@@ -1716,7 +1774,7 @@ extension WeightUnit {
 private struct SetEditor: View {
     @Bindable var set: SetLog
     let title: String
-    /// The row's second line, kept here: "Last: 82.5 × 6 · RPE 7", or the ramp's share.
+    /// The row's second line, kept here: "Last: 82.5 × 6 · 3 left", or the ramp's share.
     var subtitle: String? = nil
     /// The set type, settable here; nil for a warm-up.
     let kind: Binding<SetKind>?
@@ -1933,58 +1991,57 @@ private struct NumberStepper<Field: View>: View {
     }
 }
 
-/// Big 6-10 buttons plus a ½ toggle, each with the reps left it means
-/// ("8 · 2 left"), since the plan's targets are said in reps in reserve. The
-/// plan's target is outlined, not filled in: an effort you didn't log isn't logged.
+/// "How many more reps could you have done?" with big 0 / 1 / 2 / 3 / 4+
+/// buttons and a ½ toggle ("2½ left"). Reps left lead because lifters found
+/// RPE numbers confusing; the RPE is the small label under each button and is
+/// what's stored (RPE = 10 − reps left; Zourdos et al., J Strength Cond Res
+/// 2016; `ReserveText.rpe(repsLeft:)`). The plan's target is outlined and
+/// marked "plan", not filled in: an effort you didn't log isn't logged.
 private struct RPEPicker: View {
     @Binding var rpe: Double?
     var targetRPE: Double? = nil
     let onShowGuide: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    private static let values = [6, 7, 8, 9, 10]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
             buttons
                 .sensoryFeedback(.selection, trigger: rpe)
-            // One line: the reps left. What each number feels like is in "What's RPE?".
+            // One line: the reps left, then the RPE. What each feels like is in the guide.
             Text(rpe.map { RPEScale.summary($0) } ?? emptyHint)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
     }
 
-    /// "Plan: 3 left (RPE 7) · optional" with no effort logged yet; the target is outlined.
+    /// "Plan: 3 left · optional" with no effort logged yet; the target is outlined.
     private var emptyHint: String {
-        guard let targetRPE else { return "Optional · 8 = 2 reps left, 10 = none" }
-        let left = ReserveText.text(rpe: targetRPE).replacingOccurrences(of: " in reserve", with: " left")
-        return "Plan: \(left) (RPE \(targetRPE.formatted())) · optional"
+        guard let targetRPE else { return "Optional · 0 = you couldn't do another rep" }
+        return "Plan: \(ReserveText.short(rpe: targetRPE)) · optional"
     }
 
-    /// The whole RPE the plan's target falls on, for the outline.
-    private var targetValue: Int? {
-        targetRPE.map { Int($0.rounded(.down)) }
+    /// The button the plan's target falls on, for the outline.
+    private var targetChoice: Int? {
+        targetRPE.map { ReserveText.choice(rpe: $0) }
     }
 
-    /// Title and the guide link; stacked at accessibility text sizes.
+    /// The question (wraps at large text sizes) and an ⓘ for the guide.
     private var header: some View {
-        let stacked = dynamicTypeSize.isAccessibilitySize
-        let layout = stacked
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
-            : AnyLayout(HStackLayout())
-        return layout {
-            Text("Effort (RPE)")
+        HStack(alignment: .center, spacing: 4) {
+            Text("How many more reps could you have done?")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.primaryText)
-            if !stacked { Spacer() }
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
             Button(action: onShowGuide) {
-                Label("What's RPE?", systemImage: "questionmark.circle")
-                    .font(.caption.weight(.semibold))
-                    .frame(minHeight: 44)
+                Image(systemName: "info.circle")
+                    .font(.subheadline)
+                    .frame(minWidth: 44, minHeight: 44)
                     .contentShape(.rect)
             }
+            .accessibilityLabel("What reps left means")
         }
     }
 
@@ -1994,52 +2051,57 @@ private struct RPEPicker: View {
     private var buttons: some View {
         if dynamicTypeSize.isAccessibilitySize {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
-                ForEach(Self.values, id: \.self) { value in
-                    rpeButton(value)
+                ForEach(ReserveText.repsLeftChoices, id: \.self) { left in
+                    leftButton(left)
                 }
                 halfButton(fillsWidth: true)
             }
         } else {
             HStack(spacing: 6) {
-                ForEach(Self.values, id: \.self) { value in
-                    rpeButton(value)
+                ForEach(ReserveText.repsLeftChoices, id: \.self) { left in
+                    leftButton(left)
                 }
                 halfButton(fillsWidth: false)
             }
         }
     }
 
-    private func rpeButton(_ value: Int) -> some View {
-        let selected = rpe.map { Int($0.rounded(.down)) == value } ?? false
-        let isTarget = rpe == nil && targetValue == value
+    private func leftButton(_ left: Int) -> some View {
+        let value = ReserveText.rpe(repsLeft: left)
+        let selected = rpe.map { ReserveText.choice(rpe: $0) == left } ?? false
+        let isTarget = targetChoice == left
+        let outlined = rpe == nil && isTarget
+        let caption = isTarget ? "plan" : "RPE \(value.formatted())"
         return Button {
-            if selected && rpe == Double(value) { rpe = nil } else { rpe = Double(value) }
+            if selected && rpe == value { rpe = nil } else { rpe = value }
         } label: {
             VStack(spacing: 0) {
-                Text("\(value)")
+                Text(ReserveText.choiceLabel(left))
                     .font(.title3.weight(.bold))
-                Text("\(10 - value) left")
+                    .monospacedDigit()
+                Text(caption)
                     .font(.caption2.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .foregroundStyle(selected ? Color.white.opacity(0.9) : Theme.secondaryText)
+                    .foregroundStyle(selected ? Color.white.opacity(0.9) : (isTarget ? Theme.liftingText : Theme.secondaryText))
             }
             .frame(maxWidth: .infinity, minHeight: 52)
             .foregroundStyle(selected ? .white : Theme.primaryText)
             .background(selected ? AnyShapeStyle(Theme.lifting) : AnyShapeStyle(Theme.card), in: .rect(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(selected ? Color.clear : (isTarget ? Theme.lifting : Theme.separator), lineWidth: isTarget ? 2 : 1))
+                .strokeBorder(selected ? Color.clear : (outlined ? Theme.lifting : Theme.separator), lineWidth: outlined ? 2 : 1))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("RPE \(value), \(10 - value) reps left")
+        .accessibilityLabel(left >= 4 ? "4 or more reps left" : ReserveText.spoken(rpe: value))
         .accessibilityHint(isTarget ? "The plan's target" : "")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    /// Half a rep more left: 2 → "2½ left" (RPE 8 → 7.5), and back.
     private func halfButton(fillsWidth: Bool) -> some View {
         Button {
-            guard let current = rpe, current < 10 else { return }
-            rpe = current.truncatingRemainder(dividingBy: 1) == 0 ? current + 0.5 : current - 0.5
+            guard let current = rpe, current > 6 else { return }
+            rpe = current.truncatingRemainder(dividingBy: 1) == 0 ? current - 0.5 : current + 0.5
         } label: {
             Text("½")
                 .font(.title3.weight(.bold))
@@ -2049,8 +2111,8 @@ private struct RPEPicker: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isHalf ? Color.clear : Theme.separator))
         }
         .buttonStyle(.plain)
-        .disabled(rpe == nil || rpe == 10)
-        .accessibilityLabel("Add a half point")
+        .disabled(rpe.map { $0 <= 6 } ?? true)
+        .accessibilityLabel("Add half a rep left")
         .accessibilityAddTraits(isHalf ? .isSelected : [])
     }
 
@@ -2129,7 +2191,7 @@ private struct CollapsedExerciseRow: View {
             return "\(working.count) sets · \(unit.format(best.weightKg)) \(unit.rawValue) × \(best.reps) · done"
         }
         // The first working set still to do (else the first), not a warm-up ramp or a drop stage:
-        // "3 × 7 · 82.5 kg · 3 in reserve", as the builder and the exercise header say it (`Prescription`).
+        // "3 × 7 · 82.5 kg · 3 reps in the tank", as the builder and the exercise header say it (`Prescription`).
         let ordered = working.sorted { $0.order < $1.order }
         let first = ordered.first(where: { !$0.isCompleted }) ?? ordered.first
         let reps = first?.reps ?? target?.repsToday
@@ -2161,11 +2223,8 @@ private struct RestTimerPill: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let remaining = max(0, endsAt.timeIntervalSince(context.date))
+            // At zero the screen swaps this for `RestDonePill` (green, one tap).
             content(remaining: remaining)
-                .onChange(of: remaining == 0) { _, finished in
-                    if finished { onChange(nil) }
-                }
-                .sensoryFeedback(.warning, trigger: remaining == 0) { _, finished in finished }
         }
     }
 
@@ -2359,30 +2418,30 @@ private struct SessionStrip: View {
     }
 }
 
-/// "Reps left?" with 3+ / 2 / 1 / 0 after a working set ticked with the
-/// circle (no effort logged): one tap logs the effort and runs the
+/// "How many more reps could you have done?" with 0 / 1 / 2 / 3 / 4+ (the
+/// plan's number marked) after a working set ticked with the circle (no
+/// effort logged): one tap logs the effort and runs the
 /// set-by-set check, as rating it in the editor would.
 private struct RepsLeftStrip: View {
+    /// The plan's reps left (0-4), marked "plan"; nil without one.
+    var target: Int? = nil
     let onPick: (Int) -> Void
     let onDismiss: () -> Void
 
     var body: some View {
-        // One row when it fits; the question above the buttons when not, so
-        // each button stays at least 44 pt wide.
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 6) {
+        // The question above the buttons, so each button stays at least 44 pt wide.
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
                 question
-                buttons
+                Spacer(minLength: 0)
+                dismissButton
             }
-            VStack(alignment: .leading, spacing: 2) {
-                question
-                    .padding(.top, 6)
-                buttons
-            }
+            buttons
         }
         .padding(.leading, 14)
         .padding(.trailing, 4)
-        .padding(.vertical, 4)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
         .background(Theme.card, in: .rect(cornerRadius: 26))
         .overlay(RoundedRectangle(cornerRadius: 26).stroke(Theme.separator))
         .shadow(color: Color.black.opacity(0.12), radius: 12, y: 6)
@@ -2391,37 +2450,54 @@ private struct RepsLeftStrip: View {
     }
 
     private var question: some View {
-        Text("Reps left?")
+        Text("How many more reps could you have done?")
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Theme.primaryText)
-            .lineLimit(1)
-            .fixedSize()
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
     }
 
     private var buttons: some View {
         HStack(spacing: 6) {
-            ForEach([3, 2, 1, 0], id: \.self) { left in
-                Button { onPick(left) } label: {
-                    Text(left == 3 ? "3+" : "\(left)")
-                        .font(.headline)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.liftingText)
-                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.lifting.opacity(0.12), in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(left == 3 ? "3 or more reps left" : (left == 1 ? "1 rep left" : "\(left) reps left"))
+            ForEach(ReserveText.repsLeftChoices, id: \.self) { left in
+                choiceButton(left)
             }
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.footnote.weight(.bold))
-                    .foregroundStyle(Theme.secondaryText)
-                    .frame(width: 44, height: 44)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Don't log effort")
         }
+        .padding(.trailing, 10)
+    }
+
+    private func choiceButton(_ left: Int) -> some View {
+        let isTarget = target == left
+        return Button { onPick(left) } label: {
+            VStack(spacing: 0) {
+                Text(ReserveText.choiceLabel(left))
+                    .font(.headline)
+                    .monospacedDigit()
+                if isTarget {
+                    Text("plan")
+                        .font(.caption2.weight(.semibold))
+                }
+            }
+            .foregroundStyle(Theme.liftingText)
+            .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+            .background(Theme.lifting.opacity(isTarget ? 0.22 : 0.12), in: .capsule)
+            .overlay(Capsule().strokeBorder(isTarget ? Theme.lifting : Color.clear, lineWidth: 2))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(left >= 4 ? "4 or more reps left" : ReserveText.spoken(rpe: ReserveText.rpe(repsLeft: left)))
+        .accessibilityHint(isTarget ? "The plan's target" : "")
+    }
+
+    private var dismissButton: some View {
+        Button(action: onDismiss) {
+            Image(systemName: "xmark")
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Don't log effort")
     }
 }
 
@@ -2531,7 +2607,7 @@ private struct RecordBannerView: View {
     }
 }
 
-/// "Next set 62.5 kg (you had 3 in reserve)": the set-by-set change
+/// "Next set 62.5 kg (you had 3 reps in the tank)": the set-by-set change
 /// (`Autoregulation`), already applied to the next set and editable there,
 /// with Undo; or "Held: easing your knee" when the pain cap stopped one.
 /// Why it can be off sits behind ⓘ.

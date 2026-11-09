@@ -558,6 +558,13 @@ struct WorkoutBuilderView: View {
                 .foregroundStyle(Theme.primaryText)
             planStats(minutes: estimated, extraMinutes: extra, plan: plan, landsAt: landsAt,
                       inRange: metrics.targetStrain.map { $0.contains(landsAt) } ?? false)
+            // Why the plan runs shorter than the time picked, or fills it past this week's set targets.
+            if let lengthNote = plan.lengthNote {
+                Text(lengthNote)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let target = metrics.targetStrain {
                 let inRange = target.contains(landsAt)
                 let line: String = inRange
@@ -629,18 +636,17 @@ struct WorkoutBuilderView: View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 18))
-        let reserve = ReserveText.text(rpes: plan.exercises.map(\.rpe), fallback: plan.targetRPE)
-            .replacingOccurrences(of: " in reserve", with: "")
+        let reserve = ReserveText.count(rpes: plan.exercises.map(\.rpe), fallback: plan.targetRPE)
         return layout {
             // "~60 + 5 min" with the abs finisher on top.
             StatView(label: "Time", value: "~\(minutes + extraMinutes) min", detail: extraMinutes > 0 ? "incl. \(extraMinutes) min abs" : nil)
-            StatView(label: "In reserve", value: reserve)
+            StatView(label: "Reps in the tank", value: reserve)
             StatView(label: "Strain after", value: "≈\(strainText(landsAt))",
                      color: inRange ? Theme.recoveryHighText : Theme.strainTextColor)
         }
     }
 
-    /// "Block week 3 of 5 · 1 in reserve" and what it means, plus the superset note.
+    /// "Block week 3 of 5 · 1 rep in the tank" and what it means, plus the superset note.
     @ViewBuilder
     private func blockLine(_ plan: PlannedWorkout) -> some View {
         if let week = plan.blockWeek {

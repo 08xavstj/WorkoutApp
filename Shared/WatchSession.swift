@@ -57,7 +57,7 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
             return line
         }
 
-        /// "Target 8 · 2 in reserve", "Target 8 · 2-3 in reserve" or "to failure",
+        /// "Target 8 · 2 reps in the tank", "Target 8 · 2-3 reps in the tank" or "to failure",
         /// or nil without a plan (worded as the phone's `ReserveText` in AppCore,
         /// which the Watch doesn't compile).
         var targetLine: String? {
@@ -68,13 +68,15 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
             return parts.joined(separator: " · ")
         }
 
-        /// "2 in reserve", "2-3 in reserve", "to failure"; rounded to the nearest half rep first.
+        /// "2 reps in the tank", "1 rep in the tank", "2-3 reps in the tank",
+        /// "to failure"; rounded to the nearest half rep first (as `ReserveText.text`).
         static func reserveText(_ reserve: Double) -> String {
             let halves = (max(0, reserve) * 2).rounded() / 2
             let low = Int(halves.rounded(.down))
             let high = Int(halves.rounded(.up))
             if high == 0 { return "to failure" }
-            return low == high ? "\(low) in reserve" : "\(low)-\(high) in reserve"
+            if low == high { return low == 1 ? "1 rep in the tank" : "\(low) reps in the tank" }
+            return "\(low)-\(high) reps in the tank"
         }
 
         /// The effort to pre-select after the set: 10 minus the target reps in
@@ -139,6 +141,9 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
     var warmUpStarted: Bool?
     /// The routine's planned length, for the overview.
     var warmUpMinutes: Int?
+    /// Whether the Watch buzzes when rest ends (Settings › Rest timer alerts).
+    /// nil (older phones) buzzes, as before.
+    var restBuzz: Bool?
 
     static func id(for startedAt: Date) -> String {
         String(Int(startedAt.timeIntervalSince1970))
@@ -279,6 +284,9 @@ nonisolated enum WatchCommand: Codable, Sendable, Equatable {
     case completeSet(exerciseIndex: Int, setIndex: Int, reps: Int, weightKg: Double, rpe: Double?,
                      exerciseOrder: Int? = nil, setOrder: Int? = nil, repsEdited: Bool? = nil, weightEdited: Bool? = nil)
     case skipRest
+    /// +/- seconds on the rest timer from the wrist. Older phones can't decode
+    /// it and drop the message; the Watch's own timer still moves.
+    case adjustRest(seconds: Int)
     /// Sent by older Watches for "Skip exercise". The phone no longer deletes
     /// anything for it: the Watch moves on by itself, and Finish drops unticked sets.
     case nextExercise

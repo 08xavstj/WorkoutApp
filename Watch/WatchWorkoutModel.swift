@@ -463,19 +463,32 @@ final class WatchWorkoutModel: NSObject {
         }
     }
 
+    /// The rest ran out: one strong tap on the wrist, on time even with the
+    /// wrist down (the HKWorkoutSession keeps the app running in the background,
+    /// where `play` still works). While the Watch records, the phone schedules
+    /// no notification of its own, so this is the only buzz. Off when the phone's
+    /// Settings › Rest timer alerts isn't "Watch, else phone" (`restBuzz`).
     private func restEnded() {
+        restTask = nil
         restEndsAt = nil
-        WKInterfaceDevice.current().play(.notification)
+        if snapshot?.restBuzz != false {
+            WKInterfaceDevice.current().play(.notification)
+        }
     }
 
     func skipRest() {
+        lastLocalEdit = .now
         clearRest()
         send(.skipRest)
     }
 
+    /// +15s on the wrist; the phone moves its timer too, so a snapshot sent
+    /// before it heard doesn't pull the end back.
     func extendRest(by seconds: Int) {
         guard let restEndsAt else { return }
+        lastLocalEdit = .now
         startRest(until: restEndsAt.addingTimeInterval(Double(seconds)), length: restLength + seconds)
+        send(.adjustRest(seconds: seconds))
     }
 
     private func clearRest() {
@@ -514,9 +527,16 @@ final class WatchWorkoutModel: NSObject {
             if restEndsAt.map({ abs($0.timeIntervalSince(ends)) > 2 }) ?? true {
                 startRest(until: ends, length: incoming.restSeconds)
             }
-        } else if restEndsAt != nil, incoming.sentAt > restStartedAt.addingTimeInterval(2) {
-            // Skipped on the phone.
-            clearRest()
+        } else if let current = restEndsAt, incoming.sentAt > restStartedAt.addingTimeInterval(2) {
+            if current.timeIntervalSinceNow < 3 {
+                // The phone's timer ran out a moment before this one (the two
+                // clocks differ slightly): end it now, with the buzz.
+                restTask?.cancel()
+                restEnded()
+            } else {
+                // Skipped on the phone.
+                clearRest()
+            }
         }
     }
 

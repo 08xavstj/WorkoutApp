@@ -33,11 +33,12 @@ public enum RPEScale {
         levels.min { abs($0.rpe - rpe) < abs($1.rpe - rpe) }
     }
 
-    /// e.g. "RPE 8 · 2 reps left"
+    /// e.g. "2 reps left · RPE 8": the reps left lead, RPE is the secondary
+    /// label (`ReserveText`), so the plain words come first everywhere.
     public static func summary(_ rpe: Double) -> String {
         guard let level = level(for: rpe) else { return "RPE \(rpe.formatted())" }
         let reps = level.repsLeft == "1" ? "1 rep left" : "\(level.repsLeft) reps left"
-        return "RPE \(rpe.formatted()) · \(reps)"
+        return "\(reps) · RPE \(rpe.formatted())"
     }
 
     /// Whole-workout difficulty for the finish screen: the verbal anchors of
