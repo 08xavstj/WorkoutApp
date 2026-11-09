@@ -141,16 +141,16 @@ struct ProgressionModeTests {
         // Changed with double progression: the note names today's rep target;
         // 20 → 25 lb dumbbells is a big jump, so the top moves to 14.
         #expect(planner.progressionNote(load: 20, history: held, reps: 10...12, loadKind: .dumbbell)
-                == "Same weight, aim for 13 reps; it moves up at 14")
+                == "Same weight, aim for 13 reps; the weight goes up once you hit 14")
         // Changed with real rep and set progression: the note names today's target.
         #expect(planner.progressionNote(load: 20, history: held, reps: 10...12, mode: .reps)
-                == "Same weight as last time: aim for 13 reps; it moves up at 14")
+                == "Same weight as last time: aim for 13 reps; the weight goes up once you hit 14")
         #expect(planner.progressionNote(load: 20, history: held, reps: 10...12, mode: .sets)
-                == "Same weight: hit 12 reps to add a set; it moves up at 5 sets")
+                == "Same weight: hit 12 reps to add a set; the weight goes up once you reach 5 sets")
         var three = held
         three.lastSets = 3
         #expect(planner.progressionNote(load: 20, history: three, reps: 10...12, mode: .sets)
-                == "Same weight, one more set: you hit 12 reps; it moves up at 5 sets")
+                == "Same weight, one more set: you hit 12 reps; the weight goes up once you reach 5 sets")
         // The big-jump tip is for load progression only.
         #expect(planner.notes(load: 20, history: held, reps: 10...12, rpe: 9, kind: .dumbbell, mode: .reps) == "20 lb each hand")
     }
@@ -161,7 +161,7 @@ struct ProgressionModeTests {
         let plan = planner.plan(focus: .push, minutes: 45, recovery: 80, history: [benchID: bench])
         #expect(plan.exercises.first?.exerciseID == benchID)
         #expect(plan.exercises.first?.load == 185)
-        #expect(plan.exercises.first?.progressionNote == "Same weight as last time: aim for 9 reps; it moves up at 10")
+        #expect(plan.exercises.first?.progressionNote == "Same weight as last time: aim for 9 reps; the weight goes up once you hit 10")
         // The live session pre-fills the top of the range: 9 today.
         #expect(plan.exercises.first?.reps == 6...9)
     }

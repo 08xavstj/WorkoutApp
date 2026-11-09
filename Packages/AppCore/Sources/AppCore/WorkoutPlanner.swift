@@ -877,7 +877,7 @@ public struct WorkoutPlanner: Sendable {
     }
 
     /// "+5 lb from last time: you hit 8 reps at RPE 7", "Same weight, aim
-    /// for 7 reps; it moves up at 8", or "−10 lb from last time for today's
+    /// for 7 reps; the weight goes up once you hit 8", or "−10 lb from last time for today's
     /// effort". Makes the double progression visible. With rep or set
     /// progression (`ProgressionMode`) the held weight says what to add
     /// instead. `rpe` is today's target (nil: as last time); `loadKind` lets
@@ -923,18 +923,18 @@ public struct WorkoutPlanner: Sendable {
                 top += Self.bigJumpExtraReps
             }
             let target = max(reps.lowerBound, min(history.lastReps + 1, top))
-            if target >= top { return "Same weight, aim for \(target) reps to move up" }
-            return "Same weight, aim for \(target) reps; it moves up at \(top)"
+            if target >= top { return "Same weight: hit \(target) reps and it goes up next time" }
+            return "Same weight, aim for \(target) reps; the weight goes up once you hit \(top)"
         case .reps:
             let target = repTarget(load: load, history: history, reps: reps, rpe: today)
                 ?? max(reps.lowerBound, min(history.lastReps + 1, goal))
-            return "Same weight as last time: aim for \(target) reps; it moves up at \(goal)"
+            return "Same weight as last time: aim for \(target) reps; the weight goes up once you hit \(goal)"
         case .sets:
             let most = TrainingBlock.setRange.upperBound
             if progressedSets(load: load, history: history, reps: reps, rpe: today) != nil {
-                return "Same weight, one more set: you hit \(reps.upperBound) reps; it moves up at \(most) sets"
+                return "Same weight, one more set: you hit \(reps.upperBound) reps; the weight goes up once you reach \(most) sets"
             }
-            return "Same weight: hit \(reps.upperBound) reps to add a set; it moves up at \(most) sets"
+            return "Same weight: hit \(reps.upperBound) reps to add a set; the weight goes up once you reach \(most) sets"
         }
     }
 

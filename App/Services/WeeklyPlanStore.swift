@@ -540,15 +540,33 @@ final class WeeklyPlanStore {
         return signals
     }
 
+    /// The sessions the week before `weekStart` left undone, in plan order
+    /// (`AdaptiveWeek.leftOver`); empty without a plan that week.
+    func leftOver(before weekStart: Date, sessions: [WorkoutSession]) -> [PlannedDay] {
+        let calendar = Calendar.current
+        guard let lastStart = calendar.date(byAdding: .day, value: -7, to: weekStart),
+              let last = plan(for: lastStart) else { return [] }
+        let done = Self.doneSessions(sessions: sessions, extra: [], since: lastStart).filter { $0.date < weekStart }
+        return AdaptiveWeek.leftOver(plan: last, done: done, calendar: calendar)
+    }
+
+    /// A new week's days copied from `template`, with last week's left-over
+    /// session moved to the first day (`AdaptiveWeek.rotated`).
+    func newWeekDays(from template: [PlannedDay], weekStart: Date, sessions: [WorkoutSession]) -> [PlannedDay] {
+        AdaptiveWeek.rotated(template, startingWith: leftOver(before: weekStart, sessions: sessions).first?.focus)
+    }
+
     /// This week as a queue: the next session not done yet, wherever the
-    /// calendar had it (`AdaptiveWeek.make`). Nil for a flexible week or without a plan.
+    /// calendar had it (`AdaptiveWeek.make`), starting with what last week
+    /// left undone. Nil for a flexible week or without a plan.
     func adaptiveWeek(sessions: [WorkoutSession], extra: Set<Date> = [], checkIns: CheckInStore?, muscles: MuscleModel?,
                       now: Date = .now) -> AdaptiveWeek.Result? {
         guard let plan = plan(containing: now), !plan.isFlexible else { return nil }
         let done = Self.doneSessions(sessions: sessions, extra: extra, since: plan.weekStart)
         return AdaptiveWeek.make(plan: plan, done: done, now: now,
                                  soreness: soreSignals(checkIns: checkIns, muscles: muscles, now: now),
-                                 swaps: swaps(inWeekOf: now))
+                                 swaps: swaps(inWeekOf: now),
+                                 carriedOver: leftOver(before: plan.weekStart, sessions: sessions).first?.focus)
     }
 
     /// Today's session as the queue had it before today's training and before
@@ -560,7 +578,8 @@ final class WeeklyPlanStore {
         let done = Self.doneSessions(sessions: sessions, extra: extra, since: plan.weekStart).filter { $0.date < today }
         return AdaptiveWeek.make(plan: plan, done: done, now: now,
                                  soreness: soreSignals(checkIns: checkIns, muscles: nil, now: now, todaysAnswers: false, estimated: false),
-                                 swaps: swaps(inWeekOf: now).filter { $0.day < today })?.today
+                                 swaps: swaps(inWeekOf: now).filter { $0.day < today },
+                                 carriedOver: leftOver(before: plan.weekStart, sessions: sessions).first?.focus)?.today
     }
 
     /// Works the queue out and keeps it for today (`adaptive`); returns the

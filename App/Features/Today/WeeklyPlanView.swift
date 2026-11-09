@@ -280,7 +280,8 @@ struct WeeklyPlanView: View {
         } else if let current = store.plan(for: weekStart) {
             days = current.sortedDays
         } else if let last = store.lastPlan(before: weekStart), !last.plannedDays.isEmpty {
-            days = last.sortedDays
+            // Last week's days, with the session it didn't get to first.
+            days = store.newWeekDays(from: last.sortedDays, weekStart: weekStart, sessions: sessions)
         } else {
             let count = suggestedCount
             let focuses = WeeklyPlan.focusRotation(start: suggestedStart, count: count)

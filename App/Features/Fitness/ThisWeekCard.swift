@@ -119,7 +119,8 @@ struct ThisWeekCard: View {
             HStack(spacing: 10) {
                 if let last = store.lastPlan(before: thisWeek), !last.plannedDays.isEmpty {
                     PlanButton(title: last.isFlexible ? "Same as last week" : "Same days as last week", filled: false) {
-                        store.save(WeeklyPlan(weekStart: thisWeek, plannedDays: last.plannedDays,
+                        store.save(WeeklyPlan(weekStart: thisWeek,
+                                              plannedDays: store.newWeekDays(from: last.plannedDays, weekStart: thisWeek, sessions: sessions),
                                               mode: last.mode, sessionsPerWeek: last.sessionsPerWeek, cardio: last.cardio))
                     }
                 }

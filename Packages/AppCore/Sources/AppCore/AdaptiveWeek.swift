@@ -40,8 +40,14 @@ import Foundation
 /// - **A week that runs out.** Sessions that no longer fit (fewer days left
 ///   than sessions) are "still to do this week", never "missed": one session
 ///   costs little, since strength and muscle take weeks without training to
-///   fall off (Mujika & Padilla, Sports Med 2000), and the next week starts
-///   fresh.
+///   fall off (Mujika & Padilla, Sports Med 2000). The next week doesn't owe
+///   it (no doubling up), but it goes first: the week's order is rotated to
+///   start at the first session left over (`leftOver`, `carriedOver`), so
+///   the rotation carries on and the muscles that have rested longest train
+///   next, the same rule a new plan starts from (`WorkoutPlanner.suggestedFocus`).
+///   Keeping each muscle at about twice a week matters more than which day
+///   it falls on (Schoenfeld, Ogborn & Krieger, Sports Med 2016; Schoenfeld,
+///   Grgic & Krieger 2019). Rotating instead of skipping is an app choice.
 ///
 /// Flexible weeks (`WeeklyPlan.Mode.flexible`) have no order or days and keep
 /// their own rule (`TrainingDayPlanner.flexibleGuidance`); `make` returns nil
@@ -260,24 +266,77 @@ public enum AdaptiveWeek {
     ///   - done: logged sessions and watch training days (any range; this week's are used).
     ///   - soreness: sore signals by day (`signals(from:)`, `signals(fromSwaps:)`, `fatiguedAreas`).
     ///   - swaps: this week's "why a different workout?" answers.
+    ///   - carriedOver: the first session last week left undone (`leftOver`); the week starts with it.
     public static func make(plan: WeeklyPlan, done: [DoneSession], now: Date, soreness: [SoreSignal] = [],
-                            swaps: [Swap] = [], calendar: Calendar = .current) -> Result? {
+                            swaps: [Swap] = [], carriedOver: WorkoutFocus? = nil, calendar: Calendar = .current) -> Result? {
         guard !plan.isFlexible, !plan.plannedDays.isEmpty else { return nil }
         let today = calendar.startOfDay(for: now)
-        var result = simulate(plan: plan, done: done, today: today, soreness: soreness, swaps: swaps, calendar: calendar)
+        var result = simulate(plan: plan, done: done, today: today, soreness: soreness, swaps: swaps,
+                              carriedOver: carriedOver, calendar: calendar)
         let weekStart = calendar.startOfDay(for: plan.weekStart)
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: today), yesterday >= weekStart {
             let then = simulate(plan: plan, done: done.filter { $0.date < yesterday }, today: yesterday,
                                 soreness: soreness.filter { $0.day < today }, swaps: swaps.filter { $0.day < today },
-                                calendar: calendar)
+                                carriedOver: carriedOver, calendar: calendar)
             result.yesterdayWasSlot = then.today != nil
         }
         return result
     }
 
+    // MARK: Carrying over
+
+    /// The plan's sessions its week didn't tick, in plan order: what the next
+    /// week starts with (`carriedOver`, `rotated`). Works for flexible plans
+    /// too, where the sessions are the ones still to do.
+    /// - Parameter done: logged sessions (any range; that week's are used).
+    public static func leftOver(plan: WeeklyPlan, done: [DoneSession], calendar: Calendar = .current) -> [PlannedDay] {
+        guard !plan.plannedDays.isEmpty else { return [] }
+        let weekStart = calendar.startOfDay(for: plan.weekStart)
+        let lastDay = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
+        var counted = plan
+        counted.mode = .fixedDays
+        let week = simulate(plan: counted, done: done, today: lastDay, soreness: [], swaps: [], carriedOver: nil, calendar: calendar)
+        var left = week.queue.indices.filter { week.done[$0] == nil }
+        if plan.isFlexible, let target = plan.sessionsPerWeek {
+            // A quota under the number of sessions: only what the quota still asks for.
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+            let lifted = done.filter { $0.isLifting && $0.date >= weekStart && $0.date < weekEnd }.count
+            let owed = max(0, target - lifted)
+            left = Array(left.prefix(owed))
+        }
+        return left.map { week.queue[$0] }
+    }
+
+    /// The queue's order with the first session matching `first` leading and
+    /// the rest following in turn (Upper, Lower, Upper, Lower with Lower
+    /// first: Lower, Upper, Lower, Upper). Plan order when nothing matches.
+    static func rotation(_ queue: [PlannedDay], startingWith first: WorkoutFocus?) -> [Int] {
+        let indices = Array(queue.indices)
+        guard let first,
+              let start = queue.firstIndex(where: { $0.focus == first })
+                ?? queue.firstIndex(where: { isSameSession($0.focus, first) }) else { return indices }
+        return Array(indices[start...] + indices[..<start])
+    }
+
+    /// A new week's days from a template, with the sessions moved round so
+    /// `first` (last week's left-over, `leftOver`) is on the first day. Each
+    /// day keeps its weekday, time and length; only what it trains moves.
+    /// Unchanged when `first` is nil, already first, or not in the plan.
+    public static func rotated(_ days: [PlannedDay], startingWith first: WorkoutFocus?) -> [PlannedDay] {
+        let sorted = days.sorted { WeeklyPlan.order($0.weekday) < WeeklyPlan.order($1.weekday) }
+        let order = rotation(sorted, startingWith: first)
+        return sorted.indices.map { index in
+            var day = sorted[index]
+            day.focus = sorted[order[index]].focus
+            return day
+        }
+    }
+
     private static func simulate(plan: WeeklyPlan, done: [DoneSession], today: Date, soreness: [SoreSignal],
-                                 swaps: [Swap], calendar: Calendar) -> Result {
+                                 swaps: [Swap], carriedOver: WorkoutFocus?, calendar: Calendar) -> Result {
         let queue = plan.sortedDays
+        // Last week's left-over goes first; the rest follow in turn.
+        let order = rotation(queue, startingWith: carriedOver)
         let weekStart = calendar.startOfDay(for: plan.weekStart)
         let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
         let endOfToday = calendar.date(byAdding: .day, value: 1, to: today) ?? today
@@ -296,7 +355,7 @@ public enum AdaptiveWeek {
             let day = dayOf(session.date)
             trainedDays.insert(day)
             if let focus = session.focus { areasByDay[day, default: []].formUnion(loads(focus)) }
-            let open = queue.indices.filter { doneIndices[$0] == nil }
+            let open = order.filter { doneIndices[$0] == nil }
             var pick: Int?
             if let focus = session.focus {
                 pick = open
@@ -312,7 +371,7 @@ public enum AdaptiveWeek {
         let liftedToday = thisWeek.contains { $0.isLifting && dayOf($0.date) == today }
 
         // 2. Place what's left on the days left.
-        var pending = queue.indices.filter { doneIndices[$0] == nil }
+        var pending = order.filter { doneIndices[$0] == nil }
         let start = liftedToday ? shift(today, 1) : today
         var forced: [Date: WorkoutFocus] = [:]
         for swap in swaps where swap.reason == .equipment {
@@ -398,7 +457,13 @@ public enum AdaptiveWeek {
             day = shift(day, 1)
         }
 
-        // 3. Say where a session moved for soreness went.
+        // 3. Say why last week's left-over leads, on its day.
+        if let lead = order.first, lead != 0, let index = slots.firstIndex(where: { $0.plannedWeekday == queue[lead].weekday }),
+           slots[index].note == nil {
+            slots[index].note = "\(queue[lead].focus.shortTitle) first: it didn't fit last week."
+        }
+
+        // 4. Say where a session moved for soreness went.
         if let move = pendingMove {
             let focus = queue[move.index].focus.shortTitle
             let sore = areaText(move.areas)

@@ -20,7 +20,7 @@ struct DoubleProgressionTests {
         let today = planner.progression(history: squat(6), reps: 6...10, rpe: 7, kind: .barbell)
         #expect(today == WorkoutPlanner.Progression(load: 82.5, targetReps: 7))
         #expect(planner.progressionNote(load: 82.5, history: squat(6), reps: 6...10, rpe: 7, loadKind: .barbell)
-                == "Same weight, aim for 7 reps; it moves up at 10")
+                == "Same weight, aim for 7 reps; the weight goes up once you hit 10")
     }
 
     @Test func theTopOfTheRangeStepsUpAndResetsTheReps() {
@@ -51,7 +51,7 @@ struct DoubleProgressionTests {
         let squat = try #require(plan.exercises.first { $0.exerciseID == "Barbell_Squat" })
         #expect(squat.load == 82.5)
         #expect(squat.repsToday == 7)
-        #expect(squat.progressionNote == "Same weight, aim for 7 reps; it moves up at 8")
+        #expect(squat.progressionNote == "Same weight, aim for 7 reps; the weight goes up once you hit 8")
     }
 
     @Test func noRepTargetMeansTheTopOfTheRange() {
