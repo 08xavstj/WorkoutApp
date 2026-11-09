@@ -363,7 +363,8 @@ struct VO2Tips: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
                 .textCase(.uppercase)
-            ForEach(tips) { tip in
+            // Two tips on the card; their evidence is under the card's Details.
+            ForEach(Array(tips.prefix(2))) { tip in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "arrow.up.right")
                         .font(.caption.weight(.bold))
@@ -385,11 +386,6 @@ struct VO2Tips: View {
             .buttonStyle(.bordered)
             .tint(Theme.oxygen)
             .accessibilityHint("Opens this week's plan; easy cardio is near the bottom")
-            Text("Check again after about 8 weeks, the length of the trials. A brisk 20+ minute outdoor walk or run gives your Watch a fresh reading.")
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-            EvidenceDisclosure(points: tips.map(\.evidence), title: "Evidence for these tips")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .sheet(isPresented: $showingPlan) { WeeklyPlanView() }

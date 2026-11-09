@@ -377,51 +377,112 @@ struct CardioFitnessCard: View {
         let result = CardioFitness.assess(series, age: settings.age, sex: settings.sex)
         let trend = CardioFitness.trend(series)
         let estimates = VO2Estimates(vitals: vitals, settings: settings, metrics: metrics, sessions: sessions)
-        VStack(alignment: .leading, spacing: 10) {
-            header(result)
-            if let result {
-                readingContent(result, trend: trend, history: history, estimates: estimates)
-            } else {
-                noReadingContent(estimates)
+        // One number, one bar, one line, two tips; everything else under Details.
+        let value = result?.latest ?? estimates.average
+        let isEstimate = result == nil
+        let category = value.map { VO2Norms.category(vo2: $0, age: settings.age, sex: settings.sex) }
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                CardLabel(text: "Cardio fitness (VO₂ max)", color: Theme.oxygen)
+                Spacer()
+                if let category {
+                    Chip(text: category.name, color: category.chipColor)
+                }
             }
-            // Each study once, folded away, instead of citations in every line.
-            EvidenceDisclosure(points: Self.evidence)
+            hero(value: value, isEstimate: isEstimate, trend: trend)
+            VO2LevelBar(age: settings.age, sex: settings.sex, value: value, isEstimate: isEstimate)
+            if let value {
+                Text(VO2Norms.standing(vo2: value, age: settings.age, sex: settings.sex).percentileText + ".")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if result != nil {
+                trendChart(history)
+            }
+            tips(category ?? .average)
+            DisclosureGroup("Details") {
+                details(result, history: history, estimates: estimates)
+                    .padding(.top, 8)
+            }
+            .font(.subheadline.weight(.semibold))
+            .tint(Theme.secondaryText)
         }
         .card(tint: Theme.oxygen)
     }
 
-    @ViewBuilder
-    private func readingContent(_ result: CardioFitness.Result, trend: CardioFitness.Trend?, history: [DatedValue],
-                                estimates: VO2Estimates) -> some View {
-        headline(result, trend: trend)
-        comparison(watch: result.latest, estimates: estimates)
-        trendChart(history)
-        normsLine(result)
-        fitnessAgeLine(result)
-        adviceLabel(result, trend: trend)
-        Text("Watch VO₂ max is an estimate, about 10% low in fit people; watch the trend.")
-            .font(.caption)
-            .foregroundStyle(Theme.secondaryText)
-            .fixedSize(horizontal: false, vertical: true)
-        VO2SourceNote(lastReading: history.last?.date)
-        VO2EstimatesSection(estimates: estimates)
-        tips(result.category)
+    /// The big number: the watch reading, else the average of the two estimates.
+    private func hero(value: Double?, isEstimate: Bool, trend: CardioFitness.Trend?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(value.map { (isEstimate ? "≈" : "") + $0.formatted(.number.precision(.fractionLength(isEstimate ? 0 : 1))) } ?? "–")
+                    .font(.largeTitle.weight(.bold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(Theme.primaryText)
+                Text("ml/kg/min")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Text(isEstimate
+                 ? (value == nil ? "No reading yet: walk or run outdoors 20+ min with your Watch." : "Estimate · no Apple Watch reading yet")
+                 : trendText(trend))
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
-    /// No watch reading: the bar still shows the norms, and the estimates
-    /// (when there are any) place you on it.
+    /// Everything that used to crowd the card: the estimates, other
+    /// comparisons, fitness age, where readings come from, and the evidence.
     @ViewBuilder
-    private func noReadingContent(_ estimates: VO2Estimates) -> some View {
-        Text("No VO₂ max yet. Your watch estimates it from outdoor walks and runs with heart rate; it appears here once it's in Apple Health.")
-            .font(.subheadline)
-            .foregroundStyle(Theme.secondaryText)
-            .fixedSize(horizontal: false, vertical: true)
-        comparison(watch: nil, estimates: estimates)
-        VO2SourceNote(lastReading: nil)
-        VO2EstimatesSection(estimates: estimates)
-        // Without any value, the starting-out tips (app choice).
-        tips(estimates.average.map { VO2Norms.category(vo2: $0, age: settings.age, sex: settings.sex) } ?? .average)
+    private func details(_ result: CardioFitness.Result?, history: [DatedValue], estimates: VO2Estimates) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let heart = estimates.heart {
+                EstimateRow(title: "Estimate from heart rate", result: heart.result, detail: heart.detail)
+            }
+            if let activity = estimates.activity {
+                EstimateRow(title: "Estimate from activity, lifting included", result: activity.result, detail: activity.detail)
+            }
+            ForEach(VO2Norms.references(age: settings.age, sex: settings.sex)) { reference in
+                HStack {
+                    Text(reference.label)
+                    Spacer()
+                    Text(reference.kind == .topTen ? "\(Int(reference.value.rounded()))+" : "\(Int(reference.value.rounded()))")
+                        .monospacedDigit()
+                }
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+            }
+            if let result {
+                fitnessAgeLine(result)
+                Text("Watch VO₂ max is an estimate, about 10% low in fit people; watch the trend.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Text("Apple Watch only measures VO₂ max on outdoor walks, runs and hikes, so lifting never gives a reading. The two estimates above need no test but are rough (about ±5).")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            EvidenceDisclosure(points: Self.evidence + Self.estimateEvidence + tipEvidence(result, estimates: estimates))
+        }
+        .font(.subheadline)
+        .fontWeight(.regular)
     }
+
+    /// The studies behind the two tips on the card.
+    private func tipEvidence(_ result: CardioFitness.Result?, estimates: VO2Estimates) -> [String] {
+        let value = result?.latest ?? estimates.average
+        let category = value.map { VO2Norms.category(vo2: $0, age: settings.age, sex: settings.sex) } ?? .average
+        let goals: Goals? = settings.goalsSet ? settings.goals : nil
+        let lifts = goals.map { $0.focuses.contains(.muscle) || $0.focuses.contains(.strength) } ?? true
+        return VO2Norms.tips(category: category, lifts: lifts, losingWeight: goals?.weight == .lose).prefix(2).map(\.evidence)
+    }
+
+    static let estimateEvidence = [
+        "Heart-rate estimate: VO₂ max ≈ 15.3 × max HR ÷ resting HR (Uth et al., Eur J Appl Physiol 2004).",
+        "Activity estimate: the NASA non-exercise model (Jackson et al., Med Sci Sports Exerc 1990); lifting counts as moderate activity, hard heart-rate minutes from any workout as hard exercise.",
+        "Bands: percentiles of measured treadmill VO₂ max by age and sex (FRIEND registry; Kaminsky et al., Mayo Clin Proc 2015).",
+    ]
 
     private func comparison(watch: Double?, estimates: VO2Estimates) -> some View {
         VO2Comparison(age: settings.age, sex: settings.sex, watch: watch, estimates: estimates.marks)
