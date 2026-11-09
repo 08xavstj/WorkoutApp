@@ -334,12 +334,7 @@ struct TemplateEditorView: View {
     /// Default sets and reps for a new exercise, from your goal.
     private func add(_ exercise: Exercise) {
         let compound = ExerciseCatalog.slot(for: exercise.id)?.isCompound ?? (exercise.mechanic == "compound")
-        let reps: ClosedRange<Int> = switch gym.style {
-        case .strength: compound ? 3...6 : 8...10
-        case .muscle: compound ? 6...10 : 10...15
-        case .endurance: compound ? 10...15 : 12...20
-        case .balanced: compound ? 6...8 : 10...12
-        }
+        let reps: ClosedRange<Int> = gym.style.defaultReps(compound: compound)
         items.append(DraftItem(
             exerciseID: exercise.id, name: exercise.name, sets: 3,
             repsLow: reps.lowerBound, repsHigh: reps.upperBound, useRange: true, rpe: nil, weight: nil

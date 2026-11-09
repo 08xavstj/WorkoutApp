@@ -22,6 +22,12 @@ enum WeightUnit: String, CaseIterable, Identifiable {
     func format(_ kilograms: Double) -> String {
         display(kilograms).formatted(.number.precision(.fractionLength(0...1)))
     }
+
+    /// The unit before one is chosen: pounds where the region measures in US
+    /// units, kilograms everywhere else (the UK included, whose gyms load kg plates).
+    static var localeDefault: WeightUnit {
+        Locale.current.measurementSystem == .us ? .pounds : .kilograms
+    }
 }
 
 enum AppAppearance: String, CaseIterable, Identifiable {
@@ -52,8 +58,28 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 final class UserSettings {
     @ObservationIgnored private let defaults: UserDefaults
 
-    var age: Int { didSet { defaults.set(age, forKey: "age") } }
-    var sex: BiologicalSex { didSet { defaults.set(sex.rawValue, forKey: "sex") } }
+    /// Until `ageIsSet`/`sexIsSet`, these hold stand-ins (30, male) so the
+    /// maths can run; screens say "Not set" and Today asks for them
+    /// (`ProfileSetupCard`) instead of silently using male norms.
+    var age: Int { didSet { defaults.set(age, forKey: "age"); if !ageIsSet { ageIsSet = true } } }
+    var sex: BiologicalSex { didSet { defaults.set(sex.rawValue, forKey: "sex"); if !sexIsSet { sexIsSet = true } } }
+    /// The user (or Apple Health) gave an age. The key is written only by `didSet`.
+    private(set) var ageIsSet: Bool
+    /// The user (or Apple Health) gave a sex.
+    private(set) var sexIsSet: Bool
+    /// Age, sex, height or weight is still missing: norms, calories and zones use stand-ins.
+    var profileBasicsMissing: Bool { !ageIsSet || !sexIsSet || heightCm <= 0 || weightKg <= 0 }
+    /// "Not set" until the age is known.
+    var ageText: String { ageIsSet ? "\(age)" : "Not set" }
+    /// For norms copy: says which stand-ins are in use, or nil once age and sex are set.
+    var normsStandInNote: String? {
+        switch (ageIsSet, sexIsSet) {
+        case (true, true): nil
+        case (false, false): "Compared with men aged 30 until you add your sex and age in Settings."
+        case (true, false): "Compared with men until you add your sex in Settings."
+        case (false, true): "Compared with age 30 until you add your age in Settings."
+        }
+    }
     /// 0 means "estimate from age".
     /// Typed-in max heart rate. 0 = use the learned or estimated one.
     var maxHeartRate: Int { didSet { defaults.set(maxHeartRate, forKey: "maxHeartRate") } }
@@ -177,10 +203,12 @@ final class UserSettings {
         self.defaults = defaults
         age = defaults.object(forKey: "age") as? Int ?? 30
         sex = BiologicalSex(rawValue: defaults.string(forKey: "sex") ?? "") ?? .male
+        ageIsSet = defaults.object(forKey: "age") != nil
+        sexIsSet = BiologicalSex(rawValue: defaults.string(forKey: "sex") ?? "") != nil
         maxHeartRate = defaults.integer(forKey: "maxHeartRate")
         learnedMaxHeartRate = defaults.data(forKey: "learnedMaxHeartRate")
             .flatMap { try? JSONDecoder().decode(ObservedMaxHeartRate.Learned.self, from: $0) }
-        weightUnit = WeightUnit(rawValue: defaults.string(forKey: "weightUnit") ?? "") ?? .pounds
+        weightUnit = WeightUnit(rawValue: defaults.string(forKey: "weightUnit") ?? "") ?? .localeDefault
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .light
         hasOnboarded = defaults.bool(forKey: "hasOnboarded")
         heightCm = defaults.double(forKey: "heightCm")
@@ -235,11 +263,11 @@ final class UserSettings {
         let weight = try? await health.latestBodyMassKg()
         var filled: Set<String> = []
         if let value = characteristics.age, (13...100).contains(value) {
-            if age != value { age = value }
+            if age != value || !ageIsSet { age = value }
             filled.insert("age")
         }
         if let value = characteristics.sex {
-            if sex != value { sex = value }
+            if sex != value || !sexIsSet { sex = value }
             filled.insert("sex")
         }
         if let value = height ?? nil, value > 100 {

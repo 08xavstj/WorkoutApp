@@ -13,6 +13,8 @@ struct MedicationsView: View {
     @Environment(\.healthClient) private var health
     @Environment(\.dismiss) private var dismiss
     @State private var editing: Medication?
+    /// iOS notifications are off for the app (`NotificationsOffBanner`).
+    @State private var notificationsDenied = false
     /// True when pushed onto another NavigationStack.
     var pushed = false
 
@@ -20,6 +22,14 @@ struct MedicationsView: View {
         SheetNavigationStack(isSheet: !pushed) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if notificationsDenied, meds.medications.contains(where: { $0.isActive && !$0.times.isEmpty }) {
+                        NotificationsOffBanner(detail: "Dose reminders won't arrive. Today's doses still show here to tick off.")
+                            .card(tint: Theme.recoveryModerate)
+                    }
+                    // Weekly medicines saved with daily reminders (before schedules existed).
+                    ForEach(meds.scheduleChecks) { medication in
+                        ScheduleCheckCard(medication: medication) { editing = medication }
+                    }
                     if !meds.todayDoses.isEmpty {
                         SectionTitle(text: "Today")
                         TodayDosesList()
@@ -72,6 +82,7 @@ struct MedicationsView: View {
                 .lockedToScreenWidth()
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
+            .trackingNotificationsDenied($notificationsDenied)
             .background(alignment: .top) {
                 TopGlow(colors: [Theme.Wash.rose, Theme.Wash.lavender, Theme.Wash.sky])
             }
@@ -197,7 +208,7 @@ private struct MedicationRow: View {
                 Text(medication.name + (medication.dose.isEmpty ? "" : " · \(medication.dose)"))
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
-                Text(medication.times.isEmpty ? "As needed" : medication.times.map(timeText).joined(separator: ", "))
+                Text(doseScheduleText(medication))
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                 // The matched drug, only when it adds something ("Atorvastatin" for
@@ -213,8 +224,64 @@ private struct MedicationRow: View {
     }
 }
 
+/// "8:00 AM" for minutes after midnight. Built from hour and minute on a
+/// fixed day, not start of today + seconds, so it's right on the days clocks
+/// change (the time picker below uses the same day).
 func timeText(_ minutes: Int) -> String {
-    Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(minutes * 60)).formatted(date: .omitted, time: .shortened)
+    MedicationTime.date(minutes: minutes).formatted(date: .omitted, time: .shortened)
+}
+
+/// Clock times for the reminder pickers, on 1 January 2001: no zone changes
+/// its clocks that day, so every time exists exactly once.
+enum MedicationTime {
+    static func date(minutes: Int, calendar: Calendar = .current) -> Date {
+        let parts = DateComponents(year: 2001, month: 1, day: 1, hour: minutes / 60, minute: minutes % 60)
+        return calendar.date(from: parts) ?? Date(timeIntervalSinceReferenceDate: TimeInterval(minutes * 60))
+    }
+
+    static func minutes(from date: Date, calendar: Calendar = .current) -> Int {
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    }
+}
+
+/// "8:00 AM, 8:00 PM", "Weekly on Monday · 9:00 AM", or "As needed".
+func doseScheduleText(_ medication: Medication) -> String {
+    let times = medication.times.map(timeText).joined(separator: ", ")
+    guard medication.plan.isLessThanDaily else { return times.isEmpty ? "As needed" : times }
+    let days = medication.plan.summary()
+    return times.isEmpty ? days + " · no reminder time" : days + " · " + times
+}
+
+/// "Ozempic is usually once a week" for an entry still on daily reminders.
+/// Nothing is changed for the user; Edit opens the schedule.
+private struct ScheduleCheckCard: View {
+    let medication: Medication
+    let edit: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "calendar.badge.exclamationmark")
+                .font(.title3)
+                .foregroundStyle(Theme.recoveryModerateText)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Check \(medication.name)'s schedule")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text("It's usually taken once a week, but its reminders are set for every day. Match them to your prescription.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Edit schedule", action: edit)
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .frame(minHeight: 44, alignment: .leading)
+            }
+            Spacer(minLength: 0)
+        }
+        .card(tint: Theme.recoveryModerate)
+    }
 }
 
 /// Add or edit a medication.
@@ -222,6 +289,10 @@ struct MedicationEditor: View {
     @State var medication: Medication
     @Environment(MedicationsModel.self) private var meds
     @Environment(\.dismiss) private var dismiss
+    /// The user changed the schedule or times, so the name no longer sets them.
+    @State private var scheduleTouched = false
+
+    private var isNew: Bool { !meds.medications.contains(where: { $0.id == medication.id }) }
 
     var body: some View {
         NavigationStack {
@@ -236,19 +307,8 @@ struct MedicationEditor: View {
                             .font(.subheadline)
                     }
                 }
-                Section {
-                    ForEach(medication.times.indices, id: \.self) { index in
-                        DatePicker("Dose \(index + 1)", selection: timeBinding(index), displayedComponents: .hourAndMinute)
-                    }
-                    .onDelete { medication.times.remove(atOffsets: $0) }
-                    Button("Add a time", systemImage: "plus") {
-                        medication.times.append(min(23 * 60, (medication.times.last ?? 8 * 60) + 4 * 60))
-                    }
-                } header: {
-                    Text("Reminders")
-                } footer: {
-                    Text("Each time sends a notification with a Taken button. Remove all times for as-needed medications.")
-                }
+                MedicationScheduleSection(medication: $medication, touched: $scheduleTouched)
+                MedicationTimesSection(medication: $medication, touched: $scheduleTouched)
                 Section {
                     DatePicker("Started", selection: $medication.startDate, displayedComponents: .date)
                     Toggle("Currently taking", isOn: $medication.isActive)
@@ -256,7 +316,7 @@ struct MedicationEditor: View {
                 } footer: {
                     Text("The start date lets the app explain shifts in your heart rate and HRV baseline.")
                 }
-                if meds.medications.contains(where: { $0.id == medication.id }) {
+                if !isNew {
                     Section {
                         Button("Delete medication", role: .destructive) {
                             meds.delete(medication)
@@ -267,6 +327,7 @@ struct MedicationEditor: View {
             }
             .navigationTitle(medication.name.isEmpty ? "Add medication" : medication.name)
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: medication.name) { _, name in applyUsualSchedule(for: name) }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -284,12 +345,199 @@ struct MedicationEditor: View {
         }
     }
 
+    /// A new weekly GLP-1 (Ozempic, Mounjaro…) starts as "Weekly on today"
+    /// with no reminder time, instead of the 8:00 daily default: a daily
+    /// reminder for a weekly injection invites a double dose. The user picks
+    /// the day and time; once they touch the schedule the name stops setting it.
+    private func applyUsualSchedule(for name: String) {
+        guard isNew, !scheduleTouched, medication.schedule == nil,
+              MedicationKnowledge.usualSchedule(for: name) == .weekdays else { return }
+        medication.schedule = .weekly(onWeekdayOf: .now)
+        medication.times = []
+    }
+}
+
+/// How often: every day, on chosen weekdays (weekly injections) or every N days.
+private struct MedicationScheduleSection: View {
+    @Binding var medication: Medication
+    @Binding var touched: Bool
+
+    var body: some View {
+        Section {
+            Picker("Repeats", selection: kindBinding) {
+                Text("Every day").tag(MedicationSchedule.Kind.daily)
+                Text("On set days").tag(MedicationSchedule.Kind.weekdays)
+                Text("Every few days").tag(MedicationSchedule.Kind.interval)
+            }
+            switch medication.plan.kind {
+            case .daily:
+                EmptyView()
+            case .weekdays:
+                WeekdayChips(selection: weekdaysBinding)
+            case .interval:
+                Stepper(value: intervalBinding, in: 2...30) {
+                    Text(medication.plan.summary())
+                }
+                DatePicker("A dose day", selection: anchorBinding, displayedComponents: .date)
+            }
+        } header: {
+            Text("Schedule")
+        } footer: {
+            Text(footer)
+        }
+    }
+
+    private var footer: String {
+        let usual = MedicationKnowledge.usualSchedule(for: medication.name)
+        if usual == .weekdays, !medication.plan.isLessThanDaily {
+            return "This medicine is usually taken once a week. Check your prescription before setting daily reminders."
+        }
+        if usual == .weekdays {
+            return "\(medication.plan.summary()). Pick the day you take it; reminders and the Today list follow it."
+        }
+        return medication.plan.isLessThanDaily
+            ? "\(medication.plan.summary()). Reminders and the Today list follow this schedule."
+            : "Reminders come every day at the times below."
+    }
+
+    private var kindBinding: Binding<MedicationSchedule.Kind> {
+        Binding(
+            get: { medication.plan.kind },
+            set: { kind in
+                touched = true
+                switch kind {
+                case .daily:
+                    medication.schedule = nil
+                case .weekdays:
+                    if medication.plan.kind != .weekdays { medication.schedule = .weekly(onWeekdayOf: .now) }
+                case .interval:
+                    if medication.plan.kind != .interval {
+                        medication.schedule = .every(2, from: Calendar.current.startOfDay(for: .now))
+                    }
+                }
+            }
+        )
+    }
+
+    private var weekdaysBinding: Binding<Set<Int>> {
+        Binding(
+            get: { medication.plan.weekdays },
+            set: { days in
+                touched = true
+                var schedule = medication.plan
+                schedule.weekdays = days
+                medication.schedule = schedule
+            }
+        )
+    }
+
+    private var intervalBinding: Binding<Int> {
+        Binding(
+            get: { medication.plan.intervalDays },
+            set: { days in
+                touched = true
+                var schedule = medication.plan
+                schedule.intervalDays = max(2, days)
+                medication.schedule = schedule
+            }
+        )
+    }
+
+    private var anchorBinding: Binding<Date> {
+        Binding(
+            get: { medication.plan.anchor },
+            set: { day in
+                touched = true
+                var schedule = medication.plan
+                schedule.anchor = Calendar.current.startOfDay(for: day)
+                medication.schedule = schedule
+            }
+        )
+    }
+}
+
+/// Seven day toggles in the calendar's week order. At least one stays on.
+private struct WeekdayChips: View {
+    @Binding var selection: Set<Int>
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 36
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(MedicationSchedule.weekOrder(), id: \.self) { weekday in
+                let isOn = selection.contains(weekday)
+                Button {
+                    toggle(weekday)
+                } label: {
+                    Text(Self.letter(weekday))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isOn ? Color.white : Theme.primaryText)
+                        .frame(width: size, height: size)
+                        .background(isOn ? Theme.lifting : Theme.track, in: .circle)
+                }
+                .buttonStyle(.borderless)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityLabel(MedicationSchedule.weekdayName(weekday))
+                .accessibilityAddTraits(isOn ? .isSelected : [])
+            }
+        }
+    }
+
+    private func toggle(_ weekday: Int) {
+        if selection.contains(weekday) {
+            guard selection.count > 1 else { return }
+            selection.remove(weekday)
+        } else {
+            selection.insert(weekday)
+        }
+    }
+
+    private static func letter(_ weekday: Int) -> String {
+        let symbols = Calendar.current.veryShortWeekdaySymbols
+        return (1...symbols.count).contains(weekday) ? symbols[weekday - 1] : ""
+    }
+}
+
+/// The reminder times on each scheduled day.
+private struct MedicationTimesSection: View {
+    @Binding var medication: Medication
+    @Binding var touched: Bool
+
+    var body: some View {
+        Section {
+            ForEach(medication.times.indices, id: \.self) { index in
+                DatePicker("Dose \(index + 1)", selection: timeBinding(index), displayedComponents: .hourAndMinute)
+            }
+            .onDelete { offsets in
+                touched = true
+                medication.times.remove(atOffsets: offsets)
+            }
+            Button(medication.times.isEmpty ? "Add a reminder time" : "Add a time", systemImage: "plus") {
+                touched = true
+                medication.times.append(min(23 * 60, (medication.times.last ?? 8 * 60 - 4 * 60) + 4 * 60))
+            }
+        } header: {
+            Text("Reminders")
+        } footer: {
+            Text(footer)
+        }
+    }
+
+    private var footer: String {
+        if medication.times.isEmpty, medication.plan.isLessThanDaily {
+            return "Add the time you usually take it to get a reminder with a Taken button and see it on Today."
+        }
+        return "Each time sends a notification with a Taken button. Remove all times for as-needed medications."
+    }
+
+    /// Read and written as hour and minute on a fixed day (`MedicationTime`), so
+    /// the picker shows the stored time even on a daylight-saving change day.
     private func timeBinding(_ index: Int) -> Binding<Date> {
         Binding(
-            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(TimeInterval(medication.times[index] * 60)) },
+            get: { MedicationTime.date(minutes: medication.times.indices.contains(index) ? medication.times[index] : 8 * 60) },
             set: { date in
-                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
-                medication.times[index] = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+                guard medication.times.indices.contains(index) else { return }
+                touched = true
+                medication.times[index] = MedicationTime.minutes(from: date)
             }
         )
     }
@@ -312,7 +560,7 @@ struct MedicationDetailView: View {
                     Text(current.name)
                         .font(.largeTitle.weight(.bold))
                         .foregroundStyle(Theme.primaryText)
-                    Text([current.dose, current.times.isEmpty ? "As needed" : current.times.map(timeText).joined(separator: ", ")]
+                    Text([current.dose, doseScheduleText(current)]
                         .filter { !$0.isEmpty }.joined(separator: " · "))
                         .foregroundStyle(Theme.secondaryText)
                     if let drug { Chip(text: drug.name, color: Theme.sleep) }

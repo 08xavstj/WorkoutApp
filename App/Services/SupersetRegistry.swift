@@ -27,6 +27,9 @@ enum SupersetRegistry {
         all = all.filter { Double($0.key).map { Date(timeIntervalSince1970: $0) >= cutoff } ?? false }
         if !groups.isEmpty {
             all[id(sessionStart)] = Dictionary(uniqueKeysWithValues: groups.map { (String($0.key), $0.value) })
+        } else {
+            // The last pair went (an exercise removed): clear the session's entry too.
+            all.removeValue(forKey: id(sessionStart))
         }
         UserDefaults.standard.set(all, forKey: key)
     }

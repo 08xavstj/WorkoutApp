@@ -338,10 +338,21 @@ public enum GoalPlanner {
         return min(60, max(3, fat))
     }
 
-    /// The trainer's set and rep style for these goals.
+    /// The trainer's set and rep style for these goals. Muscle and strength
+    /// together get heavy main lifts plus moderate accessories
+    /// (`strengthAndMuscle`): strength gains are largest at ≥80% 1RM, while
+    /// muscle grows about equally from roughly 30-85% 1RM when sets go near
+    /// failure (ACSM position stand, Med Sci Sports Exerc 2026; Schoenfeld et
+    /// al., J Strength Cond Res 2017; Lopez et al., Med Sci Sports Exerc
+    /// 2021), so the heavy work costs nothing for muscle. Fat loss doesn't
+    /// change the lifting: heavy work helps keep strength and muscle in a
+    /// deficit (ACSM 2026; low-certainty evidence).
     public static func trainingStyle(_ goals: Goals) -> TrainingStyle {
-        if goals.focuses.contains(.strength) && !goals.focuses.contains(.muscle) { return .strength }
-        if goals.focuses.contains(.muscle) { return .muscle }
+        let strength = goals.focuses.contains(.strength)
+        let muscle = goals.focuses.contains(.muscle)
+        if strength && muscle { return .strengthAndMuscle }
+        if strength { return .strength }
+        if muscle { return .muscle }
         if goals.focuses.contains(.endurance) { return .endurance }
         return .balanced
     }
@@ -390,8 +401,36 @@ public enum TrainingStyle: String, Codable, Sendable {
     case balanced
     /// Heavier: 3-6 reps on big lifts, 2-3 reps left in the tank.
     case strength
-    /// Muscle growth: 6-10 / 10-15, sets taken closer to failure (Robinson et al., Sports Med 2024).
+    /// Muscle growth: 6-10 / 8-12, sets taken closer to failure (Robinson et al., Sports Med 2024).
     case muscle
     /// Lighter and higher reps with shorter rests.
     case endurance
+    /// Muscle and strength together: the session's first lift heavy (4-6
+    /// reps), other big lifts 6-10, small lifts 8-12 (`GoalPlanner.trainingStyle`).
+    case strengthAndMuscle
+
+    /// "Strength + muscle", for settings and the coach.
+    public var label: String {
+        switch self {
+        case .balanced: "Balanced"
+        case .strength: "Strength (heavy, low reps)"
+        case .muscle: "Muscle building"
+        case .endurance: "Endurance (higher reps)"
+        case .strengthAndMuscle: "Strength + muscle (heavy main lift, moderate accessories)"
+        }
+    }
+
+    /// True for the styles that build muscle first (`muscle`, `strengthAndMuscle`):
+    /// they share volume ceilings, effort offsets and block length.
+    public var buildsMuscle: Bool { self == .muscle || self == .strengthAndMuscle }
+
+    /// The style's rep range for a new exercise you add yourself (big lift or small).
+    public func defaultReps(compound: Bool) -> ClosedRange<Int> {
+        switch self {
+        case .strength: compound ? 3...6 : 8...10
+        case .muscle, .strengthAndMuscle: compound ? 6...10 : 8...12
+        case .endurance: compound ? 10...15 : 12...20
+        case .balanced: compound ? 6...8 : 10...12
+        }
+    }
 }

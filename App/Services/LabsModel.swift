@@ -40,9 +40,18 @@ nonisolated struct LabResult: Codable, Sendable, Identifiable, Equatable, Hashab
 @Observable
 final class LabsModel {
     private(set) var results: [LabResult] = []
+    /// False while the file exists but couldn't be read (a background launch
+    /// while the phone was locked): nothing is saved over it until it loads.
+    @ObservationIgnored private var canSave = false
+    @ObservationIgnored private let file = SafeJSONFile.appSupport("lab-results.json")
 
     init() {
-        results = Self.load()
+        reload()
+    }
+
+    /// Reads the file again if the last read failed (call when the phone unlocks).
+    func reloadIfUnavailable() {
+        if !canSave { reload() }
     }
 
     /// Latest result for each test, most recent first.
@@ -58,11 +67,13 @@ final class LabsModel {
     var outOfRange: [LabResult] { latest.filter { $0.status == .low || $0.status == .high } }
 
     func add(_ new: [LabResult]) {
+        reloadIfUnavailable()
         results.append(contentsOf: new)
         save()
     }
 
     func delete(_ result: LabResult) {
+        reloadIfUnavailable()
         results.removeAll { $0.id == result.id }
         save()
     }
@@ -80,23 +91,17 @@ final class LabsModel {
 
     // MARK: Storage
 
-    nonisolated private static var fileURL: URL {
-        let folder = URL.applicationSupportDirectory
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appending(path: "lab-results.json")
-    }
-
-    nonisolated private static func load() -> [LabResult] {
-        guard let data = try? Data(contentsOf: fileURL) else { return [] }
+    private func reload() {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([LabResult].self, from: data)) ?? []
+        let loaded = file.loadLogged([LabResult].self, decoder: decoder)
+        canSave = loaded.state.canSave
+        if canSave { results = loaded.value ?? [] }
     }
 
     private func save() {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(results) else { return }
-        try? data.write(to: Self.fileURL, options: [.atomic, .completeFileProtection])
+        file.saveLogged(results, canSave: canSave, encoder: encoder)
     }
 }

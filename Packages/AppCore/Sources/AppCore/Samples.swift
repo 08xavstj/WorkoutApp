@@ -54,11 +54,14 @@ extension DailyVitals {
         for entry in vitals {
             byNight[calendar.startOfDay(for: entry.date)] = entry
         }
-        for (date, milliseconds) in manualHRV where milliseconds > 0 {
+        var manualNights = Set<Date>()
+        // Oldest first, so with two readings on one morning the latest wins every time.
+        for (date, milliseconds) in manualHRV.sorted(by: { $0.key < $1.key }) where milliseconds > 0 {
             let night = calendar.startOfDay(for: date)
             var entry = byNight[night] ?? DailyVitals(date: night, hrvMilliseconds: nil, restingHeartRate: nil)
-            if entry.hrvMilliseconds == nil {
+            if entry.hrvMilliseconds == nil || manualNights.contains(night) {
                 entry.hrvMilliseconds = milliseconds
+                manualNights.insert(night)
             }
             byNight[night] = entry
         }
@@ -106,9 +109,15 @@ extension DailyVitals {
             byNight[night] = DailyVitals(date: entry.date, hrvMilliseconds: entry.hrvMilliseconds.flatMap { $0 > 0 ? $0 : nil },
                                          restingHeartRate: entry.restingHeartRate)
         }
+        // One value per morning. Readings are visited oldest first, so when a
+        // morning has two (a typed value keyed at its clock time next to a
+        // beat-to-beat one keyed at midnight) the latest wins, the same on
+        // every launch rather than in dictionary order.
         func nights(_ values: [Date: Double]) -> [Date: Double] {
             var result: [Date: Double] = [:]
-            for (date, value) in values where value > 0 { result[calendar.startOfDay(for: date)] = value }
+            for (date, value) in values.sorted(by: { $0.key < $1.key }) where value > 0 {
+                result[calendar.startOfDay(for: date)] = value
+            }
             return result
         }
         let rmssd = nights(overnightRMSSD)

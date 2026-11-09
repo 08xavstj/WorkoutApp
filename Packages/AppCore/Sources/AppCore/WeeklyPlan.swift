@@ -255,16 +255,26 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
         return 3
     }
 
-    /// The default session for each planned day, rotating from the focus that
-    /// has rested longest (`WorkoutPlanner.suggestedFocus`): 2 days upper/lower,
-    /// 3 days push/pull/legs, 4 days upper/lower twice, 5-6 days push/pull/legs
-    /// round again. Every focus is a session the trainer can build.
+    /// The default session for each planned day, so every muscle is trained
+    /// at least twice a week (ACSM position stand, Med Sci Sports Exerc 2026:
+    /// every major muscle group ≥2 days a week; frequency matters for
+    /// strength: Grgic et al., Sports Med 2018; and one session can only hold
+    /// about 6-10 productive sets for a muscle: Pelland et al., Sports Med
+    /// 2026): 1 day full body; 2 days full body twice; 3 days upper, lower,
+    /// full body; 4 days upper/lower twice; 5 days upper, lower, push, pull,
+    /// legs; 6 days push/pull/legs twice. Starts from the focus that has
+    /// rested longest (`WorkoutPlanner.suggestedFocus`) where the split
+    /// allows. Every focus is a session the trainer can build. Only new plans
+    /// use this; saved plans keep their days (audit 2026-11 §6: 3- and 5-day
+    /// push/pull/legs trained each muscle about once a week).
     public static func focusRotation(start: WorkoutFocus, count: Int) -> [WorkoutFocus] {
         guard count > 0 else { return [] }
+        let lowerFirst = start == .legs || start == .lower
         switch count {
-        case 1: return [.fullBody]
-        case 2: return start == .legs || start == .lower ? [.lower, .upper] : [.upper, .lower]
-        case 4: return start == .legs || start == .lower ? [.lower, .upper, .lower, .upper] : [.upper, .lower, .upper, .lower]
+        case 1, 2: return Array(repeating: .fullBody, count: count)
+        case 3: return lowerFirst ? [.lower, .upper, .fullBody] : [.upper, .lower, .fullBody]
+        case 4: return lowerFirst ? [.lower, .upper, .lower, .upper] : [.upper, .lower, .upper, .lower]
+        case 5: return lowerFirst ? [.lower, .upper, .push, .pull, .legs] : [.upper, .lower, .push, .pull, .legs]
         default:
             let cycle: [WorkoutFocus] = [.push, .pull, .legs]
             let first: WorkoutFocus = switch start {

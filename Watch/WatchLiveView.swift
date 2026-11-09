@@ -14,6 +14,8 @@ struct PendingSet: Identifiable, Equatable {
     /// Stable ids (`ExerciseSnapshot.id`, `SetSnapshot.order`) for the phone.
     var exerciseID: Int
     var setOrder: Int?
+    /// The exercise's id that survives a reorder on the phone (`ExerciseSnapshot.key`).
+    var exerciseKey: String?
     var reps: Int
     var weightKg: Double
     /// The reps and weight the snapshot had: what was changed on the wrist is
@@ -23,6 +25,8 @@ struct PendingSet: Identifiable, Equatable {
     /// Effort to pre-select: 10 minus the target reps in reserve, else the planned RPE.
     var suggestedRPE: Int?
     var isWarmup: Bool
+    /// A plank or side plank: `reps` are seconds and the weight isn't edited.
+    var isHold: Bool
     /// Achievable weights in kg, ascending; never empty.
     var loads: [Double]
     var unit: String
@@ -35,6 +39,7 @@ struct PendingSet: Identifiable, Equatable {
         self.setIndex = setIndex
         exerciseID = exercise.id
         setOrder = set.order
+        exerciseKey = exercise.key
         id = session.setKey(exercise: exerciseIndex, set: setIndex)
         self.reps = reps
         self.weightKg = weightKg
@@ -42,6 +47,7 @@ struct PendingSet: Identifiable, Equatable {
         baseWeightKg = set.weightKg
         suggestedRPE = set.suggestedRPE
         isWarmup = set.isWarmup
+        isHold = exercise.isHold == true
         unit = session.unit
         if let known = exercise.achievableLoadsKg, !known.isEmpty {
             loads = known
@@ -63,7 +69,6 @@ struct SetEdit: Equatable {
 /// What you're doing now: the exercise, set x of y, the target, Complete and the rest timer.
 struct WatchLiveView: View {
     @Environment(WatchWorkoutModel.self) private var model
-    @State private var rating: PendingSet?
     @State private var editing: PendingSet?
     /// Edits made with "Edit" before Complete, by set key.
     @State private var edits: [String: SetEdit] = [:]
@@ -79,6 +84,10 @@ struct WatchLiveView: View {
                 if let ends = model.restEndsAt {
                     WatchRestView(endsAt: ends, length: model.restLength)
                 }
+                // Asked after the tick, so the rest is already running; skip any time.
+                if let pending = model.pendingRating {
+                    WatchRatingPrompt(set: pending)
+                }
                 content
             }
             .padding(.horizontal, 4)
@@ -88,9 +97,6 @@ struct WatchLiveView: View {
             if let target = completable {
                 WatchCompleteButton { complete(target.session, target.index) }
             }
-        }
-        .sheet(item: $rating) { set in
-            WatchSetEffortSheet(set: set)
         }
         .sheet(item: $editing) { set in
             WatchSetEditSheet(set: set) { edit in edits[set.id] = edit }
@@ -149,21 +155,20 @@ struct WatchLiveView: View {
         let set = session.exercises[index].sets[setIndex]
         let key = session.setKey(exercise: index, set: setIndex)
         let edit = edits[key]
+        // A hold's "reps" are seconds: never take them from the rep counter.
+        let counted = session.exercises[index].isHold == true ? nil : RepCounter.shared.countedReps(forSet: key)
         return PendingSet(session: session, exerciseIndex: index, setIndex: setIndex,
-                          reps: edit?.reps ?? RepCounter.shared.countedReps(forSet: key) ?? set.reps, weightKg: edit?.weightKg ?? set.weightKg)
+                          reps: edit?.reps ?? counted ?? set.reps, weightKg: edit?.weightKg ?? set.weightKg)
     }
 
-    /// Working sets ask how hard it was first; warm-ups, drop stages and
-    /// mini-sets (no rest, no effort of their own) are ticked straight away.
+    /// Ticks the set at once, so the rest starts on Complete; a working set
+    /// then asks "Reps left?" above the rest bar (`WatchRatingPrompt`), which
+    /// can be skipped. Warm-ups, holds, drop stages and mini-sets aren't asked.
     private func complete(_ session: WatchSession, _ index: Int) {
         RepCounter.shared.stop()
         guard let set = pending(session, index) else { return }
-        let isStage = session.exercises[set.exerciseIndex].sets[set.setIndex].isStage
-        if set.isWarmup || isStage {
-            model.completeSet(set, reps: set.reps, weightKg: set.weightKg, rpe: nil)
-        } else {
-            rating = set
-        }
+        model.completeSet(set, reps: set.reps, weightKg: set.weightKg, rpe: nil)
+        edits[set.id] = nil
     }
 }
 
@@ -245,16 +250,25 @@ private struct WatchExerciseBlock: View {
     }
 
     private var title: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(exercise.name)
-                .font(.headline)
-                .lineLimit(2)
-            if let label = exercise.supersetLabel {
-                Text(label)
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(WatchTheme.lifting.opacity(0.3), in: Capsule())
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(exercise.name)
+                    .font(.headline)
+                    .lineLimit(2)
+                if let label = exercise.supersetLabel {
+                    Text(label)
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(WatchTheme.lifting.opacity(0.3), in: Capsule())
+                }
+            }
+            // Machine settings at this gym ("Seat 4 · Pin 7"), from the phone.
+            if let machineNote = exercise.machineNote {
+                Text(machineNote)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
     }
@@ -272,7 +286,8 @@ private struct WatchExerciseBlock: View {
             .font(.footnote)
             .foregroundStyle(set.isStage ? WatchTheme.lifting : .secondary)
         HStack {
-            Text(reps > 0 || weightKg > 0 ? "\(reps) × \(watchFormat(weightKg, unit: session.unit))" : "Not set")
+            // "8 × 60 kg", "10 × 20 kg each" (per hand), "30 s" for a plank.
+            Text(exercise.setText(reps: reps, weightKg: weightKg, unit: session.unit))
                 .font(.title3.weight(.bold))
                 .monospacedDigit()
                 .minimumScaleFactor(0.7)
@@ -283,9 +298,10 @@ private struct WatchExerciseBlock: View {
                 .controlSize(.mini)
         }
         if !set.isWarmup {
-            WatchSetGhost(set: set, unit: session.unit)
+            WatchSetGhost(set: set, unit: session.unit, isHold: exercise.isHold == true)
         }
-        if exercise.repCounting == true, !set.isWarmup {
+        // Never for a hold: there are no reps to count.
+        if exercise.repCounting == true, exercise.isHold != true, !set.isWarmup {
             WatchRepCounterView(setKey: session.setKey(exercise: index, set: setIndex))
         }
         if exercise.supersetLabel?.hasSuffix("1") == true, let partner = session.partnerIndex(of: index) {
@@ -313,13 +329,16 @@ private struct WatchExerciseBlock: View {
 
 /// Under the set: the plan's target and last session's same set on one line
 /// ("Target 8 · 2 in reserve · Last 60 kg × 8"), and the phone's set-by-set
-/// change, if any, on one more.
+/// change, if any, on one more. A hold reads in seconds ("Target 30 s · Last 30 s").
 private struct WatchSetGhost: View {
     let set: WatchSession.SetSnapshot
     let unit: String
+    var isHold = false
 
     private var guide: String? {
-        let parts = [set.targetLine, set.ghostLine(unit: unit)].compactMap { $0 }
+        let parts = isHold
+            ? [set.holdTargetLine, set.holdGhostLine].compactMap { $0 }
+            : [set.targetLine, set.ghostLine(unit: unit)].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -338,6 +357,49 @@ private struct WatchSetGhost: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
+    }
+}
+
+extension WatchSession.SetSnapshot {
+    /// "Target 30 s" for a plank or side plank, whose reps are seconds. Reps in
+    /// reserve don't apply to a hold, so they're left out.
+    nonisolated var holdTargetLine: String? {
+        guard let targetReps, targetReps > 0 else { return nil }
+        return "Target \(targetReps) s"
+    }
+
+    /// "Last 30 s" (with "· RPE 8" when rated), or nil without a matching set last time.
+    nonisolated var holdGhostLine: String? {
+        guard let lastReps, lastReps > 0 else { return nil }
+        var line = "Last \(lastReps) s"
+        if let lastRPE { line += " · RPE \(lastRPE.formatted())" }
+        return line
+    }
+}
+
+/// "Reps left?" for the set just ticked, as 0 / 1 / 2 / 3 / 4+ (the plan's
+/// number outlined), above the running rest. One tap logs RPE = 10 − reps
+/// left (Zourdos et al., J Strength Cond Res 2016); Skip leaves it unrated.
+private struct WatchRatingPrompt: View {
+    @Environment(WatchWorkoutModel.self) private var model
+    let set: PendingSet
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Reps left?")
+                    .font(.footnote.weight(.semibold))
+                Spacer()
+                Button("Skip") { model.skipRating() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+            }
+            WatchRepsLeftGrid(plan: set.suggestedRPE.map { min(4, max(0, 10 - $0)) }) { left in
+                model.rateSet(set, rpe: Double(10 - left))
+            }
+        }
+        .padding(8)
+        .background(WatchTheme.lifting.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

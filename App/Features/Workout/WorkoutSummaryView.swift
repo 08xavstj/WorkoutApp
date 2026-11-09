@@ -156,8 +156,22 @@ struct WorkoutSummaryView: View {
             usesBlockTargets: muscleData.usesBlock,
             sessionChange: last.map { WorkoutSummary.sessionChange(today: today, last: $0) },
             lastName: last?.name,
-            goals: goals(finished: finished, trained: Set(exercises.map(\.result.exerciseID)))
+            goals: goals(finished: finished, trained: Set(exercises.map(\.result.exerciseID))),
+            feedbackMuscles: feedbackMuscles()
         )
+    }
+
+    /// Days after a session its muscle check is still offered (app choice: next
+    /// week's set targets read last week's answers, so older ones change nothing).
+    static let feedbackDays = 3.0
+
+    /// The session's 2-4 main muscles for the muscle check (`MuscleFeedback.mainMuscles`),
+    /// for a recent session or one already answered; none otherwise.
+    private func feedbackMuscles() -> [Muscle] {
+        let recent = Date.now.timeIntervalSince(session.startedAt) < Self.feedbackDays * 86_400
+        guard !session.isActive, recent || MuscleFeedbackStore.shared.hasAnswers(for: session.startedAt) else { return [] }
+        let sets = MuscleCoverage.setsThisWeek(Self.workSets(session, library: library), weekStart: .distantPast, now: .distantFuture)
+        return MuscleFeedback.mainMuscles(sets)
     }
 
     /// This session's hard sets per muscle, and the week's count before it
@@ -268,6 +282,8 @@ struct SummaryData {
     var sessionChange: WorkoutSummary.SessionChange?
     var lastName: String?
     var goals: [SummaryGoal]
+    /// Muscles the optional muscle check asks about (`MuscleFeedbackCard`); empty hides it.
+    var feedbackMuscles: [Muscle] = []
 }
 
 struct SummaryExercise: Identifiable {
@@ -404,7 +420,8 @@ private enum SummaryFormat {
         let date = data.date.formatted(date: .abbreviated, time: .omitted)
         let total = volume(data.totals.volumeKg, unit)
         let time = duration(data.totals.duration)
-        var lines = ["\(data.title) · \(date)", "Total lifted: \(total) \(unit.rawValue)",
+        let totalLine = data.totals.volumeKg > 0 ? "Total lifted: \(total) \(unit.rawValue)" : "Total reps: \(data.totals.reps)"
+        var lines = ["\(data.title) · \(date)", totalLine,
                      "\(data.totals.workingSets) sets · \(data.totals.reps) reps · \(time)"]
         if let heart {
             let strain = whole(heart.strain)
@@ -440,6 +457,10 @@ private struct SummaryContent: View {
         }
         if !data.muscles.isEmpty {
             SummaryMusclesCard(lines: data.muscles, usesBlockTargets: data.usesBlockTargets)
+        }
+        // Pump, soreness and joint pain per main muscle, optional (`MuscleFeedbackCard`).
+        if !data.feedbackMuscles.isEmpty {
+            MuscleFeedbackCard(sessionStart: data.date, muscles: data.feedbackMuscles)
         }
         if let change = data.sessionChange, let name = data.lastName {
             SummaryLastSessionCard(change: change, name: name, unit: unit)
@@ -504,8 +525,14 @@ private struct SummaryHero: View {
 
     private var total: some View {
         VStack(alignment: .leading, spacing: 4) {
-            CardLabel(text: "Total lifted", color: Theme.liftingText)
-            MetricValueText(value: SummaryFormat.volume(data.totals.volumeKg, unit), unit: unit.rawValue, style: .hero)
+            // Bodyweight work logs no weight: its reps say more than "0 kg".
+            if data.totals.volumeKg > 0 || data.totals.reps == 0 {
+                CardLabel(text: "Total lifted", color: Theme.liftingText)
+                MetricValueText(value: SummaryFormat.volume(data.totals.volumeKg, unit), unit: unit.rawValue, style: .hero)
+            } else {
+                CardLabel(text: "Total reps", color: Theme.liftingText)
+                MetricValueText(value: "\(data.totals.reps)", unit: "reps", style: .hero)
+            }
             if let comparison = data.comparison {
                 Text(comparison)
                     .font(.footnote)

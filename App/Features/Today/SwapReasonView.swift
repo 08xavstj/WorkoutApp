@@ -5,10 +5,24 @@ import AppCore
 enum SwapOutcome: Equatable {
     /// Start the session as built.
     case start
-    /// Rebuild at this length first (the short version), then the user starts it.
-    case useMinutes(Int)
+    /// Rebuild at this length first (the short version), then the user starts
+    /// it. The answer isn't saved yet: the builder saves it when that session
+    /// starts and drops it if the builder is closed (`PendingSwap`).
+    case useMinutes(Int, answer: PendingSwap?)
     /// Open the pain log before starting.
     case openPainLog
+}
+
+/// A "Why a different workout?" answer that isn't saved yet.
+struct PendingSwap: Equatable {
+    var planned: WorkoutFocus?
+    var chosen: WorkoutFocus
+    var reason: AdaptiveWeek.Reason?
+    var soreAreas: [AdaptiveWeek.Area]
+
+    func record(in plans: WeeklyPlanStore) {
+        plans.recordSwap(planned: planned, chosen: chosen, reason: reason, soreAreas: soreAreas)
+    }
 }
 
 /// "Why a different workout?": one tap when the user picks a different
@@ -33,8 +47,13 @@ struct SwapReasonView: View {
     @Environment(WeeklyPlanStore.self) private var plans
     @State private var step: Step = .reasons
     @State private var areas: [AdaptiveWeek.Area] = []
-    /// An answer was saved (the toolbar then says Done, not Skip).
+    /// An answer was given (the toolbar then says Done, not Skip).
     @State private var recorded = false
+    /// Before starting, the answer waits here and is saved only when a session
+    /// starts or the pain log opens; the short version hands it to the builder,
+    /// which saves it on start. Backing out of the builder logs no swap for a
+    /// session that never happened.
+    @State private var pending: PendingSwap?
 
     private enum Step: Equatable {
         case reasons
@@ -52,10 +71,22 @@ struct SwapReasonView: View {
                 switch step {
                 case .reasons:
                     SwapReasonList(choose: choose)
+                    // Skip in thumb reach too, not only in the toolbar.
+                    Button {
+                        save(nil, then: .start)
+                    } label: {
+                        Text(beforeStart ? "Skip and start" : "Skip")
+                            .font(.headline)
+                            .foregroundStyle(Theme.primaryText)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(Theme.cardRaised, in: .capsule)
+                    }
+                    .buttonStyle(.plain)
                 case .soreAreas:
                     SoreAreaPicker(areas: $areas) { save(.sore, areas: areas, then: .start) }
                 case .shortOffer(let minutes):
-                    ShortVersionOffer(minutes: minutes, chosen: chosen, onDone: onDone)
+                    ShortVersionOffer(minutes: minutes, chosen: chosen,
+                                      useShort: { useShort(minutes) }, startAsBuilt: { finish(.start) })
                 }
             }
             .padding()
@@ -67,7 +98,7 @@ struct SwapReasonView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button(recorded ? "Done" : "Skip") {
-                    if !recorded { save(nil, then: .start) } else { onDone(.start) }
+                    if !recorded { save(nil, then: .start) } else { finish(.start) }
                 }
             }
         }
@@ -105,9 +136,31 @@ struct SwapReasonView: View {
     }
 
     private func save(_ reason: AdaptiveWeek.Reason?, areas: [AdaptiveWeek.Area] = [], then outcome: SwapOutcome?) {
-        plans.recordSwap(planned: planned, chosen: chosen, reason: reason, soreAreas: areas)
         recorded = true
+        if beforeStart {
+            pending = PendingSwap(planned: planned, chosen: chosen, reason: reason, soreAreas: areas)
+            if let outcome { finish(outcome) }
+            return
+        }
+        plans.recordSwap(planned: planned, chosen: chosen, reason: reason, soreAreas: areas)
         if let outcome { onDone(outcome) }
+    }
+
+    /// Goes on with the builder, saving a waiting answer first.
+    private func finish(_ outcome: SwapOutcome) {
+        if let pending {
+            pending.record(in: plans)
+            self.pending = nil
+        }
+        onDone(outcome)
+    }
+
+    /// The short version: nothing starts yet, so the answer goes to the
+    /// builder unsaved (it saves it once the short session starts).
+    private func useShort(_ minutes: Int) {
+        let answer = pending
+        pending = nil
+        onDone(.useMinutes(minutes, answer: answer))
     }
 }
 
@@ -176,7 +229,8 @@ private struct SoreAreaPicker: View {
 private struct ShortVersionOffer: View {
     let minutes: Int
     let chosen: WorkoutFocus
-    let onDone: (SwapOutcome) -> Void
+    let useShort: () -> Void
+    let startAsBuilt: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -185,7 +239,7 @@ private struct ShortVersionOffer: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
-            Button { onDone(.useMinutes(minutes)) } label: {
+            Button(action: useShort) {
                 Text("Short version · \(minutes) min")
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -193,7 +247,7 @@ private struct ShortVersionOffer: View {
                     .background(LinearGradient(colors: Theme.strainButtonColors, startPoint: .leading, endPoint: .trailing), in: .capsule)
             }
             .buttonStyle(.plain)
-            Button { onDone(.start) } label: {
+            Button(action: startAsBuilt) {
                 Text("Start \(chosen.shortTitle) as built")
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)

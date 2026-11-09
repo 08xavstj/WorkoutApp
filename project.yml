@@ -70,6 +70,10 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes:
           - workout-processing
+          - fetch
+        # The coach's check-ins refresh in the background (`CoachNudges.backgroundRefresh`).
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.lontraindustries.workoutapp.coach-refresh
         NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleURLName: com.lontraindustries.workoutapp
@@ -109,6 +113,8 @@ targets:
       - path: Widget
       - path: Shared
     dependencies:
+      # Shared/SharedStore.swift uses AppCore's MedicationSchedule (the Live Activity's doses).
+      - package: AppCore
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
       - sdk: ActivityKit.framework

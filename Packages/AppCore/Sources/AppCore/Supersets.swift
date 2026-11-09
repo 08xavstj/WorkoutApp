@@ -33,6 +33,7 @@ public enum Supersets {
         case .legExtension: ["quads"]
         case .calves: ["calves"]
         case .core: ["core"]
+        case .hipThrust: ["glutes", "hamstrings"]
         }
     }
 

@@ -50,8 +50,14 @@ nonisolated enum RestTimerStore {
     }
 
     static func start(seconds: Double) {
+        start(seconds: seconds, length: seconds)
+    }
+
+    /// A rest of `length` seconds with only `seconds` of it left (a set ticked
+    /// on the Watch that reached the phone late), so the ring shows how much has gone.
+    static func start(seconds: Double, length: Double) {
         SharedStore.defaults.set(Date.now.addingTimeInterval(seconds), forKey: endsKey)
-        SharedStore.defaults.set(seconds, forKey: lengthKey)
+        SharedStore.defaults.set(max(seconds, length), forKey: lengthKey)
     }
 
     /// +/- seconds; ends the rest if it drops to zero.

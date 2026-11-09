@@ -81,6 +81,10 @@ struct MacroSplitTests {
         let split = try #require(MacroSplit.make(calorieTarget: 2000, bodyMassKg: 70, bodyFatPercent: nil, heightCm: 170,
                                                  goals: health, sex: .female, trainingStatus: .untrained))
         #expect(split.carbsFloorGrams == 130)
+        // Protein 1.2 g/kg is the goal's own target, not a cut: no "too few calories", fat not pinned to its floor.
+        #expect(!split.tooFewCaloriesForFloors)
+        #expect(split.capNote == nil)
+        #expect(split.fatGrams > split.fatFloorGrams)
         #expect(!MacroSplit.isLifting(goals: health, trainingStatus: .advanced))
         #expect(MacroSplit.isLifting(goals: nil, trainingStatus: .novice))
         #expect(!MacroSplit.isLifting(goals: nil, trainingStatus: .untrained))

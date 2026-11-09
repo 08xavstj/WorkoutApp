@@ -14,10 +14,20 @@ import AppCore
 final class WatchSync: NSObject {
     static let shared = WatchSync()
 
-    /// The session id the Watch is running an HKWorkoutSession for.
-    private(set) var recordingSessionID: String? {
-        didSet { if oldValue != recordingSessionID { updateRestAlertPolicy() } }
+    /// The session id the Watch is running an HKWorkoutSession for. Kept across
+    /// relaunches, so a phone restarted mid-workout still knows the Watch's
+    /// workout is the Health record and doesn't save a second one.
+    private(set) var recordingSessionID: String? = UserDefaults.standard.string(forKey: WatchSync.recordingKey) {
+        didSet {
+            guard oldValue != recordingSessionID else { return }
+            UserDefaults.standard.set(recordingSessionID, forKey: Self.recordingKey)
+            updateRestAlertPolicy()
+        }
     }
+    private static let recordingKey = "watchRecordingSessionID"
+    /// The newest Watch tick applied, by when the Watch sent it: an older one
+    /// arriving later (queued) doesn't restart the rest.
+    @ObservationIgnored private var lastTickSentAt = Date.distantPast
     /// Sessions finished on the phone whose Watch recording hasn't confirmed it
     /// stopped yet: the stop is sent again whenever the Watch reconnects.
     private var pendingStops: Set<String> = []
@@ -54,6 +64,8 @@ final class WatchSync: NSObject {
         self.launcher = launcher
         self.health = health
         if let plans { self.plans = plans }
+        // A remembered recording whose session is gone or finished is stale.
+        if let id = recordingSessionID, activeSession(matching: id) == nil { recordingSessionID = nil }
         guard connection == nil, WCSession.isSupported() else { return }
         let session = WCSession.default
         session.delegate = self
@@ -208,8 +220,8 @@ final class WatchSync: NSObject {
             }
         let target = metrics.targetStrain
         updateFace(WatchFaceData(
-            recovery: metrics.recovery?.score,
-            band: metrics.recovery?.status.rawValue,
+            recovery: metrics.recoveryIsFromYesterday ? nil : metrics.recovery?.score,
+            band: metrics.recoveryIsFromYesterday ? nil : metrics.recovery?.status.rawValue,
             calibrating: metrics.recovery.map { !$0.isCalibrated } ?? false,
             strain: metrics.strain?.strain,
             targetLower: target?.lowerBound,
@@ -251,6 +263,13 @@ final class WatchSync: NSObject {
 
     private func makeSnapshot(_ session: WorkoutSession, finished: Bool) -> WatchSession {
         let profile = gym?.profile ?? .commercialKilograms
+        // The gym this workout is at (once; also done by the phone's workout screen).
+        // Deferred: this runs from view updates (`onChange` in the workout screen),
+        // where writing the gym store's observed state would modify state mid-update.
+        if !finished, let gym, gym.gymName(forSessionStartedAt: session.startedAt) == nil {
+            let start = session.startedAt
+            Task { @MainActor in gym.recordSession(startedAt: start) }
+        }
         let groups = SupersetRegistry.groups(for: session.startedAt)
         let ordered = session.orderedExercises
         var exercises: [WatchSession.ExerciseSnapshot] = []
@@ -271,13 +290,20 @@ final class WatchSync: NSObject {
                     watchSets[index].targetRIR = rir
                 }
             }
+            let loadKind = ExerciseCatalog.exercise(id: exercise.exerciseID)?.load
             exercises.append(WatchSession.ExerciseSnapshot(
                 id: exercise.order,
                 name: exercise.name,
                 supersetLabel: SupersetRegistry.label(order: exercise.order, groups: groups),
                 sets: watchSets,
                 achievableLoadsKg: loads(for: exercise.exerciseID, around: planned, profile: profile),
-                repCounting: repCounting && RepDetection.supports(exerciseID: exercise.exerciseID)
+                repCounting: repCounting && RepDetection.supports(exerciseID: exercise.exerciseID),
+                // Stable across a reorder, gone after a removal (`LiveSessionStore`).
+                key: LiveSessionStore.exerciseKey(order: exercise.order, for: session.startedAt),
+                isHold: LiveSetCoach.isHold(exercise.exerciseID) ? true : nil,
+                perHand: Prescription.isPerHand(loadKind) ? true : nil,
+                // "Seat 4 · Pin 7" at this gym (`MachineNote`).
+                machineNote: gym?.machineNote(for: exercise.exerciseID)?.shortLine
             ))
         }
         var snapshot = WatchSession(
@@ -296,6 +322,10 @@ final class WatchSync: NSObject {
         )
         // Settings › Rest timer alerts: whether the wrist buzzes when rest ends.
         snapshot.restBuzz = RestAlertPolicy.watchBuzzes
+        // The running rest's own length, for the wrist's rest bar (not the next exercise's rest).
+        if !finished, RestTimerStore.endsAt != nil {
+            snapshot.restLengthSeconds = Int(RestTimerStore.length.rounded())
+        }
         // The next set, with the superset partner up once the first half is a
         // round ahead (no rest between the halves, as `startRest` does).
         if let current = snapshot.upNext() {
@@ -336,22 +366,16 @@ final class WatchSync: NSObject {
         return window.map { profile.unit.toKilograms($0) }
     }
 
-    /// The next set, for the Live Activity ("Bench Press", "Set 3 of 4 · 135 lb × 8").
-    private func nextSetText(_ session: WorkoutSession) -> (exercise: String, detail: String) {
-        let unit = gym?.profile.unit ?? .kg
-        for exercise in session.orderedExercises {
-            let sets = exercise.orderedSets
-            guard let index = sets.firstIndex(where: { !$0.isCompleted }) else { continue }
-            let set = sets[index]
-            // "Set 2 of 3", "Warm-up 1 of 3", "Drop 1 of 2" (`SetStructure`).
-            var detail = LiveSetCoach.title(for: set, in: sets)
-            if set.weightKg > 0 || set.reps > 0 {
-                let weight = unit.fromKilograms(set.weightKg).formatted(.number.precision(.fractionLength(0...1)))
-                detail += " · \(weight) \(unit.rawValue) × \(set.reps)"
-            }
-            return (exercise.name, detail)
+    /// The next set, for the Live Activity ("Bench Press", "Set 3 of 4 · 135 lb × 8"):
+    /// the superset partner's, else the exercise just ticked if it has a set left
+    /// (exercises done out of order), else the first open one.
+    private func nextSetText(_ session: WorkoutSession, after ticked: ExerciseLog? = nil) -> (exercise: String, detail: String) {
+        let unit = gym?.liftingUnit ?? .kilograms
+        let groups = SupersetRegistry.groups(for: session.startedAt)
+        guard let next = LiveSetCoach.nextOpenSet(in: session, after: ticked, groups: groups) else {
+            return ("All sets done", "Tap Finish when you're ready")
         }
-        return ("All sets done", "Tap Finish when you're ready")
+        return (next.exercise.name, LiveSetCoach.nextSetDetail(next.set, in: next.exercise, unit: unit))
     }
 
     // MARK: Watch → Phone
@@ -371,19 +395,30 @@ final class WatchSync: NSObject {
         }
         guard let session = activeSession(matching: message.sessionID) else { return }
         switch message.command {
-        case let .completeSet(exerciseIndex, setIndex, reps, weightKg, rpe, exerciseOrder, setOrder, repsEdited, weightEdited):
+        case let .completeSet(exerciseIndex, setIndex, reps, weightKg, rpe, exerciseOrder, setOrder, repsEdited, weightEdited,
+                              exerciseKey, baseReps, baseWeightKg):
             guard let (exercise, set) = Self.target(in: session, exerciseIndex: exerciseIndex, setIndex: setIndex,
-                                                    exerciseOrder: exerciseOrder, setOrder: setOrder) else { return }
+                                                    exerciseOrder: exerciseOrder, setOrder: setOrder,
+                                                    exerciseKey: exerciseKey) else { return }
             // Idempotent: a command delivered twice (queued, then live) ticks the set once,
             // and never rewrites a set that's already logged.
             guard !set.isCompleted else { return }
             // Only what the wrist changed: an untouched value may be stale (edited on the
-            // phone since the Watch's snapshot). Older Watches send no flags: as before,
-            // anything above zero. An explicit 0 reps (a failed set) is kept.
-            if repsEdited ?? (reps > 0) { set.reps = max(0, reps) }
-            if weightEdited ?? (weightKg > 0) { set.weightKg = max(0, weightKg) }
+            // phone since the Watch's snapshot), unless the phone's value moved only through a
+            // set-by-set change an earlier queued tick made, which the wrist never showed: then
+            // what was lifted is the Watch's (`LiveWorkoutRules.tickedValue`). Older Watches
+            // send no flags: as before, anything above zero. An explicit 0 reps (a failed set) is kept.
+            let changed = AutoregulationLog.entry(for: session.startedAt, order: exercise.order)?
+                .restore?.first { $0.setOrder == set.order }
+            set.reps = Int(LiveWorkoutRules.tickedValue(
+                phone: Double(set.reps), watch: Double(reps), watchBase: baseReps.map { Double($0) },
+                edited: repsEdited, autoregulatedFrom: changed.map { Double($0.reps) }).rounded())
+            set.weightKg = LiveWorkoutRules.tickedValue(
+                phone: set.weightKg, watch: weightKg, watchBase: baseWeightKg,
+                edited: weightEdited, autoregulatedFrom: changed?.weightKg)
             if let rpe { set.rpe = rpe }
-            set.completedAt = .now
+            // When it was done on the wrist, not when the phone heard (a queued tick can be minutes late).
+            set.completedAt = LiveWorkoutRules.completedAt(sentAt: message.sentAt, sessionStart: session.startedAt, now: .now)
             try? context.save()
             if !set.isWarmup, let profile = gym?.profile {
                 LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: session.startedAt, gym: profile,
@@ -391,12 +426,30 @@ final class WatchSync: NSObject {
                 try? context.save()
             }
             noteRecords(for: exercise, in: session)
-            if set.isWarmup {
-                // Short rest after a ramp set, as on the phone (`RestTimer.warmUpRestSeconds`).
-                RestTimerStore.start(seconds: Double(RestTimer.warmUpRestSeconds))
-                Task { await WorkoutLiveActivity.refresh() }
-            } else {
-                startRest(after: exercise, in: session)
+            // Rest only for the newest tick, and only what's left of it.
+            if message.sentAt >= lastTickSentAt {
+                lastTickSentAt = message.sentAt
+                if set.isWarmup {
+                    // Short rest after a ramp set, as on the phone (`RestTimer.warmUpRestSeconds`).
+                    startRest(seconds: RestTimer.warmUpRestSeconds, sentAt: message.sentAt)
+                    let next = nextSetText(session, after: exercise)
+                    Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
+                } else {
+                    startRest(after: exercise, in: session, sentAt: message.sentAt)
+                }
+            }
+        case let .rateSet(exerciseIndex, setIndex, rpe, exerciseOrder, setOrder, exerciseKey):
+            // The effort for a set already ticked on the wrist (asked after the tick).
+            guard let (exercise, set) = Self.target(in: session, exerciseIndex: exerciseIndex, setIndex: setIndex,
+                                                    exerciseOrder: exerciseOrder, setOrder: setOrder,
+                                                    exerciseKey: exerciseKey),
+                  set.isCompleted, !set.isWarmup else { return }
+            set.rpe = max(1, min(10, rpe))
+            try? context.save()
+            if let profile = gym?.profile {
+                LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: session.startedAt, gym: profile,
+                                          blockRIR: plans?.blockWeek?.targetRIR)
+                try? context.save()
             }
         case .skipRest:
             RestTimerStore.stop()
@@ -421,6 +474,8 @@ final class WatchSync: NSObject {
             WarmUpStore.shared.finish(for: session.startedAt)
         case let .finish(sessionRPE):
             if let sessionRPE { session.sessionRPE = max(1, min(10, sessionRPE)) }
+            // The workout ended when the wrist said so, even if the phone hears much later.
+            LiveSessionStore.update(for: session.startedAt) { $0.watchFinishedAt = message.sentAt }
             try? context.save()
             if let launcher {
                 if launcher.activeSession?.persistentModelID != session.persistentModelID {
@@ -439,10 +494,16 @@ final class WatchSync: NSObject {
     /// added or removed on the phone still ticks the right one; by position from
     /// older Watches. An id that no longer exists (deleted) matches nothing.
     private static func target(in session: WorkoutSession, exerciseIndex: Int, setIndex: Int,
-                               exerciseOrder: Int?, setOrder: Int?) -> (ExerciseLog, SetLog)? {
+                               exerciseOrder: Int?, setOrder: Int?, exerciseKey: String? = nil) -> (ExerciseLog, SetLog)? {
         let exercises = session.orderedExercises
         let exercise: ExerciseLog
-        if let exerciseOrder {
+        if let exerciseKey {
+            // The stable id (`LiveSessionStore.exerciseKey`): survives a reorder; an exercise
+            // removed or swapped since has none, and the tick lands nowhere.
+            guard let order = LiveSessionStore.order(forExerciseKey: exerciseKey, sessionStart: session.startedAt),
+                  let found = exercises.first(where: { $0.order == order }) else { return nil }
+            exercise = found
+        } else if let exerciseOrder {
             // Orders can repeat after a delete and an add: prefer the one at the sent position.
             if exerciseIndex < exercises.count, exercises[exerciseIndex].order == exerciseOrder {
                 exercise = exercises[exerciseIndex]
@@ -485,30 +546,36 @@ final class WatchSync: NSObject {
     /// short rest (none for a drop) when a drop stage or mini-set is next
     /// (`SetKind`), none between the two halves of a superset (`Supersets`),
     /// else the exercise's rest preference.
-    private func startRest(after exercise: ExerciseLog, in session: WorkoutSession) {
+    private func startRest(after exercise: ExerciseLog, in session: WorkoutSession, sentAt: Date) {
+        let next = nextSetText(session, after: exercise)
+        defer { Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) } }
         if let seconds = LiveSetCoach.stageRest(before: exercise) {
             if seconds > 0 {
-                RestTimerStore.start(seconds: Double(seconds))
+                startRest(seconds: seconds, sentAt: sentAt)
             } else {
                 RestTimerStore.stop()
             }
-            let next = nextSetText(session)
-            Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
             return
         }
         let groups = SupersetRegistry.groups(for: session.startedAt)
         if let mateOrder = SupersetRegistry.partner(of: exercise.order, groups: groups), mateOrder > exercise.order,
            let mate = session.exercises.first(where: { $0.order == mateOrder }),
            mate.sets.contains(where: { !$0.isCompleted }) {
-            let next = nextSetText(session)
-            Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
             return
         }
         let seconds = RestPreferences.resolved(for: exercise.exerciseID, style: gym?.style ?? .balanced,
                                                sessionStart: session.startedAt, order: exercise.order)
-        RestTimerStore.start(seconds: Double(seconds))
-        let next = nextSetText(session)
-        Task { await WorkoutLiveActivity.refresh(exercise: next.exercise, detail: next.detail) }
+        startRest(seconds: seconds, sentAt: sentAt)
+    }
+
+    /// The rest still left of `seconds` after a tick sent at `sentAt` (a queued
+    /// tick arrives late); none once it would already have run out.
+    private func startRest(seconds: Int, sentAt: Date) {
+        if let left = LiveWorkoutRules.remainingRest(seconds: Double(seconds), sentAt: sentAt, now: .now) {
+            RestTimerStore.start(seconds: left, length: Double(seconds))
+        } else {
+            RestTimerStore.stop()
+        }
     }
 
     /// Stores the Watch's workout on the session it belongs to. With no matching
@@ -535,6 +602,10 @@ final class WatchSync: NSObject {
             session.savedToHealth = true
         }
         if session.sessionRPE == nil, let rpe = summary.sessionRPE { session.sessionRPE = max(1, min(10, rpe)) }
+        // Still open on the phone: the Watch's end is when the workout ended (`FinishWorkoutSheet`).
+        if session.isActive, LiveSessionStore.entry(for: session.startedAt).watchFinishedAt == nil {
+            LiveSessionStore.update(for: session.startedAt) { $0.watchFinishedAt = summary.end }
+        }
         try? context.save()
         // A session already finished on the phone skipped its effort score while the Watch
         // was still recording; write it now, over the session's time (`HealthKitClient+Writes`).

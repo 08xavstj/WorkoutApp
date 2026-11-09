@@ -469,20 +469,33 @@ public enum RecoveryTiming {
     public static let minimumAsleepHours = 3.0
     public static let untrackedHour = 4
     public static let trackedFallbackHour = 12
+    /// Someone who usually wakes late (day sleepers after a night shift) waits
+    /// until 2 h after their usual wake, at most until 8 pm. App choices: the
+    /// scores are tuned for one main sleep a day, whenever it falls.
+    public static let lateWakeGraceHours = 2
+    public static let latestFallbackHour = 20
 
     /// - Parameters:
     ///   - wake: the end of tonight's main sleep, if recorded.
     ///   - asleepHours: hours asleep in that sleep.
     ///   - tracksSleep: sleep was recorded on any of the last 7 nights.
+    ///   - usualWakeMinutes: your usual wake time, minutes after midnight
+    ///     (`BedtimeWindow.usualWakeMinutes`); a late one moves the noon fallback later.
     public static func nightIsOver(now: Date, wake: Date?, asleepHours: Double?, tracksSleep: Bool,
-                                   calendar: Calendar = .current) -> Bool {
+                                   usualWakeMinutes: Int? = nil, calendar: Calendar = .current) -> Bool {
         let midnight = calendar.startOfDay(for: now)
         if let wake, wake >= midnight, wake <= now.addingTimeInterval(60) {
             let wakeHour = calendar.component(.hour, from: wake)
             if wakeHour >= earliestWakeHour || (asleepHours ?? 0) >= minimumAsleepHours { return true }
         }
         let hour = calendar.component(.hour, from: now)
-        return hour >= (tracksSleep ? trackedFallbackHour : untrackedHour)
+        return hour >= (tracksSleep ? fallbackHour(usualWakeMinutes: usualWakeMinutes) : untrackedHour)
+    }
+
+    /// Noon, or 2 h after a late usual wake (at most 8 pm).
+    public static func fallbackHour(usualWakeMinutes: Int?) -> Int {
+        guard let usualWakeMinutes else { return trackedFallbackHour }
+        return min(latestFallbackHour, max(trackedFallbackHour, usualWakeMinutes / 60 + lateWakeGraceHours))
     }
 }
 

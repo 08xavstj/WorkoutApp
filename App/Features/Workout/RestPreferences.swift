@@ -29,8 +29,7 @@ enum RestPreferences {
         // The plan's own rest (the abs finisher's short circuit rest, `AbsFinisher.restSeconds`).
         if let planned, planned > 0 { return planned }
         if global > 0 { return global }
-        let compound = ExerciseCatalog.slot(for: exerciseID)?.isCompound ?? false
-        return RestTimer.defaultSeconds(style: style, compound: compound)
+        return RestTimer.defaultSeconds(style: style, exerciseID: exerciseID)
     }
 
     /// The rest after a set of the exercise at `order` in a live session:

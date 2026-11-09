@@ -44,6 +44,7 @@ struct ThisWeekCard: View {
         let done = queue?.doneWeekdays ?? store.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
         VStack(alignment: .leading, spacing: 14) {
             header(consistency)
+            TravelGymChip() // only while a travel gym is active
             if let plan, plan.isFlexible {
                 FlexibleWeekRow(plan: plan, sessions: sessions)
                 FlexibleNextSlot(sessions: sessions)

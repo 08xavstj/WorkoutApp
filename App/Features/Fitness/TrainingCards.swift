@@ -547,7 +547,9 @@ struct CardioFitnessCard: View {
     private func normsLine(_ result: CardioFitness.Result) -> some View {
         let noun = settings.sex == .male ? "man" : "woman"
         let median = result.median.formatted(.number.precision(.fractionLength(0)))
-        return Text("You're at \(Int(result.percentOfMedian.rounded()))% of the typical \(noun) your age (\(median)).")
+        // Says so while sex or age are stand-ins (`UserSettings.normsStandInNote`).
+        let standIn = settings.normsStandInNote.map { " " + $0 } ?? ""
+        return Text("You're at \(Int(result.percentOfMedian.rounded()))% of the typical \(noun) your age (\(median)).\(standIn)")
             .font(.subheadline)
             .foregroundStyle(Theme.primaryText)
             .fixedSize(horizontal: false, vertical: true)
@@ -558,7 +560,7 @@ struct CardioFitnessCard: View {
     private func fitnessAgeLine(_ result: CardioFitness.Result) -> some View {
         let age = CardioFitness.fitnessAge(vo2Max: result.latest, age: settings.age, sex: settings.sex)
         let spread = CardioFitness.watchUncertaintyYears
-        return Text("Fitness age about \(age) (\(max(18, age - spread))–\(age + spread)): the age whose typical VO₂ max matches yours, estimated from this one measure (FRIEND; Nes 2011). Your age: \(settings.age).")
+        return Text("Fitness age about \(age) (\(max(18, age - spread))–\(age + spread)): the age whose typical VO₂ max matches yours, estimated from this one measure (FRIEND; Nes 2011). Your age: \(settings.ageText).")
             .font(.subheadline)
             .foregroundStyle(Theme.primaryText)
             .fixedSize(horizontal: false, vertical: true)
@@ -825,7 +827,8 @@ private struct VO2EstimateSource {
     private var restingHeartRate: Double? {
         let recent = (vitals.stat("rhr")?.series ?? []).suffix(7).map(\.value)
         if !recent.isEmpty { return recent.reduce(0, +) / Double(recent.count) }
-        return metrics.restingHeartRate
+        // Today's value only when it is Apple Health's awake one, not sleeping heart rate.
+        return metrics.restingHeartRateSource == .healthKit ? metrics.restingHeartRate : nil
     }
 
     var heartEstimate: (result: VO2MaxEstimate.Result, detail: String)? {

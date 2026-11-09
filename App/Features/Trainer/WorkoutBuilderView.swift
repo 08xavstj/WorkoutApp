@@ -38,6 +38,8 @@ struct WorkoutBuilderView: View {
     @State private var finisherLength: AbsFinisher.Length = .five
     /// The finisher's exercises, worked out with the plan.
     @State private var finisher: AbsFinisher.Plan?
+    /// True after "Use the short version" in the swap prompt: no abs finisher then.
+    @State private var usingShortVersion = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     // Pain and "never again" (`PainGuard`, `ExerciseFilter`).
     @Environment(\.healthClient) private var health
@@ -49,6 +51,9 @@ struct WorkoutBuilderView: View {
     /// "Why a different workout?" before starting a focus other than the week's next session.
     @State private var askingWhy = false
     @State private var swapSuggested: WorkoutFocus?
+    /// The answer given with "Short version": saved when that session starts,
+    /// dropped if the builder closes or the focus changes.
+    @State private var pendingSwap: PendingSwap?
     /// Current pain and areas hurting 2+ weeks, worked out in `rebuild` (not on every redraw).
     @State private var activePains: [PainReport] = []
     @State private var clinicianAreas: [PainArea] = []
@@ -64,6 +69,8 @@ struct WorkoutBuilderView: View {
                     if !gym.isConfigured {
                         gymPrompt
                     }
+                    // Which gym you're at; switching re-plans with its equipment (`GymSwitcherMenu`).
+                    GymSwitcherMenu()
                     if medications.has(.tendonCaution) {
                         Label("A medication you take raises tendon injury risk. Skip jumps and sprints, and don't add weight in big jumps.", systemImage: "exclamationmark.triangle.fill")
                             .font(.subheadline)
@@ -79,13 +86,11 @@ struct WorkoutBuilderView: View {
                     .accessibilityIdentifier("builder-pain")
                     // Abs on top of the time (`AbsFinisher`); kept after the pain row so that row stays put.
                     finisherPicker
+                    // Optional 5-rep maxes: first-time weights start from them (`LoadEstimator`).
+                    KnowYourNumbersRow(unit: gym.profile.unit) { rebuild() }
                     if let plan {
                         if plan.exercises.isEmpty {
-                            ContentUnavailableView(
-                                "Nothing fits this focus",
-                                systemImage: "dumbbell",
-                                description: Text("No exercises match this focus with your equipment. Pick another focus, or add equipment under Gym (top right).")
-                            )
+                            nothingFits(plan)
                         } else {
                             summaryCard(plan)
                             timeSaverSection
@@ -128,7 +133,10 @@ struct WorkoutBuilderView: View {
             .safeAreaInset(edge: .bottom) {
                 Button {
                     guard let plan else { return }
-                    if let suggested = plans.swapPrompt(chosen: plan.focus, sessions: sessions, extra: metrics.recentTrainingDays,
+                    if let pendingSwap {
+                        pendingSwap.record(in: plans)
+                        self.pendingSwap = nil
+                    } else if let suggested = plans.swapPrompt(chosen: plan.focus, sessions: sessions, extra: metrics.recentTrainingDays,
                                                         checkIns: checkIns, muscles: muscles) {
                         swapSuggested = suggested
                         askingWhy = true
@@ -181,7 +189,10 @@ struct WorkoutBuilderView: View {
                         launcher.start(AbsFinisher.appending(finisher, to: plan), in: modelContext)
                         dismiss()
                     }
-                case .useMinutes(let short):
+                case .useMinutes(let short, let answer):
+                    pendingSwap = answer
+                    // The plan's short version skips the abs finisher (`AbsFinisher.length`).
+                    usingShortVersion = true
                     minutes = short
                 case .openPainLog:
                     showingPainLog = true
@@ -200,9 +211,14 @@ struct WorkoutBuilderView: View {
                 finisherLength = settings.absFinisher
                 rebuild()
             }
-            .onChange(of: focus) { rebuild() }
+            .onChange(of: focus) {
+                pendingSwap = nil
+                rebuild()
+            }
+            .onChange(of: gym.activeGymID) { rebuild() }
             .onChange(of: minutes) { rebuild() }
             .onChange(of: finisherLength) { rebuild() }
+            .onChange(of: usingShortVersion) { rebuild() }
             .onChange(of: useTimeSaver) { applyTimeSaver() }
             .onChange(of: timeSaverKind) { applyTimeSaver() }
             .onChange(of: settings.warmUpTier(for: resolvedFocus)) { rebuild() }
@@ -249,20 +265,44 @@ struct WorkoutBuilderView: View {
         // recovery still lowers the effort on a low day (`TrainingBlock`, `WorkoutPlanner.targetRPE`).
         plans.trainingStyle = gym.style
         let block = plans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
-        // Body weight, sex and training status give first-time lifts a starting weight (`LoadEstimator`);
-        // the warm-up tier's minutes count toward the time.
-        basePlan = gym.planner.plan(focus: resolvedFocus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history, block: block,
-                                focusReason: focus == nil ? autoReason : nil,
-                                prioritySlots: coverage?.prioritySlots ?? [],
-                                bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,
-                                trainingStatus: metrics.trainingStatus ?? .novice,
-                                warmUpMinutes: warmUpMinutes,
-                                exerciseFilter: exerciseFilter.isEmpty ? nil : exerciseFilter,
-                                muscleSetGoals: plans.sessionSetGoals(focus: resolvedFocus, minutes: minutes, muscles: muscles,
-                                                                      sessions: sessions, extra: metrics.recentTrainingDays),
-                                // With the abs finisher on, it covers the core (no abs twice).
-                                includeCore: finisherLength == .off)
+        // Body weight, sex, training status, age and any numbers you gave start first-time lifts
+        // (`LoadEstimator`); the warm-up tier's minutes count toward the time. The coach asks the same way.
+        basePlan = planRequest(block: block).plan(gym: gym, plans: plans, muscles: muscles, metrics: metrics,
+                                                  settings: settings, sessions: sessions, history: history)
         applyTimeSaver()
+    }
+
+    /// What the plan is built from, shared with the coach (`TrainerPlanRequest`).
+    private func planRequest(block: TrainingBlock.WeekState?) -> TrainerPlanRequest {
+        TrainerPlanRequest(focus: resolvedFocus, minutes: minutes, focusReason: focus == nil ? autoReason : nil,
+                           prioritySlots: coverage?.prioritySlots ?? [], block: block, finisherLength: finisherLength,
+                           isShortVersion: usingShortVersion, exerciseFilter: exerciseFilter, warmUpMinutes: warmUpMinutes)
+    }
+
+    /// No exercises: why (pain or never-again, else the equipment; `PlannedWorkout.lengthNote`),
+    /// and a focus that does fit.
+    @ViewBuilder
+    private func nothingFits(_ plan: PlannedWorkout) -> some View {
+        let reason = plan.lengthNote ?? "No exercises match this focus with your equipment."
+        ContentUnavailableView {
+            Label("Nothing fits this focus", systemImage: "dumbbell")
+        } description: {
+            Text(reason)
+        } actions: {
+            if let other = fittingFocus(besides: plan.focus) {
+                Button("Try \(other.shortTitle.lowercased())") { focus = other }
+                    .buttonStyle(.borderedProminent)
+            }
+            Button("Gym equipment") { showingGym = true }
+        }
+    }
+
+    /// The first other focus with something the gym and the pain filter allow.
+    private func fittingFocus(besides current: WorkoutFocus) -> WorkoutFocus? {
+        let planner = self.planner
+        return WorkoutFocus.allCases.first { candidate in
+            candidate != current && candidate.slots.contains { $0 != .core && !planner.alternatives(for: $0).isEmpty }
+        }
     }
 
     // MARK: Time-saving sets
@@ -295,26 +335,16 @@ struct WorkoutBuilderView: View {
 
     // MARK: Abs finisher
 
-    /// Exercises from this many days back count as recent, so the finisher
-    /// rotates its moves across about a week of sessions (app choice).
-    private static let finisherRotationDays = 10
-
     /// The finisher for `plan`: moves the gym and the pain filter allow, none
-    /// already in the plan, rotating away from recent ones (`AbsFinisher.make`).
+    /// already in the plan, rotating away from recent ones; none for sessions
+    /// of 20 min or less (`TrainerPlanRequest.finisher`, `AbsFinisher.length`).
     private func refreshFinisher() {
-        guard let plan, !plan.exercises.isEmpty, finisherLength != .off else {
+        guard let plan else {
             finisher = nil
             return
         }
-        finisher = AbsFinisher.make(
-            length: finisherLength,
-            planner: planner,
-            history: LiftHistory.make(from: sessions, unit: gym.profile.unit),
-            recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions, days: Self.finisherRotationDays),
-            excluding: Set(plan.exercises.map(\.exerciseID)),
-            sessionRPE: plan.targetRPE,
-            firstGroup: AbsFinisher.nextGroup(after: plan.exercises)
-        )
+        finisher = planRequest(block: plan.blockWeek).finisher(for: plan, gym: gym, sessions: sessions,
+                                                               history: LiftHistory.make(from: sessions, unit: gym.profile.unit))
     }
 
     /// Off / 5 / 10 minutes of abs on top of the session's time.
@@ -338,6 +368,10 @@ struct WorkoutBuilderView: View {
 
     private var finisherCaption: String {
         if finisherLength == .off { return "No ab block. Pull, lower and full-body days keep one core exercise." }
+        if AbsFinisher.length(finisherLength, sessionMinutes: minutes, isShortVersion: usingShortVersion) == .off {
+            if usingShortVersion { return "Skipped in the short version." }
+            return "Skipped for sessions of \(AbsFinisher.shortSessionMinutes) min or less, so it doesn't add a third to the time."
+        }
         return "Added on top of the time: \(minutes) + \(finisherLength.minutes) min, paired ab moves that rotate each session."
     }
 
@@ -403,16 +437,18 @@ struct WorkoutBuilderView: View {
         let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
         // Same starting-weight estimate as the plan (`LoadEstimator`) for a lift with no history.
         let lifter = LoadEstimator.Lifter(bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,
-                                          status: metrics.trainingStatus ?? .novice)
+                                          status: metrics.trainingStatus ?? .novice,
+                                          age: settings.ageIsSet ? settings.age : nil,
+                                          anchorOneRepMaxKg: LiftAnchorsStore.shared.anchors)
         var replacement = planner.prescribe(next, slot: slot, minutes: minutes, sessionRPE: current.targetRPE,
-                                            history: history, lifter: lifter)
-        // A lighter load on a lift that loads a 3-5/10 area (`PainGuard`).
-        exerciseFilter.capLoad(&replacement, slot: slot, gym: gym.profile)
+                                            history: history, lifter: lifter, position: index)
+        // A lighter load on a lift that loads a 3-5/10 area (`PainGuard`), against your best before the pain.
+        exerciseFilter.capLoad(&replacement, slot: slot, gym: gym.profile, history: history[next.id])
         // Keep the fitted set count and any superset pairing; redo the warm-up ramp for the new lift.
         replacement.sets = current.exercises[index].sets
         replacement.supersetGroup = current.exercises[index].supersetGroup
         current.exercises[index] = replacement
-        gym.planner.addWarmUps(&current.exercises)
+        gym.planner.addWarmUps(&current.exercises, minutes: minutes)
         current.estimatedMinutes = WorkoutPlanner.estimatedMinutes(current.exercises, style: gym.style, warmUpMinutes: warmUpMinutes)
         // Swaps change the plan before time-saving sets, which are then redone (`TimeSaver`).
         basePlan = current
@@ -561,7 +597,10 @@ struct WorkoutBuilderView: View {
             LazyVGrid(columns: chipColumns(durations.count), spacing: 8) {
                 ForEach(durations, id: \.self) { value in
                     SelectChip(title: "\(value)", isSelected: minutes == value, fillsWidth: true,
-                               spokenTitle: "\(value) minutes") { minutes = value }
+                               spokenTitle: "\(value) minutes") {
+                        usingShortVersion = false
+                        minutes = value
+                    }
                 }
             }
             if minutes < 30 {
@@ -923,6 +962,13 @@ struct PlannedExerciseRow: View {
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
                         .foregroundStyle(Theme.primaryText)
+                }
+                // A rep range or swap applied from the last block's report (`NextBlockStore`).
+                if let adjustment = exercise.adjustmentNote {
+                    Label(adjustment, systemImage: "square.stack.3d.up")
+                        .font(.caption)
+                        .foregroundStyle(Theme.liftingText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

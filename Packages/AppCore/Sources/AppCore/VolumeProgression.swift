@@ -1,7 +1,8 @@
 import Foundation
 
 /// Hard sets per muscle per week, moved through a training block by how last
-/// week went, not by pump or soreness.
+/// week went: performance and recovery first; your pump and soreness answers
+/// (`MuscleFeedback`) only adjust that, and the UI says the evidence is weak.
 ///
 /// - **The band.** About 10-20 hard sets a muscle a week builds the most muscle
 ///   for most people (Schoenfeld, Ogborn & Krieger, J Sports Sci 2017; ACSM
@@ -27,6 +28,16 @@ import Foundation
 ///   "Is the pump a signal for hypertrophy?", Human Kinetics), and soreness
 ///   tracks damage, not growth (Schoenfeld & Contreras 2013, summarised by the
 ///   Canadian Kinesiology Alliance; Nosaka et al. 2002).
+/// - **Your answers, second.** The optional per-muscle answers after a session
+///   (`MuscleFeedback`: pump, soreness from last time, joint pain) only adjust
+///   that rule, RP-style practice rather than evidence: still sore or joint
+///   pain holds the muscle (one set fewer when it happens at two sessions in
+///   the week); "recovered" with a low or OK pump allows one set (not the
+///   usual step) when only the recovery model was holding it. App choices,
+///   labelled so in the UI.
+/// - **The block report.** Changes applied from the last block's report
+///   (`NextBlockAdjustments`) add or take sets once (`Adjustment.offsets`)
+///   and can cap a muscle at the last block's highest week ("same volume").
 /// - **Effort.** People misjudge reps in reserve by about a rep (Halperin I et
 ///   al., Sports Med 2022, scoping review and meta-analysis), so a set counts
 ///   as "at the target" up to half an RPE point over it; the app's choice.
@@ -65,10 +76,21 @@ public enum VolumeProgression {
     public static let hardSetRPE = 7.0
     public static let easySetCredit = 0.6
 
+    /// The RPE from which a set counts as hard in a week with this effort
+    /// target: `hardSetRPE`, or one point under the target when that's
+    /// lower. Reps in reserve are misjudged by about a rep (Halperin et al.,
+    /// Sports Med 2022), so a set one point easier than a 3-in-reserve week's
+    /// target is on plan, not easy; counting it at 0.6 held weekly volume
+    /// for weeks (audit 2026-11 §2, sim bug 3). App choice.
+    public static func hardLine(targetRPE: Double) -> Double {
+        guard targetRPE.isFinite else { return hardSetRPE }
+        return min(hardSetRPE, targetRPE - 1)
+    }
+
     /// The top of the ramp for a goal's training style.
     public static func ceiling(style: TrainingStyle) -> Int {
         switch style {
-        case .muscle: maximumWeeklySets
+        case .muscle, .strengthAndMuscle: maximumWeeklySets
         case .strength, .balanced: 16
         case .endurance: startingSets
         }
@@ -147,7 +169,7 @@ public enum VolumeProgression {
         let offset: Double = switch style {
         case .balanced: 1
         case .strength: 0.5
-        case .muscle: 1.5
+        case .muscle, .strengthAndMuscle: 1.5
         case .endurance: 0.5
         }
         return min(10, targetRPE + (compound ? 0 : offset) + effortTolerance)
@@ -175,7 +197,7 @@ public enum VolumeProgression {
                 for muscle in set.primary { result[muscle]?.allCompleted = false }
                 continue
             }
-            let effort = (set.rpe ?? hardSetRPE) >= hardSetRPE ? 1.0 : easySetCredit
+            let effort = (set.rpe ?? hardSetRPE) >= hardLine(targetRPE: targetRPE) - 0.001 ? 1.0 : easySetCredit
             var weights: [Muscle: Double] = [:]
             for muscle in set.secondary { weights[muscle] = max(weights[muscle] ?? 0, 0.5) }
             for muscle in set.primary { weights[muscle] = 1 }
@@ -263,10 +285,43 @@ public enum VolumeProgression {
         /// The step was earned (or the old target was higher) but the week's
         /// session time can't hold more.
         case cappedTime
+        /// Your answer after a session (`MuscleFeedback`): still sore at the
+        /// newest one, left over from the session on `from` (if known).
+        case heldSore(from: Date?)
+        /// You reported joint pain for it last week.
+        case heldJointPain
+        /// Still sore at two or more sessions last week: one set fewer.
+        case reducedSore
+        /// Joint pain at two or more sessions last week: one set fewer.
+        case reducedJointPain
+        /// You said it had recovered with a low or OK pump while the recovery
+        /// model still had it tired: one set more, not the usual step.
+        case addedFeedback
+        /// Sets added (or, after an undo, taken off) by the last block's report.
+        case fromReport(offset: Int)
+        /// "Same volume next block" from the report: held at the last block's highest week.
+        case heldReport
 
         public var isHeld: Bool {
             switch self {
-            case .heldHRV, .heldNotTrained, .heldMissedSets, .heldRepsDropped, .heldTooHard, .heldNotRecovered: true
+            case .heldHRV, .heldNotTrained, .heldMissedSets, .heldRepsDropped, .heldTooHard, .heldNotRecovered,
+                 .heldSore, .heldJointPain, .reducedSore, .reducedJointPain, .heldReport: true
+            default: false
+            }
+        }
+
+        /// The change comes from your answers after a session (`MuscleFeedback`).
+        public var isFromFeedback: Bool {
+            switch self {
+            case .heldSore, .heldJointPain, .reducedSore, .reducedJointPain, .addedFeedback: true
+            default: false
+            }
+        }
+
+        /// The change comes from the last block's report (`NextBlockAdjustments`).
+        public var isFromReport: Bool {
+            switch self {
+            case .fromReport, .heldReport: true
             default: false
             }
         }
@@ -316,6 +371,18 @@ public enum VolumeProgression {
             case .heldNotRecovered: return "\(name) held at \(sets) sets: not fully recovered yet."
             case .cappedCeiling: return "\(name) at \(sets) sets, the most the plan asks for your goal."
             case .cappedTime: return "\(name) at \(sets) sets: the most your planned sessions can hold."
+            case .heldSore(let from):
+                guard let from else { return "\(name) held at \(sets) sets: you said it was still sore last week." }
+                let day = from.formatted(.dateTime.weekday(.wide))
+                return "\(name) held at \(sets) sets: still sore from \(day)."
+            case .heldJointPain: return "\(name) held at \(sets) sets: you reported joint pain last week."
+            case .reducedSore: return "\(name) down to \(sets) sets: still sore at two sessions last week."
+            case .reducedJointPain: return "\(name) down to \(sets) sets: joint pain at two sessions last week."
+            case .addedFeedback: return "\(name) up to \(sets) sets: you said it had recovered, so one set more."
+            case .fromReport(let offset):
+                let sign = offset > 0 ? "+" : "−"
+                return "\(name) \(sets) sets: \(sign)\(abs(offset)) from the block report."
+            case .heldReport: return "\(name) held at \(sets) sets: same volume as last block, from the block report."
             }
         }
     }
@@ -357,6 +424,9 @@ public enum VolumeProgression {
     ///   - state: the muscle's recovery now.
     ///   - sessions: sessions this week that train it directly (the step is one set each).
     ///   - timeCap: the most sets those sessions can hold (`capacity`).
+    ///   - feedback: last week's answers for it after sessions (`MuscleFeedback.signals`).
+    ///   - offset: sets the block report adds (or an undo takes off) this week, once (`Adjustment`).
+    ///   - reportCeiling: "same volume" from the block report: the most sets it may reach.
     public static func target(
         for muscle: Muscle,
         previous: Int?,
@@ -365,10 +435,37 @@ public enum VolumeProgression {
         lastWeek: Performance?,
         state: MuscleRecovery.State?,
         sessions: Int,
-        timeCap: Int
+        timeCap: Int,
+        recent: Double? = nil,
+        feedback: MuscleFeedback.Signal? = nil,
+        offset: Int = 0,
+        reportCeiling: Int? = nil
     ) -> Target {
         let top = ceiling(style: style)
         let cap = max(minimumSets, min(top, timeCap))
+        let earned = earnedTarget(for: muscle, previous: previous, week: week, style: style, lastWeek: lastWeek,
+                                  state: state, sessions: sessions, cap: cap, top: top, recent: recent, feedback: feedback)
+        // The block report's changes: never on a deload or a steady (stamina) week.
+        guard !week.isDeload, style != .endurance else { return earned }
+        var result = earned
+        if offset != 0 {
+            let sets = max(minimumSets, min(cap, earned.sets + offset))
+            if sets != earned.sets {
+                result = Target(muscle: muscle, sets: sets, previous: previous, change: .fromReport(offset: sets - earned.sets))
+            }
+        }
+        if let reportCeiling, result.sets > max(minimumSets, reportCeiling) {
+            result = Target(muscle: muscle, sets: max(minimumSets, reportCeiling), previous: previous, change: .heldReport)
+        }
+        return result
+    }
+
+    /// The rule itself (performance, recovery, your answers), before the block report's changes.
+    static func earnedTarget(
+        for muscle: Muscle, previous: Int?, week: TrainingBlock.WeekState, style: TrainingStyle,
+        lastWeek: Performance?, state: MuscleRecovery.State?, sessions: Int, cap: Int, top: Int,
+        recent: Double?, feedback: MuscleFeedback.Signal?
+    ) -> Target {
         func make(_ sets: Int, _ change: Change) -> Target {
             if sets > cap { return Target(muscle: muscle, sets: cap, previous: previous, change: cap < top ? .cappedTime : .cappedCeiling) }
             return Target(muscle: muscle, sets: sets, previous: previous, change: change)
@@ -379,16 +476,77 @@ public enum VolumeProgression {
             return make(sets, .deload)
         }
         if style == .endurance { return make(startingSets, .steady) }
-        guard week.week > 1, let base = previous else { return make(startingSets, .start) }
+        guard week.week > 1, let base = previous else { return make(startingSets(recent: recent, style: style), .start) }
         if week.isHeld { return make(base, .heldHRV) }
         guard let lastWeek, lastWeek.sets >= 0.5 else { return make(base, .heldNotTrained) }
+        // Your answers, a pattern first: one set fewer (app choice, RP-style practice).
+        if let feedback, feedback.painRepeatedly { return make(max(minimumSets, base - 1), .reducedJointPain) }
+        if let feedback, feedback.soreRepeatedly { return make(max(minimumSets, base - 1), .reducedSore) }
         if !lastWeek.allCompleted || lastWeek.sets < Double(base) - missedSetTolerance {
             return make(base, .heldMissedSets(done: lastWeek.sets, target: base))
         }
         if let exercise = lastWeek.repsDropped.first { return make(base, .heldRepsDropped(exercise: exercise)) }
         if let exercise = lastWeek.overEffort.first { return make(base, .heldTooHard(exercise: exercise)) }
-        if let state, state.status != .fresh { return make(base, .heldNotRecovered) }
+        if let feedback, feedback.jointPainReports > 0 { return make(base, .heldJointPain) }
+        if let feedback, feedback.isStillSore { return make(base, .heldSore(from: feedback.soreFrom)) }
+        if let state, state.status != .fresh {
+            // Performance held and you said it had recovered: one set, not the full step.
+            if let feedback, feedback.allowsStepWhenTired { return make(base + 1, .addedFeedback) }
+            return make(base, .heldNotRecovered)
+        }
         return make(base + max(1, min(2, sessions)), .added)
+    }
+
+    /// The last block's report applied to this block (`NextBlockAdjustments.volume`).
+    public struct Adjustment: Sendable, Equatable {
+        /// Sets added to (or taken off) a muscle's target this week, once:
+        /// the next week builds on the adjusted target.
+        public var offsets: [Muscle: Int]
+        /// "Same volume next block": the most sets a muscle may reach.
+        public var ceilings: [Muscle: Int]
+
+        public init(offsets: [Muscle: Int] = [:], ceilings: [Muscle: Int] = [:]) {
+            self.offsets = offsets
+            self.ceilings = ceilings
+        }
+
+        public var isEmpty: Bool { offsets.values.allSatisfy { $0 == 0 } && ceilings.isEmpty }
+    }
+
+    /// Where a muscle starts a block: about what you've been doing (`recent`:
+    /// the median of your last weeks' hard sets for it, `recentWeeklySets`),
+    /// kept between `startingSets` and 4 under the style's ceiling, so the
+    /// ramp still has room. Lifters used to 15-18 sets were dropped to 10 at
+    /// every new block; the dose-response is diminishing but positive past 10
+    /// (Pelland et al., Sports Med 2026), so starting near current volume and
+    /// adding to it is the evidence-led start (audit 2026-11 §9). Nil = 10.
+    public static func startingSets(recent: Double?, style: TrainingStyle) -> Int {
+        guard let recent, recent.isFinite, recent > 0 else { return startingSets }
+        let top = max(startingSets, ceiling(style: style) - 4)
+        return max(startingSets, min(top, Int(recent.rounded())))
+    }
+
+    /// The median weekly hard sets per muscle over the `weeks` full weeks
+    /// before `weekStart` (weeks with none count as 0, so a break lowers it),
+    /// for `startingSets(recent:style:)`. A week-1 start after a 2-3 week gap
+    /// comes out lower on its own.
+    public static func recentWeeklySets(_ sets: [LoggedSet], before weekStart: Date, weeks: Int = 4, style: TrainingStyle,
+                                        calendar: Calendar = .current) -> [Muscle: Double] {
+        guard weeks > 0 else { return [:] }
+        var perWeek: [[Muscle: Double]] = []
+        for back in 1...weeks {
+            guard let start = calendar.date(byAdding: .day, value: -7 * back, to: weekStart) else { continue }
+            perWeek.append(summarize(sets, weekStart: start, targetRPE: 10 - Double(TrainingBlock.startRIR), style: style,
+                                     calendar: calendar).mapValues(\.sets))
+        }
+        var result: [Muscle: Double] = [:]
+        for muscle in Muscle.allCases {
+            let values = perWeek.map { $0[muscle] ?? 0 }.sorted()
+            guard values.contains(where: { $0 > 0 }) else { continue }
+            let middle = values.count / 2
+            result[muscle] = values.count % 2 == 1 ? values[middle] : (values[middle - 1] + values[middle]) / 2
+        }
+        return result
     }
 
     // MARK: The week
@@ -405,27 +563,70 @@ public enum VolumeProgression {
         }
     }
 
-    /// Movements in a session of this length that train `muscle` as their main muscle.
+    /// Movements in a session of this length that train `muscle` as their
+    /// main muscle: the fewer of the focus's versions (`WorkoutFocus.slots(variant:)`),
+    /// so a muscle only one version trains (biceps on upper day A) isn't
+    /// counted on every upper day.
     static func directSlots(_ muscle: Muscle, focus: WorkoutFocus, minutes: Int) -> Int {
-        let count = WorkoutPlanner.exerciseCount(minutes: minutes)
-        var slots = Array(focus.slots.prefix(count))
-        if minutes >= WorkoutPlanner.longSessionMinutes { slots.append(focus.extraSlot) }
-        return slots.filter { MuscleCoverage.muscles(for: $0).primary == muscle }.count
+        (0..<max(1, focus.variantCount)).map { directSlots(muscle, focus: focus, minutes: minutes, variant: $0) }.min() ?? 0
     }
 
+    static func directSlots(_ muscle: Muscle, focus: WorkoutFocus, minutes: Int, variant: Int) -> Int {
+        sessionSlots(focus: focus, minutes: minutes, variant: variant)
+            .filter { MuscleCoverage.muscles(for: $0).primary == muscle }.count
+    }
+
+    /// The movements a session of this length has room for (the long session adds the extra one).
+    static func sessionSlots(focus: WorkoutFocus, minutes: Int, variant: Int) -> [MovementSlot] {
+        let count = WorkoutPlanner.exerciseCount(minutes: minutes)
+        var slots = Array(focus.slots(variant: variant).prefix(count))
+        if minutes >= WorkoutPlanner.longSessionMinutes { slots.append(focus.extraSlot(variant: variant)) }
+        return slots
+    }
+
+    /// About how many working sets a session of `minutes` holds in this
+    /// style: the time left after the transitions and about 5 minutes of ramp
+    /// sets, at a set's work plus the style's average rest, with no rest after
+    /// each exercise's last set (`WorkoutPlanner.estimatedMinutes`' own
+    /// model). An estimate for sharing out the week, not a plan.
+    public static func sessionSetBudget(minutes: Int, style: TrainingStyle) -> Double {
+        let count = Double(WorkoutPlanner.exerciseCount(minutes: minutes))
+        let rest = Double(RestTimer.defaultSeconds(style: style, compound: true)
+                          + RestTimer.defaultSeconds(style: style, compound: false)) / 2 / 60
+        let work = Double(WorkoutPlanner.workSecondsPerSet) / 60
+        let available = Double(minutes) - 5 - WorkoutPlanner.transitionMinutes * max(0, count - 1)
+        return max(0, (available + count * rest) / (work + rest))
+    }
+
+    /// How far over its even share of a session's sets one muscle's cap
+    /// may go (`capacity`), so the week can lean on one muscle while the
+    /// others take fewer. App choice.
+    public static let shareSlack = 1.25
+
     /// Sessions in the plan that train a muscle directly, and the sets their
-    /// time can hold (each session: its direct movements × 5 sets, at most
-    /// `sessionCap`). In a flexible week the session templates stand in for the
-    /// days: the coverage rule may move a focus, but the templates are the
-    /// week's usual spread.
-    public static func capacity(_ muscle: Muscle, days: [PlannedDay]) -> (sessions: Int, timeCap: Int) {
+    /// time can hold: each session's direct movements × 5 sets, at most
+    /// `sessionCap`, and at most the muscle's share of the sets the session's
+    /// time holds (`sessionSetBudget`: its share of the session's movements),
+    /// so a target is never more than the planned sessions can fit (a 45-min
+    /// strength push day held about 10 sets, not 8 for chest alone). In a
+    /// flexible week the session templates stand in for the days: the
+    /// coverage rule may move a focus, but the templates are the week's usual spread.
+    public static func capacity(_ muscle: Muscle, days: [PlannedDay], style: TrainingStyle = .balanced) -> (sessions: Int, timeCap: Int) {
         var sessions = 0
         var cap = 0
         for day in days {
             let slots = directSlots(muscle, focus: day.focus, minutes: day.minutes)
             guard slots > 0 else { continue }
             sessions += 1
-            cap += min(sessionCap(minutes: day.minutes), slots * TrainingBlock.setRange.upperBound)
+            // Big lifts get about 4 sets and small ones 3 (`WorkoutPlanner.baseSets`): the share is by that weight.
+            func weight(_ slot: MovementSlot) -> Double { slot.isCompound ? 4 : 3 }
+            let session = sessionSlots(focus: day.focus, minutes: day.minutes, variant: 0).filter { $0 != .core }
+            let total = session.reduce(0) { $0 + weight($1) }
+            let mine = session.filter { MuscleCoverage.muscles(for: $0).primary == muscle }.reduce(0) { $0 + weight($1) }
+            let fraction = total > 0 ? min(mine, Double(slots) * 4) / total : 0
+            let share = sessionSetBudget(minutes: day.minutes, style: style) * fraction * shareSlack
+            cap += min(sessionCap(minutes: day.minutes), slots * TrainingBlock.setRange.upperBound,
+                       max(TrainingBlock.setRange.lowerBound, Int(share.rounded())))
         }
         return (sessions, cap)
     }
@@ -439,15 +640,20 @@ public enum VolumeProgression {
         days: [PlannedDay],
         previous: WeekTargets?,
         lastWeek: [Muscle: Performance],
-        states: [Muscle: MuscleRecovery.State]
+        states: [Muscle: MuscleRecovery.State],
+        recentWeeklySets: [Muscle: Double] = [:],
+        feedback: [Muscle: MuscleFeedback.Signal] = [:],
+        adjustment: Adjustment? = nil
     ) -> WeekTargets {
         var targets: [Target] = []
         for muscle in MuscleCoverage.tracked {
-            let room = capacity(muscle, days: days)
+            let room = capacity(muscle, days: days, style: style)
             guard room.sessions > 0 else { continue }
             targets.append(target(
                 for: muscle, previous: previous?.target(for: muscle)?.sets, week: block, style: style,
-                lastWeek: lastWeek[muscle], state: states[muscle], sessions: room.sessions, timeCap: room.timeCap
+                lastWeek: lastWeek[muscle], state: states[muscle], sessions: room.sessions, timeCap: room.timeCap,
+                recent: recentWeeklySets[muscle], feedback: feedback[muscle],
+                offset: adjustment?.offsets[muscle] ?? 0, reportCeiling: adjustment?.ceilings[muscle]
             ))
         }
         return WeekTargets(weekStart: weekStart, targetRIR: block.targetRIR, targets: targets)

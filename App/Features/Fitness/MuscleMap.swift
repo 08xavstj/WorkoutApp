@@ -38,7 +38,8 @@ final class MuscleModel {
         var lifts: [DeloadAdvisor.LiftPoint] = []
         for session in sessions where session.startedAt >= sixWeeks {
             for exercise in session.exercises {
-                let best = exercise.sets.filter { $0.isCompleted && !$0.isWarmup }.map(\.estimatedOneRepMax).max() ?? 0
+                // Straight sets only: drop stages and mini-sets aren't e1RM evidence (as `LiftHistory`).
+                let best = exercise.sets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage }.map(\.estimatedOneRepMax).max() ?? 0
                 if best > 0 { lifts.append(.init(exercise: exercise.name, date: session.startedAt, estimatedOneRepMax: best)) }
             }
         }

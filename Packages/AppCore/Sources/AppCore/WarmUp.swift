@@ -30,19 +30,34 @@ public enum WarmUp {
         case laterCompound
         /// Isolation work: no ramp sets.
         case isolation
+        /// The first lift of a short session (30 min or less): two quick
+        /// steps (`briefRamp`), so ramp sets don't eat a third of the time.
+        case brief
     }
 
     /// Full ramp: about 50% × 8, 70% × 5, 85% × 2 of the working load.
     public static let fullRamp: [(fraction: Double, reps: Int)] = [(0.5, 8), (0.7, 5), (0.85, 2)]
     /// One set at about 70% × 3 for later compound lifts.
     public static let shortRamp: [(fraction: Double, reps: Int)] = [(0.7, 3)]
+    /// Two steps, 50% × 5 and 75% × 3, for short sessions (audit 2026-11 §15).
+    public static let briefRamp: [(fraction: Double, reps: Int)] = [(0.5, 5), (0.75, 3)]
+    /// A fourth step, 90% × 1, for a full ramp to 100 kg or more: the jump
+    /// from 85% to a heavy working weight is big. Coaching practice, like the
+    /// rest of the ramp.
+    public static let heavyStep: (fraction: Double, reps: Int) = (0.9, 1)
+    public static let heavyStepFromKg = 100.0
 
     /// Ramp sets for a working load, each rounded down to a load the gym can
     /// make. Sets that would be the empty bar, that repeat the one before, or
     /// that reach the working load are skipped, so a light lift gets fewer.
     public static func sets(workingLoad: Double, kind: EquipmentKind?, gym: GymProfile, role: Role = .firstCompound) -> [RampSet] {
-        guard let kind, workingLoad > 0, role != .isolation else { return [] }
-        let ramp = role == .firstCompound ? fullRamp : shortRamp
+        guard let kind, workingLoad > 0, workingLoad.isFinite, role != .isolation else { return [] }
+        var ramp: [(fraction: Double, reps: Int)] = switch role {
+        case .firstCompound: fullRamp
+        case .brief: briefRamp
+        default: shortRamp
+        }
+        if role == .firstCompound, gym.unit.toKilograms(workingLoad) >= heavyStepFromKg { ramp.append(heavyStep) }
         let bar = barWeight(kind, gym: gym)
         var result: [RampSet] = []
         for step in ramp {

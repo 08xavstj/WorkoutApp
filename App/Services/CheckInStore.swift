@@ -31,17 +31,26 @@ final class CheckInStore {
     /// where Health has nothing (`MoodHistory.merge`). Oldest first.
     private(set) var moods: [MoodSample] = []
 
-    @ObservationIgnored private let fileURL: URL = {
-        let folder = URL.applicationSupportDirectory
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appending(path: "checkins.json")
-    }()
+    @ObservationIgnored private let file = SafeJSONFile.appSupport("checkins.json")
+    /// False while the file exists but couldn't be read (a background launch
+    /// while the phone was locked): nothing is saved over it until it loads.
+    @ObservationIgnored private var canSave = false
+    /// When `refreshInsights` last finished (Health tab skips a reload within 10 minutes).
+    @ObservationIgnored private(set) var insightsUpdated: Date?
 
     init() {
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder().decode(Saved.self, from: data) {
-            saved = decoded
-        }
+        reload()
+    }
+
+    /// Reads the file again if the last read failed (call when the phone unlocks).
+    func reloadIfUnavailable() {
+        if !canSave { reload() }
+    }
+
+    private func reload() {
+        let loaded = file.loadLogged(Saved.self)
+        canSave = loaded.state.canSave
+        if canSave { saved = loaded.value ?? Saved() }
     }
 
     private func key(_ day: Date) -> String { Dose.dayKey(Calendar.current.startOfDay(for: day)) }
@@ -50,16 +59,19 @@ final class CheckInStore {
     func evening(on day: Date = .now) -> EveningCheckIn? { saved.evenings[key(day)] }
 
     func save(_ checkIn: MorningCheckIn) {
+        reloadIfUnavailable()
         saved.mornings[key(checkIn.day)] = checkIn
         write()
     }
 
     func save(_ checkIn: EveningCheckIn) {
+        reloadIfUnavailable()
         saved.evenings[key(checkIn.day)] = checkIn
         write()
     }
 
     func recordSleepScore(_ score: Int?, morning: Date = .now) {
+        reloadIfUnavailable()
         guard let score, saved.sleepScores[key(morning)] != Double(score) else { return }
         saved.sleepScores[key(morning)] = Double(score)
         write()
@@ -69,6 +81,7 @@ final class CheckInStore {
     /// need, so the mood patterns can use them (`CheckInInsights`).
     /// Today's value is overwritten on every call; finished days settle.
     func recordContext(dayStrains: [(date: Date, strain: Double)], usualTrainingStrain: Double?, sleepNeedHours: Double) {
+        reloadIfUnavailable()
         var changed = false
         var strains = saved.strains ?? [:]
         for day in dayStrains where strains[key(day.date)] != day.strain {
@@ -110,9 +123,7 @@ final class CheckInStore {
     }
 
     private func write() {
-        if let data = try? JSONEncoder().encode(saved) {
-            try? data.write(to: fileURL, options: .atomic)
-        }
+        file.saveLogged(saved, canSave: canSave)
     }
 
     /// Today's advice from this morning's answers.
@@ -237,6 +248,7 @@ final class CheckInStore {
         daysUntilInsights = CheckInInsights.daysUntilReady(days)
         habitProgress = CheckInInsights.uncovered(CheckInInsights.progress(days), by: insights)
         alcoholNightsLogged = alcoholNights.count
+        insightsUpdated = .now
     }
 
     /// Short summary for the AI coach.

@@ -233,10 +233,21 @@ final class MedicationsModel {
         return result.filter { seen.insert($0).inserted }
     }
 
+    /// Weekly medicines (Ozempic, Mounjaro…) still on daily reminders, from
+    /// before schedules existed or typed that way. Nothing is changed for the
+    /// user; Medications asks them to check the schedule.
+    var scheduleChecks: [Medication] {
+        medications.filter {
+            $0.isActive && !$0.times.isEmpty && !$0.plan.isLessThanDaily
+                && MedicationKnowledge.usualSchedule(for: $0.name) == .weekdays
+        }
+    }
+
     /// One line per medication for the AI coach.
     var coachSummary: [String] {
         medications.filter(\.isActive).map { med in
             var line = med.name + (med.dose.isEmpty ? "" : " \(med.dose)")
+            if med.plan.isLessThanDaily { line += " (" + med.plan.summary().lowercased() + ")" }
             if let drug = MedicationKnowledge.match(med.name) {
                 line += " (\(drug.name)): " + drug.effects.map(\.text).joined(separator: " ")
             }
@@ -254,20 +265,36 @@ nonisolated struct DrugLabel: Sendable, Equatable {
 }
 
 nonisolated enum DrugLabelClient {
-    /// Looks the medication up by its first word (generic or brand name).
+    /// Looks the medication up by its whole name, then (for longer names) its
+    /// first word, and keeps a label only when one of its brand or generic
+    /// names matches (`DrugLabelSearch`), so "Vitamin D3" never shows some
+    /// other "vitamin" product's warnings.
     @concurrent
     static func fetch(_ name: String) async throws -> DrugLabel? {
-        guard let word = name.lowercased().components(separatedBy: CharacterSet.letters.inverted).first(where: { $0.count > 2 }) else { return nil }
-        var components = URLComponents(string: "https://api.fda.gov/drug/label.json")
-        components?.queryItems = [
-            URLQueryItem(name: "search", value: "openfda.generic_name:\"\(word)\" OR openfda.brand_name:\"\(word)\""),
-            URLQueryItem(name: "limit", value: "1"),
-        ]
-        guard let url = components?.url else { return nil }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let result = (json["results"] as? [[String: Any]])?.first else { return nil }
+        for term in DrugLabelSearch.terms(for: name) {
+            var components = URLComponents(string: "https://api.fda.gov/drug/label.json")
+            components?.queryItems = [
+                URLQueryItem(name: "search", value: "openfda.generic_name:\"\(term)\" OR openfda.brand_name:\"\(term)\""),
+                URLQueryItem(name: "limit", value: "5"),
+            ]
+            guard let url = components?.url else { continue }
+            let (data, response) = try await URLSession.shared.data(from: url)
+            // 404 is openFDA's "no matches".
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = json["results"] as? [[String: Any]] else { continue }
+            for result in results {
+                let openfda = result["openfda"] as? [String: Any]
+                let generic = openfda?["generic_name"] as? [String] ?? []
+                let brand = openfda?["brand_name"] as? [String] ?? []
+                guard DrugLabelSearch.matches(term: term, labelNames: generic + brand) else { continue }
+                return label(from: result, title: generic.first?.capitalized ?? name)
+            }
+        }
+        return nil
+    }
+
+    private static func label(from result: [String: Any], title: String) -> DrugLabel {
         func text(_ keys: String...) -> String? {
             for key in keys {
                 if let value = (result[key] as? [String])?.first, !value.isEmpty {
@@ -276,8 +303,6 @@ nonisolated enum DrugLabelClient {
             }
             return nil
         }
-        let openfda = result["openfda"] as? [String: Any]
-        let title = (openfda?["generic_name"] as? [String])?.first?.capitalized ?? name
         return DrugLabel(
             title: title,
             boxedWarning: text("boxed_warning"),

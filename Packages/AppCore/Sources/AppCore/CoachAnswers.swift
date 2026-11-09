@@ -497,6 +497,7 @@ public enum CoachAnswers {
         case .strength: "For strength, 2-3 minutes or more between heavy sets lifted more than short rests in trained lifters."
         case .balanced: "That sits between the 2-3 minutes heavy sets need and the 90 s that is enough for growth."
         case .endurance: "Shorter rests keep the session brisk; that's common practice rather than a tested best."
+        case .strengthAndMuscle: "Your first heavy lift gets about 3 minutes, as heavy sets need; small lifts are fine at about 90 s for growth."
         }
         lines.append("For your \(styleName(style)) training, rest about \(restText(big)) between sets of big lifts (squats, presses, rows) and \(restText(small)) on smaller ones. \(why)")
         if let chosen = f.restTimerSeconds, chosen > 0 {
@@ -514,6 +515,7 @@ public enum CoachAnswers {
         case .strength: "strength"
         case .balanced: "balanced"
         case .endurance: "endurance"
+        case .strengthAndMuscle: "strength and muscle"
         }
     }
 

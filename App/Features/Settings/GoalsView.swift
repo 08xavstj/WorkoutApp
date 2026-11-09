@@ -226,6 +226,7 @@ struct GoalsView: View {
         case .muscle: "Muscle building"
         case .endurance: "Endurance (higher reps)"
         case .balanced: "Balanced"
+        case .strengthAndMuscle: "Strength + muscle"
         }
     }
 

@@ -1,35 +1,149 @@
 import Foundation
 import SwiftData
+import UIKit
 import AppCore
 
-/// Your gym setup (equipment, plates, dumbbells, stacks), saved on the phone.
+/// Your gyms (equipment, plates, dumbbells, stacks, machine settings), saved
+/// on the phone as JSON (`gyms.json`, `GymRegistry`). One is active: `profile`
+/// is its equipment, so the planner, prescriptions, rounding and the Watch all
+/// use the gym you're at. A travel gym ends on its date and the app goes back
+/// to your regular gym.
 @Observable
 final class GymStore {
-    private(set) var profile: GymProfile
-    /// False until you've opened My Gym and saved it at least once.
-    private(set) var isConfigured: Bool
+    private(set) var registry: GymRegistry
+
+    /// The active gym's equipment.
+    var profile: GymProfile { registry.active.profile }
+    /// False until a gym has been saved at least once.
+    var isConfigured: Bool { registry.isConfigured }
+    var activeGym: SavedGym { registry.active }
+    var activeGymID: UUID { registry.activeGymID }
+    var gyms: [SavedGym] { registry.gyms }
 
     @ObservationIgnored private let defaults: UserDefaults
-    private static let key = "gymProfile"
+    @ObservationIgnored private let file: SafeJSONFile
+    /// False while the file exists but couldn't be read (a background launch
+    /// while the phone was locked): nothing is saved over it until it loads.
+    @ObservationIgnored private var canSave = false
+    @ObservationIgnored private var hasLoaded = false
+    @ObservationIgnored private var observers: [any NSObjectProtocol] = []
+    /// The single profile saved before gyms existed; still written (your
+    /// regular gym) so an older build or a lost file keeps your equipment.
+    private static let legacyKey = "gymProfile"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, file: SafeJSONFile = .appSupport("gyms.json")) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: Self.key),
-           let saved = try? JSONDecoder().decode(GymProfile.self, from: data) {
-            profile = saved
-            isConfigured = true
-        } else {
-            // Until My Gym is set up, match the unit chosen in Settings.
-            profile = defaults.string(forKey: "weightUnit") == "kg" ? .commercialKilograms : .commercialPounds
-            isConfigured = false
+        self.file = file
+        registry = GymRegistry.migrating(legacy: nil, fallback: Self.defaultProfile(for: Self.settingsUnit(defaults)))
+        reload()
+        expireTravelGymIfNeeded()
+        observe()
+    }
+
+    // MARK: Loading and saving
+
+    /// Reads the file again if the last read failed (the phone was locked).
+    func reloadIfUnavailable() {
+        if !canSave { reload() }
+    }
+
+    private func reload() {
+        let loaded = file.loadLogged(GymRegistry.self)
+        canSave = loaded.state.canSave
+        if let value = loaded.value {
+            registry = value
+            hasLoaded = true
+        } else if canSave {
+            // First launch with gyms (or nothing readable): the profile saved
+            // before becomes your regular gym, so nothing is lost.
+            let legacy = Self.legacyProfile(defaults)
+            registry = GymRegistry.migrating(legacy: legacy, fallback: Self.defaultProfile(for: Self.settingsUnit(defaults)))
+            hasLoaded = true
+            if legacy != nil { write() }
+        } else if !hasLoaded, let legacy = Self.legacyProfile(defaults) {
+            // Locked: use the last profile in the meantime, without saving.
+            registry = GymRegistry.migrating(legacy: legacy, fallback: legacy)
         }
     }
+
+    private static func legacyProfile(_ defaults: UserDefaults) -> GymProfile? {
+        guard let data = defaults.data(forKey: legacyKey) else { return nil }
+        return try? JSONDecoder().decode(GymProfile.self, from: data)
+    }
+
+    private func write() {
+        file.saveLogged(registry, canSave: canSave)
+        guard canSave, registry.isConfigured else { return }
+        // Your regular gym, for older builds and as a last resort.
+        let home = registry.active.isTemporary
+            ? (registry.returnGymID.flatMap { registry.gym(id: $0) } ?? registry.regularGyms.first)
+            : registry.active
+        if let home, let data = try? JSONEncoder().encode(home.profile) {
+            defaults.set(data, forKey: Self.legacyKey)
+        }
+    }
+
+    /// Every change: read first if the file couldn't be read, change, save.
+    private func change(_ body: (inout GymRegistry) -> Void) {
+        reloadIfUnavailable()
+        var copy = registry
+        body(&copy)
+        guard copy != registry else { return }
+        registry = copy
+        write()
+    }
+
+    private func observe() {
+        let center = NotificationCenter.default
+        // Read again once the phone is unlocked.
+        observers.append(center.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reloadIfUnavailable() }
+        })
+        // A travel gym that ended while the app was away: back to your regular gym.
+        observers.append(center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.expireTravelGymIfNeeded() }
+        })
+        // Until a gym is set up, its unit follows Settings (onboarding, Settings).
+        observers.append(center.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.followSettingsUnit() }
+        })
+    }
+
+    /// Settings' weight unit as saved, else the region's default (`WeightUnit.localeDefault`).
+    private static func settingsUnit(_ defaults: UserDefaults) -> WeightUnit {
+        WeightUnit(rawValue: defaults.string(forKey: "weightUnit") ?? "") ?? .localeDefault
+    }
+
+    private static func defaultProfile(for unit: WeightUnit) -> GymProfile {
+        unit == .kilograms ? .commercialKilograms : .commercialPounds
+    }
+
+    /// Before a gym is set up, the default gym's unit follows Settings.
+    private func followSettingsUnit() {
+        guard !registry.isConfigured, registry.gyms.count == 1, !registry.active.isTemporary else { return }
+        let wanted = Self.defaultProfile(for: Self.settingsUnit(defaults))
+        guard profile.unit != wanted.unit else { return }
+        var replaced = wanted
+        replaced.name = registry.active.name
+        // In memory only: nothing is saved until you set up a gym.
+        registry.updateProfile(replaced, for: registry.activeGymID)
+    }
+
+    // MARK: Training
 
     /// Set from the user's goals (rep ranges and effort).
     var style: TrainingStyle = .balanced
     var planner: WorkoutPlanner {
         var planner = WorkoutPlanner(gym: profile, style: style)
         planner.progressionModes = ProgressionPreferences.overrides()
+        // Rep ranges and variation swaps applied from the last block's report (`NextBlockStore`).
+        planner.blockPreferences = NextBlockStore.shared.plannerPreferences
         return planner
     }
 
@@ -37,12 +151,123 @@ final class GymStore {
     /// numbers match the plates on the bar (Settings' unit is for body weight).
     var liftingUnit: WeightUnit { profile.unit == .kg ? .kilograms : .pounds }
 
+    // MARK: Gyms
+
+    /// Saves the active gym's equipment (Gym equipment, the builder).
     func save(_ profile: GymProfile) {
-        self.profile = profile
-        isConfigured = true
-        if let data = try? JSONEncoder().encode(profile) {
-            defaults.set(data, forKey: Self.key)
+        save(profile, for: registry.activeGymID)
+    }
+
+    /// Saves one gym's equipment and name.
+    func save(_ profile: GymProfile, for id: UUID) {
+        change { registry in
+            registry.updateProfile(profile, for: id)
+            registry.isConfigured = true
         }
+    }
+
+    /// Switches gym; the planner uses its equipment from now on.
+    func activate(_ id: UUID) {
+        change { registry in _ = registry.activate(id) }
+    }
+
+    /// Adds a regular gym (not active until you pick it).
+    @discardableResult
+    func addRegularGym(name: String, profile: GymProfile) -> UUID {
+        var id = registry.activeGymID
+        change { registry in
+            id = registry.addRegular(name: name, profile: profile, activate: false)
+            registry.isConfigured = true
+        }
+        return id
+    }
+
+    /// Adds a travel gym until `expiresAt` and switches to it.
+    @discardableResult
+    func addTravelGym(name: String, profile: GymProfile, expiresAt: Date) -> UUID {
+        var id = registry.activeGymID
+        change { registry in id = registry.addTravel(name: name, profile: profile, expiresAt: expiresAt) }
+        return id
+    }
+
+    func reuseTravelGym(_ id: UUID, expiresAt: Date) {
+        change { registry in _ = registry.reuseTravelGym(id, expiresAt: expiresAt) }
+    }
+
+    func setEnd(_ expiresAt: Date, for id: UUID) {
+        change { registry in registry.setEnd(expiresAt, for: id) }
+    }
+
+    func rename(_ id: UUID, to name: String) {
+        change { registry in registry.rename(id, to: name) }
+    }
+
+    func canDelete(_ id: UUID) -> Bool { registry.canDelete(id) }
+
+    func delete(_ id: UUID) {
+        change { registry in _ = registry.delete(id) }
+    }
+
+    /// Travel gyms that haven't ended, and those that have (kept for reuse).
+    var currentTravelGyms: [SavedGym] { registry.currentTravelGyms(at: .now) }
+    var pastTravelGyms: [SavedGym] { registry.pastTravelGyms(at: .now) }
+
+    /// Back to your regular gym once a travel gym's last day is over.
+    func expireTravelGymIfNeeded() {
+        change { registry in _ = registry.expireIfNeeded() }
+    }
+
+    /// The travel gym that just ended, to ask whether to keep it.
+    var endedTravelGym: SavedGym? { registry.endedTravelGym }
+
+    func keepEndedTravelGym() {
+        change { registry in registry.keepEndedTravelGym() }
+    }
+
+    /// "until Sun", "until today", "until 14 Nov" for a travel gym.
+    static func untilText(_ expiresAt: Date?, now: Date = .now) -> String? {
+        guard let expiresAt else { return nil }
+        let last = TravelGymDates.lastDay(expiresAt: expiresAt)
+        let calendar = Calendar.current
+        if calendar.isDateInToday(last) { return "until tonight" }
+        if calendar.isDateInTomorrow(last) { return "until tomorrow" }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: last)).day ?? 0
+        let day = days < 7
+            ? last.formatted(.dateTime.weekday(.abbreviated))
+            : last.formatted(.dateTime.day().month(.abbreviated))
+        return "until \(day)"
+    }
+
+    // MARK: Machine settings
+
+    /// Seat, pin, handles and pad for an exercise at the active gym.
+    func machineNote(for exerciseID: String) -> MachineNote? {
+        registry.machineNote(for: exerciseID)
+    }
+
+    /// Saves (or clears, when empty) an exercise's settings at the active gym.
+    func setMachineNote(_ note: MachineNote?, for exerciseID: String) {
+        change { registry in registry.setMachineNote(note, for: exerciseID) }
+    }
+
+    // MARK: Workouts
+
+    /// Notes the active gym for a workout (once; switching later doesn't rewrite it).
+    func recordSession(startedAt: Date) {
+        guard registry.sessionGym(startedAt: startedAt) == nil else { return }
+        change { registry in _ = registry.recordSession(startedAt: startedAt) }
+    }
+
+    /// The gym a workout was done at, when it was recorded.
+    func gymName(forSessionStartedAt start: Date) -> String? {
+        registry.sessionGym(startedAt: start)?.name
+    }
+
+    /// "Different gym from last time…" for a machine, cable or Smith lift whose
+    /// last workout (`lastSessionStart`) was at another gym.
+    func gymChangeNote(exerciseID: String, lastSessionStart: Date?, libraryEquipment: String?) -> String? {
+        let load = ExerciseCatalog.exercise(id: exerciseID)?.load ?? EquipmentKind.fromLibrary(libraryEquipment)
+        return registry.gymChangeNote(lastSessionStart: lastSessionStart, load: load)
     }
 }
 
@@ -57,6 +282,8 @@ enum LiftHistory {
                 // Drop stages and mini-sets are lighter or fatigued by design: not the lift's top set.
                 let working = exercise.sets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage && $0.reps > 0 }
                 guard let top = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) else { continue }
+                // Double progression needs every set at the top weight to reach the reps, not just the best one.
+                let atTop = working.filter { abs($0.weightKg - top.weightKg) < 0.01 }
                 let e1RM = unit.fromKilograms(top.estimatedOneRepMax)
                 let previous = result[exercise.exerciseID]
                 let previousBest = previous?.bestEstimatedOneRepMax ?? 0
@@ -65,8 +292,8 @@ enum LiftHistory {
                 result[exercise.exerciseID] = ExerciseHistory(
                     bestEstimatedOneRepMax: max(previousBest, e1RM),
                     lastWeight: topWeight,
-                    lastReps: top.reps,
-                    lastRPE: top.rpe,
+                    lastReps: atTop.map(\.reps).min() ?? top.reps,
+                    lastRPE: atTop.compactMap(\.rpe).max() ?? top.rpe,
                     lastDate: session.startedAt,
                     recentWeights: ExerciseHistory.appending(topWeight, to: previous?.recentWeights ?? []),
                     lastSets: working.count
@@ -183,7 +410,7 @@ final class WorkoutLauncher {
 
     /// Creates a session pre-filled with the plan's exercises and sets.
     func start(_ plan: PlannedWorkout, in context: ModelContext) {
-        start(name: plan.title, exercises: plan.exercises, unit: plan.unit, in: context)
+        start(name: plan.title, exercises: plan.exercises, unit: plan.unit, focus: plan.focus, in: context)
     }
 
     /// Starts one of your own workouts. Your exercises, sets, reps and any
@@ -204,12 +431,16 @@ final class WorkoutLauncher {
                 libraryLoad: EquipmentKind.fromLibrary(library.exercise(id: exercise.exerciseID)?.equipment)
             )
         }
-        let planned = gym.planner.prescribe(template: items, history: history)
+        // Saved workouts follow the same never-again and pain rules as planned ones.
+        let planned = gym.planner.prescribe(template: items, history: history,
+                                            exerciseFilter: ExerciseFilter(neverAgain: ExerciseExclusions.shared.ids,
+                                                                           reports: PainLogStore.shared.reports, today: .now))
         template.lastUsedAt = .now
         start(name: template.name, exercises: planned, unit: unit, in: context)
     }
 
-    private func start(name: String, exercises: [PlannedExercise], unit: LoadUnit, in context: ModelContext) {
+    private func start(name: String, exercises: [PlannedExercise], unit: LoadUnit, focus: WorkoutFocus? = nil,
+                       in context: ModelContext) {
         if resumeIfRunning() { return }
         let session = WorkoutSession(name: name)
         context.insert(session)
@@ -219,17 +450,29 @@ final class WorkoutLauncher {
         // Superset pairs (`Supersets`) for the live view: exercise order → group.
         SupersetRegistry.save(SupersetRegistry.groups(in: exercises), for: session.startedAt)
         SessionTargets.save(exercises, for: session.startedAt, unit: unit)
+        // The focus picks its warm-up tier (Settings › Training); orders are never reused (`LiveSessionStore`).
+        LiveSessionStore.update(for: session.startedAt) { entry in
+            entry.focus = focus?.rawValue
+            entry.highestOrder = exercises.isEmpty ? nil : exercises.count - 1
+        }
         try? context.save()
         running = session
         activeSession = session
     }
 
     /// One planned exercise as an `ExerciseLog` with its sets, in the session.
+    @discardableResult
     private static func insertLog(_ planned: PlannedExercise, order: Int, in session: WorkoutSession, unit: LoadUnit,
-                                  context: ModelContext) {
+                                  context: ModelContext) -> ExerciseLog {
         let log = ExerciseLog(exerciseID: planned.exerciseID, name: planned.name, order: order)
         log.session = session
         context.insert(log)
+        insertSets(planned, into: log, unit: unit, context: context)
+        return log
+    }
+
+    /// The planned exercise's sets on a log: ramp sets, working sets, then any drop stages or mini-sets.
+    private static func insertSets(_ planned: PlannedExercise, into log: ExerciseLog, unit: LoadUnit, context: ModelContext) {
         let weightKg = planned.load.map { unit.toKilograms($0) } ?? 0
         // Warm-up ramp sets first (`WarmUp`), marked so they stay out of volume, strain and PRs.
         let warmUps = planned.warmUpSets ?? []
@@ -262,9 +505,12 @@ final class WorkoutLauncher {
     @discardableResult
     func append(_ exercises: [PlannedExercise], to session: WorkoutSession, unit: LoadUnit, in context: ModelContext) -> [Int] {
         guard !exercises.isEmpty else { return [] }
-        // One past the highest order: targets, supersets, records and the Watch are keyed by it.
-        let first = (session.exercises.map(\.order).max() ?? -1) + 1
+        // Past every order the session has used (removed exercises included): targets,
+        // supersets, records and the Watch are keyed by it (`LiveWorkoutRules.nextOrder`).
+        let first = LiveWorkoutRules.nextOrder(existing: session.exercises.map(\.order),
+                                               highestUsed: LiveSessionStore.entry(for: session.startedAt).highestOrder)
         let orders = exercises.indices.map { first + $0 }
+        LiveSessionStore.noteOrders(orders, for: session.startedAt)
         for (planned, order) in zip(exercises, orders) {
             Self.insertLog(planned, order: order, in: session, unit: unit, context: context)
         }
@@ -276,6 +522,41 @@ final class WorkoutLauncher {
         SessionTargets.add(exercises, orders: orders, for: session.startedAt, unit: unit)
         try? context.save()
         return orders
+    }
+
+    /// Adds one exercise mid-session (Add exercise), its sets prefilled from the
+    /// plan the trainer would give it (`LiveSwap.prescription`) or from last time
+    /// (`LiveWorkoutRules.prefill`), with its target saved like a planned one's.
+    /// Returns the log.
+    @discardableResult
+    func add(_ planned: PlannedExercise, to session: WorkoutSession, unit: LoadUnit, in context: ModelContext) -> ExerciseLog {
+        let order = LiveSessionStore.nextOrder(existing: session.exercises.map(\.order), for: session.startedAt)
+        let log = Self.insertLog(planned, order: order, in: session, unit: unit, context: context)
+        // Nothing to aim for without a plan or history (0 reps): no target, as before.
+        if planned.reps.upperBound > 0 {
+            SessionTargets.add([planned], orders: [order], for: session.startedAt, unit: unit)
+        }
+        try? context.save()
+        return log
+    }
+
+    /// "Swap exercise": the log becomes the new lift in the same place (and
+    /// superset), its sets replaced by the new prescription. Everything the
+    /// session kept for the old lift by its order goes first (`LiveSetCoach.exerciseRemoved`),
+    /// so its target, set-by-set change and any queued Watch tick don't carry over.
+    func swap(_ log: ExerciseLog, to planned: PlannedExercise, in session: WorkoutSession, unit: LoadUnit,
+              context: ModelContext) {
+        LiveSetCoach.exerciseRemoved(order: log.order, sessionStart: session.startedAt, keepSuperset: true)
+        for set in Array(log.sets) {
+            context.delete(set)
+        }
+        log.exerciseID = planned.exerciseID
+        log.name = planned.name
+        var unramped = planned
+        unramped.warmUpSets = nil
+        Self.insertSets(unramped, into: log, unit: unit, context: context)
+        SessionTargets.replace(planned, order: log.order, for: session.startedAt, unit: unit)
+        try? context.save()
     }
 
     func startEmpty(in context: ModelContext) {

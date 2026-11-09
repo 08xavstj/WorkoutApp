@@ -27,6 +27,7 @@ struct FitnessView: View {
                     FitnessLoadSection()
                     SectionHeader("Progress")
                     FitnessProgressCard()
+                    ProgressRecordsCard()
                     SectionHeader("Workouts")
                     FitnessWorkoutsCard()
                 }

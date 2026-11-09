@@ -25,7 +25,9 @@ struct DoubleProgressionTests {
 
     @Test func theTopOfTheRangeStepsUpAndResetsTheReps() {
         let today = planner.progression(history: squat(10), reps: 6...10, rpe: 7, kind: .barbell)
-        #expect(today?.targetReps == 6)
+        // The reps the last session's 1RM allows at the new weight with today's 3 in reserve,
+        // not the bottom of the range (that left about 5 in reserve; audit 2026-11 §4).
+        #expect(today?.targetReps == 8)
         #expect((today?.load ?? 0) > 82.5)
         #expect(today?.load == GymProfile.commercialKilograms.nextLoad(above: 82.5, on: .barbell))
     }

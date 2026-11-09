@@ -36,6 +36,8 @@ struct CoachView: View {
                             ModelStatusBanner(message: message)
                         }
                         contextChips
+                        // Messages the coach sent first (`CoachNudges`), with their follow-up question.
+                        CoachInboxSection(ask: { question in Task { await send(question) } })
                         if coach.messages.isEmpty {
                             emptyState
                         }
@@ -257,21 +259,26 @@ struct CoachView: View {
             let lastPlan = coach.messages.last { $0.plan != nil }?.plan
             let resolvedFocus = focus ?? lastPlan?.focus
                 ?? WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))
-            plan = gym.planner.plan(
+            // The same request as the workout builder (`TrainerPlanRequest`): the week's set targets,
+            // movements for muscles behind on the week, age, known numbers and the abs finisher.
+            let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
+            let left = weeklyPlans.progress(sessions: sessions)?.remaining ?? 2
+            let request = TrainerPlanRequest(
                 focus: resolvedFocus,
                 minutes: minutes ?? lastPlan?.minutes ?? 45,
-                recovery: metrics.recoveryForTraining,
-                history: LiftHistory.make(from: sessions, unit: gym.profile.unit),
+                prioritySlots: focus == nil ? (muscles.coverage(sessionsLeft: max(1, left), preferred: resolvedFocus)?.prioritySlots ?? []) : [],
                 block: weeklyPlans.blockWeek,
-                bodyMassKg: metrics.bodyMassKg,
-                sex: metrics.sex,
-                trainingStatus: metrics.trainingStatus ?? .novice,
-                warmUpMinutes: WarmUpRoutine.make(tier: settings.warmUpTier(for: resolvedFocus),
-                                                  firstSlots: resolvedFocus.slots, gym: gym.profile).minutes,
+                finisherLength: settings.absFinisher,
                 exerciseFilter: ExerciseFilter(neverAgain: ExerciseExclusions.shared.ids,
                                                reports: PainLogStore.shared.allReports(checkIns: checkIns, health: []),
-                                               today: .now)
+                                               today: .now),
+                warmUpMinutes: WarmUpRoutine.make(tier: settings.warmUpTier(for: resolvedFocus),
+                                                  firstSlots: resolvedFocus.slots, gym: gym.profile).minutes
             )
+            let session = request.plan(gym: gym, plans: weeklyPlans, muscles: muscles, metrics: metrics,
+                                       settings: settings, sessions: sessions, history: history)
+            plan = AbsFinisher.appending(request.finisher(for: session, gym: gym, sessions: sessions, history: history),
+                                         to: session)
         }
         await coach.send(text, facts: makeFacts(plan: plan), plan: plan)
     }

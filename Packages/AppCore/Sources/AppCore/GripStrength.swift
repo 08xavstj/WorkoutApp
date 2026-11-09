@@ -76,18 +76,25 @@ public enum GripStrength {
     }
 
     /// What the reading means, in plain words. Never a diagnosis.
-    public static func advice(_ reading: Reading, age: Int, sex: BiologicalSex) -> String {
+    /// - Parameter inPounds: say the numbers in pounds (the user's weight unit); the maths stays in kg.
+    public static func advice(_ reading: Reading, age: Int, sex: BiologicalSex, inPounds: Bool = false) -> String {
         let band = band(age: age, sex: sex)
-        let typical = "People your age and sex typically squeeze about \(Int(band.low))-\(Int(band.high)) kg."
+        // 1 kg = 2.20462 lb; the "5 kg" step from the PURE study reads as "11 lb".
+        func amount(_ kg: Double) -> String { inPounds ? "\(Int((kg * 2.20462).rounded())) lb" : "\(Int(kg)) kg" }
+        func range(_ low: Double, _ high: Double) -> String {
+            inPounds ? "\(Int((low * 2.20462).rounded()))-\(Int((high * 2.20462).rounded())) lb" : "\(Int(low))-\(Int(high)) kg"
+        }
+        let step = amount(5)
+        let typical = "People your age and sex typically squeeze about \(range(band.low, band.high))."
         switch reading {
         case .belowCutoff:
-            return "Under \(Int(sarcopeniaCutoffKg(sex: sex))) kg is the line the European sarcopenia consensus uses for probable low muscle strength. One squeeze on a cheap dynamometer can be off, so repeat it rested; if it stays there, mention it to a doctor. Heavy pulling (rows, deadlifts, carries) raises it. \(typical)"
+            return "Under \(amount(sarcopeniaCutoffKg(sex: sex))) is the line the European sarcopenia consensus uses for probable low muscle strength. One squeeze on a cheap dynamometer can be off, so repeat it rested; if it stays there, mention it to a doctor. Heavy pulling (rows, deadlifts, carries) raises it. \(typical)"
         case .belowAverage:
-            return "\(typical) Below that band isn't a diagnosis, but grip tracks whole-body strength, and in large studies each 5 kg less went with about 16% more deaths. Rows, deadlifts and loaded carries are the lever."
+            return "\(typical) Below that band isn't a diagnosis, but grip tracks whole-body strength, and in large studies each \(step) less went with about 16% more deaths. Rows, deadlifts and loaded carries are the lever."
         case .average:
             return "\(typical) Aim above the middle of the band: grip is a free by-product of pulling and carrying, and higher is better across the whole range."
         case .aboveAverage:
-            return "\(typical) You're above it. Keep it: in large studies, every 5 kg of grip went with about 16% fewer deaths."
+            return "\(typical) You're above it. Keep it: in large studies, every \(step) of grip went with about 16% fewer deaths."
         }
     }
 

@@ -43,8 +43,8 @@ struct HealthView: View {
             .navigationTitle("Health")
             .navigationSubtitle("Trends and records")
             .tabToolbar()
-            .task { await load() }
-            .refreshable { await load() }
+            .task { await load(force: false) }
+            .refreshable { await load(force: true) }
         }
     }
 
@@ -52,20 +52,27 @@ struct HealthView: View {
         metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil)
     }
 
-    private func load() async {
+    /// Opening the tab reloads only what is over 10 minutes old (the main
+    /// refresh keeps the stats current while the app is open; the app's
+    /// choice); pull to refresh reloads everything.
+    private func load(force: Bool) async {
         guard let health else { return }
-        var manual: [Date: Double] = [:]
-        for reading in hrvReadings where manual[reading.date] == nil && reading.source != "Camera" {
-            manual[reading.date] = reading.milliseconds
-        }
+        func stale(_ date: Date?) -> Bool { force || date.map { Date.now.timeIntervalSince($0) > 10 * 60 } ?? true }
+        let manual = RootView.hrvByMorning(hrvReadings, camera: false)
         let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now
         let recent = sessions.filter { !$0.isActive && $0.startedAt >= cutoff }.map(\.strainSummary)
         // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old.
         vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: heightCm)
-        await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
-                             sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
-        await checkIns.refreshInsights(health: health, manualHRV: manual)
-        await biology.refresh(health: health, settings: settings, manualHRV: manual, proteinTarget: metrics.proteinTarget)
+        if stale(vitals.lastRefreshed) {
+            await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
+                                 sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
+        }
+        if stale(checkIns.insightsUpdated) {
+            await checkIns.refreshInsights(health: health, manualHRV: manual)
+        }
+        if stale(biology.lastRefreshed) {
+            await biology.refresh(health: health, settings: settings, manualHRV: manual, proteinTarget: metrics.proteinTarget)
+        }
         vitals.setHRVSeries(biology.hrvSeries)
     }
 }

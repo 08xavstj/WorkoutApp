@@ -2,13 +2,16 @@ import SwiftUI
 import SwiftData
 import AppCore
 
-/// Read-only view of a finished session.
+/// A finished session, with Edit for its sets (weight, reps, effort; add or
+/// delete a set). History, records, the summary and strain read the sets
+/// live, so they follow an edit.
 struct WorkoutDetailView: View {
     let session: WorkoutSession
     @Environment(GymStore.self) private var gym
     @Environment(\.modelContext) private var modelContext
     @State private var reloadToken = 0
     @State private var savedTemplate = false
+    @State private var editing = false
     @State private var supersetGroups: [Int: Int] = [:]
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Fits the set number ("W", "12") at every text size.
@@ -33,6 +36,10 @@ struct WorkoutDetailView: View {
         .navigationTitle(session.name)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                Button("Edit") { editing = true }
+                    .disabled(session.isActive)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     _ = WorkoutTemplate.from(session, in: modelContext)
                     savedTemplate = true
@@ -40,6 +47,9 @@ struct WorkoutDetailView: View {
                     Label("Add to saved workouts", systemImage: "square.and.arrow.down")
                 }
             }
+        }
+        .sheet(isPresented: $editing) {
+            WorkoutEditSheet(session: session, unit: unit)
         }
         .alert("Added to saved workouts", isPresented: $savedTemplate) {
             Button("OK", role: .cancel) {}
@@ -61,6 +71,12 @@ struct WorkoutDetailView: View {
             Text(session.startedAt.formatted(date: .complete, time: .shortened))
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
+            // Where it was done, when recorded (`GymRegistry.sessionGyms`).
+            if let gymName = gym.gymName(forSessionStartedAt: session.startedAt) {
+                Label(gymName, systemImage: "dumbbell")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
             summaryStats
             // The end-of-workout summary (`WorkoutSummaryView`), as shown after Finish.
             NavigationLink {
@@ -73,13 +89,20 @@ struct WorkoutDetailView: View {
         .listRowBackground(Theme.card)
     }
 
+    private var totalReps: Int { session.workingSets.reduce(0) { $0 + $1.reps } }
+
     private var summaryStats: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout())
         return layout {
             StatView(label: "Duration", value: Duration.seconds(session.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
-            StatView(label: "Total lifted", value: "\(unit.format(session.totalVolumeKg)) \(unit.rawValue)")
+            // Bodyweight work lifts no logged weight: its reps say more than "0 kg".
+            if session.totalVolumeKg > 0 {
+                StatView(label: "Total lifted", value: "\(unit.format(session.totalVolumeKg)) \(unit.rawValue)")
+            } else {
+                StatView(label: "Total reps", value: "\(totalReps)")
+            }
             StatView(label: "Effort", value: session.sessionRPE.map { "\($0)/10" } ?? "--", color: Theme.liftingText)
         }
     }
@@ -121,7 +144,7 @@ struct WorkoutDetailView: View {
                 // Text colour for the amber accent (ux-audit.md X4, P24).
                 .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.secondaryText)
                 .frame(width: numberWidth, alignment: .leading)
-            Text("\(unit.format(set.weightKg)) \(unit.rawValue) × \(set.reps)")
+            Text(WorkoutEditSheet.loadText(set, exerciseID: set.exercise?.exerciseID, unit: unit))
                 .monospacedDigit()
             if set.kind != .straight {
                 Text(set.kind.title)
@@ -393,5 +416,214 @@ private struct MergedHeartRateRow: View {
         var text = "Linked to \(linkedWorkout?.name ?? "the workout") on \(source)"
         if let kcal = linkedWorkout?.activeKcal, kcal > 0 { text += " · \(whole(kcal)) kcal" }
         return text
+    }
+}
+
+// MARK: - Editing a finished workout
+
+/// Edit a finished workout's sets: weight, reps and effort, delete a set or
+/// add one. Nothing changes until Save; the session's history, records,
+/// summary and strain then read the new numbers (they're computed live).
+struct WorkoutEditSheet: View {
+    let session: WorkoutSession
+    let unit: WeightUnit
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @State private var exercises: [ExerciseDraft] = []
+
+    /// One set as typed: weight in the display unit, reps, effort.
+    struct SetDraft: Identifiable, Equatable {
+        let id = UUID()
+        /// The logged set; nil for a set added here.
+        var setID: PersistentIdentifier?
+        var weight: String
+        var reps: String
+        var rpe: Double?
+        var isWarmup: Bool
+        var label: String
+    }
+
+    struct ExerciseDraft: Identifiable, Equatable {
+        var id: PersistentIdentifier
+        var exerciseID: String
+        var name: String
+        var sets: [SetDraft]
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                ForEach($exercises) { $exercise in
+                    WorkoutEditSection(exercise: $exercise, unit: unit)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle("Edit workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        save()
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear(perform: load)
+        }
+    }
+
+    /// "60 kg × 8", "20 kg per hand × 10", "30 s" for a hold.
+    static func loadText(_ set: SetLog, exerciseID: String?, unit: WeightUnit) -> String {
+        if let exerciseID, LiveSetCoach.isHold(exerciseID) { return "\(set.reps) s" }
+        let perHand = exerciseID.map { Prescription.isPerHand(ExerciseCatalog.exercise(id: $0)?.load) } == true ? " per hand" : ""
+        return "\(unit.format(set.weightKg)) \(unit.rawValue)\(perHand) × \(set.reps)"
+    }
+
+    private static func number(_ value: Double) -> String {
+        value.formatted(.number.grouping(.never).precision(.fractionLength(0...2)))
+    }
+
+    private func load() {
+        guard exercises.isEmpty else { return }
+        exercises = session.orderedExercises.map { exercise in
+            let sets = exercise.orderedSets
+            let positions = SetStructure.positions(LiveSetCoach.structureItems(sets))
+            let drafts = sets.enumerated().map { index, set in
+                let position = positions[index]
+                let label = set.isWarmup ? "W" : (position.isStage ? set.kind.shortLabel : "\(position.number ?? index + 1)")
+                return SetDraft(setID: set.persistentModelID, weight: Self.number(unit.display(set.weightKg)),
+                                reps: "\(set.reps)", rpe: set.rpe, isWarmup: set.isWarmup, label: label)
+            }
+            return ExerciseDraft(id: exercise.persistentModelID, exerciseID: exercise.exerciseID,
+                                 name: exercise.name, sets: drafts)
+        }
+    }
+
+    /// Applies the drafts: changed sets updated, removed ones deleted, added
+    /// ones logged as done (at the exercise's last set's time).
+    private func save() {
+        for draft in exercises {
+            guard let exercise = session.exercises.first(where: { $0.persistentModelID == draft.id }) else { continue }
+            // Every set deleted: the exercise goes too.
+            if draft.sets.isEmpty {
+                modelContext.delete(exercise)
+                continue
+            }
+            let kept = Set(draft.sets.compactMap(\.setID))
+            for set in exercise.sets where !kept.contains(set.persistentModelID) {
+                modelContext.delete(set)
+            }
+            var nextOrder = (exercise.sets.map(\.order).max() ?? -1) + 1
+            let doneAt = exercise.sets.compactMap(\.completedAt).max() ?? session.endedAt ?? session.startedAt
+            for item in draft.sets {
+                let weightKg = unit.toKilograms(LiveWorkoutRules.parseNumber(item.weight) ?? 0)
+                let reps = Int(LiveWorkoutRules.parseNumber(item.reps) ?? 0)
+                if let id = item.setID, let set = exercise.sets.first(where: { $0.persistentModelID == id }) {
+                    // Only what changed, so an untouched weight keeps its exact kilograms.
+                    if abs(unit.display(set.weightKg) - unit.display(weightKg)) >= 0.005 { set.weightKg = weightKg }
+                    if set.reps != reps { set.reps = reps }
+                    if set.rpe != item.rpe { set.rpe = item.rpe }
+                } else if item.setID == nil {
+                    let set = SetLog(order: nextOrder, weightKg: weightKg, reps: reps, rpe: item.rpe)
+                    set.completedAt = doneAt
+                    set.exercise = exercise
+                    modelContext.insert(set)
+                    nextOrder += 1
+                }
+            }
+        }
+        try? modelContext.save()
+    }
+}
+
+/// One exercise's sets as editable rows, swipe to delete, and Add set.
+private struct WorkoutEditSection: View {
+    @Binding var exercise: WorkoutEditSheet.ExerciseDraft
+    let unit: WeightUnit
+
+    private var isHold: Bool { LiveSetCoach.isHold(exercise.exerciseID) }
+
+    var body: some View {
+        Section(exercise.name) {
+            ForEach($exercise.sets) { $set in
+                WorkoutEditRow(set: $set, unit: unit, isHold: isHold)
+            }
+            .onDelete { exercise.sets.remove(atOffsets: $0) }
+            Button("Add set", systemImage: "plus") { addSet() }
+        }
+        .listRowBackground(Theme.card)
+    }
+
+    /// A copy of the last working set, to change.
+    private func addSet() {
+        let last = exercise.sets.last { !$0.isWarmup } ?? exercise.sets.last
+        let number = exercise.sets.filter { !$0.isWarmup }.count + 1
+        exercise.sets.append(WorkoutEditSheet.SetDraft(setID: nil, weight: last?.weight ?? "0", reps: last?.reps ?? "0",
+                                                       rpe: nil, isWarmup: false, label: "\(number)"))
+    }
+}
+
+/// Weight, reps and effort for one set.
+private struct WorkoutEditRow: View {
+    @Binding var set: WorkoutEditSheet.SetDraft
+    let unit: WeightUnit
+    let isHold: Bool
+
+    /// RPE 6-10 in half steps (RPE = 10 − reps left; Zourdos et al., J Strength Cond Res 2016).
+    private static let rpeChoices: [Double] = stride(from: 6.0, through: 10.0, by: 0.5).map { $0 }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(set.label)
+                .foregroundStyle(set.isWarmup ? Theme.recoveryModerateText : Theme.secondaryText)
+                .frame(minWidth: 24, alignment: .leading)
+            if !isHold {
+                TextField(unit.rawValue, text: $set.weight)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 80)
+                    .accessibilityLabel("Weight in \(unit.spokenName)")
+                Text(unit.rawValue)
+                    .foregroundStyle(Theme.secondaryText)
+                Text("×")
+                    .foregroundStyle(Theme.secondaryText)
+                    .accessibilityHidden(true)
+            }
+            TextField(isHold ? "s" : "reps", text: $set.reps)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 56)
+                .accessibilityLabel(isHold ? "Seconds" : "Reps")
+            if isHold {
+                Text("s").foregroundStyle(Theme.secondaryText)
+            }
+            Spacer(minLength: 4)
+            if !set.isWarmup, !isHold {
+                rpeMenu
+            }
+        }
+        .monospacedDigit()
+    }
+
+    private var rpeMenu: some View {
+        Menu {
+            Button("No rating") { set.rpe = nil }
+            ForEach(Self.rpeChoices, id: \.self) { value in
+                Button(ReserveText.short(rpe: value)) { set.rpe = value }
+            }
+        } label: {
+            Text(set.rpe.map { ReserveText.short(rpe: $0) } ?? "Effort")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.liftingText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Theme.lifting.opacity(0.12), in: .capsule)
+        }
+        .accessibilityLabel("Effort")
     }
 }

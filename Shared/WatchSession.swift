@@ -101,6 +101,30 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         var achievableLoadsKg: [Double]?
         /// Run the experimental rep counter: the setting is on and this is a barbell squat or deadlift (`RepDetection.supports`). Missing on older phones.
         var repCounting: Bool? = nil
+        /// A stable id for the exercise (`LiveSessionStore.exerciseKey` on the
+        /// phone) that the Watch sends back with a tick, so a queued tick still
+        /// finds it after a reorder and finds nothing after a removal. Missing on older phones.
+        var key: String? = nil
+        /// A plank or side plank: "reps" are seconds. Missing on older phones.
+        var isHold: Bool? = nil
+        /// Dumbbells or kettlebells: the weight is per hand. Missing on older phones.
+        var perHand: Bool? = nil
+        /// Machine settings at this gym ("Seat 4 · Pin 7"). Missing on older phones.
+        var machineNote: String? = nil
+
+        /// "60 kg", "20 kg each" (per hand), in the session's unit.
+        func weightText(_ kilograms: Double, unit: String) -> String {
+            let value = unit == "lb" ? kilograms * 2.20462 : kilograms
+            let text = "\(value.formatted(.number.precision(.fractionLength(0...1)))) \(unit)"
+            return perHand == true ? text + " each" : text
+        }
+
+        /// "8 × 60 kg", "30 s" for a hold, "Not set" with nothing filled in.
+        func setText(reps: Int, weightKg: Double, unit: String) -> String {
+            if isHold == true { return reps > 0 ? "\(reps) s" : "Not set" }
+            guard reps > 0 || weightKg > 0 else { return "Not set" }
+            return "\(reps) × \(weightText(weightKg, unit: unit))"
+        }
     }
 
     /// Stable id for the session: its start time in whole seconds, the same
@@ -144,6 +168,9 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
     /// Whether the Watch buzzes when rest ends (Settings › Rest timer alerts).
     /// nil (older phones) buzzes, as before.
     var restBuzz: Bool?
+    /// The full length of the phone's running rest, in seconds, for the Watch's
+    /// rest bar (`restSeconds` is the next exercise's rest). Nil on older phones.
+    var restLengthSeconds: Int?
 
     static func id(for startedAt: Date) -> String {
         String(Int(startedAt.timeIntervalSince1970))
@@ -281,8 +308,17 @@ nonisolated enum WatchCommand: Codable, Sendable, Equatable {
     /// the value from the snapshot it had, so an unchanged one doesn't overwrite
     /// an edit made on the phone meanwhile. All four are nil from older Watches
     /// (synthesized Codable decodes a missing optional as nil).
+    /// `exerciseKey`: the exercise's stable id from the snapshot (`ExerciseSnapshot.key`),
+    /// which survives a reorder on the phone. `baseReps` / `baseWeightKg`: the values the
+    /// Watch's snapshot had, so the phone can tell a change it made itself after that
+    /// snapshot (a set-by-set change from an earlier queued tick) from an edit. Nil from older Watches.
     case completeSet(exerciseIndex: Int, setIndex: Int, reps: Int, weightKg: Double, rpe: Double?,
-                     exerciseOrder: Int? = nil, setOrder: Int? = nil, repsEdited: Bool? = nil, weightEdited: Bool? = nil)
+                     exerciseOrder: Int? = nil, setOrder: Int? = nil, repsEdited: Bool? = nil, weightEdited: Bool? = nil,
+                     exerciseKey: String? = nil, baseReps: Int? = nil, baseWeightKg: Double? = nil)
+    /// The effort for a set already ticked on the wrist (asked after the tick, so
+    /// the rest starts at once). Older phones can't decode it and drop it; the set stays logged.
+    case rateSet(exerciseIndex: Int, setIndex: Int, rpe: Double, exerciseOrder: Int? = nil, setOrder: Int? = nil,
+                 exerciseKey: String? = nil)
     case skipRest
     /// +/- seconds on the rest timer from the wrist. Older phones can't decode
     /// it and drop the message; the Watch's own timer still moves.

@@ -12,6 +12,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     private let rmssdCache = NightlyValueCache(fileName: "rmssd-nights.json")
     /// Average sleeping heart rate for finished nights (`nightlySleepingHeartRate`).
     let sleepingHeartRateCache = NightlyValueCache(fileName: "sleeping-hr-nights.json")
+    /// The running observer queries and what they call (`observeChanges`).
+    private let observers = ObserverRegistry()
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -109,11 +111,22 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return types
     }
 
+    /// Shows the Health permission sheet. Afterwards the observers start again
+    /// and background delivery is asked for (both need access to work).
     @concurrent
     func requestAuthorization() async throws {
         if DemoHealth.active != nil { return } // demo mode: no Health sheet
         guard isAvailable else { return }
         try await store.requestAuthorization(toShare: shareTypes, read: readTypes)
+        accessChanged()
+    }
+
+    /// After the permission sheet: observers started before access was granted
+    /// have stopped with an error, so start them again; background delivery
+    /// takes effect only with access.
+    func accessChanged() {
+        if observers.handler != nil { restartObservers() }
+        enableBackgroundDelivery()
     }
 
     /// Shows the Health permission sheet again only when there are types the
@@ -137,6 +150,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         guard status == .shouldRequest else { return false }
         do {
             try await store.requestAuthorization(toShare: shareTypes, read: readTypes)
+            accessChanged()
             return true
         } catch {
             Self.log.error("Health authorization request failed: \(error.localizedDescription, privacy: .public)")
@@ -325,7 +339,9 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         for sample in try await hrvDescriptor.result(for: store) {
             // Shift by 6 h so 6 pm-midnight counts toward the next morning.
             let shifted = sample.startDate.addingTimeInterval(6 * 3600)
-            guard calendar.component(.hour, from: shifted) < 18 else { continue } // drop noon-6 pm
+            // Drop noon-6 pm. Tuned for night sleep: a day sleeper's HRV comes from
+            // beat-to-beat RMSSD inside the main sleep (`nightlyRMSSD`) once it covers 14 nights.
+            guard calendar.component(.hour, from: shifted) < 18 else { continue }
             hrvByNight[calendar.startOfDay(for: shifted), default: []].append(sample.quantity.doubleValue(for: ms))
         }
 
@@ -353,14 +369,18 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     // MARK: - Sleep
 
-    /// Sleep samples for the night ending on the morning of `day` (6 pm the day before to 2 pm).
+    /// Sleep samples for the night ending on `day`: 6 pm the day before to 6 pm,
+    /// the same 24 h that `sleepHistory` files under that morning, so a day
+    /// sleeper's 8 am-4 pm sleep after a night shift isn't cut at 2 pm.
+    /// `SleepCalculator` scores only the main sleep, so an afternoon nap in the
+    /// extra hours doesn't count as the night.
     @concurrent
     func sleepSamples(forNightEnding day: Date) async throws -> [SleepSample] {
         if let demo = DemoHealth.active { return demo.sleepSamples(forNightEnding: day) }
         let calendar = Calendar.current
         let morning = calendar.startOfDay(for: day)
         let start = morning.addingTimeInterval(-6 * 3600)
-        let end = morning.addingTimeInterval(14 * 3600)
+        let end = morning.addingTimeInterval(18 * 3600)
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
@@ -543,12 +563,15 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         )
     }
 
-    /// Most recent body weight in kilograms.
+    /// Most recent body weight in kilograms from the last `maxAgeDays` days
+    /// (nil if older, so a weight typed in Settings isn't replaced by a
+    /// reading from years ago; 180 days is the app's choice).
     @concurrent
-    func latestBodyMassKg() async throws -> Double? {
-        if let demo = DemoHealth.active { return demo.latest(.bodyMass, since: nil) }
+    func latestBodyMassKg(maxAgeDays: Int = 180) async throws -> Double? {
+        let since = Calendar.current.date(byAdding: .day, value: -maxAgeDays, to: .now)
+        if let demo = DemoHealth.active { return demo.latest(.bodyMass, since: since) }
         let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: HKQuantityType(.bodyMass))],
+            predicates: [.quantitySample(type: HKQuantityType(.bodyMass), predicate: since.map { HKQuery.predicateForSamples(withStart: $0, end: nil) })],
             sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
             limit: 1
         )
@@ -759,13 +782,11 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return try await (resting, active)
     }
 
-    /// Calls `onChange` whenever new steps, energy, heart rate, breathing or
-    /// sleep data lands in Apple Health (e.g. after Garmin Connect syncs).
-    /// Lets HealthKit wake the app when new data arrives (e.g. a Garmin sync),
-    /// so scores and the widget update without opening the app.
     /// Which of these workouts are still in Apple Health, and whether the app
-    /// can read workouts at all (any workout since `readableSince`): a read the
-    /// user hasn't allowed looks exactly like a deleted workout.
+    /// can read workouts at all (any workout since `readableSince` that another
+    /// app or device wrote): a read the user hasn't allowed looks exactly like
+    /// a deleted workout, and the app can always read the workouts it saved
+    /// itself, so those don't prove access.
     @concurrent
     func workoutsStillPresent(_ ids: Set<UUID>, readableSince: Date) async throws -> (present: Set<UUID>, canRead: Bool) {
         if DemoHealth.active != nil { return (ids, true) } // demo mode: never drop a session
@@ -775,8 +796,12 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         )
         let present = Set(try await byID.result(for: store).map(\.uuid))
         if !present.isEmpty { return (present, true) }
+        let others = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForSamples(withStart: readableSince, end: nil),
+            NSCompoundPredicate(notPredicateWithSubpredicate: HKQuery.predicateForObjects(from: HKSource.default())),
+        ])
         let any = HKSampleQueryDescriptor(
-            predicates: [.workout(HKQuery.predicateForSamples(withStart: readableSince, end: nil))],
+            predicates: [.workout(others)],
             sortDescriptors: [],
             limit: 1
         )
@@ -784,17 +809,37 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return (present, canRead)
     }
 
+    /// Lets HealthKit wake the app when new sleep, HRV or resting heart rate
+    /// arrives (e.g. a Garmin sync), so recovery and the widget update without
+    /// opening the app. Heart rate and steps aren't on the list: they land
+    /// every few minutes, and hourly wakes for them cost battery without
+    /// changing the morning scores (strain catches up when the app opens).
+    /// Takes effect once Health access is granted; safe to repeat.
     func enableBackgroundDelivery() {
         let types: [HKObjectType] = [
-            HKQuantityType(.heartRate), HKQuantityType(.restingHeartRate), HKCategoryType(.sleepAnalysis),
-            HKQuantityType(.heartRateVariabilitySDNN), HKQuantityType(.stepCount)
+            HKQuantityType(.restingHeartRate), HKCategoryType(.sleepAnalysis), HKQuantityType(.heartRateVariabilitySDNN)
         ]
         for type in types {
             store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
         }
+        // Stop the wakes earlier versions asked for.
+        for type in [HKQuantityType(.heartRate), HKQuantityType(.stepCount)] {
+            store.disableBackgroundDelivery(for: type) { _, _ in }
+        }
     }
 
-    func observeChanges(_ onChange: @escaping @Sendable () -> Void) {
+    /// Calls `onChange` whenever new steps, energy, heart rate, breathing or
+    /// sleep data lands in Apple Health (e.g. after Garmin Connect syncs), and
+    /// tells HealthKit the update was handled only once `onChange` has
+    /// finished, so a background wake gets its refresh done first.
+    func observeChanges(_ onChange: @escaping @Sendable () async -> Void) {
+        observers.setHandler(onChange)
+        restartObservers()
+    }
+
+    /// Starts the observers again (after the Health permission sheet: a query
+    /// started before access was granted stops with an error).
+    func restartObservers() {
         let types: [HKSampleType] = [
             HKQuantityType(.stepCount), HKQuantityType(.activeEnergyBurned), HKQuantityType(.heartRate),
             HKQuantityType(.restingHeartRate), HKQuantityType(.respiratoryRate), HKQuantityType(.oxygenSaturation),
@@ -803,13 +848,22 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             // Workouts added or deleted (e.g. in Apple's Fitness app).
             HKObjectType.workoutType()
         ]
-        for type in types {
-            let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
-                if error == nil { onChange() }
-                completion()
+        let observers = self.observers
+        let queries: [HKObserverQuery] = types.map { type in
+            HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
+                let done = ObserverCompletion(completion)
+                guard error == nil, let handler = observers.handler else {
+                    done.call()
+                    return
+                }
+                Task {
+                    await handler()
+                    done.call()
+                }
             }
-            store.execute(query)
         }
+        for old in observers.replaceQueries(queries) { store.stop(old) }
+        for query in queries { store.execute(query) }
     }
 
     private static func name(for type: HKWorkoutActivityType) -> String {
@@ -864,10 +918,13 @@ extension Array where Element == SleepNight {
     /// Sleep Regularity Index (0-100) over these nights, if there are enough.
     nonisolated var regularityScore: Int? {
         guard let first = self.map(\.date).min() else { return nil }
-        // Noon before the first morning, through noon today.
-        let start = first.addingTimeInterval(-12 * 3600)
-        let days = Int((Date.now.timeIntervalSince(start) / 86_400).rounded(.down))
-        return SleepRegularity.score(asleep: flatMap(\.intervals), start: start, days: days)
+        // Noon before the first morning, through noon today, in calendar days so a
+        // daylight-saving change doesn't misalign the nights after it.
+        let calendar = Calendar.current
+        let start = calendar.date(byAdding: .day, value: -1, to: first)
+            .flatMap { calendar.date(bySettingHour: 12, minute: 0, second: 0, of: $0) } ?? first.addingTimeInterval(-12 * 3600)
+        let days = SleepRegularity.calendarDays(from: start, to: .now, calendar: calendar)
+        return SleepRegularity.score(asleep: flatMap(\.intervals), start: start, days: days, calendar: calendar)
     }
 }
 
@@ -928,6 +985,44 @@ extension HealthKitClient {
             DatedValue(date: $0.startDate, value: $0.quantity.doubleValue(for: unit))
         }
     }
+}
+
+/// The observer queries `HealthKitClient` keeps running, and their handler.
+/// HealthKit calls the handlers on its own queues, hence the lock.
+nonisolated private final class ObserverRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedHandler: (@Sendable () async -> Void)?
+    private var queries: [HKObserverQuery] = []
+
+    var handler: (@Sendable () async -> Void)? {
+        lock.lock(); defer { lock.unlock() }
+        return storedHandler
+    }
+
+    func setHandler(_ handler: @escaping @Sendable () async -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        storedHandler = handler
+    }
+
+    /// Stores the new queries and returns the old ones to stop.
+    func replaceQueries(_ new: [HKObserverQuery]) -> [HKObserverQuery] {
+        lock.lock(); defer { lock.unlock() }
+        let old = queries
+        queries = new
+        return old
+    }
+}
+
+/// HealthKit's observer completion handler, carried into the task that
+/// calls it once the app's refresh is done.
+nonisolated private final class ObserverCompletion: @unchecked Sendable {
+    private let completion: () -> Void
+
+    init(_ completion: @escaping () -> Void) {
+        self.completion = completion
+    }
+
+    func call() { completion() }
 }
 
 /// Collects beats from an HKHeartbeatSeriesQuery, whose handler runs on a

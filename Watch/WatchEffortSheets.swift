@@ -1,70 +1,7 @@
 import SwiftUI
 import WatchKit
 
-/// "Reps left?" after Complete: 0 / 1 / 2 / 3 / 4+ reps left in the tank (as
-/// the phone's `ReserveText`), the plan's number marked, reps and weight to
-/// adjust, and "No rating". One tap logs the set with RPE = 10 − reps left
-/// (the RIR-based scale; Zourdos et al. 2016); the rest timer starts the
-/// moment this closes.
-struct WatchSetEffortSheet: View {
-    @Environment(WatchWorkoutModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    let set: PendingSet
-    @State private var reps: Int
-    @State private var weightKg: Double
-    @State private var adjusting = false
-
-    init(set: PendingSet) {
-        self.set = set
-        _reps = State(initialValue: set.reps)
-        _weightKg = State(initialValue: set.weightKg)
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                VStack(spacing: 0) {
-                    Text("Reps left?")
-                        .font(.headline)
-                    Text("How many more could you have done?")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                if adjusting {
-                    WatchSetAdjuster(reps: $reps, weightKg: $weightKg, loads: set.loads, unit: set.unit)
-                } else {
-                    Button {
-                        adjusting = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("\(reps) × \(watchFormat(weightKg, unit: set.unit))")
-                                .monospacedDigit()
-                            Image(systemName: "pencil")
-                        }
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Edit reps and weight")
-                }
-                WatchRepsLeftGrid(plan: set.suggestedRPE.map { min(4, max(0, 10 - $0)) }) { left in
-                    finish(rpe: Double(10 - left))
-                }
-                Button("No rating") { finish(rpe: nil) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-        }
-    }
-
-    private func finish(rpe: Double?) {
-        model.completeSet(set, reps: reps, weightKg: weightKg, rpe: rpe)
-        dismiss()
-    }
-}
-
-/// Reps and weight before Complete ("Edit" on the set).
+/// Reps and weight before Complete ("Edit" on the set); seconds only for a hold.
 struct WatchSetEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     let set: PendingSet
@@ -82,7 +19,12 @@ struct WatchSetEditSheet: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 8) {
-                WatchSetAdjuster(reps: $reps, weightKg: $weightKg, loads: set.loads, unit: set.unit)
+                if set.isHold {
+                    // A plank's "reps" are seconds and it has no weight to set.
+                    WatchHoldAdjuster(seconds: $reps)
+                } else {
+                    WatchSetAdjuster(reps: $reps, weightKg: $weightKg, loads: set.loads, unit: set.unit)
+                }
                 Button("Done") {
                     onDone(SetEdit(reps: reps, weightKg: weightKg))
                     dismiss()
@@ -91,6 +33,47 @@ struct WatchSetEditSheet: View {
                 .tint(WatchTheme.lifting)
             }
         }
+    }
+}
+
+/// A hold's time with −/+ in 5-second steps (an app choice: fine enough for
+/// a plank, few taps on the wrist); no weight.
+struct WatchHoldAdjuster: View {
+    @Binding var seconds: Int
+
+    /// Seconds per tap (app choice).
+    private static let step = 5
+
+    var body: some View {
+        HStack {
+            stepButton("minus", label: "Shorter") { seconds = Self.down(seconds) }
+            Text("\(seconds) sec")
+                .font(.headline)
+                .monospacedDigit()
+                .frame(maxWidth: .infinity)
+            stepButton("plus", label: "Longer") { seconds = Self.up(seconds) }
+        }
+    }
+
+    /// To the next lower multiple of 5 (32 → 30, 30 → 25), not below 0.
+    private static func down(_ value: Int) -> Int {
+        max(0, ((value - 1) / step) * step)
+    }
+
+    /// To the next higher multiple of 5 (32 → 35, 30 → 35).
+    private static func up(_ value: Int) -> Int {
+        (max(0, value) / step + 1) * step
+    }
+
+    private func stepButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.headline.weight(.bold))
+                .frame(width: 34, height: 34)
+        }
+        .buttonStyle(.bordered)
+        .tint(WatchTheme.lifting)
+        .accessibilityLabel(label)
     }
 }
 
@@ -193,7 +176,13 @@ struct WatchRepsLeftGrid: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(isPlan ? WatchTheme.lifting.opacity(0.55) : Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            // The plan's number is outlined, not filled: filled reads as already chosen.
+            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                if isPlan {
+                    RoundedRectangle(cornerRadius: 8).strokeBorder(WatchTheme.lifting, lineWidth: 2)
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(left >= 4 ? "4 or more reps left" : (left == 1 ? "1 rep left" : "\(left) reps left"))

@@ -13,9 +13,12 @@ import Foundation
 /// high-rep sets (Halperin I, Malleron T, Har-Nir I, et al. Accuracy in
 /// predicting repetitions to task failure in resistance exercise: a scoping
 /// review and exploratory meta-analysis. Sports Med 2022;52:377-390), hence the
-/// one-rep tolerance band and no adjustment on sets over 12 reps. Noisy RPE can
-/// make the load whipsaw, so it changes at most once per exercise per session
-/// and never off the first working set (docs/research/lifting-features.md §3.2).
+/// one-rep tolerance band (1.5 reps on sets over 12) and no adjustment on sets
+/// over 20 reps. Noisy RPE can make the load whipsaw, so it changes at most
+/// once per exercise per session. The first working set moves only on a
+/// clear miss (`firstSetGap`), or at the normal trigger when the weight was
+/// an estimate (`firstSetCanAdjust`): that's when the first set says most
+/// (audit 2026-11 §2; docs/research/lifting-features.md §3.2).
 public enum Autoregulation {
     /// A gap of up to this many reps between the reps you had left and the
     /// target counts as on plan (Halperin et al., Sports Med 2022: ~1 rep error).
@@ -25,7 +28,16 @@ public enum Autoregulation {
     public static let triggerReps = 2.0
     /// Reps-left estimates get worse as sets get longer, so sets over this
     /// many reps never trigger a change (Halperin et al., Sports Med 2022).
-    public static let maxReps = 12
+    /// Was 12, which ruled out every 10-15 small-lift set.
+    public static let maxReps = 20
+    /// Above this many reps the tolerance widens to `longSetToleranceReps`
+    /// (Halperin et al. 2022: errors grow with reps).
+    public static let longSetReps = 12
+    public static let longSetToleranceReps = 1.5
+    /// A gap this big moves even the first working set, and by up to two
+    /// jumps: three reps is well past the ~1-rep guessing error (Halperin
+    /// et al. 2022). App choice.
+    public static let firstSetGap = 3.0
     /// One jump down (or up) of more than this share of the load is too coarse
     /// for a one-set correction: two reps in reserve is only about 7% of the
     /// load by the Epley formula (≈3.3% a rep). Reps change instead. Same
@@ -86,41 +98,50 @@ public enum Autoregulation {
     }
 
     /// The next working set after one you just logged, or nil when the rules
-    /// don't apply: the first working set (`setNumber` 1), no RPE logged, no
-    /// reps, more than `maxReps` reps, or a change already made for this
-    /// exercise this session. `logged.weight` is in the gym's unit; `kind` is
-    /// the equipment the load is on (nil for bodyweight, where only reps move).
+    /// don't apply: no RPE logged, no reps, more than `maxReps` reps, a change
+    /// already made for this exercise this session, or the first working set
+    /// (`setNumber` 1) with a gap under `firstSetGap` (unless
+    /// `firstSetCanAdjust`: the weight was an estimate or the lift has fewer
+    /// than three logged sessions). `logged.weight` is in the gym's unit;
+    /// `kind` is the equipment the load is on (nil for bodyweight, where only
+    /// reps move). A gap of `firstSetGap` or more moves up to two jumps.
     public static func nextSet(
         after logged: LiftProgress.LoggedSet,
         setNumber: Int,
         targetRIR: Double,
         alreadyAdjusted: Bool,
         kind: EquipmentKind?,
-        gym: GymProfile
+        gym: GymProfile,
+        firstSetCanAdjust: Bool = false
     ) -> Suggestion? {
-        guard setNumber > 1, !alreadyAdjusted, let rpe = logged.rpe,
+        guard setNumber >= 1, !alreadyAdjusted, let rpe = logged.rpe, rpe.isFinite,
               logged.reps > 0, logged.reps <= maxReps else { return nil }
         let reserve = max(0, 10 - rpe)
         let gap = reserve - targetRIR
+        if setNumber == 1, !firstSetCanAdjust, abs(gap) < firstSetGap - 0.001 { return nil }
         var suggestion = Suggestion(change: .hold, load: logged.weight, reps: logged.reps,
                                     repsInReserve: reserve, targetRIR: targetRIR)
-        if gap >= triggerReps - 0.001 {
-            if let next = heavier(than: logged.weight, kind: kind, gym: gym) {
+        let tolerance = logged.reps > longSetReps ? longSetToleranceReps : toleranceReps
+        let trigger = triggerReps + (tolerance - toleranceReps)
+        if gap >= trigger - 0.001 {
+            if var next = heavier(than: logged.weight, kind: kind, gym: gym) {
+                // A clear miss: a second jump, if that one is small too.
+                if gap >= firstSetGap - 0.001, let second = heavier(than: next, kind: kind, gym: gym) { next = second }
                 suggestion.change = .loadUp
                 suggestion.load = next
             } else {
-                let reps = min(maxReps, logged.reps + repChange(for: gap))
+                let reps = min(maxReps, logged.reps + repChange(for: gap, tolerance: tolerance))
                 if reps > logged.reps {
                     suggestion.change = .addReps
                     suggestion.reps = reps
                 }
             }
-        } else if gap <= -triggerReps + 0.001 {
+        } else if gap <= -trigger + 0.001 {
             if let lighter = lighter(than: logged.weight, kind: kind, gym: gym) {
                 suggestion.change = .loadDown
                 suggestion.load = lighter
             } else {
-                let reps = max(1, logged.reps - repChange(for: -gap))
+                let reps = max(1, logged.reps - repChange(for: -gap, tolerance: tolerance))
                 if reps < logged.reps {
                     suggestion.change = .trimReps
                     suggestion.reps = reps
@@ -131,8 +152,9 @@ public enum Autoregulation {
     }
 
     /// Reps to add or trim to land back inside the band: the gap past the tolerance, at least 1.
-    static func repChange(for gap: Double) -> Int {
-        max(1, Int((gap - toleranceReps).rounded(.down)))
+    static func repChange(for gap: Double, tolerance: Double = toleranceReps) -> Int {
+        guard gap.isFinite else { return 1 }
+        return max(1, Int(min(50, gap - tolerance).rounded(.down)))
     }
 
     /// One jump heavier, if the gym has one that isn't a big jump.
@@ -166,8 +188,11 @@ public enum Autoregulation {
 /// repetition progression on muscular adaptations. PeerJ 2022;10:e14142), so
 /// the choice is about equipment: barbells move in small jumps, light
 /// dumbbells and coarse stacks don't. Adding sets is the volume route
-/// (more weekly sets, more growth up to a point: Pelland et al., SportRxiv 2024
-/// preprint); defaulting isolation work to it is an app choice, not a tested rule.
+/// (more weekly sets, more growth up to a point: Pelland et al., Sports Med
+/// 2026); it's offered as your own choice, not a default: the weekly set
+/// targets (`VolumeProgression`) already add sets, and set progression
+/// defaulted on isolation lifts never added weight once they fixed the sets
+/// (audit 2026-11 §5).
 public enum ProgressionMode: String, Codable, Sendable, CaseIterable, Identifiable {
     case load, reps, sets
 
@@ -192,14 +217,14 @@ public enum ProgressionMode: String, Codable, Sendable, CaseIterable, Identifiab
 
     /// The default when you haven't picked one: load for barbell-type lifts;
     /// reps for bodyweight and for equipment whose next jump is big (over 10%,
-    /// ACSM 2009); sets for other isolation work; load otherwise.
+    /// ACSM 2009); load otherwise. `compound` no longer changes it (isolation
+    /// work used to default to sets).
     public static func suggested(kind: EquipmentKind?, compound: Bool, bigJump: Bool) -> ProgressionMode {
         switch kind {
         case .barbell, .ezBar, .smithMachine: return .load
         case nil, .bodyweight, .bands, .pullUpBar, .dipStation: return .reps
         default: break
         }
-        if bigJump { return .reps }
-        return compound ? .load : .sets
+        return bigJump ? .reps : .load
     }
 }

@@ -21,11 +21,19 @@ final class BiologyModel {
     private(set) var hrvChangePercent: Double?
     private(set) var markers: [Marker] = []
     private(set) var isLoading = false
+    /// When the last refresh finished (the main refresh and the Health tab skip a recent one).
+    @ObservationIgnored private(set) var lastRefreshed: Date?
+
+    /// The next app refresh re-reads the series (after sex, age or units change).
+    func markStale() { lastRefreshed = nil }
 
     func refresh(health: HealthKitClient, settings: UserSettings, manualHRV: [Date: Double], proteinTarget: Double?) async {
         guard health.isAvailable else { return }
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            lastRefreshed = .now
+        }
 
         let today = Calendar.current.startOfDay(for: .now)
         let unit = settings.weightUnit

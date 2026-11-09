@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import AppCore
 import UserNotifications
 import os
@@ -20,13 +21,13 @@ struct WorkoutAppApp: App {
     @State private var recorder: LiveWorkoutRecorder
     @State private var router: AppRouter
     @State private var medications = MedicationsModel()
-    @State private var checkIns = CheckInStore()
+    @State private var checkIns: CheckInStore
     @State private var muscles = MuscleModel()
     @State private var conditions = ConditionsModel()
     @State private var progressPhotos: ProgressPhotosModel
     @State private var labs: LabsModel
-    @State private var weeklyPlans = WeeklyPlanStore()
-    @State private var measurements = BodyMeasurementsStore()
+    @State private var weeklyPlans: WeeklyPlanStore
+    @State private var measurements: BodyMeasurementsStore
     private let health: HealthKitClient
     private let container: ModelContainer
 
@@ -39,14 +40,39 @@ struct WorkoutAppApp: App {
         _refresher = State(initialValue: refresher)
         if health.isAvailable {
             health.enableBackgroundDelivery()
+            // HealthKit's completion waits for this, so a background wake gets its refresh first.
             health.observeChanges {
-                Task { @MainActor in refresher.refreshSoon() }
+                await refresher.healthDidChange()
             }
         }
         _recorder = State(initialValue: LiveWorkoutRecorder(store: health.store))
         _coach = State(initialValue: CoachModel())
-        _progressPhotos = State(initialValue: ProgressPhotosModel())
-        _labs = State(initialValue: LabsModel())
+        // JSON stores. A launch in the background while the phone is locked may
+        // find a file it can't read yet; each store then saves nothing until it
+        // has read it, and reads again once the phone is unlocked (`SafeJSONFile`).
+        let progressPhotos = ProgressPhotosModel()
+        let labs = LabsModel()
+        let checkIns = CheckInStore()
+        let weeklyPlans = WeeklyPlanStore()
+        let measurements = BodyMeasurementsStore()
+        _progressPhotos = State(initialValue: progressPhotos)
+        _labs = State(initialValue: labs)
+        _checkIns = State(initialValue: checkIns)
+        _weeklyPlans = State(initialValue: weeklyPlans)
+        _measurements = State(initialValue: measurements)
+        _ = NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                progressPhotos.reloadIfUnavailable()
+                labs.reloadIfUnavailable()
+                checkIns.reloadIfUnavailable()
+                weeklyPlans.reloadIfUnavailable()
+                measurements.reloadIfUnavailable()
+                NextBlockStore.shared.reloadIfUnavailable()
+                MuscleFeedbackStore.shared.reloadIfUnavailable()
+            }
+        }
         // Notification taps and "Taken" buttons arrive through the router.
         let router = AppRouter()
         _router = State(initialValue: router)
@@ -102,6 +128,7 @@ struct WorkoutAppApp: App {
                 .tint(Theme.strain)
         }
         .modelContainer(demoMode ? DemoData.container : container)
+        .backgroundTask(.appRefresh(CoachNotificationIDs.refreshTask)) { await CoachNudges.backgroundRefresh() }
     }
 }
 
@@ -110,13 +137,41 @@ extension EnvironmentValues {
 }
 
 /// Lets any screen ask for a data refresh (pull to refresh) without owning the logic.
+/// One refresh runs at a time: asking while one runs queues a single extra
+/// pass after it (so it sees the newest data) and waits for that.
 @Observable
 final class AppRefresher {
     @ObservationIgnored var perform: (() async -> Void)?
     @ObservationIgnored private var pending: Task<Void, Never>?
+    @ObservationIgnored private var running: Task<Void, Never>?
+    @ObservationIgnored private var again = false
 
     func refresh() async {
-        await perform?()
+        if let running {
+            again = true
+            await running.value
+            return
+        }
+        let task = Task {
+            repeat {
+                again = false
+                await perform?()
+            } while again
+            running = nil
+        }
+        running = task
+        await task.value
+    }
+
+    /// New data in Apple Health. In a background wake the refresh runs now,
+    /// and HealthKit's completion waits for it; in the foreground, bursts of
+    /// updates fold into one refresh shortly after.
+    func healthDidChange() async {
+        if UIApplication.shared.applicationState == .background {
+            await refresh()
+        } else {
+            refreshSoon()
+        }
     }
 
     /// Refreshes shortly, folding bursts of Health updates into one refresh.
@@ -147,6 +202,8 @@ struct RootView: View {
     @Environment(ConditionsModel.self) private var conditions
     @Environment(WeeklyPlanStore.self) private var weeklyPlans
     @Environment(BodyMeasurementsStore.self) private var measurements
+    @Environment(LabsModel.self) private var labs
+    @Environment(ProgressPhotosModel.self) private var progressPhotos
     @Environment(ExerciseLibrary.self) private var library
     @Environment(GymStore.self) private var gym
     @Environment(WorkoutLauncher.self) private var launcher
@@ -208,6 +265,7 @@ struct RootView: View {
             CheckInView(kind: kind)
         }
         .modifier(WeeklySheets(router: router))
+        .modifier(BlockReportCover()) // the finished block's report, once, when the next block starts
         .modifier(MeasurementSheets(router: router))
         .modifier(SettingsSheet(router: router))
         .sheet(item: $launcher.builderRequest) { request in
@@ -226,15 +284,18 @@ struct RootView: View {
         }
         .task {
             refresher.perform = { await refreshMetrics() }
+            CoachNudges.shared.attach(metrics: metrics, plans: weeklyPlans, checkIns: checkIns, settings: settings, gym: gym,
+                                      muscles: muscles, context: modelContext, refresher: refresher)
             Reminders.clearLegacyHRVReminders()
             // Scores first, from what Apple Health already shares. Only then, after an
             // update adds new health stats, ask for just those: the permission sheet waits
             // for an answer, and asking before the first refresh left every screen at
             // zero until it was dismissed. A second refresh picks up the new types.
-            await refreshMetrics()
+            await refresher.refresh()
             if settings.hasOnboarded && !Self.skipHealthPrompt {
+                // A new answer also restarts the Health observers (`HealthKitClient.accessChanged`).
                 if await health?.requestAuthorizationIfNeeded() == true {
-                    await refreshMetrics()
+                    await refresher.refresh()
                 }
                 // Takes effect only once Health access is granted (safe to repeat).
                 health?.enableBackgroundDelivery()
@@ -248,7 +309,7 @@ struct RootView: View {
             // Keep today's numbers current while the app is open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(300))
-                if scenePhase == .active { await refreshMetrics() }
+                if scenePhase == .active { await refresher.refresh() }
             }
         }
         .modifier(PendingLinkOpener(router: router))
@@ -256,8 +317,9 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 medications.reload()
+                reloadUnreadStores()
                 Task {
-                    await refreshMetrics()
+                    await refresher.refresh()
                     scheduleCheckInReminders()
                     await Reminders.scheduleDoses()
                     await Reminders.startMedsActivityIfNeeded()
@@ -271,10 +333,11 @@ struct RootView: View {
             finishedSessionCount: finishedSessionCount, hrvValues: hrvReadings.map(\.milliseconds),
             reloadMedications: { medications.reload() },
             openWorkout: { if let active = sessions.first(where: \.isActive) { launcher.activeSession = active } },
-            refresh: { Task { await refreshMetrics() } },
+            refresh: { Task { await refresher.refresh() } },
             scheduleCheckIns: scheduleCheckInReminders,
             scheduleWorkouts: scheduleWorkoutReminders,
-            setRestMode: { metrics.restMode = settings.isRestMode }
+            setRestMode: { metrics.restMode = settings.isRestMode },
+            markBiologyStale: { biology.markStale() }
         ))
     }
 
@@ -288,24 +351,34 @@ struct RootView: View {
         #endif
     }
 
+    /// Stores whose file couldn't be read at launch (phone locked) read it now.
+    private func reloadUnreadStores() {
+        labs.reloadIfUnavailable()
+        progressPhotos.reloadIfUnavailable()
+        checkIns.reloadIfUnavailable()
+        weeklyPlans.reloadIfUnavailable()
+        measurements.reloadIfUnavailable()
+        NextBlockStore.shared.reloadIfUnavailable()
+        MuscleFeedbackStore.shared.reloadIfUnavailable()
+    }
+
     private var finishedSessionCount: Int {
         sessions.filter { !$0.isActive }.count
     }
 
-    /// Typed-in overnight HRV (Garmin RMSSD), keyed by morning. Camera readings
+    /// Typed-in overnight HRV (Garmin RMSSD), keyed by the start of its morning,
+    /// one per day (the newest: `hrvReadings` is newest first). Camera readings
     /// are morning values and go separately (`cameraHRV`, `DailyVitals.resolvingHRV`).
-    var manualHRV: [Date: Double] {
-        var result: [Date: Double] = [:]
-        for reading in hrvReadings where result[reading.date] == nil && reading.source != "Camera" {
-            result[reading.date] = reading.milliseconds
-        }
-        return result
-    }
+    var manualHRV: [Date: Double] { Self.hrvByMorning(hrvReadings, camera: false) }
 
-    var cameraHRV: [Date: Double] {
+    var cameraHRV: [Date: Double] { Self.hrvByMorning(hrvReadings, camera: true) }
+
+    static func hrvByMorning(_ readings: [HRVReading], camera: Bool) -> [Date: Double] {
+        let calendar = Calendar.current
         var result: [Date: Double] = [:]
-        for reading in hrvReadings where result[reading.date] == nil && reading.source == "Camera" {
-            result[reading.date] = reading.milliseconds
+        for reading in readings where (reading.source == "Camera") == camera {
+            let morning = calendar.startOfDay(for: reading.date)
+            if result[morning] == nil { result[morning] = reading.milliseconds }
         }
         return result
     }
@@ -352,49 +425,81 @@ struct RootView: View {
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV, morningHRV: cameraHRV)
         // Training block (`TrainingBlock`): the trainer's style from the goals, then this week's
         // state; a week that starts with 7-day HRV below normal holds the ramp instead of adding sets.
+        // Only once recovery is known: a refresh that couldn't read Health (locked phone)
+        // would otherwise move the block on with "HRV normal" and latch it for the week.
         weeklyPlans.trainingStyle = gym.style
-        weeklyPlans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
+        if metrics.recovery != nil {
+            weeklyPlans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
+        }
+        // Changes applied from a block report end with the block they were for (`NextBlockStore`).
+        NextBlockStore.shared.observe(blockStart: weeklyPlans.block?.start)
+        checkIns.recordSleepScore(metrics.sleep?.score)
+        // Mood patterns (builder A): each day's strain, your usual training strain and sleep need.
+        checkIns.recordContext(dayStrains: metrics.weekStrain.map { (date: $0.date, strain: $0.strain) },
+                               usualTrainingStrain: metrics.usualTrainingStrain, sleepNeedHours: settings.sleepNeedHours)
+        // The widget straight after the scores, never waiting on the weather or the muscles.
+        updateWidget()
+        // A background wake (new Health data while the app is closed) stops here:
+        // today's scores, the widget and the watch face. The rest waits for the app.
+        guard UIApplication.shared.applicationState != .background else {
+            updateWatchFace()
+            // Rewrite the coach's morning message with last night's recovery (`CoachNudges`).
+            await CoachNudges.shared.refresh()
+            return
+        }
         // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old (`BodyMeasurementsStore`).
         vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil))
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         // The nightly HRV series (`BiologyModel`) here too, not only when Health
         // opens, so Today's HRV tile has its history page from the first refresh.
-        // It reads 90 nights, so at most every 30 minutes (Health still refreshes it on open).
-        if biology.hrvSeries.isEmpty || lastBiologyRefresh.map({ Date.now.timeIntervalSince($0) > 30 * 60 }) ?? true {
+        // It reads 90 nights, so at most every 30 minutes (Health skips it within 10).
+        if biology.hrvSeries.isEmpty || biology.lastRefreshed.map({ Date.now.timeIntervalSince($0) > 30 * 60 }) ?? true {
             await biology.refresh(health: health, settings: settings, manualHRV: manualHRV, proteinTarget: metrics.proteinTarget)
-            lastBiologyRefresh = .now
         }
         vitals.setHRVSeries(biology.hrvSeries)
-        checkIns.recordSleepScore(metrics.sleep?.score)
-        // Mood patterns (builder A): each day's strain, your usual training strain and sleep need.
-        checkIns.recordContext(dayStrains: metrics.weekStrain.map { (date: $0.date, strain: $0.strain) },
-                               usualTrainingStrain: metrics.usualTrainingStrain, sleepNeedHours: settings.sleepNeedHours)
+        await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
+        weeklyPlans.refreshVolume(muscles: muscles)
+        // End-of-block report (`BlockHistoryStore`): follows the block and archives it when a new one starts.
+        BlockHistoryStore.shared.observe(block: weeklyPlans.block,
+                                         records: weeklyPlans.records(sessions: sessions, extra: metrics.recentTrainingDays),
+                                         targets: weeklyPlans.volumeTargets(muscles: muscles))
+        // The weather last (it can be slow or offline; 10 s at most, `WeatherClient`).
         await conditions.refresh(settings: settings)
         // Hot days (by estimated WBGT) lower the strain target (less once you're heat-acclimatised).
         conditions.heatAcclimation = HeatAdvice.acclimation(hotDays: conditions.hotDays, trainingDays: metrics.recentTrainingDays)
         conditions.heatTrainingDays = conditions.heatAcclimation.heatTrainingDays
         metrics.heatAdjustment = HeatAdvice.targetAdjustment(wbgtC: conditions.forecastWBGT, acclimation: conditions.heatAcclimation)
-        await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
-        weeklyPlans.refreshVolume(muscles: muscles)
+        updateWatchFace()
+        await CoachNudges.shared.refresh()
+        // Last, after everything that reads `sessions`: a session whose Watch
+        // recording is gone from Apple Health loses the link (nothing is deleted, `WorkoutLinker`).
+        await WorkoutLinker.dropDeletedWatchWorkouts(sessions, health: health, context: modelContext)
+    }
+
+    /// Today's HRV, recovery and strain for the Home Screen widget. Skipped when
+    /// the refresh couldn't read Apple Health (e.g. a background wake while the
+    /// phone is locked), so a failed read never blanks a good snapshot. Before
+    /// the night is over, recovery is yesterday's, so the widget shows none
+    /// rather than yesterday's score as today's.
+    private func updateWidget() {
+        guard metrics.errorMessage == nil, metrics.lastUpdated != nil else { return }
         let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
         Reminders.updateWidget(WidgetSnapshot(
             updated: .now,
             hrv: todayHRV?.milliseconds ?? metrics.hrv,
             hrvDate: (todayHRV != nil || (metrics.hrv != nil && !metrics.recoveryIsFromYesterday)) ? Calendar.current.startOfDay(for: .now) : nil,
-            recovery: metrics.recovery?.score,
+            recovery: metrics.recoveryIsFromYesterday ? nil : metrics.recovery?.score,
             strain: metrics.strain?.strain,
             logsHRV: hrvReadings.contains { $0.date >= (Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now) }
         ))
-        // [Watch complications] Recovery, strain and the next planned session for the watch face (`WatchFaceData`).
-        do {
-            let lastWorkoutEnd = sessions.lazy.compactMap(\.endedAt).max()
-            WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd)
-        }
-        // Last, after everything that reads `sessions`: a Watch-only session whose
-        // recording was deleted in Apple Health goes too. Removing one changes the
-        // finished count, which refreshes the scores again (`WorkoutLinker`).
-        await WorkoutLinker.dropDeletedWatchWorkouts(sessions, health: health, context: modelContext)
+    }
+
+    /// [Watch complications] Recovery, strain and the next planned session for the watch face (`WatchFaceData`).
+    private func updateWatchFace() {
+        guard metrics.errorMessage == nil, metrics.lastUpdated != nil else { return }
+        let lastWorkoutEnd = sessions.lazy.compactMap(\.endedAt).max()
+        WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd)
     }
 
     // MARK: - Reminders: one morning, one evening, workouts before planned slots only
@@ -418,7 +523,8 @@ struct RootView: View {
             let nudgeDay = await Reminders.scheduleCheckIns(
                 enabled: enabled, morningMinutes: morning, eveningMinutes: evening,
                 morningDone: checkedIn, eveningDone: eveningDone,
-                hrvMissing: hrvMissing, logsHRV: typesHRV, weighInNudge: weighIn, bedByTonight: bedBy
+                hrvMissing: hrvMissing, logsHRV: typesHRV, weighInNudge: weighIn, bedByTonight: bedBy,
+                morningOn: !CoachNudges.shared.morningOn, eveningOn: !CoachNudges.shared.eveningOn
             )
             if let nudgeDay { settings.weighInNudgeDay = nudgeDay }
         }
@@ -593,6 +699,8 @@ private struct SettingsReactions: ViewModifier {
     let scheduleCheckIns: () -> Void
     let scheduleWorkouts: () -> Void
     let setRestMode: () -> Void
+    /// Sex, age and units change the norms and stored display values: re-read Biology at once.
+    let markBiologyStale: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -602,6 +710,9 @@ private struct SettingsReactions: ViewModifier {
             .onChange(of: settings.goals) { refresh() }
             .onChange(of: settings.restModeUntil) { setRestMode() }
             .onChange(of: settings.sleepNeedHours) { refresh() }
+            .onChange(of: settings.sex) { markBiologyStale(); refresh() }
+            .onChange(of: settings.age) { markBiologyStale(); refresh() }
+            .onChange(of: settings.weightUnit) { markBiologyStale(); refresh() }
             .onChange(of: finishedSessionCount) { refresh() }
             .onChange(of: hrvValues) {
                 scheduleCheckIns() // a typed HRV can complete the morning check-in
@@ -642,5 +753,3 @@ private struct ReminderReactions: ViewModifier {
     }
 }
 
-/// When `refreshMetrics` last re-read the 90-night HRV series.
-@MainActor private var lastBiologyRefresh: Date?

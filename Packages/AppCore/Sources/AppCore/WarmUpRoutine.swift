@@ -208,7 +208,7 @@ public enum WarmUpRoutine {
         public init?(slot: MovementSlot) {
             switch slot {
             case .squat, .legExtension, .calves: self = .squat
-            case .hinge, .legCurl: self = .hinge
+            case .hinge, .legCurl, .hipThrust: self = .hinge
             case .singleLeg: self = .lunge
             case .horizontalPress, .inclinePress, .chestFly, .triceps: self = .horizontalPress
             case .verticalPress, .lateralRaise: self = .verticalPress

@@ -6,9 +6,11 @@ struct AutoregulationTests {
     let gym = GymProfile.commercialKilograms
 
     private func next(_ weight: Double, _ reps: Int, rpe: Double?, target: Double, set: Int = 2,
-                      adjusted: Bool = false, kind: EquipmentKind? = .barbell) -> Autoregulation.Suggestion? {
+                      adjusted: Bool = false, kind: EquipmentKind? = .barbell,
+                      estimate: Bool = false) -> Autoregulation.Suggestion? {
         Autoregulation.nextSet(after: LiftProgress.LoggedSet(weight: weight, reps: reps, rpe: rpe), setNumber: set,
-                               targetRIR: target, alreadyAdjusted: adjusted, kind: kind, gym: gym)
+                               targetRIR: target, alreadyAdjusted: adjusted, kind: kind, gym: gym,
+                               firstSetCanAdjust: estimate)
     }
 
     @Test func twoOrMoreRepsFresherGoesUpOneJump() {
@@ -51,8 +53,9 @@ struct AutoregulationTests {
         let more = next(10, 10, rpe: 6, target: 1, kind: .dumbbell)
         #expect(more?.change == .addReps)
         #expect(more?.reps == 12)
-        // Never past the 12-rep ceiling.
-        #expect(next(10, 12, rpe: 6, target: 1, kind: .dumbbell)?.change == .hold)
+        // Never past the 20-rep ceiling (was 12, which ruled out every 10-15 small-lift set).
+        #expect(next(10, 12, rpe: 6, target: 1, kind: .dumbbell)?.reps == 14)
+        #expect(next(10, 20, rpe: 6, target: 1, kind: .dumbbell)?.change == .hold)
     }
 
     @Test func bodyweightOnlyMovesReps() {
@@ -62,15 +65,31 @@ struct AutoregulationTests {
     }
 
     @Test func guardsStopAdjustments() {
-        // Never off the first working set.
+        // Not off the first working set for a normal gap (RPE is noisy)...
         #expect(next(60, 8, rpe: 7, target: 1, set: 1) == nil)
-        // No RPE logged, no reps, or a long set (RPE is least accurate there).
+        // No RPE logged, no reps, or a very long set (RPE is least accurate there).
         #expect(next(60, 8, rpe: nil, target: 1) == nil)
         #expect(next(60, 0, rpe: 7, target: 1) == nil)
-        #expect(next(60, 13, rpe: 7, target: 1) == nil)
+        #expect(next(60, 21, rpe: 7, target: 1) == nil)
         #expect(next(60, 12, rpe: 7, target: 1)?.change == .loadUp)
+        // Over 12 reps the tolerance widens to 1.5: a 2-rep gap holds, 2.5 moves.
+        #expect(next(60, 13, rpe: 7, target: 1)?.change == .hold)
+        #expect(next(60, 13, rpe: 6.5, target: 1)?.change == .loadUp)
         // At most one change per exercise per session.
         #expect(next(60, 8, rpe: 7, target: 1, adjusted: true) == nil)
+    }
+
+    /// Audit 2026-11 §2: a first set far easier than planned moves the next
+    /// set, by two jumps; an estimated first weight moves at the usual gap.
+    @Test func aClearlyEasyFirstSetMovesTheNextOne() {
+        // RPE 5 = 5 in reserve against 2: three reps easy, so two 2.5 kg jumps.
+        let up = next(32.5, 10, rpe: 5, target: 2, set: 1)
+        #expect(up?.change == .loadUp)
+        #expect(up?.load == 37.5)
+        // A two-rep gap on set 1 moves only when the weight was an estimate.
+        #expect(next(60, 8, rpe: 7, target: 1, set: 1) == nil)
+        #expect(next(60, 8, rpe: 7, target: 1, set: 1, estimate: true)?.change == .loadUp)
+        #expect(next(60, 8, rpe: 7, target: 1, set: 1, estimate: true)?.load == 62.5)
     }
 }
 
@@ -84,7 +103,8 @@ struct ProgressionModeTests {
         #expect(ProgressionMode.suggested(kind: .ezBar, compound: false, bigJump: false) == .load)
         #expect(ProgressionMode.suggested(kind: .dumbbell, compound: true, bigJump: false) == .load)
         #expect(ProgressionMode.suggested(kind: .dumbbell, compound: true, bigJump: true) == .reps)
-        #expect(ProgressionMode.suggested(kind: .machine, compound: false, bigJump: false) == .sets)
+        // Isolation lifts default to load now (set progression stalled once weekly targets fixed the sets).
+        #expect(ProgressionMode.suggested(kind: .machine, compound: false, bigJump: false) == .load)
         #expect(ProgressionMode.suggested(kind: nil, compound: true, bigJump: false) == .reps)
 
         let planner = WorkoutPlanner(gym: gym)
@@ -107,8 +127,12 @@ struct ProgressionModeTests {
         earned.lastReps = 10
         #expect(planner.suggestedLoad(history: earned, reps: 6...8, rpe: 8, kind: .barbell, mode: .reps) == 190)
         // An easier day than last time still goes lighter, but at most 10% (`easedDropFraction`):
-        // the e1RM says 165, the floor is the first load at or over 166.5.
-        #expect(planner.suggestedLoad(history: bench, reps: 6...8, rpe: 6.5, kind: .barbell, mode: .reps) == 170)
+        // the e1RM says about 160, the floor is the first load at or over 166.5.
+        #expect(planner.suggestedLoad(history: bench, reps: 6...8, rpe: 6, kind: .barbell, mode: .reps) == 170)
+        // Half a point under last time is within the reps-in-reserve guess (Halperin 2022): the
+        // weight and reps hold instead of easing and bouncing back.
+        #expect(planner.progression(history: bench, reps: 6...8, rpe: 6.5, kind: .barbell, mode: .reps)
+                == WorkoutPlanner.Progression(load: 185, targetReps: 8))
     }
 
     @Test func progressionNotesFollowTheMode() {

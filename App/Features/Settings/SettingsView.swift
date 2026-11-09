@@ -18,6 +18,7 @@ struct SettingsView: View {
                 ProfileSettingsSection()
                 TrainingSettingsSection(showRPEGuide: { showingRPEGuide = true })
                 RemindersSettingsSection()
+                CoachCheckInsSettingsSection()
                 SleepSettingsSection()
                 NutritionSettingsSection()
                 CoachSettingsSection()
@@ -28,6 +29,7 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .scrollEdgeEffectStyle(.hard, for: .top)
             .background(Theme.background)
+            .refreshingOnProfileChange()
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -91,13 +93,11 @@ private struct ProfileSettingsSection: View {
                 .onChange(of: settings.profileFromHealth) { _, on in
                     if on, let health { Task { await settings.syncProfile(from: health) } }
                 }
-            Stepper("Age: \(settings.age)\(source("age"))", value: $settings.age, in: 13...100)
+            // "Not set" until given, instead of a silent male / 30 (`UserSettings.sexIsSet`).
+            AgePickerRow(suffix: source("age"))
                 .disabled(locked("age"))
-            Picker("Sex\(source("sex"))", selection: $settings.sex) {
-                Text("Male").tag(BiologicalSex.male)
-                Text("Female").tag(BiologicalSex.female)
-            }
-            .disabled(locked("sex"))
+            SexPickerRow(suffix: source("sex"))
+                .disabled(locked("sex"))
             heightRow
             weightRow
         } header: {
@@ -195,10 +195,11 @@ private struct TrainingSettingsSection: View {
     var body: some View {
         @Bindable var settings = settings
         Section {
+            // Your gyms, travel gyms and the one you're at (`GymsView`).
             NavigationLink {
-                MyGymView(pushed: true)
+                GymsView()
             } label: {
-                LabeledContent("Gym equipment", value: gym.isConfigured ? gym.profile.name : "Not set up")
+                LabeledContent("Gym equipment", value: gym.isConfigured ? gym.activeGym.name : "Not set up")
             }
             Picker(selection: $restSeconds) {
                 Text("Automatic").tag(0)
@@ -301,6 +302,8 @@ private struct LiftingExperienceRows: View {
 private struct RemindersSettingsSection: View {
     @Environment(UserSettings.self) private var settings
     @Environment(MedicationsModel.self) private var meds
+    /// iOS notifications are off for the app: nothing below can arrive.
+    @State private var notificationsDenied = false
 
     private func minutesBinding(_ keyPath: ReferenceWritableKeyPath<UserSettings, Int>) -> Binding<Date> {
         Binding(
@@ -315,10 +318,15 @@ private struct RemindersSettingsSection: View {
     var body: some View {
         @Bindable var settings = settings
         Section {
+            if notificationsDenied {
+                NotificationsOffBanner(detail: "Check-in, workout and dose reminders won't arrive until you allow them.")
+            }
             Toggle(isOn: $settings.checkInRemindersOn) {
                 Text("Check-in reminders")
                 Text("Morning and evening, skipped once done")
             }
+            // On an always-present row: a modifier on the Section would run per row.
+            .trackingNotificationsDenied($notificationsDenied)
             if settings.checkInRemindersOn {
                 DatePicker("Morning", selection: minutesBinding(\.morningCheckInMinutes), displayedComponents: .hourAndMinute)
                 DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)

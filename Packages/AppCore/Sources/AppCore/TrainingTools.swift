@@ -18,6 +18,13 @@ import Foundation
 ///   wants and the ~90 s that is enough for growth), 90 s on small ones.
 /// - Endurance / general health: shorter rests (60-90 s) keep the session
 ///   brisk; this is common practice rather than a tested optimum.
+/// - Strength + muscle: 2.5 min on big lifts (3 min on the heavy first lift,
+///   `heavyLiftSeconds`), 90 s on small ones.
+/// - Squats and hinges get at least 2.5 min (3 min in the balanced and
+///   strength + muscle styles) in every style but endurance: heavy
+///   multi-joint lifts keep their reps up with 2-3+ min (Schoenfeld et al.
+///   2016; Grgic et al. 2018); the split by pattern is the app's choice
+///   (audit 2026-11 §20).
 ///
 /// These defaults are also what `WorkoutPlanner.estimatedMinutes` counts per
 /// set, so the plan's length matches the timer the session actually runs.
@@ -28,8 +35,26 @@ public enum RestTimer {
         case .balanced: compound ? 150 : 90
         case .strength: compound ? 180 : 120
         case .endurance: compound ? 90 : 60
+        case .strengthAndMuscle: compound ? 150 : 90
         }
     }
+
+    /// The default for one movement pattern: squats and hinges rest longer
+    /// (see above). Nil slot = an exercise outside the catalog (isolation rest).
+    public static func defaultSeconds(style: TrainingStyle, slot: MovementSlot?) -> Int {
+        let base = defaultSeconds(style: style, compound: slot?.isCompound ?? false)
+        guard style != .endurance, slot == .squat || slot == .hinge else { return base }
+        return max(base, style == .muscle ? 150 : 180)
+    }
+
+    /// The default for an exercise by ID (`defaultSeconds(style:slot:)`), for the rest timer.
+    public static func defaultSeconds(style: TrainingStyle, exerciseID: String) -> Int {
+        defaultSeconds(style: style, slot: ExerciseCatalog.slot(for: exerciseID))
+    }
+
+    /// Rest on the heavy first lift of the strength + muscle style (4-6 reps):
+    /// 3 min, as for the strength style (Schoenfeld et al. 2016).
+    public static let heavyLiftSeconds = 180
 
     /// Rest after a warm-up ramp set (`WarmUp`). Kept short, an app choice:
     /// ramp sets are light and far from failure, and the point of a warm-up
@@ -95,10 +120,83 @@ extension WorkoutPlanner {
     /// load for the target reps and effort, or last time's weight when the
     /// exercise isn't loaded on this gym's equipment. Catalog compound lifts
     /// with a weight get warm-up ramp sets (`WarmUp`), like planned sessions.
-    public func prescribe(template items: [TemplateItem], history: [String: ExerciseHistory]) -> [PlannedExercise] {
-        var planned = prescribeWithoutWarmUps(template: items, history: history)
+    /// The same never-again and pain rules as planned sessions apply
+    /// (`checkedTemplate`): pass `exerciseFilter`, else the planner's own.
+    public func prescribe(template items: [TemplateItem], history: [String: ExerciseHistory],
+                          exerciseFilter: ExerciseFilter? = nil) -> [PlannedExercise] {
+        checkedTemplate(items, history: history, exerciseFilter: exerciseFilter).exercises
+    }
+
+    /// A saved workout made safe for today: what `prescribe(template:)` returns, plus the names left out.
+    public struct CheckedTemplate: Sendable, Equatable {
+        public var exercises: [PlannedExercise]
+        /// Exercises left out (never again, a 6+/10 sore area, or equipment
+        /// the gym lacks) with nothing to swap in, by name.
+        public var skipped: [String]
+    }
+
+    /// `prescribe(template:)` with the planner's rules for a saved workout:
+    /// - a never-again exercise, one loading a 6+/10 sore area, or one the gym
+    ///   can't do (missing equipment, nothing to load it with) is swapped for
+    ///   the first allowed option for the same movement (a regression first,
+    ///   `ExerciseFilter.apply`) and says so; with no option it is left out
+    ///   (`skipped`);
+    /// - a lift loading a 3-5/10 area gets the pain cap (`ExerciseFilter.capLoad`);
+    /// - a fixed weight you set is rounded down to one the gym can load
+    ///   (a 52 kg barbell becomes 50 on 2.5 kg jumps).
+    public func checkedTemplate(_ items: [TemplateItem], history: [String: ExerciseHistory],
+                                exerciseFilter: ExerciseFilter? = nil) -> CheckedTemplate {
+        let filter = exerciseFilter ?? self.exerciseFilter
+        var planner = self
+        planner.exerciseFilter = filter
+        var kept: [TemplateItem] = []
+        var swapNotes: [String: String] = [:]
+        var skipped: [String] = []
+        var taken = Set(items.map(\.exerciseID))
+        for item in items {
+            let catalog = ExerciseCatalog.exercise(id: item.exerciseID)
+            let slot = ExerciseCatalog.slot(for: item.exerciseID)
+            let blocked = filter.map { filter in
+                filter.neverAgain.contains(item.exerciseID)
+                    || (slot.map { !filter.allows(CatalogExercise(id: item.exerciseID, name: item.name, load: catalog?.load,
+                                                                 requires: catalog?.requires ?? []), slot: $0) } ?? false)
+            } ?? false
+            let unsupported = catalog.map { !PainGuard.gymSupports($0, gym: gym) } ?? false
+            guard blocked || unsupported else {
+                kept.append(item)
+                continue
+            }
+            // Swap for the first allowed option for the same movement that isn't already in the workout.
+            let replacement = slot.flatMap { slot in
+                planner.alternatives(for: slot).first { !taken.contains($0.id) }
+            }
+            guard let replacement else {
+                skipped.append(item.name)
+                continue
+            }
+            taken.insert(replacement.id)
+            var swapped = item
+            swapped.exerciseID = replacement.id
+            swapped.name = replacement.name
+            // A fixed weight was for the old exercise.
+            swapped.weight = nil
+            swapped.libraryLoad = nil
+            kept.append(swapped)
+            let why = blocked ? "it's on your never-again list or loads a sore area" : "your gym doesn't have the equipment"
+            swapNotes[replacement.id] = "Swapped in for \(item.name): \(why)."
+        }
+        var planned = planner.prescribeWithoutWarmUps(template: kept, history: history)
+        for index in planned.indices {
+            let id = planned[index].exerciseID
+            if let note = swapNotes[id] {
+                planned[index].note = [note, planned[index].note].compactMap { $0 }.joined(separator: " ")
+            }
+            if let filter, let slot = ExerciseCatalog.slot(for: id) {
+                filter.capLoad(&planned[index], slot: slot, gym: gym, history: history[id])
+            }
+        }
         addWarmUps(&planned)
-        return planned
+        return CheckedTemplate(exercises: planned, skipped: skipped)
     }
 
     func prescribeWithoutWarmUps(template items: [TemplateItem], history: [String: ExerciseHistory]) -> [PlannedExercise] {
@@ -114,7 +212,8 @@ extension WorkoutPlanner {
             var suggestedFrom: ExerciseHistory?
             var suggestedMode = ProgressionMode.load
             if let fixed = item.weight, fixed > 0 {
-                planned.load = fixed
+                // Rounded down to a weight this gym can load (unchanged when it can't say).
+                planned.load = kind.flatMap { gym.load(atMost: fixed, on: $0) }.map { min($0, fixed) } ?? fixed
             } else if let past = history[item.exerciseID] {
                 // The lift's progression rule (`ProgressionMode`) picks the weight; the
                 // template's own sets and reps stay as you set them.

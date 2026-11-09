@@ -32,6 +32,8 @@ struct TodayView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     AlertSlot()
+                    TravelGymChip() // "Training at: Hotel gym · until Sun" on a trip (`GymsView`)
+                    ProfileSetupCard() // sex, age, height or weight missing (ProfileBasicsView)
                     TodaySetupCard()
                     ScoresCard(sessions: sessions, askCoach: askCoach)
                     UpNextCard(habits: habits)
@@ -60,6 +62,8 @@ struct TodayView: View {
             }
             .task(id: habitsKey) { await loadHabits() }
             .modifier(WeeklyReviewReminderSync())
+            // A travel gym ended: keep it for next time or delete it.
+            .travelGymEndedPrompt()
         }
     }
 
@@ -651,7 +655,21 @@ private struct WaterPaceBar: View {
 private struct CalorieDetailsSheet: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(CheckInStore.self) private var checkIns
+    @Environment(UserSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
+
+    /// "+0.25 kg/week" or "+0.55 lb/week": stored in kg, shown in the user's unit.
+    private func weeklyChangeText(_ kilograms: Double) -> String {
+        let unit = settings.weightUnit
+        let value = unit.display(kilograms)
+        let sign = value >= 0 ? "+" : ""
+        return sign + value.formatted(.number.precision(.fractionLength(2))) + " " + unit.rawValue + "/week"
+    }
+
+    /// "1.2 kg" or "2.6 lb".
+    private func weightText(_ kilograms: Double) -> String {
+        settings.weightUnit.display(kilograms).formatted(.number.precision(.fractionLength(1))) + " " + settings.weightUnit.rawValue
+    }
 
     var body: some View {
         NavigationStack {
@@ -731,14 +749,14 @@ private struct CalorieDetailsSheet: View {
                         if let maintenance = metrics.maintenance {
                             row("Maintenance (your data)", maintenance.maintenance, bold: true)
                             row("Average eaten", maintenance.averageIntake)
-                            LabeledContent("Weight trend", value: "\(maintenance.weeklyChangeKg >= 0 ? "+" : "")\(maintenance.weeklyChangeKg.formatted(.number.precision(.fractionLength(2)))) kg/week")
+                            LabeledContent("Weight trend", value: weeklyChangeText(maintenance.weeklyChangeKg))
                             if maintenance.partialDaysSkipped > 0 {
                                 Text("\(maintenance.partialDaysSkipped) day\(maintenance.partialDaysSkipped == 1 ? " looks" : "s look") only partly logged, so \(maintenance.partialDaysSkipped == 1 ? "it's" : "they're") left out.")
                                     .font(.footnote)
                                     .foregroundStyle(Theme.secondaryText)
                             }
                             if maintenance.creatineWaterRemovedKg > 0.05 {
-                                Text("About \(maintenance.creatineWaterRemovedKg.formatted(.number.precision(.fractionLength(1)))) kg of the weight change is likely water from starting creatine, so it isn't counted as fat or muscle. Set the start date on Creatine in Medications if it's wrong.")
+                                Text("About \(weightText(maintenance.creatineWaterRemovedKg)) of the weight change is likely water from starting creatine, so it isn't counted as fat or muscle. Set the start date on Creatine in Medications if it's wrong.")
                                     .font(.footnote)
                                     .foregroundStyle(Theme.secondaryText)
                             }

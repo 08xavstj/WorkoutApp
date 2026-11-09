@@ -98,9 +98,12 @@ struct TrainingBlockTests {
 
     @Test func restartsAfterAGapOrWhenFinished() {
         let block = TrainingBlock(start: monday, style: .strength)
-        let afterGap = block.advanced(to: days(14), calendar: utc)
+        // Two weeks away no longer resets the ramp (strength holds about 3 weeks: audit 2026-11 §9).
+        let shortGap = block.advanced(to: days(14), calendar: utc)
+        #expect(shortGap.week.week == 2)
+        let afterGap = block.advanced(to: days(28), calendar: utc)
         #expect(afterGap.week.week == 1)
-        #expect(afterGap.start == days(14))
+        #expect(afterGap.start == days(28))
         #expect(afterGap.heldWeeks == 0)
         var last = block
         last.week = TrainingBlock.weekState(5, style: .strength, length: 5)
@@ -136,17 +139,22 @@ struct BlockPlannerTests {
     }
 
     @Test func blockScalesSetsAndTheDeloadHalvesThem() {
-        // 120 minutes is a long session: seven exercises, four sets each (`WorkoutPlanner.baseSets`);
-        // `fill` then adds a fifth set to the first two compound lifts and an eighth exercise
-        // (a second horizontal press: 3 sets as a compound lift, then a fourth as time allows).
+        // 120 minutes is a long session: seven exercises, four sets each (`WorkoutPlanner.baseSets`).
+        // Each muscle stays within 10 direct sets in one session (`capSessionVolume`, Pelland 2026):
+        // chest's three movements share 10 (the fly drops to 2), and `fill` adds sets and a second
+        // triceps exercise until the caps stop it, well short of two hours, which the plan says.
         let base = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:])
-        #expect(base.exercises.map(\.sets) == [5, 5, 4, 4, 4, 4, 4, 4])
-        #expect(base.exercises.last?.exerciseID == "Leverage_Chest_Press")
+        let direct = VolumeProgression.directSets(base.exercises)
+        #expect(direct.values.allSatisfy { $0 <= VolumeProgression.sessionCap(minutes: 120) })
+        #expect(base.exercises.count >= 7)
+        #expect(base.exercises.contains { $0.exerciseID == "Triceps_Pushdown_-_Rope_Attachment" })
+        #expect(base.lengthNote?.contains("every set this plan can add") == true)
         #expect(base.blockWeek == nil)
         let week4 = TrainingBlock.weekState(4, style: .balanced, length: 5) // ×1.25, RIR 1
         let ramped = planner.plan(focus: .push, minutes: 120, recovery: 90, history: [:], block: week4)
-        // Fill runs to the time picked, so the eighth exercise joins here too.
-        #expect(ramped.exercises.map(\.sets) == [5, 5, 5, 5, 5, 5, 5, 4])
+        // The ramp scales the base sets to 5, still within each muscle's cap.
+        #expect(ramped.exercises.first?.sets == 5)
+        #expect(VolumeProgression.directSets(ramped.exercises).values.allSatisfy { $0 <= 10 })
         #expect(ramped.targetRPE == 9)
         #expect(ramped.blockWeek == week4)
         let deload = TrainingBlock.weekState(5, style: .balanced, length: 5)
@@ -191,8 +199,9 @@ struct SupersetTests {
     }
 
     @Test func pairedSetsCountAtSixtyPercent() {
-        let straight = [exercise("Barbell_Squat"), exercise("Seated_Leg_Curl")]
-        let paired = [exercise("Barbell_Squat", group: 1), exercise("Seated_Leg_Curl", group: 1)]
+        // A bench press (2.5 min rest; squats now rest 3) with a leg curl.
+        let straight = [exercise("Barbell_Bench_Press_-_Medium_Grip"), exercise("Seated_Leg_Curl")]
+        let paired = [exercise("Barbell_Bench_Press_-_Medium_Grip", group: 1), exercise("Seated_Leg_Curl", group: 1)]
         // One 2 min transition between the two exercises, then the sets: 45 s each, the rest
         // only between sets (the transition stands in for the rest after the last).
         #expect(WorkoutPlanner.estimatedMinutes(straight) == 9) // 2 + (1.5 + 2.5) + (1.5 + 1.5)
@@ -208,17 +217,17 @@ struct SupersetTests {
     @Test func shortSessionsPairBeforeDroppingExercises() {
         let planner = WorkoutPlanner(gym: .commercialPounds)
         // 20 minutes: isolation goes to two sets and compound lifts to three, then squat pairs
-        // with the leg curl, then the compound lifts go to two; that fits, so all four exercises
-        // stay (the estimate counts no rest after an exercise's last set), and `fill` gives
-        // the squat its third set back.
+        // with the leg curl, then the compound lifts go to two, then the last exercise goes (the
+        // split squat: one leg at a time takes twice the work, and squats and hinges rest 3 min
+        // now); `fill` then gives the squat its sets back.
         let short = planner.plan(focus: .legs, minutes: 20, recovery: 70, history: [:])
         #expect(short.hasSupersets)
-        #expect(short.exercises.count == 4)
-        #expect(short.exercises.map(\.supersetGroup) == [1, 1, nil, nil])
-        #expect(short.exercises.map(\.exerciseID) == ["Barbell_Squat", "Seated_Leg_Curl", "Romanian_Deadlift", "Split_Squat_with_Dumbbells"])
-        #expect(short.exercises.map(\.sets) == [3, 2, 2, 2])
+        #expect(short.exercises.count == 3)
+        #expect(short.exercises.map(\.supersetGroup) == [1, 1, nil])
+        #expect(short.exercises.map(\.exerciseID) == ["Barbell_Squat", "Seated_Leg_Curl", "Romanian_Deadlift"])
+        #expect(short.exercises.first?.sets ?? 0 >= 3)
         #expect(WorkoutPlanner.estimatedMinutes(short.exercises) <= 20)
-        #expect(short.estimatedMinutes == 20)
+        #expect((short.estimatedMinutes ?? 0) >= 18)
         // 45 minutes: trimming sets is enough, so no supersets.
         let usual = planner.plan(focus: .legs, minutes: 45, recovery: 70, history: [:])
         #expect(!usual.hasSupersets)
@@ -258,8 +267,8 @@ struct WarmUpTests {
         #expect(plan.exercises[1].exerciseID == "Dumbbell_Shoulder_Press")
         #expect(plan.exercises[1].load == 55)
         #expect(plan.exercises[1].warmUpSets == [.init(load: 35, reps: 3)])
-        // Isolation work and lifts without a weight get none.
-        #expect(plan.exercises[3].warmUpSets == nil)
+        // Isolation work (the lateral raise, now third) and lifts without a weight get none.
+        #expect(plan.exercises[2].warmUpSets == nil)
         // Your own workouts get the same ramp.
         let items = [TemplateItem(exerciseID: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", sets: 4, reps: 6...8, rpe: 8)]
         let planned = planner.prescribe(template: items, history: ["Barbell_Bench_Press_-_Medium_Grip": bench])

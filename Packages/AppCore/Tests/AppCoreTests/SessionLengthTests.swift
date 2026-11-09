@@ -18,9 +18,10 @@ struct SessionLengthTests {
         #expect(longMinutes > hourMinutes)
         #expect(hourMinutes <= 60)
         #expect((65...75).contains(longMinutes))
-        // The seventh exercise is a second chest movement, not a repeat of the first.
+        // The seventh exercise is a second triceps movement, not a repeat of the first: chest
+        // already has three, and a fourth went past the session cap (`capSessionVolume`).
         #expect(Set(long.exercises.map(\.exerciseID)).count == 7)
-        #expect(long.exercises.last?.exerciseID == "Dumbbell_Bench_Press")
+        #expect(long.exercises.last?.exerciseID == "Dumbbell_One-Arm_Triceps_Extension")
         #expect(!long.hasSupersets)
         #expect(hour.estimatedMinutes == hourMinutes)
     }
@@ -48,17 +49,27 @@ struct SessionLengthTests {
         var squat = PlannedExercise(exerciseID: "Barbell_Squat", name: "Squat", sets: 3, reps: 6...8, rpe: 8, load: 185, loadKind: .barbell, note: nil)
         let curl = PlannedExercise(exerciseID: "Seated_Leg_Curl", name: "Leg Curl", sets: 3, reps: 10...12, rpe: 9, load: nil, loadKind: .machine, note: nil)
         // Balanced, no movement warm-up: 2 min transition + 3 × 45 s per exercise, with the rest
-        // (2.5 / 1.5 min) only between sets: the walk to the next exercise is the last set's rest.
-        // 2 + (2.25 + 5) + (2.25 + 3) = 14.5 → 15 (rounded half up).
-        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 15)
+        // (3 min on squats and hinges, 1.5 on small lifts; `RestTimer.defaultSeconds(style:slot:)`)
+        // only between sets: the walk to the next exercise is the last set's rest.
+        // 2 + (2.25 + 6) + (2.25 + 3) = 15.5 → 16 (rounded half up).
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 16)
         // A 6-minute movement warm-up (short tier) is added as is.
-        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], warmUpMinutes: 6) == 21)
-        // Muscle style rests 2 min on big lifts: 2 + (2.25 + 4) + 5.25 = 13.5 → 14.
-        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], style: .muscle) == 14)
-        // Three ramp sets at 1.5 min each (30 s work + 60 s rest): 14.5 + 4.5 = 19.
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], warmUpMinutes: 6) == 22)
+        // Muscle style rests 2.5 min on squats: 2 + (2.25 + 5) + 5.25 = 14.5 → 15.
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl], style: .muscle) == 15)
+        // Three ramp sets at 1.5 min each (30 s work + 60 s rest): 15.5 + 4.5 = 20.
         squat.warmUpSets = WarmUp.sets(workingLoad: 185, kind: .barbell, gym: .commercialPounds)
         #expect(squat.warmUpSets?.count == 3)
-        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 19)
+        #expect(WorkoutPlanner.estimatedMinutes([squat, curl]) == 20)
+        // A one-side-at-a-time set takes twice the work (split squat: 3 × 90 s + 2 × 2.5 min rest).
+        let split = PlannedExercise(exerciseID: "Split_Squat_with_Dumbbells", name: "Split Squat", sets: 3, reps: 6...8,
+                                    rpe: 8, load: 20, loadKind: .dumbbell, note: nil)
+        #expect(WorkoutPlanner.estimatedMinutes([split]) == 10) // 4.5 + 5 = 9.5 → 10
+        // The plan's own rest wins (the heavy first lift's 3 min in the strength + muscle style).
+        var heavy = PlannedExercise(exerciseID: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench", sets: 3, reps: 4...6,
+                                    rpe: 8, load: 100, loadKind: .barbell, note: nil)
+        heavy.restSeconds = 180
+        #expect(WorkoutPlanner.estimatedMinutes([heavy], style: .strengthAndMuscle) == 8) // 2.25 + 6 = 8.25
     }
 
     @Test func rampSetsOnlyWhenThereIsAWeight() {

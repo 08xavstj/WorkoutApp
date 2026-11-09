@@ -42,6 +42,9 @@ final class WatchWorkoutModel: NSObject {
     var selectedExercise: Int?
     /// Records from the exercise just finished here, shown for a few seconds.
     private(set) var recordNote: WatchRecordNote?
+    /// A working set just ticked here, waiting for "Reps left?" (asked after the
+    /// tick, so the rest starts at once and the question can be skipped).
+    private(set) var pendingRating: PendingSet?
     /// Record notes already shown (each rides along in a minute of snapshots).
     @ObservationIgnored private var shownRecordIDs: Set<String> = []
     @ObservationIgnored private var recordTask: Task<Void, Never>?
@@ -228,6 +231,7 @@ final class WatchWorkoutModel: NSObject {
         self.workoutSession = nil
         self.builder = nil
         clearRest()
+        pendingRating = nil
         RepCounter.shared.reset()
         if let data = WatchMessage.encode(summary) {
             connection?.transferUserInfo([WatchMessage.summary: data])
@@ -254,6 +258,7 @@ final class WatchWorkoutModel: NSObject {
     func reset() {
         phase = .idle
         summary = nil
+        pendingRating = nil
         selectedExercise = nil
         recordingSessionID = nil
         setsCompletedHere = 0
@@ -283,6 +288,7 @@ final class WatchWorkoutModel: NSObject {
         set.rpe = rpe ?? set.rpe
         set.isCompleted = true
         current.exercises[exerciseIndex].sets[setIndex] = set
+        let exercise = current.exercises[exerciseIndex]
         // Point at the next set now, before the phone answers (the superset
         // partner after the first half, as the phone does).
         current.currentExercise = nil
@@ -297,11 +303,42 @@ final class WatchWorkoutModel: NSObject {
         lastLocalEdit = .now
         snapshot = current
         setsCompletedHere += 1
+        // The stable exercise id and the values the wrist showed, so the phone puts the
+        // tick on the right exercise after a reorder and logs what was lifted (`WatchCommand`).
         send(.completeSet(exerciseIndex: exerciseIndex, setIndex: setIndex, reps: reps, weightKg: weightKg, rpe: rpe,
-                          exerciseOrder: current.exercises[exerciseIndex].id, setOrder: set.order,
-                          repsEdited: repsEdited, weightEdited: weightEdited))
+                          exerciseOrder: exercise.id, setOrder: set.order,
+                          repsEdited: repsEdited, weightEdited: weightEdited,
+                          exerciseKey: exercise.key, baseReps: pending.baseReps, baseWeightKg: pending.baseWeightKg))
         WKInterfaceDevice.current().play(.success)
         if !set.isWarmup { startRestIfNeeded(after: exerciseIndex, in: current) }
+        // "Reps left?" after a working set, unless it was rated already, it's a hold
+        // (timed), a drop stage or mini-set, or one of those comes straight after (no rest to answer in).
+        let nextIsStage = exercise.sets.first(where: { !$0.isCompleted })?.isStage == true
+        if rpe == nil, !set.isWarmup, !set.isStage, exercise.isHold != true, !nextIsStage {
+            pendingRating = pending
+        } else {
+            pendingRating = nil
+        }
+    }
+
+    /// The effort for the set just ticked: kept here and sent to the phone,
+    /// which runs its set-by-set check with it (`WatchCommand.rateSet`).
+    func rateSet(_ pending: PendingSet, rpe: Double) {
+        if pendingRating?.id == pending.id { pendingRating = nil }
+        if var current = snapshot,
+           let (exerciseIndex, setIndex) = current.locate(exerciseID: pending.exerciseID, setOrder: pending.setOrder,
+                                                         exerciseIndex: pending.exerciseIndex, setIndex: pending.setIndex) {
+            current.exercises[exerciseIndex].sets[setIndex].rpe = rpe
+            lastLocalEdit = .now
+            snapshot = current
+        }
+        send(.rateSet(exerciseIndex: pending.exerciseIndex, setIndex: pending.setIndex, rpe: rpe,
+                      exerciseOrder: pending.exerciseID, setOrder: pending.setOrder, exerciseKey: pending.exerciseKey))
+    }
+
+    /// "Reps left?" closed without an answer: the set stays logged without one.
+    func skipRating() {
+        pendingRating = nil
     }
 
     /// The superset partner to show after a set of `index`, when you picked the
@@ -522,10 +559,11 @@ final class WatchWorkoutModel: NSObject {
             WKInterfaceDevice.current().play(.click)
         }
         if isRecording, recordingSessionID == nil { adopt(incoming.id) }
-        // A set ticked on the phone starts the rest there; run it here too.
+        // A set ticked on the phone starts the rest there; run it here too, with the
+        // running rest's own length for the bar (older phones: the next exercise's rest).
         if let ends = incoming.restEndsAt, ends > .now {
             if restEndsAt.map({ abs($0.timeIntervalSince(ends)) > 2 }) ?? true {
-                startRest(until: ends, length: incoming.restSeconds)
+                startRest(until: ends, length: incoming.restLengthSeconds ?? incoming.restSeconds)
             }
         } else if let current = restEndsAt, incoming.sentAt > restStartedAt.addingTimeInterval(2) {
             if current.timeIntervalSinceNow < 3 {

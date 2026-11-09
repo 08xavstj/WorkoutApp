@@ -107,7 +107,7 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     // MARK: Schedule
 
     /// Block length by goal, deload included: strength 5 (4 building weeks),
-    /// muscle 6 (5 building weeks), balanced 5. Both sit inside the 4-6 week
+    /// muscle and strength + muscle 6 (5 building weeks), balanced 5. Both sit inside the 4-6 week
     /// range in docs/research/competitors.md §2a.2; the app chose the longer
     /// ramp for muscle because volume, not intensity, is its lever. Stamina
     /// and health goals keep steady weeks with no ramp and no deload (the
@@ -115,7 +115,7 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     public static func length(for style: TrainingStyle) -> Int {
         switch style {
         case .strength, .balanced: 5
-        case .muscle: 6
+        case .muscle, .strengthAndMuscle: 6
         case .endurance: 4
         }
     }
@@ -126,7 +126,7 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     /// 4-set base reaches the 5-set cap (two exercises × two sessions ≈ 20
     /// sets a muscle a week, the top of the productive range).
     static func rampCap(style: TrainingStyle) -> Double {
-        style == .muscle ? 1.4 : 1.25
+        style.buildsMuscle ? 1.4 : 1.25
     }
     /// Deload: about half the sets (Bell et al. 2023), rounded up from 0.5 so
     /// a 3-set exercise keeps 2.
@@ -162,7 +162,10 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
 
     /// Base sets × this week's multiplier, kept to 2-5 sets per exercise.
     public static func scaledSets(_ base: Int, multiplier: Double) -> Int {
-        let scaled = Int((Double(base) * multiplier).rounded())
+        // A NaN or infinite multiplier (a corrupt saved block) would trap the Int conversion.
+        let product = (Double(base) * multiplier).rounded()
+        guard product.isFinite else { return max(setRange.lowerBound, min(setRange.upperBound, base)) }
+        let scaled = Int(max(-1_000, min(1_000, product)))
         return max(setRange.lowerBound, min(setRange.upperBound, scaled))
     }
 
@@ -184,9 +187,13 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     }
 
     /// After a break this long the block starts again from week 1 rather
-    /// than resuming mid-ramp (strength is kept for 2-3 weeks off, Mujika &
-    /// Padilla, Sports Med 2000, but the added sets were not done).
-    public static let restartAfterWeeksAway = 2
+    /// than resuming mid-ramp. Strength and muscle are largely kept for about
+    /// 3 weeks off (Mujika & Padilla, Sports Med 2000; Bosquet et al., Scand
+    /// J Med Sci Sports 2013, meta-analysis: strength holds for about 3 weeks
+    /// of detraining), so a two-week gap no longer resets the ramp; 4 weeks
+    /// is the app's line (audit 2026-11 §9). Weekly sets after a shorter
+    /// gap come from what you did before it (`VolumeProgression.startingSets(for:recentWeeklySets:weeksAway:style:)`).
+    public static let restartAfterWeeksAway = 4
 
     /// The block as it stands in the week containing `now`: unchanged within
     /// the same calendar week, moved on one week otherwise, or a fresh block

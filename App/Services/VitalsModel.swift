@@ -95,6 +95,8 @@ final class VitalsModel {
     /// Diagnostics for reads that fail (Console: category "vitals").
     private static let log = Logger(subsystem: "com.lontraindustries.workoutapp", category: "vitals")
     private(set) var isLoading = false
+    /// When the last refresh finished (the Health tab skips a reload within 10 minutes).
+    @ObservationIgnored private(set) var lastRefreshed: Date?
     @ObservationIgnored private var isRefreshing = false
     /// Per-minute heart rate before `heartRateCacheEdge` (start of yesterday at the
     /// last read), so a refresh reads only the last day or two. The full 14 days
@@ -161,6 +163,7 @@ final class VitalsModel {
         defer {
             isRefreshing = false
             isLoading = false
+            lastRefreshed = .now
         }
         await performRefresh(health: health, settings: settings, request)
         while let next = queuedRefresh {
@@ -404,11 +407,13 @@ final class VitalsModel {
             // The same 30-night baseline as the illness watch (`temperatureBaselineNights`).
             let baseline = wrist.dropLast().suffix(Self.temperatureBaselineNights).map(\.value)
             let mean = baseline.isEmpty ? nil : baseline.reduce(0, +) / Double(baseline.count)
-            var temp = makeStat("temperature", .breathing, "Sleeping temperature", "thermometer.medium", series: wrist, unit: "°C", digits: 2)
+            // Shown in °F where the iPhone uses it (`UnitText`); the thresholds below stay in °C.
+            let shownWrist = wrist.map { DatedValue(date: $0.date, value: UnitText.temperature(fromCelsius: $0.value)) }
+            var temp = makeStat("temperature", .breathing, "Sleeping temperature", "thermometer.medium", series: shownWrist, unit: UnitText.temperatureSymbol, digits: 2)
             if let last = wrist.last, let mean {
                 let delta = last.value - mean
-                temp.value = (delta >= 0 ? "+" : "−") + fmt(abs(delta), 1)
-                temp.unit = "°C vs usual"
+                temp.value = (delta >= 0 ? "+" : "−") + fmt(abs(UnitText.temperatureDelta(fromCelsius: delta)), 1)
+                temp.unit = UnitText.temperatureSymbol + " vs usual"
                 temp.status = abs(delta) < 0.5 ? "Normal" : "Off baseline"
                 temp.tone = abs(delta) < 0.5 ? .good : .caution
                 // The pill shows the shown delta: centre = your usual, each end ±0.5 °C.
@@ -416,7 +421,8 @@ final class VitalsModel {
             }
             result.append(temp)
         } else {
-            result.append(makeStat("temperature", .breathing, "Body temperature", "thermometer.medium", series: body, unit: "°C", digits: 1))
+            let shownBody = body.map { DatedValue(date: $0.date, value: UnitText.temperature(fromCelsius: $0.value)) }
+            result.append(makeStat("temperature", .breathing, "Body temperature", "thermometer.medium", series: shownBody, unit: UnitText.temperatureSymbol, digits: 1))
         }
         let mindfulSeries = get(try? await mindful)
         var mindfulStat = makeStat("mindful", .breathing, "Mindful minutes", "leaf.fill", series: mindfulSeries, unit: "min", digits: 0)
@@ -482,7 +488,8 @@ final class VitalsModel {
             weightStat.status = abs(weekly) < 0.05 ? "Steady" : "\(weekly < 0 ? "−" : "+")\(shown.formatted(.number.precision(.fractionLength(1)))) \(unit.rawValue)/week"
         }
         if let lastReading = weightSeries.last {
-            weightStat.footnote = "Smoothed trend. Last scale reading: \(lastReading.value.formatted(.number.precision(.fractionLength(1)))) \(unit.rawValue). Daily weight swings 1-2 kg with water and food, so the trend is the number to watch."
+            let swing = unit == .pounds ? "2-4 lb" : "1-2 kg"
+            weightStat.footnote = "Smoothed trend. Last scale reading: \(lastReading.value.formatted(.number.precision(.fractionLength(1)))) \(unit.rawValue). Daily weight swings \(swing) with water and food, so the trend is the number to watch."
         }
         weightStat.secondary = weightSeries
         weightStat.secondaryLabel = "Scale reading"
@@ -740,7 +747,7 @@ final class VitalsModel {
             stat.normalRange = 12...20
             stat.about = "Breaths per minute while asleep. 12-20 is typical for adults. What matters most is change: a rise of 1-2 above your normal can be an early sign of illness."
         case "temperature":
-            stat.about = "Your temperature while asleep. Compare it with your own normal: a rise of about 0.5 °C over a night or two can come before illness, and it also shifts across a menstrual cycle."
+            stat.about = "Your temperature while asleep. Compare it with your own normal: a rise of about 0.5 °C (0.9 °F) over a night or two can come before illness, and it also shifts across a menstrual cycle."
         case "mindful":
             stat.chart = .bars
             stat.about = "Minutes logged in mindfulness or breathing apps."
@@ -759,7 +766,8 @@ final class VitalsModel {
         case "resting":
             stat.about = "Calories your body burns at rest each day, as estimated by your watch."
         case "weight":
-            stat.about = "The line is your smoothed weight trend; dots are actual scale readings. Daily weight swings 1-2 kg with water, salt and food, so the trend is what to watch."
+            let swing = stat.unit == WeightUnit.pounds.rawValue ? "2-4 lb" : "1-2 kg"
+            stat.about = "The line is your smoothed weight trend; dots are actual scale readings. Daily weight swings \(swing) with water, salt and food, so the trend is what to watch."
             stat.defaultDays = 90
         case "fat":
             stat.about = "Body fat percentage from your scale or other app. Smart-scale readings vary with hydration, so watch the trend over weeks."

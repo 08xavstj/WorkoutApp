@@ -1,4 +1,5 @@
 import ActivityKit
+import AppCore
 import os
 import Foundation
 import UserNotifications
@@ -57,6 +58,11 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         case "plan": showWeeklyPlan = true
         case "measurements": showMeasurements = true
         case "bp": showBloodPressure = true
+        case "today": selectedTab = .today
+        case "coach":
+            // A coach check-in's question ("workoutapp://coach?q=…"), asked in the Coach tab (`CoachInbox`).
+            selectedTab = .coach
+            CoachInbox.shared.open(url)
         default: break
         }
     }
@@ -134,6 +140,10 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
                 break
             }
         }
+        if let coach = CoachNudges.handle(identifier: identifier, action: action, link: link) {
+            if let url = coach.link { pendingLink = url }
+            return
+        }
         if let dayKey = Reminders.workoutDayKey(fromIdentifier: identifier) {
             // A tapped workout reminder counts as answered (see `Reminders.WorkoutReminderLog`).
             Reminders.WorkoutReminderLog.noteTapped(dayKey: dayKey)
@@ -163,7 +173,7 @@ nonisolated enum Reminders {
         let taken = UNNotificationAction(identifier: DoseNotifications.takenAction, title: "Taken", options: [], icon: UNNotificationActionIcon(systemImageName: "checkmark.circle"))
         let snooze = UNNotificationAction(identifier: DoseNotifications.snoozeAction, title: "Snooze 10 min", options: [], icon: UNNotificationActionIcon(systemImageName: "clock"))
         let dose = UNNotificationCategory(identifier: DoseNotifications.category, actions: [taken, snooze], intentIdentifiers: [])
-        UNUserNotificationCenter.current().setNotificationCategories([dose])
+        UNUserNotificationCenter.current().setNotificationCategories([dose, Self.coachCategory])
     }
 
     /// Asks once; returns whether notifications are allowed.
@@ -202,7 +212,7 @@ nonisolated enum Reminders {
     @discardableResult
     static func scheduleCheckIns(enabled: Bool, morningMinutes: Int, eveningMinutes: Int, morningDone: Bool, eveningDone: Bool,
                                  hrvMissing: Bool = false, logsHRV: Bool = true, weighInNudge: Bool = false,
-                                 bedByTonight: String? = nil) async -> Date? {
+                                 bedByTonight: String? = nil, morningOn: Bool = true, eveningOn: Bool = true) async -> Date? {
         let center = UNUserNotificationCenter.current()
         let ids = (0..<7).flatMap { ["checkin|m|\($0)", "checkin|e|\($0)"] }
         center.removePendingNotificationRequests(withIdentifiers: ids)
@@ -212,14 +222,15 @@ nonisolated enum Reminders {
         var nudgeDay: Date?
         for offset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
-            let skipMorning = offset == 0 && morningDone && !hrvMissing
+            // The coach's morning check-in (`CoachNudges`) replaces this one when it's on.
+            let skipMorning = !morningOn || (offset == 0 && morningDone && !hrvMissing)
             if !skipMorning, let fire = fireDate(day: day, minutes: morningMinutes, calendar: calendar), fire > .now {
                 let withNudge = weighInNudge && nudgeDay == nil
                 if withNudge { nudgeDay = day }
                 let content = morningContent(hrvOnly: offset == 0 && morningDone && hrvMissing, weighIn: withNudge, asksForHRV: logsHRV)
                 await add(content, identifier: "checkin|m|\(offset)", at: fire, center: center, calendar: calendar)
             }
-            let skipEvening = offset == 0 && eveningDone
+            let skipEvening = !eveningOn || (offset == 0 && eveningDone)
             if !skipEvening, let fire = fireDate(day: day, minutes: eveningMinutes, calendar: calendar), fire > .now {
                 let content = eveningContent(bedBy: offset == 0 ? bedByTonight : nil)
                 await add(content, identifier: "checkin|e|\(offset)", at: fire, center: center, calendar: calendar)
@@ -431,10 +442,22 @@ nonisolated enum Reminders {
 
     /// The most dose reminders kept pending. iOS keeps only 64 per app, and
     /// check-ins (14), workouts (up to 7), the rest timer and snoozes need room too.
-    static let maxPendingDoses = 38
+    static let maxPendingDoses = 35
 
-    /// Reminders for every untaken dose over the next 14 days (soonest first,
-    /// up to `maxPendingDoses`). Opening the app tops the queue back up.
+    /// At most this many of the pending dose reminders go to medications taken
+    /// less often than daily, so daily doses can't crowd a weekly one out.
+    static let maxPendingLessOftenDoses = 12
+    /// How far ahead daily and less-than-daily doses are scheduled.
+    static let dailyHorizonDays = 14
+    static let lessOftenHorizonDays = 84
+
+    /// Reminders for every untaken dose: daily ones over the next 14 days,
+    /// less-than-daily ones (a weekly injection, every 3 days) over the next
+    /// 12 weeks with their own share of the budget, soonest first. Opening
+    /// the app tops the queue back up. One-shot triggers rather than
+    /// repeating ones: a dose ticked off early (here or on the Lock Screen)
+    /// then never fires, which matters most for a weekly injection, and each
+    /// reminder carries the id of its own day's dose.
     static func scheduleDoses() async {
         let center = UNUserNotificationCenter.current()
         let pendingIDs = await center.pendingNotificationRequests().map(\.identifier)
@@ -449,21 +472,34 @@ nonisolated enum Reminders {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         let now = Date.now
-        var upcoming: [(dose: Dose, fire: Date)] = []
-        for offset in 0..<14 {
+        let schedules = Dictionary(MedicationStore.medications().map { ($0.id, $0.plan) }, uniquingKeysWith: { first, _ in first })
+        var daily: [(dose: Dose, fire: Date)] = []
+        var lessOften: [(dose: Dose, fire: Date)] = []
+        for offset in 0..<lessOftenHorizonDays {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
-            for dose in MedicationStore.doses(on: day) where taken[dose.id] == nil {
-                if let fire = fireDate(day: day, minutes: dose.minutes, calendar: calendar), fire > now {
-                    upcoming.append((dose, fire))
+            for dose in MedicationStore.doses(on: day, calendar: calendar) where taken[dose.id] == nil {
+                let isLessOften = schedules[dose.medicationID]?.isLessThanDaily ?? false
+                guard isLessOften || offset < dailyHorizonDays else { continue }
+                guard let fire = fireDate(day: day, minutes: dose.minutes, calendar: calendar), fire > now else { continue }
+                if isLessOften {
+                    lessOften.append((dose, fire))
+                } else {
+                    daily.append((dose, fire))
                 }
             }
         }
-        upcoming.sort { $0.fire < $1.fire }
+        lessOften.sort { $0.fire < $1.fire }
+        daily.sort { $0.fire < $1.fire }
+        let chosenLessOften = Array(lessOften.prefix(maxPendingLessOftenDoses))
+        let upcoming = chosenLessOften + daily.prefix(maxPendingDoses - chosenLessOften.count)
         guard !upcoming.isEmpty, await requestPermission() else { return }
-        for (dose, fire) in upcoming.prefix(maxPendingDoses) {
+        for (dose, fire) in upcoming {
             let content = UNMutableNotificationContent()
             content.title = "Time for \(dose.name)"
-            content.body = dose.dose.isEmpty ? "Tap Taken once you've had it." : "\(dose.dose) · Tap Taken once you've had it."
+            let schedule = schedules[dose.medicationID] ?? .daily
+            // "Weekly on Monday" in the reminder itself, so a weekly dose is never mistaken for a daily one.
+            let when = schedule.isLessThanDaily ? schedule.summary(calendar: calendar) : ""
+            content.body = [dose.dose, when, "Tap Taken once you've had it."].filter { !$0.isEmpty }.joined(separator: " · ")
             content.sound = .default
             content.categoryIdentifier = DoseNotifications.category
             content.userInfo = ["link": "workoutapp://meds"]
@@ -505,9 +541,13 @@ nonisolated enum Reminders {
         }
     }
 
-    /// Saves what the widget shows and asks it to redraw.
+    /// Saves what the widget shows and asks it to redraw: when anything
+    /// changed, and on a new day even if nothing did (the widget shows only a
+    /// snapshot saved today, so an unchanged one from yesterday read as "--").
     static func updateWidget(_ snapshot: WidgetSnapshot) {
-        if WidgetSnapshot.load() != snapshot.withUpdated(WidgetSnapshot.load()?.updated) {
+        let saved = WidgetSnapshot.load()
+        let sameDay = saved.map { Calendar.current.isDate($0.updated, inSameDayAs: snapshot.updated) } ?? false
+        if !sameDay || saved != snapshot.withUpdated(saved?.updated) {
             snapshot.save()
             WidgetCenter.shared.reloadAllTimelines()
         }
@@ -554,44 +594,72 @@ nonisolated enum Reminders {
     /// The monthly waist reminder and the 6-monthly grip reminder
     /// (`WaistToHeightRatio.nextDue`, `GripStrength.nextDue`; Ashwell 2012,
     /// EWGSOP2 via docs/research/health-metrics.md). A nil due date clears that
-    /// reminder; one already in the past fires tomorrow morning.
+    /// reminder. One reminder when due (the next morning if that has passed),
+    /// then, while still not done, one a full interval later (`OverdueReminder`),
+    /// not every morning the app is opened.
     static func scheduleMeasurementReminders(waistDue: Date?, gripDue: Date?) async {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [waistReminderIdentifier, gripReminderIdentifier])
         guard waistDue != nil || gripDue != nil, await requestPermission() else { return }
         let calendar = Calendar.current
-        if let waistDue, let fire = measurementFireDate(due: waistDue, calendar: calendar) {
+        if let waistDue, let fire = overdueFireDate(identifier: waistReminderIdentifier, due: waistDue,
+                                                    intervalDays: WaistToHeightRatio.intervalDays, calendar: calendar) {
             let content = UNMutableNotificationContent()
             content.title = "Monthly waist check"
             content.body = "Tape at the navel, relaxed, after breathing out. Under half your height is the target."
             content.sound = .default
             content.userInfo = ["link": "workoutapp://measurements"]
             await add(content, identifier: waistReminderIdentifier, at: fire, center: center, calendar: calendar)
+            noteReminder(waistReminderIdentifier, firesAt: fire)
         }
-        if let gripDue, let fire = measurementFireDate(due: gripDue, calendar: calendar) {
+        if let gripDue, let fire = overdueFireDate(identifier: gripReminderIdentifier, due: gripDue,
+                                                   intervalDays: GripStrength.intervalDays, calendar: calendar) {
             let content = UNMutableNotificationContent()
             content.title = "Grip strength, twice a year"
             content.body = "Dominant hand, best of three squeezes on a dynamometer. Two minutes."
             content.sound = .default
             content.userInfo = ["link": "workoutapp://measurements"]
             await add(content, identifier: gripReminderIdentifier, at: fire, center: center, calendar: calendar)
+            noteReminder(gripReminderIdentifier, firesAt: fire)
         }
     }
 
     /// The 3-6-monthly reminder to repeat the 7-day home blood pressure check
     /// (`HomeBloodPressure.nextCheckDue`; ESH 2021, ACC/AHA). Nil clears it.
+    /// Once overdue it repeats after 3 months (the shorter cadence), not daily.
     static func scheduleBloodPressureReminder(due: Date?) async {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [bloodPressureReminderIdentifier])
         guard let due, await requestPermission() else { return }
         let calendar = Calendar.current
-        guard let fire = measurementFireDate(due: due, calendar: calendar) else { return }
+        guard let fire = overdueFireDate(identifier: bloodPressureReminderIdentifier, due: due,
+                                         intervalDays: bloodPressureRepeatDays, calendar: calendar) else { return }
         let content = UNMutableNotificationContent()
         content.title = "Time to repeat your home blood pressure check"
         content.body = "Two readings morning and evening for 7 days; the average is what counts."
         content.sound = .default
         content.userInfo = ["link": "workoutapp://bp"]
         await add(content, identifier: bloodPressureReminderIdentifier, at: fire, center: center, calendar: calendar)
+        noteReminder(bloodPressureReminderIdentifier, firesAt: fire)
+    }
+
+    /// An unanswered blood pressure reminder comes back after about 3 months
+    /// (`HomeBloodPressure.repeatMonths` for an above-normal average).
+    static let bloodPressureRepeatDays = 91
+
+    /// When the reminder for a measurement due on `due` should fire, given the
+    /// last one set for it (`OverdueReminder`), at `measurementMinutes`.
+    static func overdueFireDate(identifier: String, due: Date, intervalDays: Int, now: Date = .now,
+                                calendar: Calendar = .current) -> Date? {
+        let lastFire = UserDefaults.standard.object(forKey: lastReminderKey(identifier)) as? Date
+        let day = OverdueReminder.nextDay(due: due, lastNag: lastFire, intervalDays: intervalDays, now: now, calendar: calendar)
+        return measurementFireDate(due: day, now: now, calendar: calendar)
+    }
+
+    private static func lastReminderKey(_ identifier: String) -> String { "lastReminder|" + identifier }
+
+    private static func noteReminder(_ identifier: String, firesAt fire: Date) {
+        UserDefaults.standard.set(fire, forKey: lastReminderKey(identifier))
     }
 
     /// `measurementMinutes` on the due day, or tomorrow when that has passed.
@@ -608,5 +676,17 @@ private extension WidgetSnapshot {
         var copy = self
         copy.updated = date ?? updated
         return copy
+    }
+}
+
+nonisolated extension Reminders {
+    /// Coach check-ins (`CoachNudges`): "Ask the coach" opens the Coach tab with
+    /// the message's question; "Not now" just dismisses.
+    static var coachCategory: UNNotificationCategory {
+        let ask = UNNotificationAction(identifier: CoachNotificationIDs.askAction, title: "Ask the coach", options: [.foreground],
+                                       icon: UNNotificationActionIcon(systemImageName: "sparkles"))
+        let notNow = UNNotificationAction(identifier: CoachNotificationIDs.notNowAction, title: "Not now", options: [],
+                                          icon: UNNotificationActionIcon(systemImageName: "moon.zzz"))
+        return UNNotificationCategory(identifier: CoachNotificationIDs.category, actions: [ask, notNow], intentIdentifiers: [])
     }
 }

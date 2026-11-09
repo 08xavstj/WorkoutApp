@@ -53,7 +53,7 @@ enum DemoData {
             UserDefaults.standard.removePersistentDomain(forName: bundleID)
         }
         let folder = URL.applicationSupportDirectory
-        for name in ["weeklyplans.json", "checkins.json", "measurements.json", "sleep-scores.json", "lab-results.json"] {
+        for name in ["weeklyplans.json", "checkins.json", "measurements.json", "sleep-scores.json", "lab-results.json", "gyms.json"] {
             try? FileManager.default.removeItem(at: folder.appending(path: name))
         }
     }

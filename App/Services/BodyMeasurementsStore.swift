@@ -35,23 +35,28 @@ final class BodyMeasurementsStore {
 
     private var saved = Saved()
 
-    @ObservationIgnored private let fileURL: URL = {
-        let folder = URL.applicationSupportDirectory
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appending(path: "measurements.json")
-    }()
+    @ObservationIgnored private let file = SafeJSONFile.appSupport("measurements.json")
+    /// False while the file exists but couldn't be read (a background launch
+    /// while the phone was locked): nothing is saved over it until it loads.
+    @ObservationIgnored private var canSave = false
 
     init() {
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder().decode(Saved.self, from: data) {
-            saved = decoded
-        }
+        reload()
+    }
+
+    /// Reads the file again if the last read failed (call when the phone unlocks).
+    func reloadIfUnavailable() {
+        if !canSave { reload() }
+    }
+
+    private func reload() {
+        let loaded = file.loadLogged(Saved.self)
+        canSave = loaded.state.canSave
+        if canSave { saved = loaded.value ?? Saved() }
     }
 
     private func write() {
-        if let data = try? JSONEncoder().encode(saved) {
-            try? data.write(to: fileURL, options: .atomic)
-        }
+        file.saveLogged(saved, canSave: canSave)
         scheduleReminders()
     }
 
@@ -62,12 +67,14 @@ final class BodyMeasurementsStore {
     var latestWaist: WaistEntry? { waistEntries.last }
 
     func addWaist(centimeters: Double, date: Date = .now) {
+        reloadIfUnavailable()
         guard centimeters > 20, centimeters < 250 else { return }
         saved.waist.append(WaistEntry(date: date, centimeters: centimeters))
         write()
     }
 
     func deleteWaist(_ entry: WaistEntry) {
+        reloadIfUnavailable()
         saved.waist.removeAll { $0.id == entry.id }
         write()
     }
@@ -107,12 +114,14 @@ final class BodyMeasurementsStore {
     }
 
     func addGrip(kilograms: Double, hand: GripStrength.Hand, date: Date = .now) {
+        reloadIfUnavailable()
         guard kilograms > 2, kilograms < 150 else { return }
         saved.grip.append(GripEntry(date: date, kilograms: kilograms, hand: hand))
         write()
     }
 
     func deleteGrip(_ entry: GripEntry) {
+        reloadIfUnavailable()
         saved.grip.removeAll { $0.id == entry.id }
         write()
     }
@@ -132,6 +141,7 @@ final class BodyMeasurementsStore {
     var stopBang: StopBangEntry? { saved.stopBang }
 
     func saveStopBang(answers: [String: Bool], date: Date = .now) {
+        reloadIfUnavailable()
         saved.stopBang = StopBangEntry(date: date, answers: answers)
         write()
     }
@@ -146,6 +156,8 @@ final class BodyMeasurementsStore {
 
     /// Monthly waist and 6-monthly grip reminders (`Reminders`, "measure|waist", "measure|grip").
     func scheduleReminders() {
+        // Unread file (locked phone): no measurements known yet, so nothing is "due".
+        guard canSave else { return }
         let waistDue = WaistToHeightRatio.nextDue(lastMeasured: latestWaist?.date)
         let gripDue = GripStrength.nextDue(lastMeasured: latestGrip?.date)
         Task { await Reminders.scheduleMeasurementReminders(waistDue: waistDue, gripDue: gripDue) }

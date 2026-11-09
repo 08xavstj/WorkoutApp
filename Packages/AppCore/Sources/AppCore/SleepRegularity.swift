@@ -18,8 +18,12 @@ public enum SleepRegularity {
     ///   - asleep: asleep intervals over the period (any order, may overlap).
     ///   - start: the first day's start (e.g. noon before the first night).
     ///   - days: how many noon-to-noon days to look at.
+    ///   - calendar: when given, each day starts at the same clock time
+    ///     (calendar days), so a daylight-saving change doesn't shift every
+    ///     night after it by an hour against the one before. Nil = fixed
+    ///     24-hour steps.
     /// - Returns: SRI on Phillips' scale, -100...100 (real values are almost always 0...100).
-    public static func index(asleep: [DateInterval], start: Date, days: Int) -> Double? {
+    public static func index(asleep: [DateInterval], start: Date, days: Int, calendar: Calendar? = nil) -> Double? {
         guard days >= 2 else { return nil }
         let merged = merge(asleep)
         let epochsPerDay = Int(86_400 / epoch)
@@ -27,7 +31,8 @@ public enum SleepRegularity {
         var dayStates: [[Bool]] = []
         var hasSleep: [Bool] = []
         for day in 0..<days {
-            let dayStart = start.addingTimeInterval(Double(day) * 86_400)
+            let dayStart = calendar.flatMap { $0.date(byAdding: .day, value: day, to: start) }
+                ?? start.addingTimeInterval(Double(day) * 86_400)
             var states = [Bool](repeating: false, count: epochsPerDay)
             var any = false
             for interval in merged where interval.end > dayStart && interval.start < dayStart.addingTimeInterval(86_400) {
@@ -59,8 +64,13 @@ public enum SleepRegularity {
     }
 
     /// The SRI as a 0-100 score (negative values, which mean worse than chance, count as 0).
-    public static func score(asleep: [DateInterval], start: Date, days: Int) -> Int? {
-        index(asleep: asleep, start: start, days: days).map { Int(min(100, max(0, $0)).rounded()) }
+    public static func score(asleep: [DateInterval], start: Date, days: Int, calendar: Calendar? = nil) -> Int? {
+        index(asleep: asleep, start: start, days: days, calendar: calendar).map { Int(min(100, max(0, $0)).rounded()) }
+    }
+
+    /// Whole calendar days from `start` to `end` (DST-safe), for `days:`.
+    public static func calendarDays(from start: Date, to end: Date, calendar: Calendar = .current) -> Int {
+        max(0, calendar.dateComponents([.day], from: start, to: end).day ?? 0)
     }
 
     static func merge(_ intervals: [DateInterval]) -> [DateInterval] {

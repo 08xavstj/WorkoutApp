@@ -17,19 +17,19 @@ Most of the planner already matched the literature: big lifts first, 10–20 har
 | Area | What the code does | What the research says | Verdict | Change |
 |---|---|---|---|---|
 | Exercise order | Multi-joint lifts first | Early-session lifts gain more strength; growth doesn't depend on order (Nunes et al., Eur J Sport Sci 2021; ACSM 2009) | Supported | Citation added |
-| Sets and reps by goal | Strength 3–6 reps heavy; muscle 6–15; balanced 6–12; endurance 10–20 | Load ranges from ~30% to 80%+ 1RM all build muscle; heavier is better for strength (Schoenfeld et al., 2017, 2021; Lopez et al., 2021) | Supported | None |
+| Sets and reps by goal | Strength 3–6 reps heavy; muscle 6–10 big lifts / 8–12 small; strength + muscle: first big lift 4–6, others 6–10, small 8–12; balanced 6–12; endurance 10–20 | Load ranges from ~30% to 80%+ 1RM all build muscle; heavier is better for strength (Schoenfeld et al., 2017, 2021; Lopez et al., 2021) | Supported | None |
 | Effort (RPE/RIR) | Big lifts 2–3 reps in reserve, small lifts closer to failure | Failure adds little for growth and nothing for strength; closer to failure helps hypertrophy more than strength (Refalo et al., 2024; Robinson et al., Sports Med 2024) | Supported | Citation updated |
 | Recovery → effort | RPE 6.5 / 7.5 / 8 by recovery band, never skips | Autoregulation works for strength (Larsen et al., PeerJ 2021); HRV-guided benefits are small and mainly in endurance (Granero-Gallegos 2020; Manresa-Rocamora 2021) | Supported, kept small | Citation added |
 | Rest | 2–3 min big lifts, ~90 s small | Singer et al., 2024; Schoenfeld et al., 2016; ACSM 2009 | Supported | Citation tidied |
 | Weekly volume | 10–20 sets/muscle "good", 20+ "high if you recover", under 10 "low" | Dose–response with diminishing returns; ~4 sets already gives most of the strength gain (Schoenfeld 2017; Pelland et al., Sports Med 2026; ACSM 2026) | Supported | Comment updated |
-| Frequency | Rotates focus so each muscle is hit ~2×/week | Frequency matters mostly through volume (Schoenfeld et al., 2016, 2019) | Supported | None |
+| Frequency | New weekly plans: full body ×2 (2 days), upper/lower/full (3), upper/lower ×2 (4), upper/lower + push/pull/legs (5), push/pull/legs ×2 (6), so each muscle is trained at least twice a week. Saved plans keep their days. | ACSM 2026: every major muscle ≥2 days/week; frequency matters mostly through volume (Schoenfeld et al., 2016, 2019) and for strength (Grgic 2018) | Supported | Fixed Nov 2026 (3/5-day PPL was ~1×/week; workout-audit-2026-11 §6) |
 | Progression | Next jump once top of range is hit at target effort | ACSM: add 2–10% when 1–2 reps over target are reached | Tweak | Big-jump rule (>10% needs +2 reps) |
 | Session length | Fixed exercise count by minutes; estimate could overrun | Time-efficient training: fewer sets of big lifts, supersets (Iversen et al., Sports Med 2021) | Wrong (overran) | `fit` trims sets to the time |
 | Exercise choice | Catalog order | Long-muscle-length work grows more: triceps overhead (Maeo 2023), seated leg curl (Maeo 2021), standing calf raise (Kinoshita 2023) | Tweak | Catalog reordered |
 | RPE accuracy | Up to 4 reps in reserve counted in e1RM | Lifters misjudge by ~1 rep, worse far from failure (Halperin et al., Sports Med 2022) | Supported | Citation added |
 | Muscle recovery | 48–72 h model; soreness overrides | Soreness tracks damage poorly (Nosaka et al., 2002) | Model, not measurement | Comment says so |
 | Deloads | Suggested on high volume + poor recovery | Consensus: planned or reactive, both fine (Bell et al., 2023) | Supported | None |
-| Warm-up | 5 min allowance; no ramp sets | Ramp sets help performance (Ribeiro et al., 2020) | Gap | Future: warm-up calculator rounded to plates |
+| Warm-up | Ramp sets rounded to plates: full ramp on the first lift (plus 90% × 1 from 100 kg), two steps on the first lift of each other region, one feeler after that; sessions of 30 min or less get two steps on the first lift only | Ramp sets help performance (Ribeiro et al., 2020; Fradkin et al., 2010); percentages are coaching practice | Supported | Done (workout-audit-2026-11 §15) |
 
 ## Open items (done in roadmap Phase 4, November 2026)
 - Warm-up ramp calculator (2–3 sets at 50/70/85% rounded to your plates): `WarmUp` in AppCore, shown in the builder and prefilled as "W" sets (Ribeiro 2020; Fradkin 2010; ACSM 2009). The 50/70/85% pattern is coaching practice, not a tested optimum.

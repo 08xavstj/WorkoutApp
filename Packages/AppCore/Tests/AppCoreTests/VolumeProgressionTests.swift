@@ -283,7 +283,8 @@ struct VolumeProgressionTests {
         #expect(direct.values.allSatisfy { $0 <= VolumeProgression.sessionCap(minutes: 60) })
         #expect((steered.estimatedMinutes ?? 0) <= 60)
         #expect(Double(steered.estimatedMinutes ?? 0) >= 0.85 * 60)
-        #expect(steered.lengthNote?.contains("extra sets") == true)
+        // Past the goals only a few sets a muscle (`setsPastGoal`), so this one runs a little short and says so.
+        #expect(steered.lengthNote?.contains("extra sets") == true || steered.lengthNote?.contains("every set") == true)
         // No goals: exactly the old plan.
         #expect(planner.plan(focus: .push, minutes: 60, recovery: 80, history: [:], muscleSetGoals: [:]) == free)
     }

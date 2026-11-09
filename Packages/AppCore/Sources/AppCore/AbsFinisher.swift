@@ -173,6 +173,17 @@ public enum AbsFinisher {
         }
     }
 
+    /// Sessions this short (and a plan's short version) skip the finisher:
+    /// 5-10 minutes on top of a 15-20 minute session adds a third to a half
+    /// to the time you picked. App choice.
+    public static let shortSessionMinutes = 20
+
+    /// The finisher length to use for a session: off for short sessions
+    /// (`shortSessionMinutes` or less, or the plan's short version), else your choice.
+    public static func length(_ chosen: Length, sessionMinutes: Int, isShortVersion: Bool = false) -> Length {
+        (isShortVersion || sessionMinutes <= shortSessionMinutes) ? .off : chosen
+    }
+
     /// What the finisher does and doesn't do, for the UI.
     public static let evidenceNote = "Abs grow like other muscles, with about 10-20 hard sets a week (Schoenfeld 2017). Ab work won't burn belly fat on its own (Vispute 2011): that comes from diet and overall activity."
 
@@ -216,7 +227,7 @@ public enum AbsFinisher {
     public static func patternPriority(style: TrainingStyle) -> [CorePattern] {
         switch style {
         case .strength: [.antiExtension, .rotationLateral, .flexion, .legRaise]
-        case .muscle: [.flexion, .legRaise, .antiExtension, .rotationLateral]
+        case .muscle, .strengthAndMuscle: [.flexion, .legRaise, .antiExtension, .rotationLateral]
         case .balanced, .endurance: [.flexion, .antiExtension, .legRaise, .rotationLateral]
         }
     }

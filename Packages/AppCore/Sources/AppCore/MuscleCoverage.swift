@@ -96,6 +96,7 @@ public enum MuscleCoverage {
         case .legCurl: (.hamstrings, [])
         case .calves: (.calves, [])
         case .core: (.abdominals, [])
+        case .hipThrust: (.glutes, [.hamstrings])
         }
     }
 

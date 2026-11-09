@@ -75,14 +75,15 @@ private struct ConditionsRowLabel: View {
         }
     }
 
-    /// "19° now · high 22° · Partly cloudy": the heat advice below uses the
-    /// day's high, so the row names it when it's warmer than now.
+    /// "19°C now · high 22° · Partly cloudy" (°F where the iPhone uses it;
+    /// Open-Meteo gives °C): the heat advice below uses the day's high, so
+    /// the row names it when it's warmer than now.
     private var headline: String {
-        let now = Int(conditions.temperature.rounded())
-        if let high = conditions.high.map({ Int($0.rounded()) }), high > now {
-            return "\(now)° now · high \(high)° · \(conditions.summary)"
+        let now = UnitText.weather(conditions.temperature)
+        if let high = conditions.high, high.rounded() > conditions.temperature.rounded() {
+            return now + " now · high " + UnitText.weatherShort(high) + " · " + conditions.summary
         }
-        return "\(now)° · \(conditions.summary)"
+        return now + " · " + conditions.summary
     }
 
     private var content: some View {
@@ -174,6 +175,14 @@ private struct WeatherCard: View {
         }
     }
 
+    /// "Feels 17° · H 22° L 12° · Lisbon", in the same unit as the line above it.
+    private func feelsLine(_ c: Conditions) -> String {
+        var line = "Feels " + UnitText.weatherShort(c.feelsLike)
+        if let high = c.high { line += " · H " + UnitText.weatherShort(high) }
+        if let low = c.low { line += " L " + UnitText.weatherShort(low) }
+        return line + " · " + settings.placeName
+    }
+
     private func header(_ c: Conditions) -> some View {
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: c.symbol)
@@ -181,10 +190,10 @@ private struct WeatherCard: View {
                 .font(.largeTitle)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
-                Text("\(Int(c.temperature.rounded()))° · \(c.summary)")
+                Text(UnitText.weather(c.temperature) + " · " + c.summary)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.primaryText)
-                Text("Feels \(Int(c.feelsLike.rounded()))°\(c.high.map { " · H \(Int($0.rounded()))°" } ?? "")\(c.low.map { " L \(Int($0.rounded()))°" } ?? "") · \(settings.placeName)")
+                Text(feelsLine(c))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .lineLimit(2)

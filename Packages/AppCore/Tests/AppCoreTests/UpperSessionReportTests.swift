@@ -68,10 +68,11 @@ struct UpperSessionReportTests {
                         #expect(load >= last.lastWeight * 0.9 - 0.001, "\(label): \(exercise.name) \(load) vs \(last.lastWeight)")
                         #expect(load <= last.lastWeight * 1.1 + 0.001, "\(label): \(exercise.name) \(load)")
                         // Double progression: about last time's reps (one more, or one fewer on an
-                        // easier day at the same weight), or the bottom of the range after a step up.
+                        // easier day at the same weight), or after a step up what the new weight
+                        // allows (in the range, not more than last time's reps; audit 2026-11 §4).
                         let reps = exercise.repsToday
                         if load > last.lastWeight + 0.001 {
-                            #expect(reps == exercise.reps.lowerBound, "\(label): \(exercise.name) \(reps)")
+                            #expect(exercise.reps.contains(reps) && reps <= last.lastReps, "\(label): \(exercise.name) \(reps)")
                         } else {
                             #expect(abs(reps - last.lastReps) <= 1, "\(label): \(exercise.name) \(reps) vs \(last.lastReps)")
                         }

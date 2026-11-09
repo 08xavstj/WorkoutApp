@@ -44,12 +44,25 @@ struct WorkoutHistoryView: View {
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
-                if let offsets = pendingDelete { delete(at: offsets) }
-                pendingDelete = nil
+            if pendingHasHealthWorkout {
+                // Only the workouts Tensile saved (the iPhone's, the Tensile Watch app's) can go;
+                // one from another app (Garmin, Apple's Workout app) stays (`deleteOwnWorkouts`).
+                Button("Delete here and in Apple Health", role: .destructive) {
+                    if let offsets = pendingDelete { delete(at: offsets, fromHealth: true) }
+                    pendingDelete = nil
+                }
+                Button("Delete in Tensile only", role: .destructive) {
+                    if let offsets = pendingDelete { delete(at: offsets, fromHealth: false) }
+                    pendingDelete = nil
+                }
+            } else {
+                Button("Delete", role: .destructive) {
+                    if let offsets = pendingDelete { delete(at: offsets, fromHealth: false) }
+                    pendingDelete = nil
+                }
             }
         } message: {
-            Text("Its sets and strain are removed. This can't be undone.")
+            Text(deleteMessage)
         }
         // Watch workouts can sync days late (Garmin), so pair recent sessions on each load (`WorkoutLinker`).
         .task {
@@ -59,9 +72,42 @@ struct WorkoutHistoryView: View {
         }
     }
 
-    private func delete(at offsets: IndexSet) {
-        for index in offsets {
-            modelContext.delete(finished[index])
+    /// The workouts being deleted, while the question is up.
+    private var pendingSessions: [WorkoutSession] {
+        guard let pendingDelete else { return [] }
+        let list = finished
+        return pendingDelete.filter { $0 < list.count }.map { list[$0] }
+    }
+
+    /// True when Tensile saved a workout to Apple Health for one of them.
+    private var pendingHasHealthWorkout: Bool {
+        pendingSessions.contains { $0.savedToHealth || $0.watchWorkoutUUID != nil }
+    }
+
+    private var deleteMessage: String {
+        var text = "Its sets are removed from Tensile. This can't be undone."
+        if pendingHasHealthWorkout {
+            text += " The workout Tensile saved in Apple Health, which counts toward strain, can go too."
+        }
+        if pendingSessions.contains(where: { $0.linkedWorkoutSource != nil }) {
+            text += " A workout from another app stays in Apple Health."
+        }
+        return text
+    }
+
+    /// Deletes the sessions; with `fromHealth`, also the Apple Health workouts
+    /// Tensile saved for them (the user chose it in the question above).
+    private func delete(at offsets: IndexSet, fromHealth: Bool) {
+        let list = finished
+        for index in offsets where index < list.count {
+            let session = list[index]
+            if fromHealth, session.savedToHealth || session.watchWorkoutUUID != nil, let health {
+                let start = session.startedAt
+                let end = session.endedAt ?? session.startedAt
+                let watchID = session.watchWorkoutUUID
+                Task { _ = await health.deleteOwnWorkouts(start: start, end: end, watchWorkoutUUID: watchID) }
+            }
+            modelContext.delete(session)
         }
         try? modelContext.save()
     }

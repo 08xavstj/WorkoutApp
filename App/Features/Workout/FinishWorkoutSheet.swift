@@ -7,6 +7,8 @@ struct FinishWorkoutSheet: View {
     @Bindable var session: WorkoutSession
     /// Personal records not shown during the workout (`SetFeedback.records`).
     var records: [RecordBanner] = []
+    /// The end to use instead of now: "End at 6:42 PM" from "Still training?".
+    var endOverride: Date? = nil
     let onFinished: () -> Void
 
     @Environment(\.modelContext) private var modelContext
@@ -86,17 +88,14 @@ struct FinishWorkoutSheet: View {
                     .disabled(isSaving)
                 }
             }
-            .confirmationDialog(
-                "\(untickedWithData.count) set\(untickedWithData.count == 1 ? "" : "s") with weights or reps weren't ticked off",
-                isPresented: $confirmingUnticked,
-                titleVisibility: .visible
-            ) {
-                Button("Mark \(untickedWithData.count == 1 ? "it" : "them") as done") {
-                    for set in untickedWithData { set.completedAt = .now }
+            .confirmationDialog(uncheckedTitle, isPresented: $confirmingUnticked, titleVisibility: .visible) {
+                // Leaving them out comes first: a set you changed but didn't tick usually wasn't done.
+                Button(untickedWithData.count == 1 ? "Leave it out" : "Leave them out") {
                     Task { await finish() }
                 }
-                Button("Discard \(untickedWithData.count == 1 ? "it" : "them")", role: .destructive) {
-                    Task { await finish() }
+                Button(untickedWithData.count == 1 ? "Log it as done" : "Log them as done") {
+                    let sets = untickedWithData
+                    Task { await finish(markingDone: sets) }
                 }
                 Button("Cancel", role: .cancel) {}
             }
@@ -139,80 +138,108 @@ struct FinishWorkoutSheet: View {
         }
     }
 
-    /// Sets the user filled in but didn't tick.
+    /// Working sets whose weight or reps you changed by hand but didn't tick
+    /// (`LiveSessionStore.markTouched`). Sets still as the plan prefilled them
+    /// weren't done, and warm-ups aren't asked about: those just go.
     private var untickedWithData: [SetLog] {
-        session.exercises.flatMap(\.sets).filter { !$0.isCompleted && ($0.weightKg > 0 || $0.reps > 0) }
+        session.exercises.flatMap { exercise in
+            exercise.sets.filter { set in
+                !set.isCompleted && !set.isWarmup && (set.weightKg > 0 || set.reps > 0)
+                    && LiveSessionStore.isTouched(order: exercise.order, setOrder: set.order, for: session.startedAt)
+            }
+        }
     }
 
-    private func finish() async {
+    private var uncheckedTitle: String {
+        let count = untickedWithData.count
+        return count == 1 ? "1 set you changed wasn't ticked off" : "\(count) sets you changed weren't ticked off"
+    }
+
+    /// When the workout ended: the "Still training?" choice, else when the Apple
+    /// Watch finished it (heard late when the phone was away), else now
+    /// (`LiveWorkoutRules.endDate`).
+    private var endDate: Date {
+        if let endOverride { return min(.now, max(session.startedAt, endOverride)) }
+        let lastTick = session.exercises.flatMap(\.sets).compactMap(\.completedAt).max()
+        return LiveWorkoutRules.endDate(start: session.startedAt,
+                                        watchFinishedAt: LiveSessionStore.entry(for: session.startedAt).watchFinishedAt,
+                                        lastTick: lastTick, now: .now)
+    }
+
+    /// Saves to Apple Health first, then ends the session: a Health error leaves
+    /// the workout open and unchanged (try again, or untick Save to Apple Health),
+    /// instead of ending it with its sets gone under a screen still showing it.
+    private func finish(markingDone: [SetLog] = []) async {
         isSaving = true
         defer { isSaving = false }
-        // Drop sets that were never ticked off.
+        errorMessage = nil
+        let end = endDate
+        let watchRecords = WatchSync.shared.watchOwnsWorkout(session)
+        let ownRecording = recorder.isRecording && recorder.sessionStart == session.startedAt
+        if session.savedToHealth || watchRecords || !saveToHealth {
+            // Not saving, already saved, or the Apple Watch's workout is the Health
+            // record (`WatchSync`): one workout in Health, not two.
+            if ownRecording { recorder.discard() }
+        } else if ownRecording {
+            // The live session already holds the heart rate (AirPods / strap); save it with the workout.
+            do {
+                try await recorder.finish(at: end)
+                session.savedToHealth = true
+            } catch {
+                errorMessage = healthSaveMessage(error)
+                return
+            }
+        } else if let health {
+            do {
+                try await health.saveStrengthWorkout(start: session.startedAt, end: end)
+                session.savedToHealth = true
+            } catch {
+                errorMessage = healthSaveMessage(error)
+                return
+            }
+        }
+        // Now end it: the sets you chose to log, unticked ones dropped, and
+        // exercises left with nothing logged dropped too (so "Add to saved
+        // workouts" doesn't save a skipped exercise as 1 × 8-12).
+        for set in markingDone where !set.isCompleted { set.completedAt = end }
         for exercise in session.exercises {
             for set in exercise.sets where !set.isCompleted {
                 modelContext.delete(set)
             }
+            if !exercise.sets.contains(where: \.isCompleted) {
+                modelContext.delete(exercise)
+            }
         }
         session.sessionRPE = Int(rpe)
-        session.endedAt = .now
+        session.endedAt = end
         do {
             try modelContext.save()
         } catch {
             errorMessage = "Couldn't save: \(error.localizedDescription)"
             return
         }
-        // Stop the Apple Watch now, not after the Health saves below, so its
-        // workout ends with the phone's and its summary can join this session.
-        // (`onFinished` sends it again; repeats are harmless.)
+        // Stop the Apple Watch now, so its workout ends with the phone's and its
+        // summary can join this session. (`onFinished` sends it again; repeats are harmless.)
         WatchSync.shared.sessionFinished(session)
         if saveAsTemplate, !templateSaved {
             _ = WorkoutTemplate.from(session, in: modelContext)
             templateSaved = true
         }
-        if let end = session.endedAt {
-            // Apple Watch (`WatchSync`): when the Watch records this session, its HKWorkout is
-            // the record, so the phone saves no bare workout of its own. An AirPods
-            // recording is still finished (discarding it would drop its heart-rate
-            // samples); the linker pairs the two and the merge dedupes the minutes.
-            let watchRecords = WatchSync.shared.watchOwnsWorkout(session)
-            if recorder.isRecording && recorder.sessionStart == session.startedAt {
-                // The live session already holds the heart rate (AirPods / strap); save it with the workout.
-                if saveToHealth {
-                    do {
-                        try await recorder.finish(at: end)
-                        session.savedToHealth = true
-                    } catch {
-                        // Stay open: the session is saved; the Health write can be retried or skipped.
-                        errorMessage = healthSaveMessage(error)
-                        return
-                    }
-                } else {
-                    recorder.discard()
-                }
-            } else if saveToHealth, !watchRecords, let health {
-                do {
-                    try await health.saveStrengthWorkout(start: session.startedAt, end: end)
-                    session.savedToHealth = true
-                } catch {
-                    errorMessage = healthSaveMessage(error)
-                    return
-                }
-            }
-            // Session RPE → Apple Health workout effort score, linked to the
-            // workout just saved so Apple's Training Load counts lifting
-            // (iOS 18 type; HealthKitClient+Writes; competitors.md §1g).
-            if session.savedToHealth, let health {
-                try? await health.saveWorkoutEffort(score: Int(rpe), start: session.startedAt, end: end)
-            }
-            // Pair the session with the workout a watch recorded alongside it, so
-            // history shows one entry with the watch's heart rate (`WorkoutLinker`).
-            if let health {
-                await WorkoutLinker.link(session, health: health)
-            }
-            try? modelContext.save()
+        // Session RPE → Apple Health workout effort score, linked to the
+        // workout just saved so Apple's Training Load counts lifting
+        // (iOS 18 type; HealthKitClient+Writes; competitors.md §1g).
+        if session.savedToHealth, let health {
+            try? await health.saveWorkoutEffort(score: Int(rpe), start: session.startedAt, end: end)
         }
+        // Pair the session with the workout a watch recorded alongside it, so
+        // history shows one entry with the watch's heart rate (`WorkoutLinker`).
+        if let health {
+            await WorkoutLinker.link(session, health: health)
+        }
+        try? modelContext.save()
         await WorkoutLiveActivity.endAll()
         // The summary opens once the workout screen has closed (`WorkoutSummaryPresenter`).
+        CoachNudges.shared.workoutFinished(session)
         WorkoutSummaryPresenter.shared.pending = session
         dismiss()
         onFinished()

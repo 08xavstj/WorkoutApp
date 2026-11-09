@@ -531,7 +531,8 @@ final class DailyMetricsModel {
             async let workoutsTask = health.externalWorkouts(from: today, to: now)
             async let nightsTask = health.sleepHistory(nights: 31)
             let (healthVitals, sleepSamples, externalWorkouts) = try await (vitalsTask, sleepTask, workoutsTask)
-            let nights = (try? await nightsTask) ?? []
+            let fetchedNights = try? await nightsTask
+            let nights = fetchedNights ?? []
             sleepNights = nights
             let lastWeek = Array(nights.suffix(8))
             sleepConsistency = lastWeek.regularityScore
@@ -572,7 +573,9 @@ final class DailyMetricsModel {
             let tracksSleep = nights.contains { $0.date >= (calendar.date(byAdding: .day, value: -7, to: today) ?? today) }
             let tonight = self.sleepCalculator.score(samples: sleepSamples)
             let nightOver = RecoveryTiming.nightIsOver(now: now, wake: tonight?.asleepEnd, asleepHours: tonight.map { $0.asleep / 3600 },
-                                                       tracksSleep: tracksSleep, calendar: calendar)
+                                                       tracksSleep: tracksSleep,
+                                                       usualWakeMinutes: BedtimeWindow.usualWakeMinutes(nights.suffix(14).map(\.wake), calendar: calendar),
+                                                       calendar: calendar)
             recoveryIsFromYesterday = !nightOver
             let scoredDay = nightOver ? today : yesterday
             // Today's HRV is the typed one when you entered a value for today
@@ -701,7 +704,12 @@ final class DailyMetricsModel {
             // Completed days only: today isn't over, so it would make this week read low.
             let completeDays = days.dropLast()
             cardioLoad = loadCalculator.evaluate(dailyLoads: completeDays.map(\.1.cardioLoad))
-            muscularLoad = loadCalculator.evaluate(dailyLoads: completeDays.map(\.1.liftingLoad))
+            // Muscular load counts only from the first lift: earlier days are unknown, not rest,
+            // so a new user's weeks 2-3 don't read as "much more than usual" (calibrating until 14 days).
+            let firstLiftDay = min(loggedSessionDays.min() ?? .distantFuture,
+                                   completeDays.first { $0.1.liftingLoad > 0 }?.0 ?? .distantFuture)
+            muscularLoad = loadCalculator.evaluate(dailyLoads: completeDays.map(\.1.liftingLoad),
+                                                   knownDays: completeDays.filter { $0.0 >= firstLiftDay }.count)
 
             var sleepCalculator = self.sleepCalculator
             sleepCalculator.baseSleepNeedHours = settings.sleepNeedHours
@@ -709,6 +717,11 @@ final class DailyMetricsModel {
             sleep = sleepCalculator.score(samples: sleepSamples, previousDayStrain: yesterdayStrain, consistency: sleepConsistency)
             // [Recovery research] Sleep is compared with your own last 30 scores; RHR source as above.
             SleepScoreLog.record(sleep?.score, on: today)
+            if let fetchedNights {
+                await backfillSleepScores(health: health, nights: fetchedNights, calculator: sleepCalculator,
+                                          strainByDay: Dictionary(days.map { ($0.0, $0.1.strain) }, uniquingKeysWith: { _, last in last }),
+                                          today: today, calendar: calendar)
+            }
             // Before the night is over, yesterday's score with yesterday's sleep (`recoveryIsFromYesterday`).
             let scoredSleep = nightOver ? sleep?.score : SleepScoreLog.recentScores(before: today, days: 1).last
             recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: scoredSleep,
@@ -845,6 +858,35 @@ final class DailyMetricsModel {
         } catch {
             errorMessage = "Couldn't read Apple Health: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: Sleep score history
+
+    /// Mornings already tried by `backfillSleepScores` (no main sleep to score), so they aren't re-read every refresh.
+    @ObservationIgnored private var sleepBackfillTried: Set<Date> = []
+
+    /// Keeps the last week of `SleepScoreLog` in step with Apple Health: a
+    /// morning with sleep but no score (the app wasn't opened that day) is
+    /// scored now, and a score whose sleep is no longer in Health (deleted) is
+    /// dropped. Only after a successful sleep read, and never drops anything
+    /// when Health returned no nights at all (a revoked read looks the same).
+    private func backfillSleepScores(health: HealthKitClient, nights: [SleepNight], calculator: SleepCalculator,
+                                     strainByDay: [Date: Double], today: Date, calendar: Calendar) async {
+        guard let windowStart = calendar.date(byAdding: .day, value: -SleepScoreLog.backfillDays, to: today) else { return }
+        let tracked = Set(nights.map { calendar.startOfDay(for: $0.date) }.filter { $0 >= windowStart && $0 < today })
+        let scored = SleepScoreLog.scoredMornings(from: windowStart, before: today)
+        let gone = nights.isEmpty ? [] : Array(scored.subtracting(tracked))
+        var added: [Date: Int] = [:]
+        for morning in tracked.subtracting(scored).subtracting(sleepBackfillTried).sorted() {
+            sleepBackfillTried.insert(morning)
+            guard let samples = try? await health.sleepSamples(forNightEnding: morning) else { continue }
+            let previous = calendar.date(byAdding: .day, value: -1, to: morning).flatMap { strainByDay[$0] }
+            if let score = calculator.score(samples: samples, previousDayStrain: previous, consistency: sleepConsistency)?.score {
+                added[morning] = score
+            }
+        }
+        sleepBackfillTried = sleepBackfillTried.filter { $0 >= windowStart }
+        if !added.isEmpty || !gone.isEmpty { SleepScoreLog.update(adding: added, removing: gone) }
     }
 
     // MARK: Weekly calorie target

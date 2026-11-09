@@ -15,6 +15,8 @@ struct MyGymView: View {
     /// True when pushed inside another sheet's NavigationStack (the workout
     /// builder), so it doesn't open a sheet on a sheet (ux-audit 4.1 rule 5).
     var pushed = false
+    /// The gym to edit (Settings › Gym equipment); nil edits the active gym.
+    var gymID: UUID? = nil
 
     /// Number fields grow with the text, and rows stack at accessibility
     /// text sizes instead of clipping (ux-audit.md 4.8, P22).
@@ -40,6 +42,11 @@ struct MyGymView: View {
                         Button("Commercial gym (lb)") { apply(.commercialPounds) }
                         Button("Commercial gym (kg)") { apply(.commercialKilograms) }
                         Button("Home gym: dumbbells only") { apply(.homeDumbbells) }
+                        Section("Travel") {
+                            ForEach(TravelGymPreset.allCases) { preset in
+                                Button(preset.name) { apply(preset.profile(unit: draft.unit)) }
+                            }
+                        }
                     } label: {
                         Label("Start from a preset", systemImage: "square.on.square")
                     }
@@ -177,12 +184,16 @@ struct MyGymView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         draft.plates.removeAll { $0.weight <= 0 }
-                        gym.save(draft)
+                        if let gymID {
+                            gym.save(draft, for: gymID)
+                        } else {
+                            gym.save(draft)
+                        }
                         dismiss()
                     }
                 }
             }
-            .onAppear { draft = gym.profile }
+            .onAppear { draft = gymID.flatMap { gym.registry.gym(id: $0)?.profile } ?? gym.profile }
         }
     }
 

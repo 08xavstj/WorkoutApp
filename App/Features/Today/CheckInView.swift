@@ -127,7 +127,9 @@ struct CheckInView: View {
             }
             .pickerStyle(.segmented)
         }
-        if settings.sex == .female {
+        // Also while sex isn't set: Health often lacks it, and hiding the
+        // question would silently treat everyone as male.
+        if settings.sex == .female || !settings.sexIsSet {
             Section {
                 Picker("Cycle", selection: $morning.cycle) {
                     Text("–").tag(MorningCheckIn.Cycle?.none)

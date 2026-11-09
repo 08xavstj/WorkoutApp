@@ -339,7 +339,7 @@ private struct GripReading: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             Chip(text: reading.rawValue, color: GripReading.color(for: reading))
-            Text(GripStrength.advice(reading, age: age, sex: sex))
+            Text(GripStrength.advice(reading, age: age, sex: sex, inPounds: unit == .pounds))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

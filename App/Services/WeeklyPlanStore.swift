@@ -33,17 +33,25 @@ final class WeeklyPlanStore {
     /// the views that know the goals before they save or refresh.
     var trainingStyle: TrainingStyle = .balanced
 
-    @ObservationIgnored private let fileURL: URL = {
-        let folder = URL.applicationSupportDirectory
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appending(path: "weeklyplans.json")
-    }()
+    @ObservationIgnored private let file = SafeJSONFile.appSupport("weeklyplans.json")
+    /// False while the file exists but couldn't be read (a background launch
+    /// while the phone was locked): nothing is saved over it until it loads.
+    @ObservationIgnored private var canSave = false
 
     init() {
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder().decode(Saved.self, from: data) {
-            saved = decoded
-        }
+        reload()
+    }
+
+    /// Reads the file again if the last read failed (call when the phone unlocks).
+    /// Every method that writes calls it first.
+    func reloadIfUnavailable() {
+        if !canSave { reload() }
+    }
+
+    private func reload() {
+        let loaded = file.loadLogged(Saved.self)
+        canSave = loaded.state.canSave
+        if canSave { saved = loaded.value ?? Saved() }
     }
 
     // MARK: Plans
@@ -89,8 +97,11 @@ final class WeeklyPlanStore {
         return plannedDays.first { WeeklyPlan.order($0.weekday) > today }
     }
 
-    /// Start times still to come for this week's planned days and, unless next
-    /// week has its own plan, the same days next week. For workout reminders
+    /// Start times still to come for this week's planned days and, once next
+    /// week's plan is saved, next week's. A plan isn't carried into a week
+    /// that has none, the same as `todayPlan` and `reminderSlots` (each week is
+    /// planned or confirmed on its own), so the watch face never shows a
+    /// Monday session that Monday won't have. For workout reminders
     /// tied to planned slots (`Reminders.PlannedSlot(start:name:ifThen:)`) and
     /// the watch face. In a flexible week the remaining sessions are projected
     /// onto the next days at their usual time (today included unless trained),
@@ -109,9 +120,8 @@ final class WeeklyPlanStore {
             }
         }
         for week in (queued == nil ? 0 : 1)..<2 {
-            guard let weekStart = Calendar.current.date(byAdding: .day, value: 7 * week, to: current.weekStart) else { continue }
-            let plan = self.plan(for: weekStart)
-                ?? WeeklyPlan(weekStart: weekStart, plannedDays: current.plannedDays, mode: current.mode, sessionsPerWeek: current.sessionsPerWeek)
+            guard let weekStart = Calendar.current.date(byAdding: .day, value: 7 * week, to: current.weekStart),
+                  let plan = week == 0 ? Optional(current) : self.plan(for: weekStart), !plan.isFlexible else { continue }
             for day in plan.sortedDays {
                 if let start = plan.start(of: day), start > now { slots.append((day, start)) }
             }
@@ -208,6 +218,7 @@ final class WeeklyPlanStore {
     /// `keptWeeks`. The first confirmed plan with training days starts a
     /// training block (`startBlockIfNeeded`).
     func save(_ plan: WeeklyPlan) {
+        reloadIfUnavailable()
         saved.plans.removeAll { Calendar.current.isDate($0.weekStart, inSameDayAs: plan.weekStart) }
         saved.plans.append(plan)
         let cutoff = Calendar.current.date(byAdding: .day, value: -7 * Self.keptWeeks, to: WeeklyPlan.weekStart(containing: .now)) ?? .distantPast
@@ -240,6 +251,7 @@ final class WeeklyPlanStore {
 
     /// Starts a block in `trainingStyle` from this week if none exists.
     func startBlockIfNeeded(now: Date = .now, persist: Bool = true) {
+        reloadIfUnavailable()
         guard saved.block == nil else { return }
         saved.block = TrainingBlock(start: WeeklyPlan.weekStart(containing: now), style: trainingStyle)
         if persist { write() }
@@ -247,6 +259,7 @@ final class WeeklyPlanStore {
 
     /// Starts over from week 1 this week (e.g. after changing goals).
     func restartBlock(now: Date = .now) {
+        reloadIfUnavailable()
         let thisWeek = WeeklyPlan.weekStart(containing: now)
         saved.block = TrainingBlock(start: thisWeek, style: trainingStyle)
         // A new block starts every muscle again at week 1's sets.
@@ -261,6 +274,7 @@ final class WeeklyPlanStore {
     /// exists but no block does (plans saved before blocks existed).
     @discardableResult
     func refreshBlock(now: Date = .now, hrvBelowNormal: Bool = false) -> TrainingBlock.WeekState? {
+        reloadIfUnavailable()
         guard let current = saved.block else {
             if plans.contains(where: { !$0.plannedDays.isEmpty }) { startBlockIfNeeded(now: now) }
             return saved.block?.week
@@ -274,9 +288,7 @@ final class WeeklyPlanStore {
     }
 
     private func write() {
-        if let data = try? JSONEncoder().encode(saved) {
-            try? data.write(to: fileURL, options: .atomic)
-        }
+        file.saveLogged(saved, canSave: canSave)
     }
 
     // MARK: Matching sessions
@@ -338,7 +350,8 @@ final class WeeklyPlanStore {
         let thisWeek = WeeklyPlan.weekStart(containing: now)
         if let stored = savedVolume(for: thisWeek) { return stored }
         guard muscles.hasRefreshed, let current = saved.block else { return nil }
-        let block = current.covers(weekStart: thisWeek) ? current.week : current.advanced(to: now, style: trainingStyle).week
+        let running = current.covers(weekStart: thisWeek) ? current : current.advanced(to: now, style: trainingStyle)
+        let block = running.week
         let days = (plan(for: thisWeek) ?? lastPlan(before: thisWeek))?.plannedDays ?? []
         guard !days.isEmpty else { return nil }
         let lastMonday = calendar.date(byAdding: .day, value: -7, to: thisWeek) ?? thisWeek
@@ -352,8 +365,25 @@ final class WeeklyPlanStore {
         }
         let style = current.style
         let lastWeek = VolumeProgression.summarize(muscles.loggedSets, weekStart: lastMonday, targetRPE: lastRPE, style: style)
+        // Your answers after last week's sessions (`MuscleFeedbackStore`) and the
+        // last block's report, if you applied it to this block (`NextBlockStore`).
+        let feedback = MuscleFeedbackStore.shared.signals(sets: muscles.loggedSets, weekStart: lastMonday)
+        let adjustment = NextBlockStore.shared.volume(blockStart: running.start, weekStart: thisWeek)
         return VolumeProgression.week(weekStart: thisWeek, block: block, style: style, days: days,
-                                      previous: previous, lastWeek: lastWeek, states: muscles.states)
+                                      previous: previous, lastWeek: lastWeek, states: muscles.states,
+                                      recentWeeklySets: VolumeProgression.recentWeeklySets(muscles.loggedSets, before: thisWeek, style: style),
+                                      feedback: feedback, adjustment: adjustment)
+    }
+
+    /// Drops this week's saved targets, so the next `refreshVolume` works them
+    /// out again: after the block report's changes are applied or undone
+    /// (`NextBlockStore`), which change this week's targets.
+    func redoVolume(now: Date = .now) {
+        reloadIfUnavailable()
+        let thisWeek = WeeklyPlan.weekStart(containing: now)
+        guard savedVolume(for: thisWeek) != nil else { return }
+        saved.volume?.removeAll { Calendar.current.isDate($0.weekStart, inSameDayAs: thisWeek) }
+        write()
     }
 
     /// Saves this week's targets the first time they can be worked out from
@@ -361,6 +391,7 @@ final class WeeklyPlanStore {
     /// also notes which recent days were only easy cardio (`liftingExtra`).
     /// Call from a task once `MuscleModel.refresh` has run.
     func refreshVolume(muscles: MuscleModel, now: Date = .now) {
+        reloadIfUnavailable()
         let calendar = Calendar.current
         if let kind = current?.cardio?.kind {
             let names = kind.workoutNames
@@ -377,6 +408,14 @@ final class WeeklyPlanStore {
         weeks.append(targets)
         saved.volume = weeks
         write()
+        // The block report's sets now live in this week's targets: later weeks
+        // build on them. A deload week leaves them out, so they wait for the next.
+        if let block = saved.block {
+            let running = block.covers(weekStart: thisWeek) ? block : block.advanced(to: now, style: trainingStyle)
+            if !running.week.isDeload {
+                NextBlockStore.shared.markOffsetsApplied(blockStart: running.start, weekStart: thisWeek)
+            }
+        }
     }
 
     /// Direct sets for each muscle today's session trains (`VolumeProgression.sessionGoals`),
@@ -576,6 +615,7 @@ final class WeeklyPlanStore {
     /// Saves the day's answer (replacing an earlier one that day), keeping `keptWeeks` weeks.
     func recordSwap(planned: WorkoutFocus?, chosen: WorkoutFocus, reason: AdaptiveWeek.Reason?,
                     soreAreas: [AdaptiveWeek.Area] = [], now: Date = .now) {
+        reloadIfUnavailable()
         let calendar = Calendar.current
         let day = calendar.startOfDay(for: now)
         var all = saved.swaps ?? []

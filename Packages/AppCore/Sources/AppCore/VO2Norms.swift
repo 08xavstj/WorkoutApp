@@ -207,16 +207,32 @@ public enum VO2Norms {
         public var isBelowTable: Bool
         public var isAboveTable: Bool
         public var sex: BiologicalSex
+        /// The age the table was read at; FRIEND covers 20-79, so younger and
+        /// older ages are read against the nearest decade (`cutPoints`).
+        public var age: Int = 40
 
         /// "About the 60th percentile for men your age", "Above the 95th
         /// percentile for women your age". Rounded to 5: it's interpolated.
+        /// Outside the table's 20-79 it names the decade used instead of "your age".
         public var percentileText: String {
             let group = sex == .male ? "men" : "women"
-            if isBelowTable { return "Below the 5th percentile for \(group) your age" }
-            if isAboveTable { return "Above the 95th percentile for \(group) your age" }
+            let who = VO2Norms.peerText(age: age)
+            if isBelowTable { return "Below the 5th percentile for \(group) \(who)" }
+            if isAboveTable { return "Above the 95th percentile for \(group) \(who)" }
             let rounded = Int(min(95, max(5, (percentile / 5).rounded() * 5)))
-            return "About the \(VO2Norms.ordinal(rounded)) percentile for \(group) your age"
+            return "About the \(VO2Norms.ordinal(rounded)) percentile for \(group) \(who)"
         }
+    }
+
+    /// Ages the FRIEND table covers (Kaminsky et al. 2015: adults 20-79).
+    public static let coveredAges = 20...79
+
+    /// "your age", or the nearest decade the table has when you're outside it
+    /// (the norms are clamped there, not extrapolated).
+    public static func peerText(age: Int) -> String {
+        if age < coveredAges.lowerBound { return "in their 20s (the norms start at 20)" }
+        if age > coveredAges.upperBound { return "in their 70s (the norms stop at 79)" }
+        return "your age"
     }
 
     public static func standing(vo2: Double, age: Int, sex: BiologicalSex) -> Standing {
@@ -227,7 +243,8 @@ public enum VO2Norms {
             category: category(vo2: vo2, age: age, sex: sex),
             isBelowTable: vo2 < (cuts.first ?? 0),
             isAboveTable: vo2 > (cuts.last ?? .infinity),
-            sex: sex
+            sex: sex,
+            age: age
         )
     }
 

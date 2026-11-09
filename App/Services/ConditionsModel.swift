@@ -23,6 +23,9 @@ final class ConditionsModel {
             recordHotDay()
         } catch {
             errorMessage = "Couldn't load the weather."
+            // Yesterday's weather isn't today's: offline, drop it rather than let an old
+            // hot day keep lowering the strain target (`heatAdjustment`).
+            if let current, !Calendar.current.isDateInToday(current.fetched) { self.current = nil }
         }
     }
 
@@ -191,6 +194,8 @@ nonisolated enum WeatherClient {
         var results: [Result]?
     }
 
+    static let requestTimeout: TimeInterval = 10
+
     @concurrent
     static func conditions(latitude: Double, longitude: Double) async throws -> Conditions {
         var forecast = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
@@ -209,8 +214,10 @@ nonisolated enum WeatherClient {
             .init(name: "longitude", value: "\(longitude)"),
             .init(name: "current", value: "us_aqi"),
         ]
-        async let forecastData = URLSession.shared.data(from: forecast.url!)
-        async let airData = URLSession.shared.data(from: air.url!)
+        // 10 s, not URLSession's 60 s default: the weather is a nice-to-have and
+        // the refresh shouldn't hang on a bad connection (the app's choice).
+        async let forecastData = URLSession.shared.data(for: URLRequest(url: forecast.url!, timeoutInterval: requestTimeout))
+        async let airData = URLSession.shared.data(for: URLRequest(url: air.url!, timeoutInterval: requestTimeout))
         let decoded = try JSONDecoder().decode(Forecast.self, from: try await forecastData.0)
         let aqi = (try? await airData).flatMap { try? JSONDecoder().decode(AirQuality.self, from: $0.0) }?.current.us_aqi
         let daily = decoded.daily

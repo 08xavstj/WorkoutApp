@@ -40,9 +40,15 @@ public struct TrainingLoadCalculator: Sendable {
         public var ratio: Double?
     }
 
-    /// - Parameter dailyLoads: one value per day, oldest first, ideally 28 days.
-    ///   The last 7 are "this week"; the ones before are "usual" (at least 7).
-    public func evaluate(dailyLoads: [Double]) -> Result {
+    /// - Parameters:
+    ///   - dailyLoads: one value per day, oldest first, ideally 28 days.
+    ///     The last 7 are "this week"; the ones before are "usual" (at least 7).
+    ///   - knownDays: how many of the most recent days were actually tracked
+    ///     (e.g. days since the first logged lift). Days before that are
+    ///     unknown, not rest: counting them as zero makes a new user's second
+    ///     and third weeks read as a huge jump. Nil = every day is known.
+    public func evaluate(dailyLoads: [Double], knownDays: Int? = nil) -> Result {
+        let dailyLoads = knownDays.map { Array(dailyLoads.suffix(max(0, $0))) } ?? dailyLoads
         let recent = dailyLoads.suffix(Self.acuteDays)
         let earlier = dailyLoads.dropLast(Self.acuteDays)
         let acute = recent.isEmpty ? 0 : recent.reduce(0, +) / Double(recent.count)

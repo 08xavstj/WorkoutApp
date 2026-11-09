@@ -162,6 +162,7 @@ public enum PainGuard {
         case .legExtension: return [.knee]
         case .calves: return [.ankle]
         case .core: return []
+        case .hipThrust: return [.hip]
         }
     }
 
@@ -397,17 +398,26 @@ public struct ExerciseFilter: Sendable, Equatable {
     }
 
     /// The gym's options for a slot, filtered and reordered: regressions for
-    /// a 3-5/10 area first (only ones the gym supports), then the usual
-    /// options; never-again exercises and anything loading a 6+/10 area are
-    /// removed.
+    /// a 3-5/10 area first (only ones the gym supports; with two sore areas,
+    /// those that load fewer of them first, so a box squat for the knee
+    /// doesn't win over a leg press when the lower back hurts too), then the
+    /// usual options; never-again exercises and anything loading a 6+/10
+    /// area are removed.
     public func apply(to supported: [CatalogExercise], slot: MovementSlot, gym: GymProfile) -> [CatalogExercise] {
         let loaded = supported.reduce(into: PainGuard.areas(for: slot)) { areas, exercise in
             areas.formUnion(PainGuard.areas(forExerciseID: exercise.id, slot: slot))
+        }
+        let sore = Set(regressAreas)
+        func soreCount(_ exercise: CatalogExercise) -> Int {
+            PainGuard.areas(forExerciseID: exercise.id, slot: slot).intersection(sore).count
         }
         let preferred = regressAreas
             .filter { loaded.contains($0) }
             .flatMap { PainGuard.regressions(for: $0, slot: slot) }
             .filter { PainGuard.gymSupports($0, gym: gym) }
+            .enumerated()
+            .sorted { (soreCount($0.element), $0.offset) < (soreCount($1.element), $1.offset) }
+            .map(\.element)
         var seen: Set<String> = []
         var result: [CatalogExercise] = []
         for exercise in preferred + supported where !seen.contains(exercise.id) && allows(exercise, slot: slot) {
@@ -423,22 +433,57 @@ public struct ExerciseFilter: Sendable, Equatable {
         return regressAreas.first { loads.contains($0) }
     }
 
-    /// Caps the working load 20 % lighter (rounded down to a load the gym
-    /// can make) on a lift that loads a 3-5/10 area, and says why. Lifts
+    /// Every 3-5/10 area this exercise loads, worst first.
+    public func regressAreasLoaded(byExerciseID id: String, slot: MovementSlot) -> [PainArea] {
+        let loads = PainGuard.areas(forExerciseID: id, slot: slot)
+        return regressAreas.filter { loads.contains($0) }
+    }
+
+    /// Caps the working load at 80% of what you lifted before the pain
+    /// (rounded down to a load the gym can make) on a lift that loads a
+    /// 3-5/10 area, and says why. "Before the pain" is the larger of today's
+    /// load and what your best estimated 1RM (`history`, which lighter capped
+    /// sessions don't lower) allows for today's reps and effort, so the cap
+    /// holds at about 80% session after session instead of cutting 20% off a
+    /// load already built on capped sessions (80 → 60 → 45 → 35 kg); and it
+    /// never goes under last session's weight when that session was clearly
+    /// easier than today's effort (a capped day). Lifts
     /// with no load get the note only. The cap is kept on the exercise
     /// (`PlannedExercise.maxLoadKg`) so live autoregulation can't add it back.
-    public func capLoad(_ exercise: inout PlannedExercise, slot: MovementSlot, gym: GymProfile) {
-        guard let area = regressArea(forExerciseID: exercise.exerciseID, slot: slot) else { return }
+    public func capLoad(_ exercise: inout PlannedExercise, slot: MovementSlot, gym: GymProfile,
+                        history: ExerciseHistory? = nil) {
+        let areas = regressAreasLoaded(byExerciseID: exercise.exerciseID, slot: slot)
+        guard !areas.isEmpty else { return }
+        let names = areas.map(\.possessive).joined(separator: " and ")
         let line: String
-        if let load = exercise.load, let kind = exercise.loadKind,
-           let capped = gym.load(atMost: load * PainGuard.loadCapFraction, on: kind), capped < load - 0.001 {
-            exercise.load = capped
-            exercise.maxLoadKg = gym.unit.toKilograms(capped)
-            // The progression line would contradict the cap.
-            exercise.progressionNote = nil
-            line = "About 20% lighter for \(area.possessive) (the app's choice). Stop the lift if pain goes above 5/10."
+        if let load = exercise.load, let kind = exercise.loadKind, load > 0 {
+            var reference = load
+            if let history, history.bestEstimatedOneRepMax.isFinite, history.bestEstimatedOneRepMax > 0 {
+                let reserve = max(0, 10 - exercise.rpe)
+                let fresh = history.bestEstimatedOneRepMax / (1 + (Double(exercise.repsToday) + reserve) / 30)
+                if fresh.isFinite { reference = max(reference, fresh) }
+            }
+            if var capped = gym.load(atMost: reference * PainGuard.loadCapFraction, on: kind),
+               capped < reference - 0.001 {
+                // Never under last session's weight when that was clearly easy (a capped day,
+                // logged two or more points under today's effort): it must not shrink the next cap.
+                if let history, history.lastWeight > 0, history.lastWeight.isFinite, let lastRPE = history.lastRPE,
+                   lastRPE <= exercise.rpe - WorkoutPlanner.catchUpGap + 0.001,
+                   let last = gym.load(atMost: min(load, history.lastWeight), on: kind), last > capped {
+                    capped = last
+                }
+                if capped < load - 0.001 {
+                    exercise.load = capped
+                    // The progression line would contradict the cap.
+                    exercise.progressionNote = nil
+                }
+                exercise.maxLoadKg = gym.unit.toKilograms(capped)
+                line = "About 20% lighter than usual for \(names) (the app's choice). Stop the lift if pain goes above 5/10."
+            } else {
+                line = "Go easy for \(names): stop the lift if pain goes above 5/10."
+            }
         } else {
-            line = "Go easy for \(area.possessive): stop the lift if pain goes above 5/10."
+            line = "Go easy for \(names): stop the lift if pain goes above 5/10."
         }
         if let note = exercise.note, !note.isEmpty {
             exercise.note = note + " " + line
@@ -447,15 +492,21 @@ public struct ExerciseFilter: Sendable, Equatable {
         }
     }
 
-    /// Caps every affected lift in a plan, redoes the ramp sets for the new
-    /// loads and adds one line to "Why this session".
-    public func capLoads(_ workout: inout PlannedWorkout, planner: WorkoutPlanner) {
+    /// Caps every affected lift in a plan (`capLoad`, against `history`),
+    /// redoes the ramp sets and the time estimate for the new loads, and
+    /// adds one line to "Why this session".
+    public func capLoads(_ workout: inout PlannedWorkout, planner: WorkoutPlanner,
+                         history: [String: ExerciseHistory] = [:], warmUpMinutes: Int = 0) {
         for index in workout.exercises.indices {
             let id = workout.exercises[index].exerciseID
             guard let slot = ExerciseCatalog.slot(for: id) ?? PainGuard.regressionSlot(for: id) else { continue }
-            capLoad(&workout.exercises[index], slot: slot, gym: planner.gym)
+            capLoad(&workout.exercises[index], slot: slot, gym: planner.gym, history: history[id])
         }
-        planner.addWarmUps(&workout.exercises)
+        planner.addWarmUps(&workout.exercises, minutes: workout.minutes)
+        if workout.estimatedMinutes != nil {
+            workout.estimatedMinutes = WorkoutPlanner.estimatedMinutes(workout.exercises, style: planner.style,
+                                                                       warmUpMinutes: warmUpMinutes)
+        }
         if let line = rationaleLine {
             workout.rationale = workout.rationale.isEmpty ? line : workout.rationale + " " + line
         }

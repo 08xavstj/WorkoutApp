@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import AppCore
 
 /// Front and side progress photos, kept only inside the app: never in the
 /// Photos library, left out of iCloud and computer backups, and never sent
@@ -31,6 +32,11 @@ final class ProgressPhotosModel {
 
     @ObservationIgnored private let folder: URL
     @ObservationIgnored private var thumbnails: [String: UIImage] = [:]
+    /// The index (`SafeJSONFile`). Until it has been read, nothing is saved
+    /// over it: a launch in the background while the phone was locked used to
+    /// read nothing, and the next save wiped the list of photos.
+    @ObservationIgnored private let indexFile: SafeJSONFile
+    @ObservationIgnored private var canSave = false
 
     init() {
         var folder = URL.applicationSupportDirectory.appending(path: "ProgressPhotos")
@@ -40,18 +46,25 @@ final class ProgressPhotosModel {
         values.isExcludedFromBackup = true
         try? folder.setResourceValues(values)
         self.folder = folder
-        if let data = try? Data(contentsOf: indexURL), let index = try? JSONDecoder().decode(Index.self, from: data) {
-            entries = index.entries
-        }
+        indexFile = SafeJSONFile(url: folder.appending(path: "index.json"))
+        reload()
     }
 
-    private var indexURL: URL { folder.appending(path: "index.json") }
+    /// Reads the index again if the last read failed (call when the phone unlocks).
+    func reloadIfUnavailable() {
+        if !canSave { reload() }
+    }
 
+    private func reload() {
+        let loaded = indexFile.loadLogged(Index.self)
+        canSave = loaded.state.canSave
+        if canSave { entries = loaded.value?.entries ?? [] }
+    }
+
+    /// The index is protected until first unlock (readable in a background
+    /// launch); the photos themselves stay unreadable while the phone is locked.
     private func saveIndex() {
-        if let data = try? JSONEncoder().encode(Index(entries: entries)) {
-            // Encrypted at rest; unreadable while the phone is locked.
-            try? data.write(to: indexURL, options: [.atomic, .completeFileProtection])
-        }
+        indexFile.saveLogged(Index(entries: entries), canSave: canSave)
     }
 
     static func dayKey(_ date: Date) -> String {
@@ -80,6 +93,7 @@ final class ProgressPhotosModel {
     }
 
     func save(_ image: UIImage, pose: Pose) {
+        reloadIfUnavailable()
         let day = Self.dayKey(.now)
         let fileName = "\(day)-\(pose.rawValue).jpg"
         guard let data = Self.resized(image, maxSide: 1600).jpegData(compressionQuality: 0.82) else { return }
@@ -95,6 +109,7 @@ final class ProgressPhotosModel {
     }
 
     func delete(_ entry: Entry) {
+        reloadIfUnavailable()
         try? FileManager.default.removeItem(at: folder.appending(path: entry.fileName))
         entries.removeAll { $0.id == entry.id }
         thumbnails[entry.fileName] = nil

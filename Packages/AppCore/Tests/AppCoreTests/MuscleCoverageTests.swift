@@ -66,10 +66,11 @@ struct MuscleCoverageTests {
     }
 
     @Test func prioritySlotsGoAfterTheCompoundLifts() {
+        // Push puts side delts before the incline press now; pull has a second row before the core (audit 2026-11 §12, §19).
         #expect(WorkoutPlanner.orderedSlots(focus: .push, minutes: 45, priority: [.triceps])
-                == [.horizontalPress, .verticalPress, .inclinePress, .triceps, .lateralRaise, .chestFly])
+                == [.horizontalPress, .verticalPress, .triceps, .lateralRaise, .inclinePress, .chestFly])
         #expect(WorkoutPlanner.orderedSlots(focus: .pull, minutes: 45, priority: [.hinge, .hinge])
-                == [.verticalPull, .horizontalRow, .hinge, .rearDelt, .biceps, .hammerCurl, .core])
+                == [.verticalPull, .horizontalRow, .hinge, .rearDelt, .biceps, .horizontalRow, .core])
         #expect(WorkoutPlanner.orderedSlots(focus: .legs, minutes: 45, priority: []) == WorkoutFocus.legs.slots)
         // The planner then builds the session with the lagging muscle's movement in it.
         let plan = WorkoutPlanner(gym: .commercialPounds).plan(focus: .pull, minutes: 45, recovery: 80, history: [:],

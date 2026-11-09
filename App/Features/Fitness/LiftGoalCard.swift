@@ -10,17 +10,30 @@ import AppCore
 /// History and text helpers shared by the lift-goal views.
 enum LiftGoalHistory {
     /// Best e1RM per finished session for one exercise, in kg, from
-    /// completed working sets of 10 reps or fewer.
+    /// completed working sets of 10 reps or fewer. Drop stages and mini-sets
+    /// are left out (lighter or fatigued by design), as in the PR logic (`LiftHistory`).
     static func samples(exerciseID: String, sessions: [WorkoutSession]) -> [LiftGoalProjection.Sample] {
         let logged = sessions.filter { !$0.isActive }.compactMap { session -> LiftProgress.LoggedSession? in
             let sets = session.exercises
                 .filter { $0.exerciseID == exerciseID }
                 .flatMap(\.sets)
-                .filter { $0.isCompleted && !$0.isWarmup }
+                .filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage }
                 .map { LiftProgress.LoggedSet(weight: $0.weightKg, reps: $0.reps, rpe: $0.rpe) }
             return sets.isEmpty ? nil : LiftProgress.LoggedSession(date: session.startedAt, sets: sets)
         }
         return LiftGoalProjection.series(logged)
+    }
+
+    /// Another lift for the same movement (`ExerciseCatalog.slot`) logged in the
+    /// last 4 weeks while the goal's own lift wasn't: the goal only tracks its
+    /// own lift, so the card says so instead of going quiet. Nil otherwise.
+    static func recentVariant(of goal: LiftGoal, sessions: [WorkoutSession], now: Date = .now) -> String? {
+        guard let slot = ExerciseCatalog.slot(for: goal.exerciseID) else { return nil }
+        let since = now.addingTimeInterval(-28 * 86_400)
+        let recent = sessions.filter { !$0.isActive && $0.startedAt >= since }.sorted { $0.startedAt > $1.startedAt }
+        let logged = recent.flatMap(\.exercises).filter { exercise in exercise.sets.contains { $0.isCompleted && !$0.isWarmup } }
+        guard !logged.contains(where: { $0.exerciseID == goal.exerciseID }) else { return nil }
+        return logged.first { $0.exerciseID != goal.exerciseID && ExerciseCatalog.slot(for: $0.exerciseID) == slot }?.name
     }
 
     /// The projection for a goal, or nil when a bodyweight goal has no body weight.
@@ -102,6 +115,13 @@ struct LiftGoalCard: View {
             Text(LiftGoalHistory.title(goal, unit: unit))
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)
+            if let variant = LiftGoalHistory.recentVariant(of: goal, sessions: sessions) {
+                // Tracking is by the exact lift: a swapped variant doesn't count toward it.
+                Label("You've been doing \(variant) lately. This goal tracks \(goal.name) only.", systemImage: "info.circle")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let projection {
                 LiftGoalProgressBar(projection: projection, unit: unit, liftName: goal.name)
                 LiftGoalProjectionText(projection: projection, unit: unit)

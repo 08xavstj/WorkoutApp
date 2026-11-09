@@ -13,7 +13,9 @@ struct RecoveryContributorsSheet: View {
         let drinks = checkIns.evening(on: yesterday)?.drinks
         let illness = vitals.illnessAlert(metrics: metrics, drinksLastNight: drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false,
                                           daysSinceLastPeriod: checkIns.daysSinceLastPeriod())
-        let items = metrics.recoveryContributors(drinksLastNight: drinks, illness: illness)
+        // Luteal-phase context after a logged period (Schmalenberger 2019; weak evidence, so a note only).
+        let cycle = CycleRecovery.contributor(sex: metrics.sex, daysSinceLastPeriod: checkIns.daysSinceLastPeriod())
+        let items = metrics.recoveryContributors(drinksLastNight: drinks, illness: illness) + (cycle.map { [$0] } ?? [])
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {

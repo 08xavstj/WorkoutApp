@@ -53,7 +53,9 @@ struct PainGuardTests {
             }
         }
         #expect(ExerciseCatalog.slot(for: "Box_Squat") == .squat)
-        #expect(ExerciseCatalog.slot(for: "Barbell_Hip_Thrust") == .hinge)
+        // Hip thrusts are a regular movement now (glutes first), so the catalog's slot wins.
+        #expect(ExerciseCatalog.slot(for: "Barbell_Hip_Thrust") == .hipThrust)
+        #expect(PainGuard.regressionSlot(for: "Barbell_Hip_Thrust") == .hinge)
     }
 
     // MARK: Thresholds

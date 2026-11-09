@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// First launch: explain the three scores and ask for Apple Health access,
-/// then offer the optional setup steps (goals, city, gym equipment) before
+/// then offer the setup steps (about you, goals, city, gym equipment) before
 /// the app opens. `-hasOnboarded YES` (UI tests) skips all of it.
 struct OnboardingView: View {
     @Environment(UserSettings.self) private var settings
@@ -91,11 +91,13 @@ struct OnboardingView: View {
             // The launch refresh ran before access was granted, and the launch task only
             // turns on background delivery for people already onboarded: do both now, so
             // Today fills in without reopening the app. Observers started at launch
-            // without access are started again (refreshSoon folds duplicates into one refresh).
+            // without access are started again, with the same handler the app
+            // installs (`WorkoutAppApp`): a background wake waits for its refresh
+            // (`healthDidChange`); in the foreground bursts fold into one refresh.
             health.enableBackgroundDelivery()
             let refresher = refresher
             health.observeChanges {
-                Task { @MainActor in refresher.refreshSoon() }
+                await refresher.healthDidChange()
             }
             Task { await refresher.refresh() }
         }
@@ -118,7 +120,7 @@ private struct OnboardingSetupPage: View {
     let finish: () -> Void
 
     private var anyDone: Bool {
-        settings.goalsSet || settings.hasLocation || gym.isConfigured
+        settings.goalsSet || settings.hasLocation || gym.isConfigured || !settings.profileBasicsMissing
     }
 
     var body: some View {
@@ -148,6 +150,14 @@ private struct OnboardingSetupPage: View {
 
     @ViewBuilder
     private var setupRows: some View {
+        // Asked here because Apple Health often has no sex or birth date, and
+        // the stand-ins (male, 30) would give women men's norms.
+        NavigationLink {
+            ProfileBasicsView(pushed: true)
+        } label: {
+            OnboardingSetupRow(title: "Add your sex, age, height and weight", detail: "Sets your heart-rate zones, calories and fitness norms.",
+                               systemImage: "person.crop.circle", isDone: !settings.profileBasicsMissing)
+        }
         NavigationLink {
             GoalsView(pushed: true)
         } label: {

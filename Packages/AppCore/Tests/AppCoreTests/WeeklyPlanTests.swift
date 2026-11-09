@@ -149,9 +149,13 @@ struct WeeklyPlanTests {
         #expect(WeeklyPlan.suggestedDayCount(goals: Goals(focuses: [.health])) == 3)
         #expect(WeeklyPlan.suggestedDayCount(goals: Goals(focuses: [.muscle])) == 4)
         #expect(WeeklyPlan.suggestedDayCount(goals: Goals(focuses: [.strength, .endurance])) == 4)
-        #expect(WeeklyPlan.focusRotation(start: .pull, count: 3) == [.pull, .legs, .push])
-        #expect(WeeklyPlan.focusRotation(start: .push, count: 5) == [.push, .pull, .legs, .push, .pull])
-        #expect(WeeklyPlan.focusRotation(start: .push, count: 2) == [.upper, .lower])
+        // New plans train every muscle at least twice a week (audit 2026-11 §6): full body for
+        // 1-2 days, upper/lower/full for 3, upper/lower twice for 4, U/L + PPL for 5, PPL twice for 6.
+        #expect(WeeklyPlan.focusRotation(start: .pull, count: 3) == [.upper, .lower, .fullBody])
+        #expect(WeeklyPlan.focusRotation(start: .legs, count: 3) == [.lower, .upper, .fullBody])
+        #expect(WeeklyPlan.focusRotation(start: .push, count: 5) == [.upper, .lower, .push, .pull, .legs])
+        #expect(WeeklyPlan.focusRotation(start: .push, count: 2) == [.fullBody, .fullBody])
+        #expect(WeeklyPlan.focusRotation(start: .pull, count: 6) == [.pull, .legs, .push, .pull, .legs, .push])
         #expect(WeeklyPlan.focusRotation(start: .legs, count: 4) == [.lower, .upper, .lower, .upper])
         #expect(WeeklyPlan.suggestedWeekdays(count: 3) == [2, 4, 6])
         #expect(WeeklyPlan.suggestedWeekdays(count: 6).count == 6)

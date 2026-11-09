@@ -28,6 +28,9 @@ enum SessionTargets {
         /// The plan's own rest after a set (`PlannedExercise.restSeconds`: the
         /// abs finisher's short circuit rest). Nil = the usual rest timer.
         var restSeconds: Int? = nil
+        /// A hold (plank, side plank: `CoreMove.isHold`): "reps" are seconds, so
+        /// there's no reps-left question, set-by-set change or rep record. Nil = not a hold.
+        var isHold: Bool? = nil
 
         /// Reps each working set aims for today.
         var repsToday: Int { targetReps ?? repsHigh }
@@ -73,7 +76,28 @@ enum SessionTargets {
         return Target(repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound,
                       rpe: exercise.rpe, loadKg: loadKg, maxLoadKg: exercise.maxLoadKg,
                       targetReps: exercise.targetReps, progressionNote: exercise.progressionNote,
-                      restSeconds: exercise.restSeconds)
+                      restSeconds: exercise.restSeconds,
+                      isHold: CoreMoves.move(id: exercise.exerciseID)?.isHold == true ? true : nil)
+    }
+
+    /// An exercise was removed: its target goes, so an exercise added later
+    /// can't pick it up.
+    static func remove(order: Int, for sessionStart: Date) {
+        var all = load()
+        let id = WatchSession.id(for: sessionStart)
+        guard var entry = all[id], entry.removeValue(forKey: String(order)) != nil else { return }
+        all[id] = entry
+        store(all)
+    }
+
+    /// A swapped-in exercise takes the swapped-out one's place: its target replaces the old one.
+    static func replace(_ exercise: PlannedExercise, order: Int, for sessionStart: Date, unit: LoadUnit? = nil) {
+        var all = load()
+        let id = WatchSession.id(for: sessionStart)
+        var entry = all[id] ?? [:]
+        entry[String(order)] = target(for: exercise, unit: unit)
+        all[id] = entry
+        store(all)
     }
 
     static func target(for sessionStart: Date, order: Int) -> Target? {
@@ -162,6 +186,17 @@ enum AutoregulationLog {
         }
     }
 
+    /// An exercise was removed or swapped: its change goes with it.
+    static func remove(order: Int, for sessionStart: Date) {
+        var all = load()
+        let id = WatchSession.id(for: sessionStart)
+        guard var session = all[id], session.removeValue(forKey: String(order)) != nil else { return }
+        all[id] = session
+        if let data = try? JSONEncoder().encode(all) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
     private static func load() -> [String: [String: Entry]] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let saved = try? JSONDecoder().decode([String: [String: Entry]].self, from: data) else { return [:] }
@@ -203,7 +238,8 @@ enum LiveSetCoach {
     @discardableResult
     static func autoregulate(after set: SetLog, in exercise: ExerciseLog, sessionStart: Date,
                              gym: GymProfile, blockRIR: Int? = nil) -> AutoregulationLog.Entry? {
-        guard set.isCompleted, !set.isWarmup, set.kind.allowsAutoregulation,
+        // A hold's "reps" are seconds (`CoreMove.isHold`): no reps-in-reserve change for it.
+        guard set.isCompleted, !set.isWarmup, set.kind.allowsAutoregulation, !isHold(exercise.exerciseID),
               AutoregulationLog.entry(for: sessionStart, order: exercise.order) == nil,
               let rir = targetRIR(sessionStart: sessionStart, order: exercise.order, blockRIR: blockRIR) else { return nil }
         let working = exercise.orderedSets.filter { !$0.isWarmup && !$0.kind.isStage }
@@ -258,6 +294,29 @@ enum LiveSetCoach {
                                             reps: changesReps ? suggestion.reps : nil, restore: restore)
         AutoregulationLog.save(entry, for: sessionStart, order: exercise.order)
         return entry
+    }
+
+    /// A plank or side plank: logged in seconds, so no reps left, no set-by-set
+    /// change and no rep records (`CoreMove.isHold`).
+    static func isHold(_ exerciseID: String) -> Bool {
+        CoreMoves.move(id: exerciseID)?.isHold == true
+    }
+
+    /// An exercise was removed (or swapped out): everything the session kept by
+    /// its order goes, so an exercise added later never inherits its target,
+    /// set-by-set change, superset or a queued Watch tick, and its superset
+    /// partner stops being labelled A1. Returns the session's superset groups now.
+    @discardableResult
+    static func exerciseRemoved(order: Int, sessionStart: Date, keepSuperset: Bool = false) -> [Int: Int] {
+        SessionTargets.remove(order: order, for: sessionStart)
+        AutoregulationLog.remove(order: order, for: sessionStart)
+        LiveSessionStore.removeExercise(order: order, for: sessionStart)
+        var groups = SupersetRegistry.groups(for: sessionStart)
+        if !keepSuperset, let group = groups[order] {
+            groups = groups.filter { $0.value != group }
+            SupersetRegistry.save(groups, for: sessionStart)
+        }
+        return groups
     }
 
     /// "Held: easing your knee" for a lift that loads a sore area
@@ -343,7 +402,8 @@ enum LiveSetCoach {
                     snapshot.lastRPE = ghost.rpe
                 }
                 snapshot.targetReps = targetReps(for: set, target: target, entry: entry)
-                snapshot.targetRIR = target?.targetRIR
+                // A hold has no reps in reserve to aim for (`isHold`).
+                snapshot.targetRIR = isHold(exercise.exerciseID) ? nil : target?.targetRIR
                 if let entry, entry.isShown, entry.setOrder == set.order, !set.isCompleted {
                     snapshot.note = entry.message
                 } else if set.kind == .failure, !set.isCompleted {
@@ -363,6 +423,8 @@ enum LiveSetCoach {
     /// Drop stages and mini-sets are left out on both sides: a first-ever
     /// light drop weight isn't a rep record, and fatigued stages aren't e1RM evidence.
     static func records(for exercise: ExerciseLog, sessionStart: Date, sessions: [WorkoutSession], unit: WeightUnit) -> [SetFeedback.Record] {
+        // A hold's "reps" are seconds: a "most reps" record would misread them.
+        guard !isHold(exercise.exerciseID) else { return [] }
         let today = exercise.orderedSets
             .filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage }
             .map { LiftProgress.LoggedSet(weight: unit.display($0.weightKg), reps: $0.reps, rpe: $0.rpe) }
@@ -377,6 +439,47 @@ enum LiveSetCoach {
                 return sets.isEmpty ? nil : LiftProgress.LoggedSession(date: session.startedAt, sets: sets)
             }
         return SetFeedback.records(today: today, earlier: earlier)
+    }
+
+    // MARK: Next set
+
+    /// The set to do next after a tick in `ticked`: its superset partner's set
+    /// while the partner has one left (A1 → A2 → A1), else `ticked`'s own next
+    /// set (an exercise done out of order isn't left for an earlier one), else
+    /// the first open set in the workout. Nil when every set is done.
+    static func nextOpenSet(in session: WorkoutSession, after ticked: ExerciseLog?,
+                            groups: [Int: Int]) -> (exercise: ExerciseLog, set: SetLog)? {
+        if let ticked {
+            let own = ticked.orderedSets.first { !$0.isCompleted }
+            // A drop stage or mini-set of this set comes before the partner.
+            let stageNext = own.map { $0.kind.isStage } ?? false
+            if !stageNext, let mateOrder = SupersetRegistry.partner(of: ticked.order, groups: groups),
+               let mate = session.exercises.first(where: { $0.order == mateOrder }),
+               let set = mate.orderedSets.first(where: { !$0.isCompleted }) {
+                return (mate, set)
+            }
+            if let own { return (ticked, own) }
+        }
+        for exercise in session.orderedExercises {
+            if let set = exercise.orderedSets.first(where: { !$0.isCompleted }) { return (exercise, set) }
+        }
+        return nil
+    }
+
+    /// "Set 3 of 4 · 60 kg × 8", "Set 2 of 3 · 20 kg per hand × 10", "Set 1 of 3 · 30 s":
+    /// the Live Activity's and the rest bar's "Next" line.
+    static func nextSetDetail(_ set: SetLog, in exercise: ExerciseLog, unit: WeightUnit) -> String {
+        // "Set 3 of 4", "Warm-up 2 of 3", "Drop 1 of 2" (`SetStructure`).
+        var detail = title(for: set, in: exercise.orderedSets)
+        if isHold(exercise.exerciseID) {
+            if set.reps > 0 { detail += " · \(set.reps) s" }
+            return detail
+        }
+        if set.weightKg > 0 || set.reps > 0 {
+            let perHand = Prescription.isPerHand(ExerciseCatalog.exercise(id: exercise.exerciseID)?.load) ? " per hand" : ""
+            detail += " · \(unit.format(set.weightKg)) \(unit.rawValue)\(perHand) × \(set.reps)"
+        }
+        return detail
     }
 
     // MARK: Set types
@@ -401,6 +504,164 @@ enum LiveSetCoach {
         let positions = SetStructure.positions(structureItems(sets))
         guard positions[index].isStage else { return nil }
         return sets[index].kind.restBeforeSeconds
+    }
+}
+
+/// More of a live session's own state, in UserDefaults like `SessionTargets`
+/// (so no schema change), keyed by the session's start: its planned focus,
+/// the exercise orders it has used, stable exercise ids for the Watch, the
+/// sets changed by hand, and when the Apple Watch finished it. Kept a week,
+/// so a workout left running for days still has it.
+enum LiveSessionStore {
+    nonisolated struct Entry: Codable, Sendable, Equatable {
+        /// The planned focus (`WorkoutFocus.rawValue`), for its warm-up tier (Settings › Training).
+        var focus: String? = nil
+        /// The highest exercise order the session has used, removed exercises
+        /// included (`LiveWorkoutRules.nextOrder`).
+        var highestOrder: Int? = nil
+        /// Exercise order → a stable id the Watch sends back with a tick, so a
+        /// queued tick still finds its exercise after a reorder, and finds
+        /// nothing after a removal or swap.
+        var exerciseKeys: [String: String]? = nil
+        /// Sets whose weight or reps were changed by hand ("order-setOrder"):
+        /// the only unticked sets Finish asks about.
+        var touched: [String]? = nil
+        /// Sets whose RPE 10 came from marking them "to failure" ("order-setOrder").
+        var autoFilledRPE: [String]? = nil
+        /// When the Apple Watch finished the workout (its Finish, else its summary's end).
+        var watchFinishedAt: Date? = nil
+        /// When "Still training?" was last answered "Keep going".
+        var keptGoingAt: Date? = nil
+    }
+
+    private static let key = "liveSessionStore"
+    private static let keepSeconds: TimeInterval = 7 * 86_400
+
+    static func entry(for sessionStart: Date) -> Entry {
+        load()[WatchSession.id(for: sessionStart)] ?? Entry()
+    }
+
+    static func update(for sessionStart: Date, _ change: (inout Entry) -> Void) {
+        var all = load()
+        let cutoff = Date.now.addingTimeInterval(-keepSeconds)
+        all = all.filter { WatchSession.startDate(for: $0.key).map { $0 >= cutoff } ?? false }
+        let id = WatchSession.id(for: sessionStart)
+        var entry = all[id] ?? Entry()
+        let before = entry
+        change(&entry)
+        guard entry != before || all[id] == nil else { return }
+        all[id] = entry
+        if let data = try? JSONEncoder().encode(all) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    /// "order-setOrder", the key for one set.
+    static func setKey(order: Int, setOrder: Int) -> String { "\(order)-\(setOrder)" }
+
+    // MARK: Focus
+
+    static func focus(for sessionStart: Date) -> WorkoutFocus? {
+        entry(for: sessionStart).focus.flatMap(WorkoutFocus.init(rawValue:))
+    }
+
+    static func setFocus(_ focus: WorkoutFocus?, for sessionStart: Date) {
+        update(for: sessionStart) { $0.focus = focus?.rawValue }
+    }
+
+    // MARK: Orders
+
+    /// The order for an exercise added now; remembered, so it's never handed out twice.
+    static func nextOrder(existing: [Int], for sessionStart: Date) -> Int {
+        let order = LiveWorkoutRules.nextOrder(existing: existing, highestUsed: entry(for: sessionStart).highestOrder)
+        noteOrders([order], for: sessionStart)
+        return order
+    }
+
+    static func noteOrders(_ orders: [Int], for sessionStart: Date) {
+        guard let top = orders.max() else { return }
+        update(for: sessionStart) { $0.highestOrder = max($0.highestOrder ?? -1, top) }
+    }
+
+    // MARK: Exercise ids for the Watch
+
+    /// The exercise's stable id, made the first time it's asked for.
+    static func exerciseKey(order: Int, for sessionStart: Date) -> String {
+        if let known = entry(for: sessionStart).exerciseKeys?[String(order)] { return known }
+        let made = UUID().uuidString
+        update(for: sessionStart) { entry in
+            var keys = entry.exerciseKeys ?? [:]
+            if keys[String(order)] == nil { keys[String(order)] = made }
+            entry.exerciseKeys = keys
+        }
+        return entry(for: sessionStart).exerciseKeys?[String(order)] ?? made
+    }
+
+    /// The order of the exercise with this id now; nil once it was removed or swapped.
+    static func order(forExerciseKey exerciseKey: String, sessionStart: Date) -> Int? {
+        entry(for: sessionStart).exerciseKeys?.first { $0.value == exerciseKey }.flatMap { Int($0.key) }
+    }
+
+    // MARK: Sets changed by hand
+
+    static func markTouched(order: Int, setOrder: Int, for sessionStart: Date) {
+        let key = setKey(order: order, setOrder: setOrder)
+        guard entry(for: sessionStart).touched?.contains(key) != true else { return }
+        update(for: sessionStart) { $0.touched = ($0.touched ?? []) + [key] }
+    }
+
+    static func isTouched(order: Int, setOrder: Int, for sessionStart: Date) -> Bool {
+        entry(for: sessionStart).touched?.contains(setKey(order: order, setOrder: setOrder)) == true
+    }
+
+    static func isAutoFilledRPE(order: Int, setOrder: Int, for sessionStart: Date) -> Bool {
+        entry(for: sessionStart).autoFilledRPE?.contains(setKey(order: order, setOrder: setOrder)) == true
+    }
+
+    static func setAutoFilledRPE(_ on: Bool, order: Int, setOrder: Int, for sessionStart: Date) {
+        let key = setKey(order: order, setOrder: setOrder)
+        update(for: sessionStart) { entry in
+            var keys = (entry.autoFilledRPE ?? []).filter { $0 != key }
+            if on { keys.append(key) }
+            entry.autoFilledRPE = keys
+        }
+    }
+
+    // MARK: Reorder, removal, swap
+
+    /// After a reorder (`mapping`: old → new order), everything keyed by order moves.
+    static func remap(for sessionStart: Date, _ mapping: [Int: Int]) {
+        update(for: sessionStart) { entry in
+            if let keys = entry.exerciseKeys { entry.exerciseKeys = remapped(keys, mapping) }
+            entry.touched = entry.touched.map { remappedSetKeys($0, mapping) }
+            entry.autoFilledRPE = entry.autoFilledRPE.map { remappedSetKeys($0, mapping) }
+        }
+    }
+
+    /// An exercise was removed or swapped: its id and set marks go (a queued
+    /// Watch tick for it then finds nothing), and its order is never reused.
+    static func removeExercise(order: Int, for sessionStart: Date) {
+        update(for: sessionStart) { entry in
+            entry.exerciseKeys?.removeValue(forKey: String(order))
+            let prefix = "\(order)-"
+            entry.touched = entry.touched?.filter { !$0.hasPrefix(prefix) }
+            entry.autoFilledRPE = entry.autoFilledRPE?.filter { !$0.hasPrefix(prefix) }
+            entry.highestOrder = max(entry.highestOrder ?? -1, order)
+        }
+    }
+
+    private static func remappedSetKeys(_ keys: [String], _ mapping: [Int: Int]) -> [String] {
+        keys.map { key in
+            let parts = key.split(separator: "-", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let order = Int(parts[0]), let moved = mapping[order] else { return key }
+            return "\(moved)-\(parts[1])"
+        }
+    }
+
+    private static func load() -> [String: Entry] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let saved = try? JSONDecoder().decode([String: Entry].self, from: data) else { return [:] }
+        return saved
     }
 }
 

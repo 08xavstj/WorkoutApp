@@ -119,7 +119,10 @@ public struct MacroSplit: Sendable, Equatable {
             protein = min(stepDownProtein(bodyMassKg: bodyMassKg, bodyFatPercent: bodyFatPercent, reference: reference, goals: goals),
                           roomForProtein.rounded(.down))
         }
-        let minimum = (reference * max(proteinMinimumGramsPerKg, minimumProteinPerKg ?? 0)).rounded()
+        // The 1.6 g/kg minimum only guards a goal target that was cut to fit; a goal
+        // whose own target is lower (1.2 g/kg for maintain/gain without lifting,
+        // `GoalPlanner.proteinPerKg`) isn't "too few calories".
+        let minimum = min(uncapped, (reference * max(proteinMinimumGramsPerKg, minimumProteinPerKg ?? 0)).rounded())
         var tooFew = false
         if protein < minimum {
             protein = minimum

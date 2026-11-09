@@ -109,11 +109,19 @@ private struct ScoreRings: View {
         .accessibilityIdentifier("ring-\(which.rawValue)") // UI tests (ScreenshotTests)
     }
 
+    /// Today's strain, or nil before there's anything to count: no heart rate
+    /// today and no workouts, so "--" instead of a measured-looking "0%".
+    private var shownStrain: Double? {
+        guard let strain = metrics.strain?.strain else { return nil }
+        let hasData = strain > 0 || metrics.todaysHeartRateReadings > 0 || !metrics.activities.isEmpty
+        return hasData ? strain : nil
+    }
+
     private func strainRing(size: CGFloat) -> some View {
         ScoreRing(
             title: "Strain",
-            value: metrics.strain.map { "\(whole($0.strain))" } ?? "--",
-            unit: metrics.strain == nil ? "" : "%",
+            value: shownStrain.map { "\(whole($0))" } ?? "--",
+            unit: shownStrain == nil ? "" : "%",
             subtitle: strainSubtitle,
             progress: (metrics.strain?.strain ?? 0) / StrainCalculator.maximum,
             colors: Theme.strainColors,
