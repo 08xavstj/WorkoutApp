@@ -264,6 +264,7 @@ struct WorkoutBuilderView: View {
         // This week in the training block scales the sets and sets the RIR target;
         // recovery still lowers the effort on a low day (`TrainingBlock`, `WorkoutPlanner.targetRPE`).
         plans.trainingStyle = gym.style
+        plans.gym = gym.profile
         let block = plans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
         // Body weight, sex, training status, age and any numbers you gave start first-time lifts
         // (`LoadEstimator`); the warm-up tier's minutes count toward the time. The coach asks the same way.

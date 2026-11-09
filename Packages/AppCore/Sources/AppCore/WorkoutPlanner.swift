@@ -915,6 +915,16 @@ public struct WorkoutPlanner: Sendable {
             }
             return "Same weight, \(count) reps for today's effort"
         }
+        // The gym's heaviest weight: reps build past the range instead (`extendedReps`).
+        if let kind = loadKind, gym.nextLoad(above: load, on: kind) == nil {
+            let aim = target ?? max(reps.lowerBound, min(history.lastReps + 1, reps.upperBound))
+            return "Your gym's heaviest: aim for \(aim) reps. Reps go past the range here to keep the sets hard"
+        }
+        // Reps past the range while the next weight is a jump out of reach (`extendedReps`).
+        if let target, target > history.lastReps + 1 || target > goal,
+           let last = history.lastRPE, last <= today - Self.catchUpGap + 0.001 {
+            return "Same weight, aim for \(target) reps: last time was easy (\(history.lastReps) reps at RPE \(last.formatted())) and the next weight up is a big jump"
+        }
         switch mode {
         case .load:
             // Double progression (`progression`): one more rep at the same weight.
@@ -922,7 +932,7 @@ public struct WorkoutPlanner: Sendable {
             if let kind = loadKind, let next = gym.nextLoad(above: load, on: kind), isBigJump(from: load, to: next) {
                 top += Self.bigJumpExtraReps
             }
-            let target = max(reps.lowerBound, min(history.lastReps + 1, top))
+            let target = target ?? max(reps.lowerBound, min(history.lastReps + 1, top))
             if target >= top { return "Same weight: hit \(target) reps and it goes up next time" }
             return "Same weight, aim for \(target) reps; the weight goes up once you hit \(top)"
         case .reps:
@@ -1531,9 +1541,11 @@ public struct WorkoutPlanner: Sendable {
         return minimumCompoundSets
     }
 
-    /// Cuts sets until the estimated length fits `minutes`: always from the
-    /// exercise with the most sets, the later one on a tie, so the main lifts
-    /// keep theirs longest, and compound lifts keep 3 (`setFloor`). Then the
+    /// Cuts sets until the estimated length fits `minutes`: one set off each
+    /// muscle before a second off any (a week's band allows one set under
+    /// the target per session), then from the exercise with the most sets,
+    /// the later one on a tie, so the main lifts keep theirs longest, and
+    /// compound lifts keep 3 (`setFloor`). Then the
     /// exercises are paired into supersets (`Supersets.pair`), which keeps
     /// the work and cuts the time; then the last isolation exercise outside
     /// a superset goes, then (in sessions over 20 minutes) the last exercise,
@@ -1548,11 +1560,19 @@ public struct WorkoutPlanner: Sendable {
         // Sessions of 20 min or less (or with a warm-up taking a third of the time) keep more
         // exercises at 2 sets each instead of fewer at 3: more total sets in the time.
         let roomy = minutes > AbsFinisher.shortSessionMinutes && warmUpMinutes * 3 < minutes
+        // Sets cut per main muscle: one off each before a second off any, so the cuts stay inside
+        // each week's band (one set under the target per session; `VolumeProgression.Target.band`).
+        var cuts: [Muscle: Int] = [:]
+        func cutRank(_ index: Int) -> (Int, Int) {
+            let cut = VolumeProgression.primaryMuscle(exercises[index]).map { cuts[$0, default: 0] } ?? 0
+            return (cut, -exercises[index].sets)
+        }
         while estimatedMinutes(exercises, style: style, warmUpMinutes: warmUpMinutes) > minutes {
             let aboveFloor = exercises.indices.filter { exercises[$0].sets > setFloor(exercises[$0], deload: deload) }
             let trimmable = exercises.indices.filter { exercises[$0].sets > minimumSetsWhenShort }
-            if let index = aboveFloor.reversed().max(by: { exercises[$0].sets < exercises[$1].sets }) {
+            if let index = aboveFloor.reversed().min(by: { cutRank($0) < cutRank($1) }) {
                 exercises[index].sets -= 1
+                if let muscle = VolumeProgression.primaryMuscle(exercises[index]) { cuts[muscle, default: 0] += 1 }
             } else if triedPairing, !deload, exercises.count > 2,
                       let index = exercises.indices.last(where: { index in
                           exercises[index].supersetGroup == nil
@@ -1615,6 +1635,31 @@ public struct WorkoutPlanner: Sendable {
     /// otherwise could suggest far less. 10% is the app's cap; a pain cap
     /// (`ExerciseFilter.capLoad`) applies on top.
     public static let easedDropFraction = 0.10
+    /// Last time over today's effort target by more than
+    /// `VolumeProgression.effortTolerance` but by at most this many RPE
+    /// points, where the next weight down is a coarse step: the same weight
+    /// with one rep fewer, not the lighter weight (`repEased`). On the
+    /// RIR-based RPE scale a point is a rep in reserve (Zourdos et al., J
+    /// Strength Cond Res 2016; Helms et al., Strength Cond J 2016), so a rep
+    /// off brings the set back to the target, while a step down worth two or
+    /// more of those corrections overshoots it: the next session is then
+    /// clearly easy and the weight goes straight back up. Near the lifter's
+    /// limit that cycled 34 → 32 → 34 → 32 kg dumbbells for 12 weeks. A
+    /// one-rep miss is also within the ~1-rep error of reps-in-reserve
+    /// guesses (Halperin et al., Sports Med 2022), the band the set-by-set
+    /// rule holds the load in (`Autoregulation.toleranceReps`). App choice.
+    public static let repEaseOvershoot = Autoregulation.toleranceReps
+    /// The most reps a set is asked for when the weight can't go up (the
+    /// gym's heaviest, or the next weight out of reach) and last time was
+    /// clearly easier than planned (`extendedReps`). Loads from about 30% of
+    /// 1RM build about as much muscle as heavy ones when sets end near
+    /// failure (Schoenfeld BJ, Grgic J, Ogborn D, Krieger JW, J Strength Cond
+    /// Res 2017;31:3508-23, meta-analysis; its low-load trials ran up to about
+    /// 25-35 reps), while sets far from failure build less (Robinson et al.,
+    /// Sports Med 2024). Past 30 a harder variation is the better tool, and
+    /// reps-in-reserve guesses get worse on long sets (Halperin et al. 2022);
+    /// the 30 is the app's choice.
+    public static let maximumExtendedReps = 30
 
     /// Today's weight and rep target for a lift with history (`progression`).
     public struct Progression: Sendable, Equatable {
@@ -1697,7 +1742,39 @@ public struct WorkoutPlanner: Sendable {
     public func progression(history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind,
                             mode: ProgressionMode = .load, lowerBody: Bool = false) -> Progression? {
         let repsInReserve = max(0, 10 - rpe)
-        let lastInRange = min(max(history.lastReps, reps.lowerBound), reps.upperBound)
+        // Last time at least `catchUpGap` reps fresher than today's target.
+        let clearlyEasier = history.lastRPE.map { $0.isFinite && $0 <= rpe - Self.catchUpGap + 0.001 } ?? false
+        /// A step to `next` that is a big jump (light dumbbells, coarse stacks)
+        /// is taken only when last session says you'd get at least half the
+        /// bottom of the range there (then build reps at it); a 10 → 20 lb face
+        /// pull for a lifter whose 1RM is 16 isn't a step. App choice.
+        func stepWithinReach(_ next: Double) -> Bool {
+            let from = history.lastWeight
+            guard isBigJump(from: from, to: next) else { return true }
+            // RPE 5 or less: how much was left isn't known; a jump up to a third is taken on trust.
+            if Self.reserveUnknown(history.lastRPE), from > 0, next <= from * (1 + 1.0 / 3) + 0.001 { return true }
+            let lastReserve = history.lastRPE.map { max(0, min(Self.catchUpMaxReserve, 10 - $0)) } ?? repsInReserve
+            let oneRepMax = from * (1 + (Double(max(0, history.lastReps)) + lastReserve) / 30)
+            // At the rep ceiling and still clearly easy: the reps can't grow, so the step is
+            // taken if that 1RM (a floor at RPE 5 or less) is over it.
+            if history.lastReps >= Self.maximumExtendedReps, clearlyEasier, next < oneRepMax { return true }
+            let reachable = 30 * (oneRepMax / next - 1) - repsInReserve
+            return reachable >= Double(reps.lowerBound) / 2 - 0.001
+        }
+        // Reps past the range at a weight that can't go up (`extendedReps`) count as in range:
+        // the next sessions build from there, not from the top of the range (23 reps → 8).
+        let extendedZone = history.lastReps > reps.upperBound && !history.lastWasLighter
+            && (gym.nextLoad(above: history.lastWeight, on: kind).map { !stepWithinReach($0) } ?? true)
+        let repRoof = extendedZone ? max(reps.upperBound, Self.maximumExtendedReps) : reps.upperBound
+        let lastInRange = min(max(history.lastReps, reps.lowerBound), repRoof)
+        /// An easier day there: reps are the dial, a rep off per RPE point over
+        /// today's target (one point is about one rep in reserve: Zourdos et al. 2016).
+        func extendedEase() -> Progression? {
+            guard extendedZone, let last = history.lastRPE, last.isFinite,
+                  let held = gym.load(atMost: history.lastWeight, on: kind) else { return nil }
+            let off = max(1, Int((last - rpe).rounded(.up)))
+            return Progression(load: held, targetReps: max(reps.lowerBound, lastInRange - off))
+        }
         /// The loadable weight for `count` reps at today's reps in reserve,
         /// never more than `easedDropFraction` under last time's weight (or
         /// the one load step down where the gym's jumps are coarser).
@@ -1758,20 +1835,6 @@ public struct WorkoutPlanner: Sendable {
             let last = OneRepMax.estimate(weight: history.lastWeight, reps: history.lastReps, rpe: history.lastRPE)
             return last < history.bestEstimatedOneRepMax * 0.9
         }
-        /// A step to `next` that is a big jump (light dumbbells, coarse stacks)
-        /// is taken only when last session says you'd get at least half the
-        /// bottom of the range there (then build reps at it); a 10 → 20 lb face
-        /// pull for a lifter whose 1RM is 16 isn't a step. App choice.
-        func stepWithinReach(_ next: Double) -> Bool {
-            let from = history.lastWeight
-            guard isBigJump(from: from, to: next) else { return true }
-            // RPE 5 or less: how much was left isn't known; a jump up to a third is taken on trust.
-            if Self.reserveUnknown(history.lastRPE), from > 0, next <= from * (1 + 1.0 / 3) + 0.001 { return true }
-            let lastReserve = history.lastRPE.map { max(0, min(Self.catchUpMaxReserve, 10 - $0)) } ?? repsInReserve
-            let oneRepMax = from * (1 + (Double(max(0, history.lastReps)) + lastReserve) / 30)
-            let reachable = 30 * (oneRepMax / next - 1) - repsInReserve
-            return reachable >= Double(reps.lowerBound) / 2 - 0.001
-        }
         // Last time was at or under today's effort target: the rep (or weight) goes up.
         let strictlyHeld = (history.lastRPE ?? rpe) <= rpe + 0.001
         // Up to half a point over still counts as on target (reps in reserve are guessed to about
@@ -1786,6 +1849,9 @@ public struct WorkoutPlanner: Sendable {
             guard let estimated = estimate(lastInRange) else { return nil }
             let held = gym.load(atMost: history.recentHeaviestWeight, on: kind) ?? estimated
             guard effortHeld else {
+                if let eased = repEased(history: history, lastReps: lastInRange, reps: reps, rpe: rpe, kind: kind) ?? extendedEase() {
+                    return eased
+                }
                 let load = min(estimated, held)
                 return Progression(load: load, targetReps: easedReps(load))
             }
@@ -1800,9 +1866,18 @@ public struct WorkoutPlanner: Sendable {
                 return Progression(load: next, targetReps: repsAt(next))
             }
             let top = mode == .reps ? reps.upperBound + Self.bigJumpExtraReps : reps.upperBound
-            return Progression(load: held, targetReps: max(reps.lowerBound, min(history.lastReps + added, top)))
+            let target = max(reps.lowerBound, min(history.lastReps + added, extendedZone ? repRoof : top))
+            // Clearly easy at the top with no step in reach (or nothing heavier): more reps.
+            if strictlyHeld, history.lastReps >= top || gym.nextLoad(above: held, on: kind) == nil,
+               let extended = extendedReps(history: history, reps: reps, rpe: rpe) {
+                return Progression(load: held, targetReps: max(target, extended))
+            }
+            return Progression(load: held, targetReps: target)
         }
         guard effortHeld else {
+            if let eased = repEased(history: history, lastReps: lastInRange, reps: reps, rpe: rpe, kind: kind) ?? extendedEase() {
+                return eased
+            }
             guard let estimated = estimate(lastInRange) else { return nil }
             // An easier day: never heavier than last time.
             let cap = gym.load(atMost: history.lastWeight, on: kind) ?? estimated
@@ -1824,7 +1899,13 @@ public struct WorkoutPlanner: Sendable {
             return Progression(load: min(estimated, held), targetReps: reps.lowerBound)
         }
         guard strictlyHeld, history.lastReps >= top, let next, stepWithinReach(next) else {
-            return Progression(load: held, targetReps: max(reps.lowerBound, min(history.lastReps + added, top)))
+            let target = max(reps.lowerBound, min(history.lastReps + added, extendedZone ? repRoof : top))
+            // Clearly easy at the top with no step in reach (or nothing heavier): more reps.
+            if strictlyHeld, history.lastReps >= top || next == nil,
+               let extended = extendedReps(history: history, reps: reps, rpe: rpe) {
+                return Progression(load: held, targetReps: max(target, extended))
+            }
+            return Progression(load: held, targetReps: target)
         }
         // Well past the top: the 1RM estimate may say more than one jump.
         if history.lastReps > top, let estimated = estimate(reps.upperBound), estimated > next + 0.001 {
@@ -1860,6 +1941,51 @@ public struct WorkoutPlanner: Sendable {
         // At least one step up: the set was clearly too easy (RPE 5 only says "5 or more left").
         let load = max(next, gym.load(atMost: target, on: kind) ?? next)
         return load
+    }
+
+    /// The same weight with one rep fewer when last time went a little past
+    /// today's effort target (over `VolumeProgression.effortTolerance`, at
+    /// most `repEaseOvershoot` RPE points), a rep can come off inside the
+    /// range, and the next weight down is more than twice the cut the miss
+    /// calls for: by Epley each RPE point is about 1/(30 + reps + reps in
+    /// reserve) of the load (2.4% at 10 reps, 1.5 in reserve), so a 2 kg
+    /// step off 34 kg dumbbells (5.9%) overshoots while 2.5 kg off a 105 kg
+    /// bar (2.4%) is the cut itself. Nil otherwise: a bigger miss, reps at
+    /// the bottom of the range, or a fine step eases the load (`progression`).
+    /// `lastReps` is last time's reps kept in the range (or the extended reps, `extendedReps`).
+    func repEased(history: ExerciseHistory, lastReps: Int, reps: ClosedRange<Int>, rpe: Double,
+                  kind: EquipmentKind) -> Progression? {
+        guard let last = history.lastRPE, last.isFinite, rpe.isFinite else { return nil }
+        let over = last - rpe
+        guard over > VolumeProgression.effortTolerance + 0.001, over <= Self.repEaseOvershoot + 0.001,
+              history.lastReps > reps.lowerBound, lastReps > reps.lowerBound, history.lastWeight > 0,
+              let held = gym.load(atMost: history.lastWeight, on: kind), abs(held - history.lastWeight) < 0.001 else { return nil }
+        let cut = over / (30 + Double(lastReps) + max(0, 10 - rpe))
+        if let lower = gym.achievableLoads(for: kind).last(where: { $0 < held - 0.001 }), (held - lower) / held <= 2 * cut {
+            return nil
+        }
+        return Progression(load: held, targetReps: lastReps - 1)
+    }
+
+    /// Reps past the range when the weight stays although last time was
+    /// clearly easier than planned (`catchUpGap` or more reps fresher): the
+    /// gym has nothing heavier, or the top of the range is done and the next
+    /// weight is a jump out of reach (`stepWithinReach`). Last time's reps
+    /// plus the extra reps in reserve it had over today's target (at least
+    /// one; RPE 5 or less counts as 5 left, the scale's floor: Zourdos et
+    /// al. 2016), at most `maximumExtendedReps`. With the top of the range as the cap, a lifter
+    /// stronger than the gym's heaviest dumbbell logged sets at RPE 5 for
+    /// months: well short of the effort target, so they barely counted as
+    /// hard sets (`VolumeProgression.hardSetRPE`). The rising reps also lift
+    /// the 1RM estimate, which brings a big next jump within reach. Nil when
+    /// last time wasn't clearly easier, was a lighter (easier-day) session,
+    /// or was under the range.
+    func extendedReps(history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double) -> Int? {
+        guard let last = history.lastRPE, last.isFinite, rpe.isFinite, last <= rpe - Self.catchUpGap + 0.001,
+              !history.lastWasLighter, history.lastReps >= reps.lowerBound else { return nil }
+        let lastReserve = min(Self.catchUpMaxReserve, 10 - last)
+        let gain = max(1, Int((lastReserve - max(0, 10 - rpe)).rounded(.down)))
+        return min(Self.maximumExtendedReps, history.lastReps + gain)
     }
 
     func isBigJump(from current: Double, to next: Double) -> Bool {

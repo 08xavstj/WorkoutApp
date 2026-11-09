@@ -32,6 +32,7 @@ struct TrainerPlanRequest {
     /// The session, without the finisher (`finisher(for:)` adds it).
     func plan(gym: GymStore, plans: WeeklyPlanStore, muscles: MuscleModel, metrics: DailyMetricsModel,
               settings: UserSettings, sessions: [WorkoutSession], history: [String: ExerciseHistory]) -> PlannedWorkout {
+        plans.gym = gym.profile
         let goals = plans.sessionSetGoals(focus: focus, minutes: minutes, muscles: muscles, sessions: sessions,
                                           extra: metrics.recentTrainingDays)
         return gym.planner.plan(focus: focus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history,

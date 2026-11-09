@@ -42,9 +42,11 @@ import Foundation
 ///   al., Sports Med 2022, scoping review and meta-analysis), so a set counts
 ///   as "at the target" up to half an RPE point over it; the app's choice.
 /// - **Caps.** Never more than 20 sets a week, and never more than the week's
-///   sessions can hold in their time (`capacity`). A superset round of two
-///   moves for the same muscle group here (lateral raise with rear-delt fly,
-///   both "shoulders") counts once, so pairing never meets a target on paper.
+///   sessions can hold in their time (`capacity`), even when that is under
+///   the 4-set floor; muscles the gym has no movement for get no target. A
+///   superset round of two moves for the same muscle group here (lateral
+///   raise with rear-delt fly, both "shoulders") counts once, so pairing
+///   never meets a target on paper.
 /// - **Goal tailoring.** Muscle goals ramp to 20; strength and balanced goals
 ///   stop at 16, because strength rises less with extra sets than muscle size
 ///   does (Pelland 2024, secondary); stamina and health goals keep steady
@@ -344,9 +346,10 @@ public enum VolumeProgression {
         }
 
         /// The week's band: the target, with one set fewer in each of two
-        /// sessions as the bottom ("12-14"), never under `minimumSets`.
+        /// sessions as the bottom ("12-14"), never under `minimumSets`, or
+        /// under the target when the sessions can't hold that many (`target`).
         public var band: ClosedRange<Int> {
-            let floor = VolumeProgression.minimumSets
+            let floor = min(VolumeProgression.minimumSets, max(1, sets))
             return max(floor, sets - 2)...max(floor, sets)
         }
 
@@ -442,20 +445,24 @@ public enum VolumeProgression {
         reportCeiling: Int? = nil
     ) -> Target {
         let top = ceiling(style: style)
-        let cap = max(minimumSets, min(top, timeCap))
+        // What the sessions can hold, even under `minimumSets`: a 30-minute upper day holds about
+        // three chest sets, and a target of four there could never be met, so it held the muscle
+        // as "missed sets" every week. The note says the time caps it (`cappedTime`).
+        let cap = max(1, min(top, timeCap))
+        let floor = min(minimumSets, cap)
         let earned = earnedTarget(for: muscle, previous: previous, week: week, style: style, lastWeek: lastWeek,
                                   state: state, sessions: sessions, cap: cap, top: top, recent: recent, feedback: feedback)
         // The block report's changes: never on a deload or a steady (stamina) week.
         guard !week.isDeload, style != .endurance else { return earned }
         var result = earned
         if offset != 0 {
-            let sets = max(minimumSets, min(cap, earned.sets + offset))
+            let sets = max(floor, min(cap, earned.sets + offset))
             if sets != earned.sets {
                 result = Target(muscle: muscle, sets: sets, previous: previous, change: .fromReport(offset: sets - earned.sets))
             }
         }
-        if let reportCeiling, result.sets > max(minimumSets, reportCeiling) {
-            result = Target(muscle: muscle, sets: max(minimumSets, reportCeiling), previous: previous, change: .heldReport)
+        if let reportCeiling, result.sets > max(floor, reportCeiling) {
+            result = Target(muscle: muscle, sets: max(floor, reportCeiling), previous: previous, change: .heldReport)
         }
         return result
     }
@@ -566,22 +573,39 @@ public enum VolumeProgression {
     /// Movements in a session of this length that train `muscle` as their
     /// main muscle: the fewer of the focus's versions (`WorkoutFocus.slots(variant:)`),
     /// so a muscle only one version trains (biceps on upper day A) isn't
-    /// counted on every upper day.
-    static func directSlots(_ muscle: Muscle, focus: WorkoutFocus, minutes: Int) -> Int {
-        (0..<max(1, focus.variantCount)).map { directSlots(muscle, focus: focus, minutes: minutes, variant: $0) }.min() ?? 0
+    /// counted on every upper day. With a `gym`, only movements it can do.
+    static func directSlots(_ muscle: Muscle, focus: WorkoutFocus, minutes: Int, gym: GymProfile? = nil) -> Int {
+        (0..<max(1, focus.variantCount)).map { directSlots(muscle, focus: focus, minutes: minutes, variant: $0, gym: gym) }.min() ?? 0
     }
 
-    static func directSlots(_ muscle: Muscle, focus: WorkoutFocus, minutes: Int, variant: Int) -> Int {
-        sessionSlots(focus: focus, minutes: minutes, variant: variant)
+    static func directSlots(_ muscle: Muscle, focus: WorkoutFocus, minutes: Int, variant: Int, gym: GymProfile? = nil) -> Int {
+        sessionSlots(focus: focus, minutes: minutes, variant: variant, gym: gym)
             .filter { MuscleCoverage.muscles(for: $0).primary == muscle }.count
     }
 
-    /// The movements a session of this length has room for (the long session adds the extra one).
-    static func sessionSlots(focus: WorkoutFocus, minutes: Int, variant: Int) -> [MovementSlot] {
+    /// The movements a session of this length has room for (the long session
+    /// adds the extra one). With a `gym`, as `WorkoutPlanner.plan` fills it
+    /// there: a movement the gym has nothing for gives way to its stand-in
+    /// (`MovementSlot.fallback`) or, with none, to the next movement in the
+    /// list. A rack gym has no calf raise and a bodyweight gym no hamstring
+    /// curl or hinge, so those muscles get no weekly target there: a target
+    /// the equipment can't meet only held the volume ramp ("missed sets") for
+    /// good. Without a gym, the focus's own list.
+    static func sessionSlots(focus: WorkoutFocus, minutes: Int, variant: Int, gym: GymProfile? = nil) -> [MovementSlot] {
         let count = WorkoutPlanner.exerciseCount(minutes: minutes)
-        var slots = Array(focus.slots(variant: variant).prefix(count))
-        if minutes >= WorkoutPlanner.longSessionMinutes { slots.append(focus.extraSlot(variant: variant)) }
-        return slots
+        let long = minutes >= WorkoutPlanner.longSessionMinutes
+        guard let gym else {
+            var slots = Array(focus.slots(variant: variant).prefix(count))
+            if long { slots.append(focus.extraSlot(variant: variant)) }
+            return slots
+        }
+        let planner = WorkoutPlanner(gym: gym)
+        let listed = focus.slots(variant: variant) + (long ? [focus.extraSlot(variant: variant)] : [])
+        let planned = listed.compactMap { slot -> MovementSlot? in
+            if !planner.alternatives(for: slot).isEmpty { return slot }
+            return slot.fallback.flatMap { planner.alternatives(for: $0).isEmpty ? nil : $0 }
+        }
+        return Array(planned.prefix(count))
     }
 
     /// About how many working sets a session of `minutes` holds in this
@@ -611,20 +635,25 @@ public enum VolumeProgression {
     /// strength push day held about 10 sets, not 8 for chest alone). In a
     /// flexible week the session templates stand in for the days: the
     /// coverage rule may move a focus, but the templates are the week's usual spread.
-    public static func capacity(_ muscle: Muscle, days: [PlannedDay], style: TrainingStyle = .balanced) -> (sessions: Int, timeCap: Int) {
+    /// Pass the `gym` so only movements its equipment can do count (`sessionSlots`).
+    public static func capacity(_ muscle: Muscle, days: [PlannedDay], style: TrainingStyle = .balanced,
+                                gym: GymProfile? = nil) -> (sessions: Int, timeCap: Int) {
         var sessions = 0
         var cap = 0
         for day in days {
-            let slots = directSlots(muscle, focus: day.focus, minutes: day.minutes)
+            let slots = directSlots(muscle, focus: day.focus, minutes: day.minutes, gym: gym)
             guard slots > 0 else { continue }
             sessions += 1
             // Big lifts get about 4 sets and small ones 3 (`WorkoutPlanner.baseSets`): the share is by that weight.
             func weight(_ slot: MovementSlot) -> Double { slot.isCompound ? 4 : 3 }
-            let session = sessionSlots(focus: day.focus, minutes: day.minutes, variant: 0).filter { $0 != .core }
+            let session = sessionSlots(focus: day.focus, minutes: day.minutes, variant: 0, gym: gym).filter { $0 != .core }
             let total = session.reduce(0) { $0 + weight($1) }
             let mine = session.filter { MuscleCoverage.muscles(for: $0).primary == muscle }.reduce(0) { $0 + weight($1) }
             let fraction = total > 0 ? min(mine, Double(slots) * 4) / total : 0
-            let share = sessionSetBudget(minutes: day.minutes, style: style) * fraction * shareSlack
+            // Steady weeks (stamina and health goals) hold every muscle at its target at once, so
+            // none can lean on another's share: no slack, or the targets overfill the session.
+            let slack = style == .endurance ? 1 : shareSlack
+            let share = sessionSetBudget(minutes: day.minutes, style: style) * fraction * slack
             cap += min(sessionCap(minutes: day.minutes), slots * TrainingBlock.setRange.upperBound,
                        max(TrainingBlock.setRange.lowerBound, Int(share.rounded())))
         }
@@ -632,7 +661,8 @@ public enum VolumeProgression {
     }
 
     /// Every tracked muscle's target this week. Muscles the plan doesn't train
-    /// directly get none (their sets come from other movements as helpers).
+    /// directly get none (their sets come from other movements as helpers),
+    /// nor do muscles the `gym` has no movement for (`sessionSlots`).
     public static func week(
         weekStart: Date,
         block: TrainingBlock.WeekState,
@@ -643,11 +673,12 @@ public enum VolumeProgression {
         states: [Muscle: MuscleRecovery.State],
         recentWeeklySets: [Muscle: Double] = [:],
         feedback: [Muscle: MuscleFeedback.Signal] = [:],
-        adjustment: Adjustment? = nil
+        adjustment: Adjustment? = nil,
+        gym: GymProfile? = nil
     ) -> WeekTargets {
         var targets: [Target] = []
         for muscle in MuscleCoverage.tracked {
-            let room = capacity(muscle, days: days, style: style)
+            let room = capacity(muscle, days: days, style: style, gym: gym)
             guard room.sessions > 0 else { continue }
             targets.append(target(
                 for: muscle, previous: previous?.target(for: muscle)?.sets, week: block, style: style,
@@ -671,17 +702,19 @@ public enum VolumeProgression {
     ///   - focus: today's session.
     ///   - minutes: today's length.
     ///   - laterSessions: the week's sessions after today (focus and length).
+    ///   - gym: the gym, so only sessions that can train a muscle share its sets.
     public static func sessionGoals(
         targets: WeekTargets,
         doneThisWeek: [Muscle: Double],
         focus: WorkoutFocus,
         minutes: Int,
-        laterSessions: [PlannedDay]
+        laterSessions: [PlannedDay],
+        gym: GymProfile? = nil
     ) -> [Muscle: Int] {
         var goals: [Muscle: Int] = [:]
         for target in targets.targets {
-            guard directSlots(target.muscle, focus: focus, minutes: minutes) > 0 else { continue }
-            let later = laterSessions.filter { directSlots(target.muscle, focus: $0.focus, minutes: $0.minutes) > 0 }.count
+            guard directSlots(target.muscle, focus: focus, minutes: minutes, gym: gym) > 0 else { continue }
+            let later = laterSessions.filter { directSlots(target.muscle, focus: $0.focus, minutes: $0.minutes, gym: gym) > 0 }.count
             let owed = max(0, Double(target.sets) - (doneThisWeek[target.muscle] ?? 0))
             let share = Int((owed / Double(later + 1)).rounded(.up))
             goals[target.muscle] = min(sessionCap(minutes: minutes), share)

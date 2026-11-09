@@ -428,6 +428,7 @@ struct RootView: View {
         // Only once recovery is known: a refresh that couldn't read Health (locked phone)
         // would otherwise move the block on with "HRV normal" and latch it for the week.
         weeklyPlans.trainingStyle = gym.style
+        weeklyPlans.gym = gym.profile
         if metrics.recovery != nil {
             weeklyPlans.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
         }

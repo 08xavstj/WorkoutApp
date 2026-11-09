@@ -87,11 +87,10 @@ enum SimInvariant: String, CaseIterable, Sendable, CustomStringConvertible {
 enum SimKnownBugs {
     // The 2026-11 planner pass fixed the rest (pain-cap ratchet, set-mode stall, slow catch-up,
     // empty bar, ping-pong, full-body balance, bodyweight pull, compound sets, short-session
-    // warm-ups, regression starting weights, stale estimate, big-jump rep target, per-session volume).
-    static let reasons: [SimInvariant: String] = [
-        .weeklySetsWithinBand: "VolumeProgression.capacity counts the focus's movements, not the gym's equipment (a rack gym has no calf option, a bodyweight gym no hamstring curl), and sets logged at RPE 5-6 while a light first weight catches up count 0.6",
-        .progressionNoOscillation: "near the lifter's limit on coarse steps (advanced, 0.3%/session gains, 5-9% jumps) double progression cycles step up → miss → back down a few times in 12 weeks",
-    ]
+    // warm-ups, regression starting weights, stale estimate, big-jump rep target, per-session volume,
+    // weekly targets the gym's equipment or time can't meet, easy sets at the gym's heaviest weight,
+    // and the step up → miss → back down cycle near the limit on coarse steps).
+    static let reasons: [SimInvariant: String] = [:]
 }
 
 struct SimReport {
@@ -545,8 +544,17 @@ enum PlanChecks {
             // Reps, effort, rest.
             let heavy = position == 0 && !finisher && scenario.style == .strengthAndMuscle
             let expected = expectedReps(style: scenario.style, slot: slot, exerciseID: exercise.exerciseID, heavy: heavy)
+            // At the gym's heaviest weight, or under a big next jump, reps build past the range
+            // (`WorkoutPlanner.extendedReps`) rather than leave the sets far from failure. A pain
+            // cap (`ExerciseFilter.capLoad`) then lowers the load and keeps those reps.
+            let weightCapped = exercise.maxLoadKg != nil || exercise.load.flatMap { load in
+                exercise.loadKind.map { kind in
+                    gym.nextLoad(above: load, on: kind).map { ($0 - load) / load > WorkoutPlanner.routineJumpFraction + 0.0001 } ?? true
+                }
+            } ?? false
+            let roof = weightCapped ? WorkoutPlanner.maximumExtendedReps : expected.upperBound + WorkoutPlanner.bigJumpExtraReps
             if exercise.reps.lowerBound != expected.lowerBound || exercise.reps.upperBound < expected.upperBound
-                || exercise.reps.upperBound > expected.upperBound + WorkoutPlanner.bigJumpExtraReps {
+                || exercise.reps.upperBound > roof {
                 report.add(.repRangeMatchesStyle, s, "\(tag) reps \(exercise.reps) for \(scenario.style.rawValue) (expected \(expected))")
             }
             if let target = exercise.targetReps, !exercise.reps.contains(target) {
@@ -769,6 +777,8 @@ struct LiftSimulation {
         var exposures: [String: Int] = [:]
         var logged: [VolumeProgression.LoggedSet] = []
         var previousTargets: VolumeProgression.WeekTargets?
+        // Sets the planner can't make harder yet (session start | exercise; see the weekly check).
+        var calibrating: Set<String> = []
         let filter = ExerciseFilter(pains: pains)
 
         for week in 0..<weeks {
@@ -778,7 +788,7 @@ struct LiftSimulation {
             let lastWeek = VolumeProgression.summarize(logged, weekStart: lastWeekStart, targetRPE: previousTargets?.targetRPE ?? 7,
                                                        style: style, calendar: SimFixtures.calendar)
             let targets = VolumeProgression.week(weekStart: weekStart, block: block, style: style, days: plannedDays,
-                                                 previous: previousTargets, lastWeek: lastWeek, states: [:])
+                                                 previous: previousTargets, lastWeek: lastWeek, states: [:], gym: gym.profile)
             previousTargets = targets
             var weekDirect: [Muscle: Int] = [:]
             var pushSets = 0
@@ -790,7 +800,8 @@ struct LiftSimulation {
                 let done = VolumeProgression.summarize(logged, weekStart: weekStart, targetRPE: targets.targetRPE, style: style,
                                                        calendar: SimFixtures.calendar).mapValues(\.sets)
                 let goals = VolumeProgression.sessionGoals(targets: targets, doneThisWeek: done, focus: day.focus,
-                                                           minutes: day.minutes, laterSessions: Array(plannedDays.dropFirst(session + 1)))
+                                                           minutes: day.minutes, laterSessions: Array(plannedDays.dropFirst(session + 1)),
+                                                           gym: gym.profile)
                 let recovery = self.recovery(week, session)
                 let workout = planner.plan(focus: day.focus, minutes: day.minutes, recovery: recovery, history: history,
                                            block: block, bodyMassKg: massKg, sex: sex, trainingStatus: status,
@@ -864,6 +875,17 @@ struct LiftSimulation {
                         done = min(load, lighter)
                     }
                     let canDo = 30 * (oneRM / done - 1)
+                    // The weight is still being found (a first session; last time clearly easier than
+                    // planned, which the plan answers with a catch-up or more reps; or the first session
+                    // at a heavier weight, whose reps are predicted and rounded down), or it's the gym's
+                    // heaviest with the reps at the ceiling: the plan can't make these sets harder yet.
+                    let easyLastTime = (past?.lastRPE).map { $0 <= exercise.rpe - WorkoutPlanner.catchUpGap + 0.001 } ?? false
+                    let heavier = past.map { done > $0.lastWeight + 0.001 } ?? false
+                    let atCeiling = gym.profile.nextLoad(above: done, on: exercise.loadKind ?? .machine) == nil
+                        && target >= WorkoutPlanner.maximumExtendedReps
+                    if past == nil || easyLastTime || heavier || atCeiling {
+                        calibrating.insert("\(start.timeIntervalSince1970)|\(id)")
+                    }
 
                     // Do the sets.
                     var sets: [(reps: Int, rpe: Double)] = []
@@ -914,7 +936,19 @@ struct LiftSimulation {
                     output.report.add(.pushPullBalancedPerWeek, weekScenario, "push \(pushSets) vs pull \(pullSets) sets this week (ratio \(String(format: "%.2f", ratio)))")
                 }
             }
-            let credited = VolumeProgression.summarize(logged, weekStart: weekStart, targetRPE: targets.targetRPE, style: style,
+            // A set far from failure counts 0.6 (`VolumeProgression.easySetCredit`: muscle growth falls
+            // off with reps in reserve, Robinson et al. 2024). While a lift's weight is still being
+            // found, or the gym has nothing heavier and the reps are at the ceiling, the plan can't
+            // make its sets harder, so they count in full here: the band then checks the planned
+            // volume and the effort of every lift the planner already knows.
+            let bandSets = logged.map { set -> VolumeProgression.LoggedSet in
+                var set = set
+                if calibrating.contains("\(set.sessionStart.timeIntervalSince1970)|\(set.exerciseID)") { set.rpe = nil }
+                return set
+            }
+            let credited = VolumeProgression.summarize(bandSets, weekStart: weekStart, targetRPE: targets.targetRPE, style: style,
+                                                       calendar: SimFixtures.calendar)
+            let reported = VolumeProgression.summarize(logged, weekStart: weekStart, targetRPE: targets.targetRPE, style: style,
                                                        calendar: SimFixtures.calendar)
             for target in targets.targets {
                 let actual = weekDirect[target.muscle] ?? 0
@@ -922,7 +956,8 @@ struct LiftSimulation {
                 let ceiling = VolumeProgression.ceiling(style: style)
                 // Credit depends on the RPE reported, so only the honest lifter is held to the band.
                 if behaviour == .honest, done < Double(target.band.lowerBound) - 0.001 {
-                    output.report.add(.weeklySetsWithinBand, weekScenario, "\(target.muscle.name): \(done.formatted()) sets credited (\(actual) direct planned), target \(target.sets) (band \(target.bandText), \(target.change))")
+                    let asLogged = reported[target.muscle]?.sets ?? 0
+                    output.report.add(.weeklySetsWithinBand, weekScenario, "\(target.muscle.name): \(done.formatted()) sets credited (\(asLogged.formatted()) as logged, \(actual) direct planned), target \(target.sets) (band \(target.bandText), \(target.change))")
                 } else if actual > max(target.sets, ceiling) + 4 {
                     output.report.add(.weeklySetsWithinBand, weekScenario, "\(target.muscle.name): \(actual) direct sets planned, target \(target.sets), ceiling \(ceiling)")
                 }
@@ -1016,9 +1051,18 @@ struct LiftSimulation {
                 var reversals = 0
                 var lastDirection = 0
                 // A change in the block's effort target (RIR 3 → 2 → 1, then back to 3) is a planned
-                // load change, not a reversal.
+                // load change, not a reversal. Nor is one fine step answering an RPE a point off the
+                // target: no more than two RPE points' worth of load by Epley (1/(30 + reps + reps in
+                // reserve) each: 2.5 kg on a 100 kg row), the line `WorkoutPlanner.repEased` draws.
+                // That is RPE autoregulation at work (Helms et al., Strength Cond J 2016; it works
+                // as well as fixed loading: Hickmott et al., Sports Med Open 2022). A coarse step
+                // (2 kg on 34 kg dumbbells) overshoots the correction, and cycling on it is the bug.
                 for (a, b) in zip(hard, hard.dropFirst()) where (a.week == b.week || b.week == a.week + 1)
                     && abs(a.rpeTarget - b.rpeTarget) < 0.01 {
+                    let step = gymProfile.smallestJump(from: min(a.load, b.load), on: kind) ?? 0
+                    let pointShare = 1 / (30 + Double(a.targetReps) + max(0, 10 - a.rpeTarget))
+                    let fine = abs(b.load - a.load) <= step + 0.001 && abs(b.load - a.load) / max(a.load, b.load) <= 2 * pointShare + 1e-9
+                    if fine { continue }
                     let direction = b.load > a.load + 0.001 ? 1 : (b.load < a.load - 0.001 ? -1 : 0)
                     if direction != 0 {
                         if lastDirection != 0, direction != lastDirection { reversals += 1 }
@@ -1628,5 +1672,123 @@ struct PlannerBugReproTests {
             #expect(!PainGuard.areas(forExerciseID: squat.exerciseID, slot: .squat).contains(.lowerBack),
                     "squat pick \(squat.name) loads the sore lower back; Leg Press is in both regression lists")
         }
+    }
+
+    // MARK: Weekly set band (`weeklySetsWithinBand`)
+
+    @Test func weeklyTargetsSkipMusclesTheGymCannotTrain() {
+        // A rack gym has no calf raise, a bodyweight gym no hinge or hamstring curl.
+        let upperLower = zip(WeeklyPlan.suggestedWeekdays(count: 4), [WorkoutFocus.upper, .lower, .upper, .lower]).map {
+            PlannedDay(weekday: $0, time: 18 * 60, focus: $1, minutes: 60)
+        }
+        let block = TrainingBlock.weekState(1, style: .strength, length: 5)
+        func muscles(_ gym: GymProfile?, _ days: [PlannedDay]) -> Set<Muscle> {
+            Set(VolumeProgression.week(weekStart: SimFixtures.monday, block: block, style: .strength, days: days, previous: nil,
+                                       lastWeek: [:], states: [:], gym: gym).targets.map(\.muscle))
+        }
+        #expect(muscles(nil, upperLower).contains(.calves))
+        #expect(!muscles(SimFixtures.barbellRack, upperLower).contains(.calves))
+        #expect(muscles(SimFixtures.barbellRack, upperLower).contains(.quadriceps))
+        let fullBody = [PlannedDay(weekday: 2, time: 18 * 60, focus: .fullBody, minutes: 30),
+                        PlannedDay(weekday: 5, time: 18 * 60, focus: .fullBody, minutes: 30)]
+        #expect(!muscles(SimFixtures.bodyweightOnly, fullBody).contains(.hamstrings))
+    }
+
+    @Test func aTargetIsNeverMoreThanTheSessionsHold() {
+        // A 30-minute upper day holds about 3 chest sets: the target was 4 (the floor) and never met.
+        let target = VolumeProgression.target(for: .chest, previous: nil, week: TrainingBlock.weekState(1, style: .muscle, length: 5),
+                                              style: .muscle, lastWeek: nil, state: nil, sessions: 1, timeCap: 3)
+        #expect(target.sets == 3)
+        #expect(target.band == 3...3)
+        #expect(target.change == .cappedTime)
+        // Steady (stamina) weeks hold every muscle at its target at once: no share slack, so the
+        // 30-minute hotel upper day's chest cap is the 3 sets it holds, not 4.
+        let days = [PlannedDay(weekday: 2, time: 18 * 60, focus: .upper, minutes: 30),
+                    PlannedDay(weekday: 4, time: 18 * 60, focus: .lower, minutes: 30)]
+        #expect(VolumeProgression.capacity(.chest, days: days, style: .endurance, gym: SimFixtures.hotel).timeCap == 3)
+    }
+
+    @Test func theGymsHeaviestWeightBuildsRepsPastTheRange() {
+        // 25 kg is the heaviest dumbbell; the lifter logs RPE 5 at the top of the range.
+        let planner = WorkoutPlanner(gym: SimFixtures.homeDumbbellsKg, style: .balanced)
+        var history = ExerciseHistory(bestEstimatedOneRepMax: 25 * (1 + 13.0 / 30), lastWeight: 25, lastReps: 8, lastRPE: 5,
+                                      lastDate: SimFixtures.monday, recentWeights: [25, 25, 25], lastSets: 3)
+        var trail: [Int] = []
+        for _ in 0..<12 {
+            guard let next = planner.progression(history: history, reps: 6...8, rpe: 7, kind: .dumbbell) else { break }
+            #expect(next.load == 25)
+            trail.append(next.targetReps)
+            history = ExerciseHistory(bestEstimatedOneRepMax: history.bestEstimatedOneRepMax, lastWeight: 25, lastReps: next.targetReps,
+                                      lastRPE: 5, lastDate: SimFixtures.monday, recentWeights: [25, 25, 25], lastSets: 3)
+        }
+        // Up past the range while the sets stay easy, never past the ceiling, never back down.
+        #expect(trail.first ?? 0 > 8, "\(trail)")
+        #expect(trail == trail.sorted(), "\(trail)")
+        #expect(trail.last == WorkoutPlanner.maximumExtendedReps, "\(trail)")
+        // Hard sets there hold the reps: 23 at the target doesn't drop back to the range's 8.
+        let hard = ExerciseHistory(bestEstimatedOneRepMax: 45, lastWeight: 25, lastReps: 23, lastRPE: 7, lastDate: SimFixtures.monday,
+                                   recentWeights: [25, 25, 25], lastSets: 3)
+        #expect(planner.progression(history: hard, reps: 6...8, rpe: 7, kind: .dumbbell)?.targetReps == 24)
+    }
+
+    @Test func timeCutsSpreadOverTheMuscles() {
+        // Two sets over the time: one off the hamstrings and one off the calves (each week's band
+        // allows a set under per session), not both off the calves.
+        func exercise(_ id: String, _ sets: Int) -> PlannedExercise {
+            let choice = ExerciseCatalog.exercise(id: id)
+            return PlannedExercise(exerciseID: id, name: choice?.name ?? id, sets: sets, reps: 8...12, rpe: 8, load: 40,
+                                   loadKind: choice?.load, note: nil)
+        }
+        var session = [exercise("Seated_Leg_Curl", 4), exercise("Standing_Calf_Raises", 5)]
+        let trimmed = [exercise("Seated_Leg_Curl", 3), exercise("Standing_Calf_Raises", 4)]
+        #expect(WorkoutPlanner.estimatedMinutes(session) > WorkoutPlanner.estimatedMinutes(trimmed))
+        WorkoutPlanner.fit(&session, minutes: WorkoutPlanner.estimatedMinutes(trimmed))
+        #expect(session.map(\.sets) == [3, 4])
+    }
+
+    // MARK: Oscillation near the limit (`progressionNoOscillation`)
+
+    @Test func aSmallMissOnACoarseStepTakesARepOffNotTheWeight() {
+        let planner = WorkoutPlanner(gym: .commercialKilograms, style: .muscle)
+        // 34 kg dumbbells × 10 at RPE 9.5 against 8.5: the next pair down (32 kg, 6%) is more than
+        // twice the cut a point calls for, so the weight stays and a rep comes off.
+        let split = ExerciseHistory(bestEstimatedOneRepMax: 45.3, lastWeight: 34, lastReps: 10, lastRPE: 9.5,
+                                    lastDate: SimFixtures.monday, recentWeights: [34, 34, 34], lastSets: 3)
+        #expect(planner.progression(history: split, reps: 6...10, rpe: 8.5, kind: .dumbbell)
+                == WorkoutPlanner.Progression(load: 34, targetReps: 9))
+        // On a 2.5 kg bar step (2.4%) the step is the cut: the weight eases as before.
+        let row = ExerciseHistory(bestEstimatedOneRepMax: 140, lastWeight: 105, lastReps: 10, lastRPE: 9.5,
+                                  lastDate: SimFixtures.monday, recentWeights: [105, 105, 105], lastSets: 3)
+        #expect((planner.progression(history: row, reps: 6...10, rpe: 8.5, kind: .barbell)?.load ?? 105) < 105)
+    }
+
+    @Test func nearTheLimitOnCoarseStepsTheWeightDoesNotBounce() {
+        // An advanced lifter (+0.3% a session) at about 34 kg × 10 on 2 kg dumbbell steps, RPE honest.
+        let planner = WorkoutPlanner(gym: .commercialKilograms, style: .muscle)
+        var oneRM = 44.5
+        var history = ExerciseHistory(bestEstimatedOneRepMax: 44, lastWeight: 34, lastReps: 9, lastRPE: 8.5,
+                                      lastDate: SimFixtures.monday, recentWeights: [34, 34, 34], lastSets: 3)
+        var loads: [Double] = []
+        for _ in 0..<20 {
+            guard let next = planner.progression(history: history, reps: 6...10, rpe: 8.5, kind: .dumbbell) else { break }
+            loads.append(next.load)
+            let canDo = 30 * (oneRM / next.load - 1)
+            let reps = min(next.targetReps, max(0, Int(canDo.rounded(.down))))
+            let rpe = min(10, max(5, ((10 - (canDo - Double(reps))) * 2).rounded() / 2))
+            history = ExerciseHistory(bestEstimatedOneRepMax: max(history.bestEstimatedOneRepMax,
+                                                                  OneRepMax.estimate(weight: next.load, reps: reps, rpe: rpe)),
+                                      lastWeight: next.load, lastReps: reps, lastRPE: rpe, lastDate: SimFixtures.monday,
+                                      recentWeights: ExerciseHistory.appending(next.load, to: history.recentWeights), lastSets: 3)
+            oneRM *= 1.003
+        }
+        var reversals = 0
+        var direction = 0
+        for (a, b) in zip(loads, loads.dropFirst()) where abs(b - a) > 0.001 {
+            let now = b > a ? 1 : -1
+            if direction != 0, now != direction { reversals += 1 }
+            direction = now
+        }
+        #expect(reversals < 2, "34 kg split squat near the limit: \(loads)")
+        #expect((loads.last ?? 0) >= 34, "\(loads)")
     }
 }

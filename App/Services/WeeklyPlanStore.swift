@@ -32,6 +32,9 @@ final class WeeklyPlanStore {
     /// The trainer's style from the user's goals; new blocks take it. Set by
     /// the views that know the goals before they save or refresh.
     var trainingStyle: TrainingStyle = .balanced
+    /// The active gym's equipment, so muscles it has no movement for get no
+    /// weekly set target (`VolumeProgression.week(gym:)`). Set beside `trainingStyle`.
+    @ObservationIgnored var gym: GymProfile?
 
     @ObservationIgnored private let file = SafeJSONFile.appSupport("weeklyplans.json")
     /// False while the file exists but couldn't be read (a background launch
@@ -372,7 +375,7 @@ final class WeeklyPlanStore {
         return VolumeProgression.week(weekStart: thisWeek, block: block, style: style, days: days,
                                       previous: previous, lastWeek: lastWeek, states: muscles.states,
                                       recentWeeklySets: VolumeProgression.recentWeeklySets(muscles.loggedSets, before: thisWeek, style: style),
-                                      feedback: feedback, adjustment: adjustment)
+                                      feedback: feedback, adjustment: adjustment, gym: gym)
     }
 
     /// Drops this week's saved targets, so the next `refreshVolume` works them
@@ -442,7 +445,7 @@ final class WeeklyPlanStore {
             later = plan.sortedDays.filter { WeeklyPlan.order($0.weekday) > today }
         }
         return VolumeProgression.sessionGoals(targets: targets, doneThisWeek: muscles.weekSets, focus: focus,
-                                              minutes: minutes, laterSessions: later)
+                                              minutes: minutes, laterSessions: later, gym: gym)
     }
 
     // MARK: Easy cardio (`CardioPlanner`)
