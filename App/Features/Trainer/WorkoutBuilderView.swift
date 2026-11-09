@@ -46,6 +46,9 @@ struct WorkoutBuilderView: View {
     /// Lower back pain other apps logged in Apple Health.
     @State private var healthPains: [PainReport] = []
     @State private var showingPainLog = false
+    /// "Why a different workout?" before starting a focus other than the week's next session.
+    @State private var askingWhy = false
+    @State private var swapSuggested: WorkoutFocus?
     /// Current pain and areas hurting 2+ weeks, worked out in `rebuild` (not on every redraw).
     @State private var activePains: [PainReport] = []
     @State private var clinicianAreas: [PainArea] = []
@@ -125,6 +128,12 @@ struct WorkoutBuilderView: View {
             .safeAreaInset(edge: .bottom) {
                 Button {
                     guard let plan else { return }
+                    if let suggested = plans.swapPrompt(chosen: plan.focus, sessions: sessions, extra: metrics.recentTrainingDays,
+                                                        checkIns: checkIns, muscles: muscles) {
+                        swapSuggested = suggested
+                        askingWhy = true
+                        return
+                    }
                     // The abs finisher goes after the session's own exercises (`AbsFinisher`).
                     launcher.start(AbsFinisher.appending(finisher, to: plan), in: modelContext)
                     dismiss()
@@ -164,6 +173,20 @@ struct WorkoutBuilderView: View {
                     logPain(changed)
                 }
             }
+            .swapReasonGate(isPresented: $askingWhy, planned: swapSuggested, chosen: resolvedFocus,
+                            shortMinutes: shortVersionMinutes) { outcome in
+                switch outcome {
+                case .start:
+                    if let plan {
+                        launcher.start(AbsFinisher.appending(finisher, to: plan), in: modelContext)
+                        dismiss()
+                    }
+                case .useMinutes(let short):
+                    minutes = short
+                case .openPainLog:
+                    showingPainLog = true
+                }
+            }
             .onChange(of: showingPainLog) { _, showing in
                 if !showing { rebuild() }
             }
@@ -187,6 +210,12 @@ struct WorkoutBuilderView: View {
     }
 
     /// Your pick, else what sore or tired muscles allow, else what you haven't trained lately.
+    /// The plan's short version, offered by the swap prompt when it's shorter than the chosen time.
+    private var shortVersionMinutes: Int? {
+        let short = plans.todayPlan()?.shortVersionMinutes ?? 15
+        return short < minutes ? short : nil
+    }
+
     private var resolvedFocus: WorkoutFocus {
         focus ?? checkIns.suggestedFocus ?? muscles.suggestedFocus ?? coverage?.focus
             ?? WorkoutPlanner.suggestedFocus(recentExerciseIDs: LiftHistory.recentExerciseIDs(sessions))

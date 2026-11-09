@@ -15,6 +15,10 @@ struct ScoresCard: View {
     let askCoach: (String) -> Void
 
     @Environment(WorkoutLauncher.self) private var launcher
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(WeeklyPlanStore.self) private var plans
+    @Environment(CheckInStore.self) private var checkIns
+    @Environment(MuscleModel.self) private var muscles
     @State private var sheet: TodayScoreSheet?
     /// A builder request from the Strain sheet, opened once the sheet has gone
     /// (only one sheet shows at a time; HIG Sheets).
@@ -29,6 +33,12 @@ struct ScoresCard: View {
             ScoresPrimaryButton(sessions: sessions)
         }
         .card()
+        // This week as a queue (`AdaptiveWeek`): today's guidance and the button follow
+        // the next session not done yet, re-worked out when a session, check-in or answer changes.
+        .task(id: plans.adaptiveKey(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns) + (muscles.hasRefreshed ? "|m" : "")) {
+            let week = plans.refreshAdaptive(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)
+            if metrics.adaptiveWeek != week { metrics.adaptiveWeek = week }
+        }
         .sheet(item: $sheet, onDismiss: { openPendingBuilder() }) { which in
             sheetContent(which)
                 .presentationDetents([.medium, .large])
@@ -220,7 +230,9 @@ private struct CoachingSection: View {
 
 /// One button chosen by state (ux-audit.md 4.6): "Start Push · 45 min" when a
 /// session is planned today and not done yet ("Start Push (short) · 15 min" on
-/// an easy day); on a rest or recovery day the plan's guidance wins, so a
+/// an easy day). In a fixed week that's the queue's next session
+/// (`AdaptiveWeek`): a missed Upper shows today, and Lower once Upper is done,
+/// whatever the calendar said. On a rest or recovery day the plan's guidance wins, so a
 /// planned session only gets a quiet "Train anyway" option; "Start workout"
 /// when today is below its range, nothing is planned and you haven't trained;
 /// otherwise none. Nothing in rest mode, which pauses workout nudges. The full choice
@@ -234,6 +246,7 @@ private struct ScoresPrimaryButton: View {
     @Environment(WeeklyPlanStore.self) private var plans
     @Environment(MuscleModel.self) private var muscles
     @Environment(WorkoutLauncher.self) private var launcher
+    @Environment(CheckInStore.self) private var checkIns
 
     private struct Choice {
         var title: String
@@ -288,7 +301,7 @@ private struct ScoresPrimaryButton: View {
             let name = planned.focus.shortTitle
             return Choice(title: "Train anyway · \(name) (short) · \(minutes) min", focus: planned.focus, minutes: minutes, secondary: true)
         }
-        let short = metrics.dayGuidance?.kind == .easyTraining
+        let short = metrics.dayGuidance?.kind == .easyTraining || queuedToday?.short == true
         if let planned = plannedToday {
             return Self.start(planned, short: short)
         }
@@ -321,9 +334,19 @@ private struct ScoresPrimaryButton: View {
         return next.day
     }
 
-    /// Today's planned session from this week's plan, unless a session was
-    /// already logged today (as on the This week card).
+    /// Today's session in the week's queue (`AdaptiveWeek`): nil once a
+    /// session is logged today or when today is a rest day in the queue.
+    private var queuedToday: AdaptiveWeek.Slot? {
+        plans.adaptiveWeek(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)?.today
+    }
+
+    /// Today's planned session: the queue's in a fixed week, else this week's
+    /// plan, unless a session was already logged today (as on the This week card).
     private var plannedToday: PlannedDay? {
+        if plans.current?.isFlexible == false,
+           let week = plans.adaptiveWeek(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles) {
+            return week.today?.session
+        }
         guard let today = plans.todayPlan() else { return nil }
         let weekday = Calendar.current.component(.weekday, from: .now)
         let done = plans.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)

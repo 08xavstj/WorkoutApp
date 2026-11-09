@@ -149,6 +149,9 @@ final class DailyMetricsModel {
     /// Set by the app before a refresh; nil in a fixed-day week or without a plan.
     var flexibleWeek: WeeklyPlan.Progress?
     var flexibleNextFocus: WorkoutFocus?
+    /// A fixed-day week run as a queue (`AdaptiveWeek`, `WeeklyPlanStore.refreshAdaptive`):
+    /// set from Today and Fitness › This week; used by `dayGuidance` on its day.
+    var adaptiveWeek: AdaptiveWeek.Result?
 
     // MARK: Energy availability (body & nutrition measures)
 
@@ -404,6 +407,13 @@ final class DailyMetricsModel {
             return TrainingDayPlanner.flexibleGuidance(
                 week: flexibleWeek, nextFocus: flexibleNextFocus, past: past,
                 lowRecovery: recovery.score < 34 || trainEasyToday,
+                usualTrainingStrain: usualTrainingStrain, calendar: calendar
+            )
+        }
+        // Fixed week as a queue: the next session not done yet (`TrainingDayPlanner.adaptiveGuidance`).
+        if let adaptiveWeek, calendar.isDate(adaptiveWeek.day, inSameDayAs: today) {
+            return TrainingDayPlanner.adaptiveGuidance(
+                week: adaptiveWeek, past: past, lowRecovery: recovery.score < 34 || trainEasyToday,
                 usualTrainingStrain: usualTrainingStrain, calendar: calendar
             )
         }

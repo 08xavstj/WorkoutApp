@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import AppCore
 
 /// Today's "Up next": at most four small things to do, ordered by time of
@@ -10,7 +11,10 @@ import AppCore
 /// Rows: morning and evening check-in (until done), medication doses due
 /// (with Take), the caffeine cut-off, the day's movement nudge, a weigh-in
 /// reminder, the breathing offer and tonight's bed-by window. Today's planned
-/// session is the Scores card's button, so it isn't repeated here.
+/// session is the Scores card's button, so it isn't repeated here; once today
+/// is done or a rest day, the week's next session shows ("Next: Lower · 60
+/// min", from the queue in `AdaptiveWeek`), and a session that wasn't the one
+/// suggested asks why once (`SwapQuestionButton`).
 struct UpNextCard: View {
     let habits: TodayHabits
 
@@ -23,6 +27,8 @@ struct UpNextCard: View {
     // Easy cardio from the weekly plan (`CardioPlanner`).
     @Environment(WeeklyPlanStore.self) private var plans
     @Environment(MuscleModel.self) private var muscles
+    // The week's queue (`AdaptiveWeek`) needs the logged sessions.
+    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     /// Most rows shown at once (ux-audit.md 4.6).
     private static let maximumRows = 4
@@ -61,6 +67,7 @@ struct UpNextCard: View {
         }
         if let bedtime = bedtimeItem() { items.append(bedtime) }
         if let cardio = cardioItem(now: now) { items.append(cardio) }
+        items += weekQueueItems(now: now)
         // Builder B: the watch flagged possible hypertension and no 7-day home
         // check has been done since (`HomeBloodPressure.pendingHypertensionEvent`;
         // Apple's validation: sensitivity 41%, specificity 92%, watch-features.md 1.1).
@@ -154,6 +161,34 @@ struct UpNextCard: View {
             icon: today.kind.systemImage, color: Theme.oxygen, title: today.title, detail: today.detail))
     }
 
+    /// A fixed week's queue (`AdaptiveWeek`): "Why the switch?" after a session
+    /// that wasn't the suggested one (asked once), and the next session once
+    /// today has none left ("Next: Lower · 60 min", tomorrow, with any soreness note).
+    private func weekQueueItems(now: Int) -> [UpNextItem] {
+        guard !metrics.restMode, plans.current?.isFlexible == false,
+              let week = plans.adaptiveWeek(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)
+        else { return [] }
+        var items: [UpNextItem] = []
+        if let swap = plans.unansweredSwap(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns) {
+            items.append(UpNextItem(id: "swap-why", minutes: now, kind: .swapQuestion(planned: swap.planned, chosen: swap.chosen)))
+        }
+        if week.today == nil, let next = week.next, let label = week.nextLabel {
+            let when = Self.dayWord(next.date)
+            let detail = next.note.map { "\(when) · \($0)" } ?? when
+            items.append(UpNextItem(id: "next-session", minutes: now, kind: .info(
+                icon: "dumbbell.fill", color: Theme.lifting, title: label, detail: detail)))
+        } else if week.today == nil, let note = week.stillToDoNote {
+            items.append(UpNextItem(id: "next-session", minutes: now, kind: .info(
+                icon: "calendar", color: Theme.lifting, title: "Still to do this week", detail: note)))
+        }
+        return items
+    }
+
+    /// "Tomorrow", or the weekday ("Thursday").
+    private static func dayWord(_ date: Date) -> String {
+        Calendar.current.isDateInTomorrow(date) ? "Tomorrow" : date.formatted(.dateTime.weekday(.wide))
+    }
+
     /// The first `maximumRows` rows, but the day's easy cardio isn't cut by
     /// the cap: it takes the place of the last row that isn't a dose or a
     /// blood-pressure check (rows are by time, so it still comes last).
@@ -189,6 +224,8 @@ private struct UpNextItem: Identifiable {
         case info(icon: String, color: Color, title: String, detail: String?)
         /// Builder B: a watch hypertension notification waiting for the 7-day home check.
         case bloodPressure(Date)
+        /// A session that wasn't the suggested one: ask why once (`SwapQuestionButton`).
+        case swapQuestion(planned: WorkoutFocus, chosen: WorkoutFocus)
     }
 
     let id: String
@@ -217,6 +254,8 @@ private struct UpNextItemRow: View {
                 .accessibilityElement(children: .combine)
         case .bloodPressure(let flagged):
             BloodPressureUpNextRow(flagged: flagged)
+        case .swapQuestion(let planned, let chosen):
+            SwapQuestionButton(planned: planned, chosen: chosen)
         }
     }
 }

@@ -201,6 +201,119 @@ public enum TrainingDayPlanner {
         )
     }
 
+    // MARK: Fixed weeks as a queue
+
+    /// Today's guidance for a fixed-day week run as a queue (`AdaptiveWeek`):
+    /// the next session not done yet, wherever the calendar had it, so a
+    /// missed or swapped session moves instead of vanishing (Schoenfeld, Grgic
+    /// & Krieger 2019: for equal volume the spread across the week matters
+    /// little). The rest of `guidance` still applies: a rest day that turned
+    /// hard (yesterday took no session in the queue) is followed by an easy or
+    /// rest day (Foster 1998; Gabbett 2016), and low recovery or the 7-day HRV
+    /// below normal makes today's session the easy version (Kiviniemi 2007;
+    /// Javaloyes 2019). Sore muscles move a session later inside
+    /// `AdaptiveWeek` (Cheung, Hume & Maxwell 2003). The wording suggests and
+    /// never scolds (Teixeira et al. 2012; Ntoumanis et al. 2021).
+    public static func adaptiveGuidance(
+        week: AdaptiveWeek.Result,
+        past: [PastDay],
+        lowRecovery: Bool,
+        usualTrainingStrain: Double?,
+        calendar: Calendar = .current
+    ) -> Guidance {
+        let training = StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: usualTrainingStrain)
+        let easy = StrainCalculator.targetStrain(forRecovery: 0, usualTrainingStrain: usualTrainingStrain)
+        let hard = hardDayStrain(usualTrainingStrain: usualTrainingStrain)
+        let today = week.day
+        let next = week.next
+        let nextText: String = {
+            if let next {
+                var text = " Next: \(next.focus.shortTitle) \(dayWord(next.date, from: today, calendar: calendar))."
+                if let note = next.note { text += " " + note }
+                return text
+            }
+            if let note = week.stillToDoNote { return " " + note }
+            return " That's the week's plan done."
+        }()
+
+        if week.liftedToday {
+            return Guidance(kind: .training, strainRange: training, title: "Training day",
+                            reason: "Session done today.\(nextText)")
+        }
+
+        let slot = week.today
+        // Yesterday was a rest day in the queue and ended up a hard training day.
+        if let yesterday = past.max(by: { $0.date < $1.date }),
+           let before = calendar.date(byAdding: .day, value: -1, to: today),
+           calendar.isDate(yesterday.date, inSameDayAs: before),
+           yesterday.strain >= hard,
+           week.yesterdayWasSlot.map({ !$0 }) ?? (yesterday.wasRestDay == true) {
+            if let slot, !lowRecovery {
+                return Guidance(
+                    kind: .easyTraining, strainRange: easy, title: "Easy day",
+                    reason: "Yesterday was a rest day that turned into a hard one, so keep today's \(slot.focus.shortTitle) session short and easy, or move it to tomorrow.",
+                    focus: slot.focus
+                )
+            }
+            let moved = slot.map { " Your \($0.focus.shortTitle) session can move to tomorrow." } ?? ""
+            return Guidance(
+                kind: .recovery, strainRange: restDayRange, title: "Recovery day",
+                reason: "Yesterday was meant to be a rest day and ended up hard, so today is the rest day instead: a walk is plenty, and sleep does the rest.\(moved)"
+            )
+        }
+
+        guard let slot else {
+            if let next {
+                let lead = week.moveNote.map { "Rest day. \($0)" } ?? "Rest day."
+                return Guidance(
+                    kind: .rest, strainRange: restDayRange, title: "Rest day",
+                    reason: "\(lead) Light movement like a walk is good.\(nextText)"
+                )
+            }
+            let tail = week.stillToDoNote ?? "That's the week's plan done; a walk is good, and the review sets next week."
+            return Guidance(kind: .rest, strainRange: restDayRange, title: "Rest day", reason: "Rest day. \(tail)")
+        }
+
+        let movedFrom = slot.isMoved ? plannedDate(weekday: slot.plannedWeekday, weekStart: week.weekStart, calendar: calendar) : nil
+        if lowRecovery {
+            return Guidance(
+                kind: .easyTraining, strainRange: easy, title: "Easy day",
+                reason: "\(slot.focus.title) is next, but recovery is low, so the short version or an easy session suits today.",
+                focus: slot.focus, movedFrom: movedFrom
+            )
+        }
+        if slot.easy {
+            return Guidance(kind: .easyTraining, strainRange: easy, title: "Easy day",
+                            reason: slot.note ?? "\(slot.focus.title) is next: keep it easy today.",
+                            focus: slot.focus, movedFrom: movedFrom)
+        }
+        var reason: String
+        if !slot.isMoved {
+            reason = "\(slot.focus.title) is planned today."
+        } else if WeeklyPlan.order(slot.plannedWeekday) < WeeklyPlan.order(slot.session.weekday) {
+            let weekday = WeeklyPlan.weekdayName(slot.plannedWeekday, calendar: calendar)
+            reason = "\(slot.focus.title) is next in your week (planned \(weekday)), so today takes it. What builds muscle is the week's total, not the exact day."
+        } else {
+            reason = "\(slot.focus.title) is next in your week, so it moves up to today."
+        }
+        if let note = slot.note { reason += " " + note }
+        return Guidance(kind: slot.isPlannedDay ? .training : .makeUp, strainRange: training, title: "Training day",
+                        reason: reason, focus: slot.focus, movedFrom: movedFrom)
+    }
+
+    /// "tomorrow", "today" or "on Thu".
+    static func dayWord(_ date: Date, from today: Date, calendar: Calendar) -> String {
+        if calendar.isDate(date, inSameDayAs: today) { return "today" }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: today), calendar.isDate(date, inSameDayAs: tomorrow) {
+            return "tomorrow"
+        }
+        return "on " + WeeklyPlan.weekdayName(calendar.component(.weekday, from: date), calendar: calendar)
+    }
+
+    private static func plannedDate(weekday: Int, weekStart: Date, calendar: Calendar) -> Date? {
+        calendar.date(byAdding: .day, value: WeeklyPlan.order(weekday), to: weekStart)
+    }
+
     // MARK: Flexible weeks
 
     /// Today's guidance for a flexible plan (sessions a week, any days).

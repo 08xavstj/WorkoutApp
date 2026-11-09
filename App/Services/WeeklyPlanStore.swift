@@ -19,6 +19,9 @@ final class WeeklyPlanStore {
         /// Per-muscle weekly set targets, this week and last (`VolumeProgression`).
         /// Optional so files saved before it existed still decode.
         var volume: [VolumeProgression.WeekTargets]? = nil
+        /// "Why a different workout?" answers, one per day (`AdaptiveWeek.Swap`).
+        /// Optional so files saved before it existed still decode.
+        var swaps: [AdaptiveWeek.Swap]? = nil
     }
 
     /// Weeks of plans kept (this week included).
@@ -64,16 +67,24 @@ final class WeeklyPlanStore {
     var plannedDays: [PlannedDay] { current?.sortedDays ?? [] }
 
     /// Today's planned slot, if any. Nil in a flexible week: no day is
-    /// planned, the week is (`progress`, `nextSession`).
+    /// planned, the week is (`progress`, `nextSession`). In a fixed week whose
+    /// queue was worked out today (`refreshAdaptive`), today's session from
+    /// the queue as it stood before today's training (`AdaptiveWeek`), so a
+    /// missed session shows on the day that takes it; other days, the calendar.
     func todayPlan(now: Date = .now) -> PlannedDay? {
         guard let plan = plan(containing: now), !plan.isFlexible else { return nil }
+        if let state = freshAdaptive(now: now) { return state.suggestedToday?.session }
         return plan.day(for: Calendar.current.component(.weekday, from: now))
     }
 
     /// The next planned day after today, within this week. In a flexible
-    /// week, the first session template (the days aren't fixed).
+    /// week, the first session template (the days aren't fixed). In a fixed
+    /// week, the queue's next session after today when it is known.
     func nextPlannedDay(after now: Date = .now) -> PlannedDay? {
         if current?.isFlexible == true { return plannedDays.first }
+        if let state = freshAdaptive(now: now) {
+            return state.week.slots.first { $0.date > state.week.day }?.session
+        }
         let today = WeeklyPlan.order(Calendar.current.component(.weekday, from: now))
         return plannedDays.first { WeeklyPlan.order($0.weekday) > today }
     }
@@ -88,7 +99,16 @@ final class WeeklyPlanStore {
         guard let current = plan(containing: now) else { return [] }
         if current.isFlexible { return flexibleSlots(plan: current, trainingDays: trainingDays, now: now) }
         var slots: [(day: PlannedDay, start: Date)] = []
-        for week in 0..<2 {
+        // This week from the queue when it's known today (`AdaptiveWeek`), else the calendar.
+        let queued = freshAdaptive(now: now)
+        if let queued {
+            for slot in queued.week.slots {
+                let time = slot.session.time
+                if let start = Calendar.current.date(bySettingHour: time / 60, minute: time % 60, second: 0, of: slot.date),
+                   start > now { slots.append((slot.session, start)) }
+            }
+        }
+        for week in (queued == nil ? 0 : 1)..<2 {
             guard let weekStart = Calendar.current.date(byAdding: .day, value: 7 * week, to: current.weekStart) else { continue }
             let plan = self.plan(for: weekStart)
                 ?? WeeklyPlan(weekStart: weekStart, plannedDays: current.plannedDays, mode: current.mode, sessionsPerWeek: current.sessionsPerWeek)
@@ -150,9 +170,18 @@ final class WeeklyPlanStore {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         guard let plan = plan(containing: now), plan.isFlexible else {
+            let queued = freshAdaptive(now: now)
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: WeeklyPlan.weekStart(containing: now)) ?? today
             return (0..<8).compactMap { offset -> Reminders.PlannedSlot? in
-                guard let day = calendar.date(byAdding: .day, value: offset, to: today),
-                      let planned = todayPlan(now: day),
+                guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { return nil }
+                // This week's days follow the queue when it's known (a missed session moves); later, the plan.
+                let planned: PlannedDay?
+                if let queued, day < weekEnd {
+                    planned = queued.week.slot(on: day)?.session
+                } else {
+                    planned = todayPlan(now: day)
+                }
+                guard let planned,
                       let start = Reminders.fireDate(day: day, minutes: planned.time, calendar: calendar) else { return nil }
                 return Reminders.PlannedSlot(start: start, name: planned.focus.shortTitle, ifThen: planned.ifThen)
             }
@@ -366,6 +395,9 @@ final class WeeklyPlanStore {
                     later = (0..<after).map { templates[min(progress.done + 1 + $0, templates.count - 1)] }
                 }
             }
+        } else if let state = freshAdaptive(now: now) {
+            // The queue's sessions after today (`AdaptiveWeek`), so a moved session still counts.
+            later = state.week.slots.filter { $0.date > state.week.day }.map(\.session)
         } else {
             let today = WeeklyPlan.order(Calendar.current.component(.weekday, from: now))
             later = plan.sortedDays.filter { WeeklyPlan.order($0.weekday) > today }
@@ -411,6 +443,188 @@ final class WeeklyPlanStore {
         return muscles.recentCardio + today
     }
 
+    // MARK: The week as a queue (`AdaptiveWeek`)
+
+    /// The queue as last worked out today (`refreshAdaptive`), with today's
+    /// session as it stood before today's training.
+    nonisolated struct AdaptiveState: Equatable {
+        var week: AdaptiveWeek.Result
+        var suggestedToday: AdaptiveWeek.Slot?
+    }
+
+    /// Set by `refreshAdaptive` from a task (Today's Scores card, Fitness ›
+    /// This week); read by `todayPlan`, `upcomingSlots`, `reminderSlots` and
+    /// `sessionSetGoals` only on the day it was worked out.
+    private(set) var adaptive: AdaptiveState?
+
+    private func freshAdaptive(now: Date) -> AdaptiveState? {
+        guard let adaptive, Calendar.current.isDate(adaptive.week.day, inSameDayAs: now) else { return nil }
+        return adaptive
+    }
+
+    /// This week's logged sessions (focus from name or exercises) and watch
+    /// training days without one (they count for the total, not as a lift).
+    static func doneSessions(sessions: [WorkoutSession], extra: Set<Date>, since: Date) -> [AdaptiveWeek.DoneSession] {
+        let calendar = Calendar.current
+        let lifts = sessions.filter { !$0.isActive && $0.startedAt >= since }
+        var done = lifts.map { session in
+            AdaptiveWeek.DoneSession(
+                date: session.startedAt,
+                focus: AdaptiveWeek.inferFocus(name: session.name, exerciseIDs: session.orderedExercises.map(\.exerciseID))
+            )
+        }
+        let liftDays = Set(lifts.map { calendar.startOfDay(for: $0.startedAt) })
+        for day in Set(extra.map { calendar.startOfDay(for: $0) }) where day >= since && !liftDays.contains(day) {
+            done.append(AdaptiveWeek.DoneSession(date: day, focus: nil, isLifting: false))
+        }
+        return done
+    }
+
+    /// Sore groups: this morning's and yesterday's check-ins (5/10 or more),
+    /// this week's "why a different workout?" answers, and today's muscle
+    /// model estimate (`AdaptiveWeek.fatiguedAreas`, under 50% recovered).
+    func soreSignals(checkIns: CheckInStore?, muscles: MuscleModel?, now: Date = .now,
+                     todaysAnswers: Bool = true, estimated: Bool = true) -> [AdaptiveWeek.SoreSignal] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        var signals: [AdaptiveWeek.SoreSignal] = []
+        if let checkIns {
+            signals += AdaptiveWeek.signals(from: checkIns.morning(on: now))
+            if let yesterday = calendar.date(byAdding: .day, value: -1, to: today) {
+                signals += AdaptiveWeek.signals(from: checkIns.morning(on: yesterday))
+            }
+        }
+        signals += AdaptiveWeek.signals(fromSwaps: swaps(inWeekOf: now).filter { todaysAnswers || $0.day < today })
+        if estimated, let muscles, muscles.hasRefreshed {
+            signals += AdaptiveWeek.fatiguedAreas(muscles.states, day: today)
+        }
+        return signals
+    }
+
+    /// This week as a queue: the next session not done yet, wherever the
+    /// calendar had it (`AdaptiveWeek.make`). Nil for a flexible week or without a plan.
+    func adaptiveWeek(sessions: [WorkoutSession], extra: Set<Date> = [], checkIns: CheckInStore?, muscles: MuscleModel?,
+                      now: Date = .now) -> AdaptiveWeek.Result? {
+        guard let plan = plan(containing: now), !plan.isFlexible else { return nil }
+        let done = Self.doneSessions(sessions: sessions, extra: extra, since: plan.weekStart)
+        return AdaptiveWeek.make(plan: plan, done: done, now: now,
+                                 soreness: soreSignals(checkIns: checkIns, muscles: muscles, now: now),
+                                 swaps: swaps(inWeekOf: now))
+    }
+
+    /// Today's session as the queue had it before today's training and before
+    /// today's answer, for "why a different workout?" (the model estimate is
+    /// left out: it already includes today's session).
+    func suggestedToday(sessions: [WorkoutSession], extra: Set<Date> = [], checkIns: CheckInStore?, now: Date = .now) -> AdaptiveWeek.Slot? {
+        guard let plan = plan(containing: now), !plan.isFlexible else { return nil }
+        let today = Calendar.current.startOfDay(for: now)
+        let done = Self.doneSessions(sessions: sessions, extra: extra, since: plan.weekStart).filter { $0.date < today }
+        return AdaptiveWeek.make(plan: plan, done: done, now: now,
+                                 soreness: soreSignals(checkIns: checkIns, muscles: nil, now: now, todaysAnswers: false, estimated: false),
+                                 swaps: swaps(inWeekOf: now).filter { $0.day < today })?.today
+    }
+
+    /// Works the queue out and keeps it for today (`adaptive`); returns the
+    /// week for `DailyMetricsModel.adaptiveWeek`. Call from a task, never a view body.
+    @discardableResult
+    func refreshAdaptive(sessions: [WorkoutSession], extra: Set<Date> = [], checkIns: CheckInStore?, muscles: MuscleModel?,
+                         now: Date = .now) -> AdaptiveWeek.Result? {
+        guard let week = adaptiveWeek(sessions: sessions, extra: extra, checkIns: checkIns, muscles: muscles, now: now) else {
+            if adaptive != nil { adaptive = nil }
+            return nil
+        }
+        let state = AdaptiveState(week: week, suggestedToday: suggestedToday(sessions: sessions, extra: extra, checkIns: checkIns, now: now))
+        if state != adaptive { adaptive = state }
+        return week
+    }
+
+    /// Changes whenever the queue's inputs might have: for `.task(id:)`.
+    func adaptiveKey(sessions: [WorkoutSession], extra: Set<Date>, checkIns: CheckInStore) -> String {
+        let finished = sessions.filter { !$0.isActive }
+        let last = finished.map(\.startedAt).max()?.timeIntervalSince1970 ?? 0
+        let morning = checkIns.morning()
+        let soreness = morning?.soreness ?? -1
+        let areas = morning?.soreAreas.map(\.rawValue).joined(separator: ",") ?? ""
+        let day = Calendar.current.startOfDay(for: .now).timeIntervalSince1970
+        let planText = current.map { plan in
+            plan.mode.rawValue + plan.sortedDays.map { "\($0.weekday)\($0.focus.rawValue)" }.joined()
+        } ?? "none"
+        let answers = allSwaps.map { swap -> String in
+            let reason = swap.reason?.rawValue ?? "-"
+            return "\(swap.day.timeIntervalSince1970)\(reason)"
+        }.joined()
+        return "\(day)|\(finished.count)|\(last)|\(extra.count)|\(soreness)|\(areas)|\(answers)|\(planText)"
+    }
+
+    // MARK: Why a different workout?
+
+    /// Every saved answer, oldest first.
+    var allSwaps: [AdaptiveWeek.Swap] { (saved.swaps ?? []).sorted { $0.day < $1.day } }
+
+    /// The answer for the day containing `date`, if one was given (or skipped).
+    func swap(on date: Date = .now) -> AdaptiveWeek.Swap? {
+        saved.swaps?.first { Calendar.current.isDate($0.day, inSameDayAs: date) }
+    }
+
+    /// Answers in the week containing `date`.
+    func swaps(inWeekOf date: Date = .now) -> [AdaptiveWeek.Swap] {
+        let start = WeeklyPlan.weekStart(containing: date)
+        let end = Calendar.current.date(byAdding: .day, value: 7, to: start) ?? start
+        return allSwaps.filter { $0.day >= start && $0.day < end }
+    }
+
+    /// Saves the day's answer (replacing an earlier one that day), keeping `keptWeeks` weeks.
+    func recordSwap(planned: WorkoutFocus?, chosen: WorkoutFocus, reason: AdaptiveWeek.Reason?,
+                    soreAreas: [AdaptiveWeek.Area] = [], now: Date = .now) {
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: now)
+        var all = saved.swaps ?? []
+        all.removeAll { calendar.isDate($0.day, inSameDayAs: day) }
+        all.append(AdaptiveWeek.Swap(day: day, planned: planned, chosen: chosen, reason: reason, soreAreas: soreAreas, recordedAt: now))
+        let cutoff = calendar.date(byAdding: .day, value: -7 * Self.keptWeeks, to: WeeklyPlan.weekStart(containing: now)) ?? .distantPast
+        saved.swaps = all.filter { $0.day >= cutoff }
+        write()
+    }
+
+    /// The session the queue suggests today when `chosen` is a different one
+    /// and nothing was answered today, so the builder can ask why. Nil in a
+    /// flexible week, on a rest day, once today has a session, or for the same
+    /// session (Legs for Lower counts as the same).
+    func swapPrompt(chosen: WorkoutFocus, sessions: [WorkoutSession], extra: Set<Date> = [], checkIns: CheckInStore?,
+                    muscles: MuscleModel?, now: Date = .now) -> WorkoutFocus? {
+        guard swap(on: now) == nil,
+              let week = adaptiveWeek(sessions: sessions, extra: extra, checkIns: checkIns, muscles: muscles, now: now),
+              !week.liftedToday, let suggested = week.today?.focus,
+              !AdaptiveWeek.isSameSession(suggested, chosen) else { return nil }
+        return suggested
+    }
+
+    /// A session logged today that wasn't the one suggested, with no answer
+    /// yet: Today and This week ask why once, after the fact (it catches
+    /// sessions started from Coach, a saved workout or the watch).
+    func unansweredSwap(sessions: [WorkoutSession], extra: Set<Date> = [], checkIns: CheckInStore?,
+                        now: Date = .now) -> (planned: WorkoutFocus, chosen: WorkoutFocus)? {
+        guard swap(on: now) == nil,
+              let suggested = suggestedToday(sessions: sessions, extra: extra, checkIns: checkIns, now: now)?.focus else { return nil }
+        let calendar = Calendar.current
+        let chosen = sessions
+            .filter { !$0.isActive && calendar.isDate($0.startedAt, inSameDayAs: now) }
+            .sorted { $0.startedAt < $1.startedAt }
+            .compactMap { AdaptiveWeek.inferFocus(name: $0.name, exerciseIDs: $0.orderedExercises.map(\.exerciseID)) }
+            .first
+        guard let chosen, !AdaptiveWeek.isSameSession(suggested, chosen) else { return nil }
+        return (suggested, chosen)
+    }
+
+    /// "Tue: Upper for Lower · legs sore" for each answered swap in the week
+    /// starting `weekStart` (skipped ones left out), for This week and the review.
+    func swapLines(weekStart: Date) -> [String] {
+        swaps(inWeekOf: weekStart).filter { $0.reason != nil }.map { swap in
+            let weekday = WeeklyPlan.weekdayName(Calendar.current.component(.weekday, from: swap.day))
+            return "\(weekday): \(swap.label)"
+        }
+    }
+
     // MARK: Coach
 
     /// One line for the AI coach: the plan, how it's going, and this week's
@@ -432,6 +646,13 @@ final class WeeklyPlanStore {
         line += "; done \(sessionsDone(sessions: sessions, extra: extra, now: now)) of \(plan.sessionTarget) so far"
         if result.plannedWeeks > 0 { line += "; consistency \(result.label) on plan" }
         if !plan.changes.isEmpty { line += ". Changes this week: " + plan.changes.prefix(3).joined(separator: "; ") }
+        // The queue (`AdaptiveWeek`): what's next and why sessions were swapped.
+        if let state = freshAdaptive(now: now), !plan.isFlexible {
+            if let next = state.week.next { line += ". Next in the queue: \(next.focus.shortTitle.lowercased()) \(WeeklyPlan.weekdayName(next.session.weekday))" }
+            if let move = state.week.moveNote { line += " (\(move.dropLast()))" }
+        }
+        let swapped = swapLines(weekStart: plan.weekStart)
+        if !swapped.isEmpty { line += ". Swaps: " + swapped.prefix(3).joined(separator: "; ") }
         line += "."
         // Training block (`TrainingBlock.coachLine`): week, RIR target, deload or held ramp.
         if let block = saved.block { line += " " + block.coachLine }

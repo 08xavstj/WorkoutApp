@@ -14,6 +14,11 @@ import AppCore
 /// engagement (Silverman & Barasch 2023), so a missed day is a grey dot, not
 /// a red one, and there is no "broken" anywhere.
 ///
+/// A fixed-day plan runs as a queue (`AdaptiveWeek`): a session done on
+/// another day ticks its own dot (Upper done Tuesday ticks Monday's Upper),
+/// today shows the next session not done yet, a session moved for soreness
+/// says so, and the week's "why a different workout?" answers are listed.
+///
 /// A flexible plan (`WeeklyPlan.Mode.flexible`) shows "2 of 4 done · 3 days
 /// left" with one dot per session, and the next session's focus from the
 /// coverage rule (`MuscleCoverage`): the week only needs its total.
@@ -25,13 +30,18 @@ struct ThisWeekCard: View {
     @Environment(UserSettings.self) private var settings
     @Environment(AppRouter.self) private var router
     @Environment(MuscleModel.self) private var muscles
+    @Environment(CheckInStore.self) private var checkIns
 
     private var thisWeek: Date { WeeklyPlan.weekStart(containing: .now) }
 
     var body: some View {
         let plan = store.current
         let consistency = store.consistency(sessions: sessions, extra: metrics.recentTrainingDays)
-        let done = store.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
+        // Fixed week as a queue (`AdaptiveWeek`): dots tick the matching planned session, not the weekday.
+        let queue = plan?.isFlexible == false
+            ? store.adaptiveWeek(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)
+            : nil
+        let done = queue?.doneWeekdays ?? store.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
         VStack(alignment: .leading, spacing: 14) {
             header(consistency)
             if let plan, plan.isFlexible {
@@ -40,7 +50,11 @@ struct ThisWeekCard: View {
             } else if let plan {
                 PlanDots(days: plan.sortedDays, done: done,
                          sessionsDone: store.sessionsDone(sessions: sessions, extra: metrics.recentTrainingDays))
-                PlanTodaySlot(plan: plan, done: done)
+                if let queue {
+                    QueueTodaySlot(week: queue, sessions: sessions)
+                } else {
+                    PlanTodaySlot(plan: plan, done: done)
+                }
             } else {
                 noPlan
             }
@@ -63,6 +77,11 @@ struct ThisWeekCard: View {
         // This week's per-muscle set targets (`VolumeProgression`) and the cardio-only days, once muscles have loaded.
         .task(id: muscles.hasRefreshed) {
             store.refreshVolume(muscles: muscles)
+        }
+        // The queue for today's guidance, reminders and the watch (as on Today's Scores card).
+        .task(id: store.adaptiveKey(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns) + (muscles.hasRefreshed ? "|m" : "")) {
+            let week = store.refreshAdaptive(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)
+            if metrics.adaptiveWeek != week { metrics.adaptiveWeek = week }
         }
     }
 
@@ -356,6 +375,106 @@ private struct CardioSlotRow: View {
         .frame(minHeight: 28)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(slot.kind.title), \(slot.minutes) minutes, \(day): \(status)")
+    }
+}
+
+/// A fixed week's queue (`AdaptiveWeek`): today's session (wherever the
+/// calendar had it) with Start / Short version, or the next one once today is
+/// done or a rest day; soreness moves, sessions still to do, this week's
+/// swaps and, once, "why the switch?" after a different session.
+private struct QueueTodaySlot: View {
+    let week: AdaptiveWeek.Result
+    let sessions: [WorkoutSession]
+
+    @Environment(WorkoutLauncher.self) private var launcher
+    @Environment(WeeklyPlanStore.self) private var store
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(CheckInStore.self) private var checkIns
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let slot = week.today {
+                todaySession(slot)
+            } else {
+                upNext
+            }
+            if week.today != nil || week.next != nil, let note = week.stillToDoNote {
+                QueueNote(text: note, systemImage: "calendar")
+            }
+            ForEach(store.swapLines(weekStart: week.weekStart), id: \.self) { line in
+                QueueNote(text: "Swapped " + line, systemImage: "arrow.triangle.swap")
+            }
+            if let swap = store.unansweredSwap(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns) {
+                SwapQuestionButton(planned: swap.planned, chosen: swap.chosen)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func todaySession(_ slot: AdaptiveWeek.Slot) -> some View {
+        let day = slot.session
+        let moved = slot.isMoved ? " · from " + WeeklyPlan.weekdayName(slot.plannedWeekday) : ""
+        Text("Today \(day.clockText()): \(day.focus.shortTitle), \(day.minutes) min\(moved)")
+            .font(.headline)
+            .foregroundStyle(Theme.primaryText)
+        if let note = slot.note {
+            QueueNote(text: note, systemImage: "figure.cooldown")
+        } else if let ifThen = day.ifThen, !ifThen.isEmpty {
+            Text(ifThen)
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        HStack(spacing: 10) {
+            PlanButton(title: "Start", filled: true) {
+                launcher.openBuilder(focus: day.focus, minutes: slot.short ? day.shortVersionMinutes : day.minutes)
+            }
+            // The minimum version (Swann 2021; report rec. 7).
+            PlanButton(title: "Short version · \(day.shortVersionMinutes) min", filled: false) {
+                launcher.openBuilder(focus: day.focus, minutes: day.shortVersionMinutes)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var upNext: some View {
+        if week.liftedToday {
+            Chip(text: "Done today", color: Theme.recoveryHigh)
+        }
+        if let next = week.next, let label = week.nextLabel {
+            Text("\(label), \(Self.dayWord(next.date))")
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+            if let note = next.note ?? week.moveNote {
+                QueueNote(text: note, systemImage: "figure.cooldown")
+            }
+        } else if let note = week.stillToDoNote {
+            Text(note)
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text("Rest day. That's the week's plan done; the review sets the next one.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+        }
+    }
+
+    /// "tomorrow", or "Thu".
+    private static func dayWord(_ date: Date) -> String {
+        Calendar.current.isDateInTomorrow(date) ? "tomorrow" : WeeklyPlan.weekdayName(Calendar.current.component(.weekday, from: date))
+    }
+}
+
+/// A small icon line under the queue's session.
+private struct QueueNote: View {
+    let text: String
+    let systemImage: String
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.footnote)
+            .foregroundStyle(Theme.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

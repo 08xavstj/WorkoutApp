@@ -158,8 +158,10 @@ struct WeeklyReviewView: View {
             case 1...: "\(difference) more than planned"
             default: "\(-difference) fewer than planned"
             }
+            let swaps = store.swapLines(weekStart: lastWeek).map { "Swapped " + $0 }.joined(separator: "; ")
+            let base = kept ? versusPlan + " · week kept" : "A lighter week than planned. This week starts fresh."
             return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done) \(days)",
-                              detail: kept ? versusPlan + " · week kept" : "A lighter week than planned. This week starts fresh.")
+                              detail: swaps.isEmpty ? base : base + ". " + swaps)
         }
         return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done)", detail: "No plan last week to compare with.")
     }

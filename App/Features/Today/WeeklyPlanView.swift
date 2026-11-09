@@ -122,6 +122,8 @@ struct WeeklyPlanView: View {
         } else {
             let dayWord = days.count == 1 ? "day" : "days"
             text = "\(days.count) \(dayWord) a week (\(WeeklyPlan.dayRange.lowerBound)–\(WeeklyPlan.dayRange.upperBound) work). About \(suggestedCount) a week suits your goal; a plan you can keep beats a bigger one."
+            // The week runs as a queue (`AdaptiveWeek`; equal-volume frequency, Schoenfeld, Grgic & Krieger 2019).
+            text += " Miss or swap a session and the rest move up in order, so nothing is lost; sore muscles push a session a day later."
         }
         // A block's deload week keeps the days; the trainer halves the sets (`TrainingBlock`).
         if blockWeek?.isDeload == true {
