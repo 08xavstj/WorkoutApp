@@ -45,7 +45,9 @@ final class BiologyModel {
 
         // RMSSD first (typed, camera, Apple Watch beat-to-beat), never mixed with SDNN.
         let nights = (try? await health.sleepHistory(nights: 90)) ?? []
-        let rmssd = await health.nightlyRMSSD(nights: nights).merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+        let rmssd = await health.nightlyRMSSD(nights: nights)
+            .merging(DailyMetricsModel.ouraRMSSD()) { _, oura in oura }
+            .merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
         let vitals = DailyVitals.merging((try? await vitalsTask) ?? [], manualHRV: rmssd, manualOnlyHRV: true).sorted { $0.date < $1.date }
         hrvSeries = vitals.compactMap { v in v.hrvMilliseconds.map { DatedValue(date: v.date, value: $0) } }
         let rhrSeries = vitals.compactMap { v in v.restingHeartRate.map { DatedValue(date: v.date, value: $0) } }

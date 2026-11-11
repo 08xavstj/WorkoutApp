@@ -386,20 +386,42 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate)]
         )
-        return try await descriptor.result(for: store).compactMap { sample in
-            guard let value = HKCategoryValueSleepAnalysis(rawValue: sample.value) else { return nil }
-            let stage: SleepStage
-            switch value {
-            case .inBed: stage = .inBed
-            case .awake: stage = .awake
-            case .asleepCore: stage = .core
-            case .asleepDeep: stage = .deep
-            case .asleepREM: stage = .rem
-            case .asleepUnspecified: stage = .unspecified
-            @unknown default: return nil
-            }
-            return SleepSample(stage: stage, start: sample.startDate, end: sample.endDate, source: sample.sourceRevision.source.name)
+        let samples = try await descriptor.result(for: store).compactMap(Self.sleepSample)
+        return Self.preferredSleep(samples, from: start, to: end) { _ in morning }
+    }
+
+    /// One Health sleep sample as an AppCore value, with the kind of device
+    /// that recorded it (`SleepSource.tracker`).
+    private static func sleepSample(_ sample: HKCategorySample) -> SleepSample? {
+        guard let value = HKCategoryValueSleepAnalysis(rawValue: sample.value) else { return nil }
+        let stage: SleepStage
+        switch value {
+        case .inBed: stage = .inBed
+        case .awake: stage = .awake
+        case .asleepCore: stage = .core
+        case .asleepDeep: stage = .deep
+        case .asleepREM: stage = .rem
+        case .asleepUnspecified: stage = .unspecified
+        @unknown default: return nil
         }
+        let source = sample.sourceRevision.source
+        let tracker = SleepSource.tracker(bundleID: source.bundleIdentifier, sourceName: source.name, deviceModel: sample.device?.model)
+        return SleepSample(stage: stage, start: sample.startDate, end: sample.endDate, source: source.name, tracker: tracker)
+    }
+
+    /// The sleep source setting (`SleepSourceSetting`) applied night by
+    /// night. With the ring first, a night Oura didn't write to Apple Health
+    /// (not synced yet, or Health sharing off) comes from the direct Oura
+    /// link's download (`OuraCache`) when it has it.
+    private static func preferredSleep(_ samples: [SleepSample], from start: Date, to end: Date,
+                                       night: (SleepSample) -> Date) -> [SleepSample] {
+        let preference = SleepSourceSetting.current
+        var all = samples
+        if preference == .ring {
+            let ringNights = Set(samples.filter { $0.tracker == .ring && $0.stage.isAsleep }.map(night))
+            all += OuraCache.shared.sleepSamples(from: start, to: end).filter { !ringNights.contains(night($0)) }
+        }
+        return SleepSource.pick(all, prefer: preference, night: night).sorted { $0.start < $1.start }
     }
 
     /// Overnight HRV as RMSSD (ms) computed from Apple Watch beat-to-beat
@@ -521,10 +543,14 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKCategoryValueSleepAnalysis.asleepCore.rawValue, HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
             HKCategoryValueSleepAnalysis.asleepREM.rawValue, HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue
         ]
+        // Each night from the preferred device (`SleepSourceSetting`), then its asleep time.
+        func nightOf(_ sample: SleepSample) -> Date { calendar.startOfDay(for: sample.start.addingTimeInterval(6 * 3600)) }
+        let samples = try await descriptor.result(for: store)
+            .filter { asleepValues.contains($0.value) }
+            .compactMap(Self.sleepSample)
         var byNight: [Date: [DateInterval]] = [:]
-        for sample in try await descriptor.result(for: store) where asleepValues.contains(sample.value) {
-            let night = calendar.startOfDay(for: sample.startDate.addingTimeInterval(6 * 3600))
-            byNight[night, default: []].append(DateInterval(start: sample.startDate, end: max(sample.startDate, sample.endDate)))
+        for sample in Self.preferredSleep(samples, from: start, to: .now, night: nightOf) where sample.stage.isAsleep {
+            byNight[nightOf(sample), default: []].append(DateInterval(start: sample.start, end: max(sample.start, sample.end)))
         }
         return byNight.keys.sorted().compactMap { night in
             // Only the main sleep counts: an afternoon nap or an evening doze

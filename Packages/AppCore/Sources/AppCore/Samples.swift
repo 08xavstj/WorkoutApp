@@ -222,12 +222,16 @@ public struct SleepSample: Sendable, Equatable {
     /// The app or device that recorded it (Apple Health's source name), if known,
     /// so two trackers recording the same night aren't counted twice.
     public var source: String?
+    /// The kind of device that recorded it, for the sleep source setting
+    /// (`SleepSource.pick`); nil when unknown.
+    public var tracker: SleepTracker?
 
-    public init(stage: SleepStage, start: Date, end: Date, source: String? = nil) {
+    public init(stage: SleepStage, start: Date, end: Date, source: String? = nil, tracker: SleepTracker? = nil) {
         self.stage = stage
         self.start = start
         self.end = end
         self.source = source
+        self.tracker = tracker
     }
 
     public var duration: TimeInterval { max(0, end.timeIntervalSince(start)) }

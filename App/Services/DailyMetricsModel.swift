@@ -101,6 +101,14 @@ final class DailyMetricsModel {
     /// `RecoveryCalculator.preferSleepingHeartRate`).
     private static let rhrSourceKey = "recoveryRestingHeartRateSource"
 
+    /// Oura's overnight RMSSD by morning (direct link) when the ring comes
+    /// first for sleep; empty otherwise. Oura averages the whole sleep, the
+    /// watch a few minute-long recordings, so the two can differ a little:
+    /// both are RMSSD, though, never mixed with SDNN (`DailyVitals.resolvingHRV`).
+    nonisolated static func ouraRMSSD() -> [Date: Double] {
+        SleepSourceSetting.current == .ring ? OuraCache.shared.nightlyRMSSD() : [:]
+    }
+
     /// A short label for the recovery ring instead of the usual one, when it
     /// needs explaining: yesterday's score before you wake, or sleep only.
     var recoveryNote: String? {
@@ -113,7 +121,7 @@ final class DailyMetricsModel {
     /// One line on which HRV measure recovery uses (`DailyVitals.resolvingHRV`).
     var hrvMetricNote: String? {
         switch hrvSelection {
-        case .rmssd: "HRV is overnight RMSSD (Apple Watch beat-to-beat data or your watch app's value). Nights without it use Apple Health's SDNN, scaled to your own RMSSD."
+        case .rmssd: "HRV is overnight RMSSD (your Oura ring, Apple Watch beat-to-beat data or your watch app's value). Nights without it use Apple Health's SDNN, scaled to your own RMSSD."
         case .sdnn: "HRV is Apple Health's SDNN. Once overnight RMSSD covers 14 of the last 30 nights, the app switches to it."
         case .morningRMSSD: "HRV is your morning camera reading. It isn't mixed with overnight HRV, which is measured asleep."
         case nil: nil
@@ -551,7 +559,10 @@ final class DailyMetricsModel {
             // night) once it covers 14 of the last 30 nights, else Apple Health's SDNN,
             // with gaps filled from the other via your own ratio. Camera readings are
             // taken awake in the morning, so they only stand in when there's no overnight HRV.
-            let beatToBeat = await health.nightlyRMSSD(nights: nights)
+            // With the Oura ring first (`SleepSourceSetting`), Oura's overnight RMSSD
+            // (the direct link's average over the whole sleep) replaces the watch's for
+            // the nights it has, so recovery keeps its HRV on nights the watch is off.
+            let beatToBeat = await health.nightlyRMSSD(nights: nights).merging(Self.ouraRMSSD()) { _, oura in oura }
             let rmssd = beatToBeat.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
             let selection = DailyVitals.resolvingHRV(healthVitals, overnightRMSSD: rmssd, morningHRV: morningHRV,
                                                      today: today, calendar: calendar)

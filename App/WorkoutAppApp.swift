@@ -422,6 +422,9 @@ struct RootView: View {
         }
         // Personal calories (docs/research/calories.md): training status from the whole lifting log.
         metrics.trainingStatus = TrainingStatus.resolve(reported: settings.liftingExperience, sessionDates: sessions.filter { !$0.isActive }.map(\.startedAt))
+        // The direct Oura link first (at most every 30 minutes), so last night's ring
+        // sleep and HRV are there for the scores (`OuraLink`, `SleepSourceSetting`).
+        await OuraLink.shared.syncIfDue()
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV, morningHRV: cameraHRV)
         // Training block (`TrainingBlock`): the trainer's style from the goals, then this week's
         // state; a week that starts with 7-day HRV below normal holds the ramp instead of adding sets.
@@ -702,6 +705,9 @@ private struct SettingsReactions: ViewModifier {
     let setRestMode: () -> Void
     /// Sex, age and units change the norms and stored display values: re-read Biology at once.
     let markBiologyStale: () -> Void
+    /// Whose sleep comes first (`SleepSourceSetting`): sleep, HRV and recovery change with it.
+    @AppStorage(SleepSourceSetting.key) private var sleepSource: SleepSourcePreference = .standard
+    @State private var oura = OuraLink.shared
 
     func body(content: Content) -> some View {
         content
@@ -715,6 +721,8 @@ private struct SettingsReactions: ViewModifier {
             .onChange(of: settings.age) { markBiologyStale(); refresh() }
             .onChange(of: settings.weightUnit) { markBiologyStale(); refresh() }
             .onChange(of: finishedSessionCount) { refresh() }
+            .onChange(of: sleepSource) { markBiologyStale(); refresh() }
+            .onChange(of: oura.syncedAt) { markBiologyStale(); refresh() }
             .onChange(of: hrvValues) {
                 scheduleCheckIns() // a typed HRV can complete the morning check-in
                 refresh()

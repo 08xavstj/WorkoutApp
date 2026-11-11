@@ -386,12 +386,19 @@ private struct RemindersSettingsSection: View {
 
 private struct SleepSettingsSection: View {
     @Environment(UserSettings.self) private var settings
+    @AppStorage(SleepSourceSetting.key) private var sleepSource: SleepSourcePreference = .standard
 
     var body: some View {
         @Bindable var settings = settings
         Section {
             Stepper(value: $settings.sleepNeedHours, in: 6...10, step: 0.25) {
                 LabeledContent("Sleep need", value: Duration.seconds(settings.sleepNeedHours * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
+            }
+            // Oura ring or Apple Watch first (`SleepSourceSetting`); also under Data sources › Oura Ring.
+            Picker("Sleep from", selection: $sleepSource) {
+                ForEach(SleepSourcePreference.allCases) { option in
+                    Text(option.title).tag(option)
+                }
             }
             Toggle("Rest mode (sick or resting)", isOn: Binding(
                 get: { settings.isRestMode },
@@ -400,7 +407,7 @@ private struct SleepSettingsSection: View {
         } header: {
             Text("Sleep & rest")
         } footer: {
-            Text("Sleep need sets your sleep score and sleep debt; adults need 7 hours or more. Rest mode pauses strain targets and workout nudges for 3 days, then turns itself off.")
+            Text("Sleep need sets your sleep score and sleep debt; adults need 7 hours or more. Sleep from picks whose night counts when you wear more than one tracker to bed. Rest mode pauses strain targets and workout nudges for 3 days, then turns itself off.")
         }
     }
 }
@@ -432,7 +439,7 @@ private struct CoachSettingsSection: View {
         } header: {
             Text("Coach")
         } footer: {
-            Text("Chats, health data and photos stay on this iPhone. Only weather (your city, via Open-Meteo) and medication names (FDA drug labels) are looked up online.")
+            Text("Chats, health data and photos stay on this iPhone. Only weather (your city, via Open-Meteo) and medication names (FDA drug labels) are looked up online, plus your Oura data if you connect your ring.")
         }
     }
 }
@@ -451,6 +458,11 @@ private struct DataSourcesSettingsSection: View {
             }
             if let healthURL = URL(string: "x-apple-health://") {
                 Link("Open Apple Health", destination: healthURL)
+            }
+            NavigationLink {
+                OuraSettingsView()
+            } label: {
+                LabeledContent("Oura Ring", value: OuraLink.shared.status == .connected ? "Connected" : "Not connected")
             }
             NavigationLink("Using a Garmin") {
                 GarminHelpView()

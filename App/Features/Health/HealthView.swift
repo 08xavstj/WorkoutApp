@@ -25,6 +25,7 @@ struct HealthView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HRVBaselineCard()
+                    OuraCard()
                     KeyMeasuresSection()
                     AllMeasuresSection()
                     RecordsSection()
