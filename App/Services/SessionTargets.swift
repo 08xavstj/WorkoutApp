@@ -144,6 +144,15 @@ enum AutoregulationLog {
         /// True once undone: the note goes, and no second change is made
         /// (still at most one per exercise per session).
         var undone: Bool? = nil
+        /// A rep-goal update (`RepGoal`), not a weight change: these follow
+        /// every set, and don't count toward the one weight change.
+        var isRepGoal: Bool? = nil
+        /// The weight already changed this session (kept when a rep-goal
+        /// note replaces the weight change's note), so it changes only once.
+        var loadChanged: Bool? = nil
+
+        /// This exercise's weight (or reps, by `Autoregulation`) already moved this session.
+        var blocksLoadChange: Bool { loadChanged == true || isRepGoal != true }
 
         nonisolated struct Restore: Codable, Sendable, Equatable {
             var setOrder: Int
@@ -235,12 +244,62 @@ enum LiveSetCoach {
     /// (`Target.maxLoadKg`): a "go heavier" there is held, and says why. Nil
     /// (and nothing saved) when no set changed, so the note never claims a
     /// change that wasn't made.
+    ///
+    /// Otherwise the next set's rep goal follows the reps left (`updateRepGoal`).
     @discardableResult
     static func autoregulate(after set: SetLog, in exercise: ExerciseLog, sessionStart: Date,
                              gym: GymProfile, blockRIR: Int? = nil) -> AutoregulationLog.Entry? {
+        if let entry = adjustLoad(after: set, in: exercise, sessionStart: sessionStart, gym: gym, blockRIR: blockRIR) {
+            return entry
+        }
+        return updateRepGoal(after: set, in: exercise, sessionStart: sessionStart, blockRIR: blockRIR)
+    }
+
+    /// After every rated working set: the next set's rep goal at the same
+    /// weight from the reps it had left (`RepGoal`), on the remaining sets
+    /// still at that weight and goal (ones you've changed are left alone).
+    /// The lifter sees a rep number, never the plan's reserve. Not past the
+    /// pain cap's weight with more reps. Nil when the goal didn't change.
+    @discardableResult
+    static func updateRepGoal(after set: SetLog, in exercise: ExerciseLog, sessionStart: Date,
+                              blockRIR: Int? = nil) -> AutoregulationLog.Entry? {
+        guard set.isCompleted, !set.isWarmup, set.kind.allowsAutoregulation, !isHold(exercise.exerciseID),
+              let rpe = set.rpe, set.reps > 0, set.reps <= Autoregulation.maxReps,
+              let rir = targetRIR(sessionStart: sessionStart, order: exercise.order, blockRIR: blockRIR) else { return nil }
+        let existing = AutoregulationLog.entry(for: sessionStart, order: exercise.order)
+        // A weight change still waiting on its set stays as it is.
+        if let existing, existing.isRepGoal != true, existing.isShown, existing.setOrder > set.order { return nil }
+        let working = exercise.orderedSets.filter { !$0.isWarmup && !$0.kind.isStage }
+        guard let index = working.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) else { return nil }
+        let remaining = working.dropFirst(index + 1).filter { !$0.isCompleted }
+        guard let next = remaining.first, abs(next.weightKg - set.weightKg) < 0.01 else { return nil }
+        let target = SessionTargets.target(for: sessionStart, order: exercise.order)
+        let range = target.map { $0.repsLow...max($0.repsLow, $0.repsHigh) } ?? max(1, next.reps - 2)...(next.reps + 2)
+        let left = ReserveText.choice(rpe: rpe)
+        let goal = RepGoal.next(repsDone: set.reps, repsLeft: left, targetRIR: rir, range: range)
+        // At the pain cap's weight, no extra reps (as `adjustLoad`).
+        if goal > next.reps, let cap = target?.maxLoadKg, set.weightKg >= cap - 0.01 { return nil }
+        guard let message = RepGoal.note(goal: goal, previous: next.reps, repsLeft: left) else { return nil }
+        let previousGoal = next.reps
+        var restore: [AutoregulationLog.Entry.Restore] = []
+        for upcoming in remaining where abs(upcoming.weightKg - set.weightKg) < 0.01 && upcoming.reps == previousGoal {
+            restore.append(AutoregulationLog.Entry.Restore(setOrder: upcoming.order, weightKg: upcoming.weightKg, reps: upcoming.reps))
+            upcoming.reps = goal
+        }
+        guard !restore.isEmpty else { return nil }
+        var entry = AutoregulationLog.Entry(setOrder: next.order, message: message, reps: goal, restore: restore)
+        entry.isRepGoal = true
+        entry.loadChanged = existing.map { $0.loadChanged == true || $0.isRepGoal != true }
+        AutoregulationLog.save(entry, for: sessionStart, order: exercise.order)
+        return entry
+    }
+
+    /// The once-per-exercise weight change (`Autoregulation.nextSet`).
+    private static func adjustLoad(after set: SetLog, in exercise: ExerciseLog, sessionStart: Date,
+                                   gym: GymProfile, blockRIR: Int? = nil) -> AutoregulationLog.Entry? {
         // A hold's "reps" are seconds (`CoreMove.isHold`): no reps-in-reserve change for it.
         guard set.isCompleted, !set.isWarmup, set.kind.allowsAutoregulation, !isHold(exercise.exerciseID),
-              AutoregulationLog.entry(for: sessionStart, order: exercise.order) == nil,
+              AutoregulationLog.entry(for: sessionStart, order: exercise.order)?.blocksLoadChange != true,
               let rir = targetRIR(sessionStart: sessionStart, order: exercise.order, blockRIR: blockRIR) else { return nil }
         let working = exercise.orderedSets.filter { !$0.isWarmup && !$0.kind.isStage }
         guard let index = working.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) else { return nil }

@@ -173,50 +173,32 @@ struct RPEGuideView: View {
     }
 }
 
-/// The first time a workout shows a reps-in-reserve target: a short card at
-/// the top saying what "3 reps in the tank" means, with Got it (never again,
-/// `seenKey`) and More (the full guide). The ⓘ beside each exercise's plan
-/// line opens the guide any time.
+/// Once, at the top of a workout: each set has a rep goal, and the "reps
+/// left" tap after a set moves the next set's goal (`RepGoal`). Shown again
+/// once after the switch from reps-in-reserve targets (new `seenKey`).
 struct RepsLeftIntroCard: View {
-    nonisolated static let seenKey = "workout.repsLeftIntroSeen"
+    nonisolated static let seenKey = "workout.repGoalIntroSeen"
 
-    let reserve: Double
     let onDone: () -> Void
-    @State private var showingGuide = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(ReserveText.explainerTitle(reserve), systemImage: "fuelpump")
+            Label("Hit the rep goal", systemImage: "target")
                 .font(.headline)
                 .foregroundStyle(Theme.liftingText)
-            Text(ReserveText.explainerBody(reserve))
+            Text("Each set shows the reps to aim for. After a set, tap how many more you could have done: the next set's goal goes up if it was easy and down if it was hard.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 10) {
-                Button(action: onDone) {
-                    Text("Got it")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.lifting, in: .capsule)
-                }
-                .buttonStyle(.plain)
-                Button { showingGuide = true } label: {
-                    Text("More")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.liftingText)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.lifting.opacity(0.12), in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Opens the reps-left guide")
+            Button(action: onDone) {
+                Text("Got it")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Theme.lifting, in: .capsule)
             }
+            .buttonStyle(.plain)
         }
         .card()
-        .sheet(isPresented: $showingGuide) {
-            RPEGuideView(reserve: reserve)
-                .presentationDetents([.medium, .large])
-        }
     }
 }

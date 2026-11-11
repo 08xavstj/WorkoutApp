@@ -57,26 +57,10 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
             return line
         }
 
-        /// "Target 8 · 2 reps in the tank", "Target 8 · 2-3 reps in the tank" or "to failure",
-        /// or nil without a plan (worded as the phone's `ReserveText` in AppCore,
-        /// which the Watch doesn't compile).
+        /// "Goal 8 reps", or nil without one. The plan's reps in reserve stay
+        /// behind the scenes, as on the phone (`RepGoal` in AppCore).
         var targetLine: String? {
-            guard targetReps != nil || targetRIR != nil else { return nil }
-            var parts: [String] = []
-            if let targetReps { parts.append("Target \(targetReps)") }
-            if let targetRIR { parts.append(Self.reserveText(targetRIR)) }
-            return parts.joined(separator: " · ")
-        }
-
-        /// "2 reps in the tank", "1 rep in the tank", "2-3 reps in the tank",
-        /// "to failure"; rounded to the nearest half rep first (as `ReserveText.text`).
-        static func reserveText(_ reserve: Double) -> String {
-            let halves = (max(0, reserve) * 2).rounded() / 2
-            let low = Int(halves.rounded(.down))
-            let high = Int(halves.rounded(.up))
-            if high == 0 { return "to failure" }
-            if low == high { return low == 1 ? "1 rep in the tank" : "\(low) reps in the tank" }
-            return "\(low)-\(high) reps in the tank"
+            targetReps.map { "Goal \($0) reps" }
         }
 
         /// The effort to pre-select after the set: 10 minus the target reps in

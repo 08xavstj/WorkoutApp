@@ -37,8 +37,9 @@ public enum SetFeedback {
             case let .short(reps):
                 let of = targetReps.map { " of \($0)" } ?? ""
                 return "\(reps) short\(of) · no weight added next session"
-            case let .pastEffort(rir):
-                return "Harder than planned: aim for \(ReserveText.text(rir)) next set"
+            case .pastEffort:
+                // The rep goal adjusts the next set (`RepGoal`); no reps-in-reserve number here.
+                return "Harder than planned: the next set's goal adjusts"
             case let .heavier(delta):
                 return "+\(Autoregulation.format(delta)) \(unit) on last time"
             case let .moreReps(reps):

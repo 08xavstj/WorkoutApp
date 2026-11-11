@@ -697,19 +697,19 @@ struct WorkoutBuilderView: View {
 
     /// Time, effort and strain side by side; stacked at accessibility text
     /// sizes so none is cut off (ux-audit.md 4.8, P22).
-    /// Effort is reps in reserve, the same words the sets use, and the range
-    /// the exercises actually ask for (not the session's number); strain is
+    /// Sets is the working sets planned (the sets themselves show rep goals,
+    /// not reps in reserve: `RepGoal`); strain is
     /// where today's total lands after the session, not the gain: green
     /// inside today's range.
     private func planStats(minutes: Int, extraMinutes: Int = 0, plan: PlannedWorkout, landsAt: Double, inRange: Bool) -> some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 18))
-        let reserve = ReserveText.count(rpes: plan.exercises.map(\.rpe), fallback: plan.targetRPE)
+        let sets = plan.exercises.reduce(0) { $0 + $1.sets }
         return layout {
             // "~60 + 5 min" with the abs finisher on top.
             StatView(label: "Time", value: "~\(minutes + extraMinutes) min", detail: extraMinutes > 0 ? "incl. \(extraMinutes) min abs" : nil)
-            StatView(label: "Reps in the tank", value: reserve)
+            StatView(label: "Working sets", value: "\(sets)")
             StatView(label: "Strain after", value: "≈\(strainText(landsAt))",
                      color: inRange ? Theme.recoveryHighText : Theme.strainTextColor)
         }

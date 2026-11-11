@@ -76,3 +76,41 @@ struct SportDayTests {
         #expect(result.focus == .upper)
     }
 }
+
+struct RepGoalTests {
+    let range = 6...10
+
+    @Test func onPlanKeepsTheReps() {
+        #expect(RepGoal.next(repsDone: 8, repsLeft: 2, targetRIR: 2, range: range) == 8)
+    }
+
+    @Test func moreLeftRaisesTheGoalAtMostTwo() {
+        #expect(RepGoal.next(repsDone: 8, repsLeft: 3, targetRIR: 2, range: range) == 9)
+        #expect(RepGoal.next(repsDone: 8, repsLeft: 4, targetRIR: 1, range: range) == 10)
+        // "4+" from a 0-reserve plan would be +4: capped at +2.
+        #expect(RepGoal.next(repsDone: 7, repsLeft: 4, targetRIR: 0, range: range) == 9)
+    }
+
+    @Test func lessLeftLowersTheGoal() {
+        #expect(RepGoal.next(repsDone: 8, repsLeft: 0, targetRIR: 2, range: range) == 6)
+        #expect(RepGoal.next(repsDone: 8, repsLeft: 1, targetRIR: 2, range: range) == 7)
+    }
+
+    @Test func halfARepIsNoChange() {
+        #expect(RepGoal.next(repsDone: 8, repsLeft: 2, targetRIR: 2.5, range: range) == 8)
+        #expect(RepGoal.next(repsDone: 8, repsLeft: 3, targetRIR: 2.5, range: range) == 8)
+    }
+
+    @Test func staysNearThePlannedRange() {
+        #expect(RepGoal.next(repsDone: 12, repsLeft: 4, targetRIR: 1, range: range) == 12)
+        #expect(RepGoal.next(repsDone: 4, repsLeft: 0, targetRIR: 3, range: range) == 4)
+        #expect(RepGoal.next(repsDone: 3, repsLeft: 0, targetRIR: 3, range: 3...5) == 1)
+    }
+
+    @Test func notesSayWhy() {
+        #expect(RepGoal.note(goal: 9, previous: 8, repsLeft: 4) == "Next set goal 9 reps: you had 4+ left")
+        #expect(RepGoal.note(goal: 6, previous: 8, repsLeft: 0) == "Next set goal 6 reps: you hit your limit")
+        #expect(RepGoal.note(goal: 7, previous: 8, repsLeft: 1) == "Next set goal 7 reps: that set was harder than planned")
+        #expect(RepGoal.note(goal: 8, previous: 8, repsLeft: 2) == nil)
+    }
+}

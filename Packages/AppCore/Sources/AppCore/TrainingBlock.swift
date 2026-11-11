@@ -57,9 +57,8 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         /// "Block week 3 of 5 · 1 rep in the tank" or "Deload week (5 of 5) · 3
         /// reps in the tank": the same words the sets and the builder use (`ReserveText`).
         public var label: String {
-            isDeload
-                ? "Deload week (\(week) of \(length)) · \(ReserveText.text(Double(targetRIR)))"
-                : "Block week \(week) of \(length) · \(ReserveText.text(Double(targetRIR)))"
+            // No reps-in-reserve number: sets show a rep goal (`RepGoal`), and the reserve stays behind it.
+            isDeload ? "Deload week (\(week) of \(length))" : "Block week \(week) of \(length)"
         }
 
         /// The note, plus "Today eased to 3-4 reps in the tank." when the day's plan
@@ -67,7 +66,7 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         public func note(plannedRPE: Double) -> String {
             let reserve = 10 - plannedRPE
             guard reserve > Double(targetRIR) + 0.25 else { return note }
-            return note + " Today eased to \(ReserveText.text(reserve))."
+            return note + " Today's rep goals are a little easier."
         }
 
         /// One short line on what this week changes.
@@ -76,9 +75,8 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
             if isDeload { return "Planned easier week: about half the sets, a little lighter." }
             if isHeld { return "HRV is below your normal range, so this week repeats last week's sets instead of adding more." }
             let percent = Int(((setMultiplier - 1) * 100).rounded())
-            let reserve = ReserveText.text(Double(targetRIR))
-            if percent <= 0 { return "Base sets this week; stop with \(reserve)." }
-            return "About \(percent)% more sets than week 1; stop with \(reserve)."
+            if percent <= 0 { return "Base sets this week." }
+            return "About \(percent)% more sets than week 1."
         }
     }
 

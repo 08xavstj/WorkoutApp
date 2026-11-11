@@ -19,14 +19,14 @@ struct AutoregulationTests {
         #expect(up?.change == .loadUp)
         #expect(up?.load == 62.5)
         #expect(up?.reps == 8)
-        #expect(up?.message(unit: "kg") == "Next set 62.5 kg (you had 3 reps in the tank)")
+        #expect(up?.message(unit: "kg") == "Next set 62.5 kg: that set was easy (3 left)")
     }
 
     @Test func twoOrMoreRepsHarderGoesDownOneJump() {
         let down = next(60, 8, rpe: 10, target: 2)
         #expect(down?.change == .loadDown)
         #expect(down?.load == 57.5)
-        #expect(down?.message(unit: "kg") == "Next set 57.5 kg (you went to failure; plan: 2 reps in the tank)")
+        #expect(down?.message(unit: "kg") == "Next set 57.5 kg: you hit your limit")
     }
 
     @Test func withinOneRepHolds() {
@@ -44,7 +44,7 @@ struct AutoregulationTests {
         #expect(trim?.change == .trimReps)
         #expect(trim?.load == 10)
         #expect(trim?.reps == 9)
-        #expect(trim?.message(unit: "kg") == "Next set 9 reps, same weight (you went to failure; plan: 2 reps in the tank)")
+        #expect(trim?.message(unit: "kg") == "Next set goal 9 reps, same weight: you hit your limit")
         // Three reps past the target trims two.
         #expect(next(10, 10, rpe: 10, target: 3, kind: .dumbbell)?.reps == 8)
     }

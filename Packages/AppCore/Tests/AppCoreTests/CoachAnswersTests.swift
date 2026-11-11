@@ -172,7 +172,7 @@ struct CoachAnswersTests {
 
     @Test func planWorkoutExplainsTheCard() {
         let answer = CoachAnswers.planWorkout(facts)!
-        #expect(answer.text.hasPrefix("Push Day, about 45 min with 5 exercises; sets stop with 2 reps in the tank."))
+        #expect(answer.text.hasPrefix("Push Day, about 45 min with 5 exercises; each set has a rep goal that adjusts as you go."))
         #expect(answer.text.contains("Chest and shoulders are fresh."))
         #expect(answer.text.contains("rounded to the plates"))
     }

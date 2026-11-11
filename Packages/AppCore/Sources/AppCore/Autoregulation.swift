@@ -77,22 +77,23 @@ public enum Autoregulation {
             self.targetRIR = targetRIR
         }
 
-        /// "Next set 62.5 kg (you had 3 in reserve)"; nil for `hold`. Reps in
-        /// reserve are written by `ReserveText`, as everywhere on the phone.
+        /// "Next set 62.5 kg: that set was easy"; nil for `hold`. Says how
+        /// the set felt, not the plan's reps-in-reserve number: the lifter
+        /// works to a rep goal (`RepGoal`), the reserve stays behind the scenes.
         public func message(unit: String) -> String? {
-            let had = repsInReserve < 0.25 ? "you went to failure" : "you had \(ReserveText.text(repsInReserve))"
-            let plan = "plan: \(ReserveText.text(targetRIR))"
+            let easy = "that set was easy (\(ReserveText.choiceLabel(Int(repsInReserve.rounded()))) left)"
+            let hard = repsInReserve < 0.25 ? "you hit your limit" : "that set was harder than planned"
             switch change {
             case .hold:
                 return nil
             case .loadUp:
-                return "Next set \(Autoregulation.format(load)) \(unit) (\(had))"
+                return "Next set \(Autoregulation.format(load)) \(unit): \(easy)"
             case .loadDown:
-                return "Next set \(Autoregulation.format(load)) \(unit) (\(had); \(plan))"
+                return "Next set \(Autoregulation.format(load)) \(unit): \(hard)"
             case .trimReps:
-                return "Next set \(reps) reps, same weight (\(had); \(plan))"
+                return "Next set goal \(reps) reps, same weight: \(hard)"
             case .addReps:
-                return "Next set \(reps) reps, same weight (\(had))"
+                return "Next set goal \(reps) reps, same weight: \(easy)"
             }
         }
     }
