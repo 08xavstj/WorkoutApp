@@ -371,7 +371,7 @@ extension CoachView {
 
         var extras = healthSummary.split(separator: "\n").map(String.init)
         if let weather = conditions.coachSummary(place: settings.placeName) { extras.append(weather) }
-        if let plan = weeklyPlans.coachSummary(sessions: sessions, extra: metrics.recentTrainingDays) { extras.append(plan) }
+        if let plan = weeklyPlans.coachSummary(sessions: sessions, extra: metrics.recentLiftingDays) { extras.append(plan) }
         if let notes = checkIns.coachSummary { extras.append(contentsOf: notes.split(separator: "\n").map(String.init)) }
         if gym.isConfigured { extras.append(gym.planner.gymSummary()) }
         f.extraLines = extras

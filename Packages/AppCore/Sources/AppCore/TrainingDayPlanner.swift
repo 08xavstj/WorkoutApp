@@ -65,10 +65,14 @@ public enum TrainingDayPlanner {
         /// planned session, so it can't have been "missed" or a "rest day
         /// that turned hard".
         public var planKnown: Bool
-        /// Whether the day counted as a training day: a logged session, or a
-        /// watch-only workout day (`isWatchTrainingDay`). Nil when the caller
-        /// doesn't know; then strain at or above `trainingDayStrain` counts.
+        /// Whether the day had a lift: a logged session, or a strength workout
+        /// another app recorded (`isWatchTrainingDay`). Soccer, a run or a walk
+        /// is false, so they never stand in for a planned lift. Nil when the
+        /// caller doesn't know; then strain at or above `trainingDayStrain` counts.
         public var trained: Bool?
+
+        /// Hard from sport or cardio, not a lift: known not to be a lift.
+        var wasHardNonLift: Bool { trained == false }
 
         public init(date: Date, plannedFocus: WorkoutFocus?, strain: Double, planKnown: Bool = true, trained: Bool? = nil) {
             self.date = date
@@ -123,6 +127,21 @@ public enum TrainingDayPlanner {
         hadWorkout && strain >= trainingDayStrain
     }
 
+    /// A hard day of sport or cardio (soccer, a long run) doesn't move the
+    /// next day's lift: strength is back to normal within about a day of
+    /// endurance work (Sporer & Wenger, J Strength Cond Res 2003;17:638:
+    /// impaired for up to 8 h, recovered at 24 h), and adding running or
+    /// cycling to lifting didn't cost strength or muscle across 43 studies
+    /// (Schumann et al., Sports Med 2022). Low recovery still eases the day.
+    /// Heavy legs after sport are the caveat, so the note says so.
+    static func liftAfterSport(_ focus: WorkoutFocus, training: ClosedRange<Double>) -> Guidance {
+        let legs = AdaptiveWeek.loads(focus).contains(.legs)
+        let tail = legs ? " If your legs are still heavy, go a little lighter on the leg lifts." : ""
+        return Guidance(kind: .training, strainRange: training, title: "Training day",
+                        reason: "\(focus.title) is still on: yesterday was hard, but it was sport or cardio, not a lift, and strength is back within a day.\(tail)",
+                        focus: focus)
+    }
+
     /// Strain that makes a rest day count as a hard training day: the bottom
     /// of your normal training range (`StrainCalculator.targetStrain`), at least 40%.
     public static func hardDayStrain(usualTrainingStrain: Double?) -> Double {
@@ -148,6 +167,9 @@ public enum TrainingDayPlanner {
         // Yesterday was a rest day in the plan and ended up a hard training day.
         // Days without a fixed-day plan (`planKnown` false) were never rest days.
         if let yesterday = days.last, yesterday.wasRestDay == true, yesterday.strain >= hard {
+            if let planned = plannedToday, !lowRecovery, yesterday.wasHardNonLift {
+                return liftAfterSport(planned, training: training)
+            }
             if let planned = plannedToday, !lowRecovery {
                 return Guidance(
                     kind: .easyTraining, strainRange: easy, title: "Easy day",
@@ -248,6 +270,9 @@ public enum TrainingDayPlanner {
            calendar.isDate(yesterday.date, inSameDayAs: before),
            yesterday.strain >= hard,
            week.yesterdayWasSlot.map({ !$0 }) ?? (yesterday.wasRestDay == true) {
+            if let slot, !lowRecovery, yesterday.wasHardNonLift {
+                return liftAfterSport(slot.focus, training: training)
+            }
             if let slot, !lowRecovery {
                 return Guidance(
                     kind: .easyTraining, strainRange: easy, title: "Easy day",
@@ -381,7 +406,8 @@ public enum TrainingDayPlanner {
                 focus: nextFocus
             )
         }
-        if let yesterday, yesterday.strain >= hard {
+        // A hard lift yesterday suggests a rest day when the week has room; hard sport or cardio doesn't (`liftAfterSport`).
+        if let yesterday, yesterday.strain >= hard, !yesterday.wasHardNonLift {
             return Guidance(
                 kind: .rest, strainRange: restDayRange, title: "Rest day",
                 reason: "Yesterday was a hard day and the week has room (\(left) to go, \(days) left), so today suits a rest day. If you feel good, training today is fine too."

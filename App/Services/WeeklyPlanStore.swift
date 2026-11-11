@@ -297,9 +297,10 @@ final class WeeklyPlanStore {
     // MARK: Matching sessions
 
     /// Start-of-day dates with a finished gym session, plus any other training
-    /// days (`DailyMetricsModel.recentTrainingDays`: watch workout days with
-    /// strain at least 35%, `TrainingDayPlanner.isWatchTrainingDay`). A logged
-    /// session always counts as done, however light; a walk alone doesn't.
+    /// days (`DailyMetricsModel.recentLiftingDays`: strength workouts another
+    /// app or the watch recorded, at strain at least 35%,
+    /// `TrainingDayPlanner.isWatchTrainingDay`). A logged session always
+    /// counts as done, however light; soccer, a run or a walk never do.
     static func trainingDays(sessions: [WorkoutSession], extra: Set<Date> = []) -> [Date] {
         let calendar = Calendar.current
         var days = Set(sessions.filter { !$0.isActive }.map { calendar.startOfDay(for: $0.startedAt) })
@@ -504,8 +505,8 @@ final class WeeklyPlanStore {
         return adaptive
     }
 
-    /// This week's logged sessions (focus from name or exercises) and watch
-    /// training days without one (they count for the total, not as a lift).
+    /// This week's logged sessions (focus from name or exercises) and
+    /// strength workouts other apps recorded on days without one.
     static func doneSessions(sessions: [WorkoutSession], extra: Set<Date>, since: Date) -> [AdaptiveWeek.DoneSession] {
         let calendar = Calendar.current
         let lifts = sessions.filter { !$0.isActive && $0.startedAt >= since }
@@ -516,8 +517,10 @@ final class WeeklyPlanStore {
             )
         }
         let liftDays = Set(lifts.map { calendar.startOfDay(for: $0.startedAt) })
+        // `extra` is strength workouts from other apps (`DailyMetricsModel.recentLiftingDays`):
+        // a lift of unknown focus, which ticks the day's planned session.
         for day in Set(extra.map { calendar.startOfDay(for: $0) }) where day >= since && !liftDays.contains(day) {
-            done.append(AdaptiveWeek.DoneSession(date: day, focus: nil, isLifting: false))
+            done.append(AdaptiveWeek.DoneSession(date: day, focus: nil, isLifting: true))
         }
         return done
     }

@@ -136,7 +136,7 @@ struct WorkoutBuilderView: View {
                     if let pendingSwap {
                         pendingSwap.record(in: plans)
                         self.pendingSwap = nil
-                    } else if let suggested = plans.swapPrompt(chosen: plan.focus, sessions: sessions, extra: metrics.recentTrainingDays,
+                    } else if let suggested = plans.swapPrompt(chosen: plan.focus, sessions: sessions, extra: metrics.recentLiftingDays,
                                                         checkIns: checkIns, muscles: muscles) {
                         swapSuggested = suggested
                         askingWhy = true

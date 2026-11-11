@@ -122,7 +122,7 @@ private struct StrainGoalCard: View {
     private var plannedToday: PlannedDay? {
         guard metrics.dayGuidance?.isRestDay != true, var today = plans.todayPlan() else { return nil }
         let weekday = Calendar.current.component(.weekday, from: .now)
-        let done = plans.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
+        let done = plans.doneWeekdays(sessions: sessions, extra: metrics.recentLiftingDays)
         guard !done.contains(weekday) else { return nil }
         if metrics.dayGuidance?.kind == .easyTraining {
             today.minutes = min(today.shortVersionMinutes, today.minutes)

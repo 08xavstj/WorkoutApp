@@ -115,7 +115,7 @@ struct WeeklyReviewView: View {
     // MARK: Numbers
 
     private var trainingDays: [Date] {
-        WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays)
+        WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentLiftingDays)
     }
 
     private var lastWeekRecord: WeekRecord {
@@ -263,7 +263,7 @@ struct WeeklyReviewView: View {
     /// Identity, stated only when it's true for 3+ weeks and never as a chain
     /// to protect (Rhodes et al. 2016, identity–behaviour r = 0.44).
     private var identityLine: String? {
-        let weeks = Consistency.weeksTrainingAtLeast(2, records: store.records(sessions: sessions, extra: metrics.recentTrainingDays))
+        let weeks = Consistency.weeksTrainingAtLeast(2, records: store.records(sessions: sessions, extra: metrics.recentLiftingDays))
         guard weeks >= 3 else { return nil }
         return "You've trained at least twice a week for \(weeks) weeks running. That's someone who lifts."
     }

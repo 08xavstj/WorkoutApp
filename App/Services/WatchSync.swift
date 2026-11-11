@@ -212,7 +212,7 @@ final class WatchSync: NSObject {
         let today = calendar.startOfDay(for: now)
         let horizon = today.addingTimeInterval(8 * 86_400)
         // From the start of today, so today's session stays on the face (done or not).
-        let slots = plans.upcomingSlots(now: today, trainingDays: WeeklyPlanStore.trainingDays(sessions: recentSessions(), extra: metrics.recentTrainingDays))
+        let slots = plans.upcomingSlots(now: today, trainingDays: WeeklyPlanStore.trainingDays(sessions: recentSessions(), extra: metrics.recentLiftingDays))
             .filter { $0.start < horizon }
             .map { slot in
                 WatchFaceData.Slot(start: slot.start, title: slot.day.focus.title,

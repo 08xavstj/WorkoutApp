@@ -426,7 +426,7 @@ extension CoachNudges {
     private func session(on day: Date, now: Date) -> CoachCheckIns.Session? {
         guard let plans, let context else { return nil }
         let sessions = recentSessions(context: context, now: now)
-        let extra = metrics?.recentTrainingDays ?? []
+        let extra = metrics?.recentLiftingDays ?? []
         let calendar = Calendar.current
         if calendar.isDate(day, inSameDayAs: now) {
             return plans.adaptiveWeek(sessions: sessions, extra: extra, checkIns: checkIns, muscles: muscles, now: now)?
@@ -488,7 +488,7 @@ extension CoachNudges {
             f.goals = settings.goalsSet ? settings.goals : nil
         }
         if let plans {
-            let extra = metrics?.recentTrainingDays ?? []
+            let extra = metrics?.recentLiftingDays ?? []
             if let next = plans.adaptiveWeek(sessions: all, extra: extra, checkIns: checkIns, muscles: muscles, now: now)?.next {
                 f.nextSession = CoachCheckIns.Session(slot: next)
                 f.nextDayText = Self.dayText(next.date, now: now)

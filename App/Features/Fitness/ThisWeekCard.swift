@@ -36,12 +36,12 @@ struct ThisWeekCard: View {
 
     var body: some View {
         let plan = store.current
-        let consistency = store.consistency(sessions: sessions, extra: metrics.recentTrainingDays)
+        let consistency = store.consistency(sessions: sessions, extra: metrics.recentLiftingDays)
         // Fixed week as a queue (`AdaptiveWeek`): dots tick the matching planned session, not the weekday.
         let queue = plan?.isFlexible == false
-            ? store.adaptiveWeek(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)
+            ? store.adaptiveWeek(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns, muscles: muscles)
             : nil
-        let done = queue?.doneWeekdays ?? store.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
+        let done = queue?.doneWeekdays ?? store.doneWeekdays(sessions: sessions, extra: metrics.recentLiftingDays)
         VStack(alignment: .leading, spacing: 14) {
             header(consistency)
             TravelGymChip() // only while a travel gym is active
@@ -50,7 +50,7 @@ struct ThisWeekCard: View {
                 FlexibleNextSlot(sessions: sessions)
             } else if let plan {
                 PlanDots(days: plan.sortedDays, done: done,
-                         sessionsDone: store.sessionsDone(sessions: sessions, extra: metrics.recentTrainingDays))
+                         sessionsDone: store.sessionsDone(sessions: sessions, extra: metrics.recentLiftingDays))
                 if let queue {
                     QueueTodaySlot(week: queue, sessions: sessions)
                 } else {
@@ -80,8 +80,8 @@ struct ThisWeekCard: View {
             store.refreshVolume(muscles: muscles)
         }
         // The queue for today's guidance, reminders and the watch (as on Today's Scores card).
-        .task(id: store.adaptiveKey(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns) + (muscles.hasRefreshed ? "|m" : "")) {
-            let week = store.refreshAdaptive(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)
+        .task(id: store.adaptiveKey(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns) + (muscles.hasRefreshed ? "|m" : "")) {
+            let week = store.refreshAdaptive(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns, muscles: muscles)
             if metrics.adaptiveWeek != week { metrics.adaptiveWeek = week }
         }
     }
@@ -243,8 +243,8 @@ private struct FlexibleWeekRow: View {
 
     var body: some View {
         // Through the store, so days that were only easy cardio don't count toward the lifting quota.
-        let progress = store.progress(sessions: sessions, extra: metrics.recentTrainingDays)
-            ?? plan.progress(trainingDays: WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays))
+        let progress = store.progress(sessions: sessions, extra: metrics.recentLiftingDays)
+            ?? plan.progress(trainingDays: WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentLiftingDays))
         HStack(alignment: .center, spacing: 14) {
             HStack(spacing: 8) {
                 ForEach(0..<max(progress.target, 0), id: \.self) { index in
@@ -276,7 +276,7 @@ private struct FlexibleNextSlot: View {
     @Environment(WorkoutLauncher.self) private var launcher
 
     var body: some View {
-        let progress = store.progress(sessions: sessions, extra: metrics.recentTrainingDays)
+        let progress = store.progress(sessions: sessions, extra: metrics.recentLiftingDays)
         if let progress, progress.isMet {
             Text(progress.trainedToday
                  ? "Done today, and that's the week's \(progress.target). Rest days until Monday."
@@ -290,7 +290,7 @@ private struct FlexibleNextSlot: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
-        } else if let next = store.nextSession(sessions: sessions, extra: metrics.recentTrainingDays, muscles: muscles) {
+        } else if let next = store.nextSession(sessions: sessions, extra: metrics.recentLiftingDays, muscles: muscles) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Next: \(next.day.focus.shortTitle), \(next.day.minutes) min")
                     .font(.headline)
@@ -406,7 +406,7 @@ private struct QueueTodaySlot: View {
             ForEach(store.swapLines(weekStart: week.weekStart), id: \.self) { line in
                 QueueNote(text: "Swapped " + line, systemImage: "arrow.triangle.swap")
             }
-            if let swap = store.unansweredSwap(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns) {
+            if let swap = store.unansweredSwap(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns) {
                 SwapQuestionButton(planned: swap.planned, chosen: swap.chosen)
             }
         }

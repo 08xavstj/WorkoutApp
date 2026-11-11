@@ -45,6 +45,11 @@ final class DailyMetricsModel {
     /// Days in the last 4 weeks with a workout or logged session and strain 35%+
     /// (`TrainingDayPlanner.isWatchTrainingDay`), for plan ticks and heat acclimation.
     private(set) var recentTrainingDays: Set<Date> = []
+    /// Days with a strength workout another app or the watch recorded (no
+    /// Tensile session) at training-day strain: the only watch days that
+    /// count toward the lifting plan. Soccer, a walk or a run never tick a
+    /// lift (`WeeklyPlanStore`); they still count for strain and load.
+    private(set) var recentLiftingDays: Set<Date> = []
     /// When you fell asleep on recent nights, for the caffeine cut-off.
     private(set) var recentBedtimes: [Date] = []
     private(set) var cardioLoad: TrainingLoadCalculator.Result?
@@ -266,6 +271,8 @@ final class DailyMetricsModel {
     /// Days with a workout in Apple Health, kept like `dayCache` (refetched
     /// from the first recomputed day on), for `TrainingDayPlanner.isWatchTrainingDay`.
     @ObservationIgnored private var workoutDays: Set<Date> = []
+    /// The subset of `workoutDays` with a strength workout.
+    @ObservationIgnored private var strengthWorkoutDays: Set<Date> = []
     @ObservationIgnored private var isRefreshing = false
     @ObservationIgnored private var refreshQueued = false
     /// The newest arguments passed while a refresh was running, so the queued
@@ -407,7 +414,8 @@ final class DailyMetricsModel {
                     plannedFocus: plannedFocusByDay[start],
                     strain: day.strain,
                     planKnown: fixedPlanDays.contains(start),
-                    trained: loggedSessionDays.contains(start) || recentTrainingDays.contains(start)
+                    // A lift, not any workout: soccer on a planned lifting day leaves the lift to do.
+                    trained: loggedSessionDays.contains(start) || recentLiftingDays.contains(start)
                 )
             }
         // Flexible week: a quota on any days, no planned day to miss (`TrainingDayPlanner.flexibleGuidance`).
@@ -665,6 +673,8 @@ final class DailyMetricsModel {
                 let fetchedWorkouts = (try? await health.externalWorkouts(from: firstNeeded, to: now)) ?? []
                 workoutDays = workoutDays.filter { $0 < firstNeeded }
                     .union(fetchedWorkouts.map { calendar.startOfDay(for: $0.start) })
+                strengthWorkoutDays = strengthWorkoutDays.filter { $0 < firstNeeded }
+                    .union(fetchedWorkouts.filter(\.isStrength).map { calendar.startOfDay(for: $0.start) })
                 let liftingWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                     + fetchedWorkouts.filter(\.isStrength).map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                 let merged = await Self.mergeHeartRate(mergeSources, liftingWindows: liftingWindows)
@@ -710,6 +720,9 @@ final class DailyMetricsModel {
             let sessionDays = Set(sessions.map { calendar.startOfDay(for: $0.start) })
             recentTrainingDays = Set(days.filter { entry in
                 TrainingDayPlanner.isWatchTrainingDay(hadWorkout: workoutDays.contains(entry.0) || sessionDays.contains(entry.0), strain: entry.1.strain)
+            }.map(\.0))
+            recentLiftingDays = Set(days.filter { entry in
+                TrainingDayPlanner.isWatchTrainingDay(hadWorkout: strengthWorkoutDays.contains(entry.0), strain: entry.1.strain)
             }.map(\.0))
             let loadCalculator = TrainingLoadCalculator()
             // Completed days only: today isn't over, so it would make this week read low.

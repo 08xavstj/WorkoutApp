@@ -166,10 +166,10 @@ struct UpNextCard: View {
     /// today has none left ("Next: Lower · 60 min", tomorrow, with any soreness note).
     private func weekQueueItems(now: Int) -> [UpNextItem] {
         guard !metrics.restMode, plans.current?.isFlexible == false,
-              let week = plans.adaptiveWeek(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)
+              let week = plans.adaptiveWeek(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns, muscles: muscles)
         else { return [] }
         var items: [UpNextItem] = []
-        if let swap = plans.unansweredSwap(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns) {
+        if let swap = plans.unansweredSwap(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns) {
             items.append(UpNextItem(id: "swap-why", minutes: now, kind: .swapQuestion(planned: swap.planned, chosen: swap.chosen)))
         }
         if week.today == nil, let next = week.next, let label = week.nextLabel {

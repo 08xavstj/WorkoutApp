@@ -413,8 +413,8 @@ struct RootView: View {
             metrics.hasWeeklyPlan = !(weeklyPlans.current?.plannedDays.isEmpty ?? true)
             // Flexible week (WeeklyPlanStore builder): quota progress and the coverage rule's next focus.
             if weeklyPlans.current?.isFlexible == true {
-                metrics.flexibleWeek = weeklyPlans.progress(sessions: sessions, extra: metrics.recentTrainingDays)
-                metrics.flexibleNextFocus = weeklyPlans.nextSession(sessions: sessions, extra: metrics.recentTrainingDays, muscles: muscles)?.day.focus
+                metrics.flexibleWeek = weeklyPlans.progress(sessions: sessions, extra: metrics.recentLiftingDays)
+                metrics.flexibleNextFocus = weeklyPlans.nextSession(sessions: sessions, extra: metrics.recentLiftingDays, muscles: muscles)?.day.focus
             } else {
                 metrics.flexibleWeek = nil
                 metrics.flexibleNextFocus = nil
@@ -466,7 +466,7 @@ struct RootView: View {
         weeklyPlans.refreshVolume(muscles: muscles)
         // End-of-block report (`BlockHistoryStore`): follows the block and archives it when a new one starts.
         BlockHistoryStore.shared.observe(block: weeklyPlans.block,
-                                         records: weeklyPlans.records(sessions: sessions, extra: metrics.recentTrainingDays),
+                                         records: weeklyPlans.records(sessions: sessions, extra: metrics.recentLiftingDays),
                                          targets: weeklyPlans.volumeTargets(muscles: muscles))
         // The weather last (it can be slow or offline; 10 s at most, `WeatherClient`).
         await conditions.refresh(settings: settings)
@@ -551,13 +551,13 @@ struct RootView: View {
     /// once saved, next week's), as dates.
     private func plannedSlots() -> [Reminders.PlannedSlot] {
         // Fixed days: every planned slot; flexible week: only days when the sessions left need them (`WeeklyPlanStore.reminderSlots`).
-        weeklyPlans.reminderSlots(trainingDays: WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays))
+        weeklyPlans.reminderSlots(trainingDays: WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentLiftingDays))
     }
 
     private func scheduleWorkoutReminders() {
         let slots = plannedSlots()
         let enabled = settings.workoutRemindersOn && !settings.isRestMode
-        let trained = Set(WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentTrainingDays))
+        let trained = Set(WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentLiftingDays))
         Task { await Reminders.scheduleWorkoutReminders(slots: slots, enabled: enabled, trainedDays: trained) }
     }
 }

@@ -34,7 +34,7 @@ struct TrainerPlanRequest {
               settings: UserSettings, sessions: [WorkoutSession], history: [String: ExerciseHistory]) -> PlannedWorkout {
         plans.gym = gym.profile
         let goals = plans.sessionSetGoals(focus: focus, minutes: minutes, muscles: muscles, sessions: sessions,
-                                          extra: metrics.recentTrainingDays)
+                                          extra: metrics.recentLiftingDays)
         return gym.planner.plan(focus: focus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history,
                                 block: block, focusReason: focusReason, prioritySlots: prioritySlots,
                                 bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,

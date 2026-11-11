@@ -35,8 +35,8 @@ struct ScoresCard: View {
         .card()
         // This week as a queue (`AdaptiveWeek`): today's guidance and the button follow
         // the next session not done yet, re-worked out when a session, check-in or answer changes.
-        .task(id: plans.adaptiveKey(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns) + (muscles.hasRefreshed ? "|m" : "")) {
-            let week = plans.refreshAdaptive(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)
+        .task(id: plans.adaptiveKey(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns) + (muscles.hasRefreshed ? "|m" : "")) {
+            let week = plans.refreshAdaptive(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns, muscles: muscles)
             if metrics.adaptiveWeek != week { metrics.adaptiveWeek = week }
         }
         .sheet(item: $sheet, onDismiss: { openPendingBuilder() }) { which in
@@ -319,7 +319,7 @@ private struct ScoresPrimaryButton: View {
         }
         // A session missed in the last two days moved to today (`TrainingDayPlanner`).
         if let guidance = metrics.dayGuidance, guidance.kind == .makeUp, let focus = guidance.focus,
-           metrics.activities.isEmpty {
+           !liftedToday {
             return Choice(title: "Start \(focus.shortTitle) (moved)", focus: focus, minutes: nil)
         }
         guard metrics.activities.isEmpty, let target = metrics.targetStrain else { return nil }
@@ -335,29 +335,35 @@ private struct ScoresPrimaryButton: View {
     /// logged today, or today's guidance is a rest day. On an easy day the
     /// button offers the short version (`start(_:short:)`).
     private var flexibleNext: PlannedDay? {
-        guard plans.current?.isFlexible == true, metrics.activities.isEmpty,
+        guard plans.current?.isFlexible == true, !liftedToday,
               metrics.dayGuidance?.isRestDay != true,
-              let progress = plans.progress(sessions: sessions, extra: metrics.recentTrainingDays), !progress.trainedToday,
-              let next = plans.nextSession(sessions: sessions, extra: metrics.recentTrainingDays, muscles: muscles) else { return nil }
+              let progress = plans.progress(sessions: sessions, extra: metrics.recentLiftingDays), !progress.trainedToday,
+              let next = plans.nextSession(sessions: sessions, extra: metrics.recentLiftingDays, muscles: muscles) else { return nil }
         return next.day
+    }
+
+    /// A strength workout today (logged here or by another app). Soccer, a
+    /// walk or a run don't count: the day's lift is still offered after them.
+    private var liftedToday: Bool {
+        metrics.activities.contains(where: \.isStrength)
     }
 
     /// Today's session in the week's queue (`AdaptiveWeek`): nil once a
     /// session is logged today or when today is a rest day in the queue.
     private var queuedToday: AdaptiveWeek.Slot? {
-        plans.adaptiveWeek(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles)?.today
+        plans.adaptiveWeek(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns, muscles: muscles)?.today
     }
 
     /// Today's planned session: the queue's in a fixed week, else this week's
     /// plan, unless a session was already logged today (as on the This week card).
     private var plannedToday: PlannedDay? {
         if plans.current?.isFlexible == false,
-           let week = plans.adaptiveWeek(sessions: sessions, extra: metrics.recentTrainingDays, checkIns: checkIns, muscles: muscles) {
+           let week = plans.adaptiveWeek(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns, muscles: muscles) {
             return week.today?.session
         }
         guard let today = plans.todayPlan() else { return nil }
         let weekday = Calendar.current.component(.weekday, from: .now)
-        let done = plans.doneWeekdays(sessions: sessions, extra: metrics.recentTrainingDays)
+        let done = plans.doneWeekdays(sessions: sessions, extra: metrics.recentLiftingDays)
         return done.contains(weekday) ? nil : today
     }
 }
