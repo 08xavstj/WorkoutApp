@@ -64,6 +64,28 @@ final class VitalsModel {
     private(set) var bloodOxygen: Double?
     private(set) var intensityMinutes: IntensityMinutes.Result?
     private(set) var bodyAge: BodyAge.Result?
+
+    /// One no-test VO₂ max estimate with the inputs it used, for the cardio card.
+    struct VO2EstimatePart: Equatable {
+        var result: VO2MaxEstimate.Result
+        var detail: String
+    }
+    /// From heart rate (Uth 2004) and from activity, lifting included (Jackson 1990).
+    private(set) var vo2HeartEstimate: VO2EstimatePart?
+    private(set) var vo2ActivityEstimate: VO2EstimatePart?
+    /// The two estimates' mean (`VO2MaxEstimate.combined`).
+    var vo2Estimate: VO2MaxEstimate.Result? {
+        VO2MaxEstimate.combined([vo2HeartEstimate?.result, vo2ActivityEstimate?.result].compactMap { $0 })
+    }
+    /// The VO₂ max the app scores with (body age, levels, fitness age, coach):
+    /// the estimate or the watch, per the setting (`VO2Source`, `vo2SourceKey`).
+    var vo2ForScores: (value: Double, isEstimate: Bool)? {
+        VO2Source.pick(watch: vo2MaxHistory.last?.value, estimate: vo2Estimate?.value, prefer: Self.vo2Source)
+    }
+    static let vo2SourceKey = "vo2Source"
+    static var vo2Source: VO2Source {
+        UserDefaults.standard.string(forKey: vo2SourceKey).flatMap(VO2Source.init(rawValue:)) ?? .standard
+    }
     /// Waist / height from a reading in the last 90 days (set by the app from
     /// `BodyMeasurementsStore`); body age uses it instead of BMI (Ashwell 2012).
     var waistToHeightRatio: Double?
@@ -601,6 +623,30 @@ final class VitalsModel {
         consistencyStat.defaultDays = 7
         result.append(consistencyStat)
 
+        // VO₂ max without a test (`VO2MaxEstimate`): the 7 latest awake resting heart
+        // rates (sleeping heart rate runs lower and would inflate the ratio), this
+        // week's hard and moderate minutes, and logged lifting over 4 weeks.
+        let liftingStart = now.addingTimeInterval(-28 * 86_400)
+        let liftingMinutesPerWeek = sessions.filter { $0.start >= liftingStart }
+            .reduce(0.0) { $0 + min(max(0, $1.end.timeIntervalSince($1.start)), 3 * 3_600) } / 60 / 4
+        let estimateBMI = bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm)
+        (vo2HeartEstimate, vo2ActivityEstimate) = Self.vo2Estimates(
+            restingHeartRates: rhrSeries.suffix(7).map(\.value), maxHeartRate: resolvedProfile.maxHeartRate,
+            measuredMax: settings.maxHeartRate > 0 || settings.learnedMaxOverride != nil,
+            intensity: derived.intensityWeek, liftingMinutesPerWeek: liftingMinutesPerWeek,
+            settings: settings, bmi: estimateBMI, bodyFatPercent: fatSeries.last?.value)
+        // With the estimate in use, the VO₂ max stat shows it; the watch's readings stay as its history.
+        let scoredVO2 = VO2Source.pick(watch: vo2Series.last?.value, estimate: vo2Estimate?.value, prefer: Self.vo2Source)
+        if let index = result.firstIndex(where: { $0.id == "vo2" }), let scored = scoredVO2, scored.isEstimate {
+            var stat = result[index]
+            stat.value = scored.value.formatted(.number.precision(.fractionLength(0)))
+            stat.status = Biomarkers.vo2MaxLabel(scored.value, age: settings.age, sex: settings.sex)
+            stat.tone = VO2Norms.category(vo2: scored.value, age: settings.age, sex: settings.sex).isBelowAverage ? .caution : .good
+            let watch = vo2Series.last.map { " Apple Watch's last reading: \($0.value.formatted(.number.precision(.fractionLength(1))))." } ?? ""
+            stat.footnote = "Tensile's estimate from heart rate and activity, about ±5.\(watch)"
+            result[index] = stat
+        }
+
         stats = result.map(Self.describe)
         readProblem = coreFailures.isEmpty
             ? nil
@@ -615,16 +661,43 @@ final class VitalsModel {
         bodyAge = BodyAge.estimate(BodyAge.Inputs(
             age: settings.age,
             sex: settings.sex,
-            vo2Max: vo2Series.last?.value,
+            // The setting's VO₂ max (`vo2ForScores`): the estimate by default.
+            vo2Max: scoredVO2?.value,
             restingHeartRate: average(rhrSeries, last: 14),
             sleepHours: averageSleep,
             dailySteps: average(fullDaySteps, last: 30),
             bodyFatPercent: fatSeries.last?.value,
             bmi: bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm),
-            vo2MaxAgeDays: vo2Series.last.map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 },
+            vo2MaxAgeDays: scoredVO2?.isEstimate == true
+                ? 0
+                : vo2Series.last.map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 },
             bodyCompositionAgeDays: (fatSeries.last ?? bmiSeries.last ?? rawWeight.last).map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 },
             waistToHeightRatio: waistToHeightRatio
         ))
+    }
+
+    /// The two no-test estimates (`VO2MaxEstimate`), each nil when its inputs are missing.
+    private static func vo2Estimates(restingHeartRates: [Double], maxHeartRate: Double, measuredMax: Bool,
+                                     intensity: IntensityMinutes.Result?, liftingMinutesPerWeek: Double,
+                                     settings: UserSettings, bmi: Double?, bodyFatPercent: Double?)
+        -> (VO2EstimatePart?, VO2EstimatePart?) {
+        var heart: VO2EstimatePart?
+        if !restingHeartRates.isEmpty {
+            let resting = restingHeartRates.reduce(0, +) / Double(restingHeartRates.count)
+            if let result = VO2MaxEstimate.heartRateRatio(maxHeartRate: maxHeartRate, restingHeartRate: resting, measuredMax: measuredMax) {
+                let source = measuredMax ? "your max" : "age-based max"
+                heart = VO2EstimatePart(result: result, detail: "\(source) \(Int(maxHeartRate.rounded())) ÷ resting \(Int(resting.rounded())) bpm")
+            }
+        }
+        let rating = VO2MaxEstimate.activityRating(vigorousMinutes: Double(intensity?.vigorous ?? 0),
+                                                   moderateMinutes: Double(intensity?.moderate ?? 0),
+                                                   liftingMinutes: liftingMinutesPerWeek)
+        var activity: VO2EstimatePart?
+        if let result = VO2MaxEstimate.activity(rating: rating, age: settings.age, sex: settings.sex, bmi: bmi, bodyFatPercent: bodyFatPercent) {
+            let lifting = Int(liftingMinutesPerWeek.rounded())
+            activity = VO2EstimatePart(result: result, detail: "Level \(rating) of 7: \(VO2MaxEstimate.ratingText(rating)) · lifting \(lifting) min a week")
+        }
+        return (heart, activity)
     }
 
     private func computedBMI(weightKg: Double?, heightCm: Double) -> Double? {

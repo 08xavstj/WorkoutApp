@@ -338,7 +338,7 @@ extension CoachView {
         // Readings for the questions the app answers itself (and when the model is off).
         f.steps = metrics.steps
         f.stepGoal = vitals.stat("steps")?.goal
-        f.vo2Max = vitals.vo2MaxHistory.max { $0.date < $1.date }?.value
+        f.vo2Max = vitals.vo2ForScores?.value
         let unit = settings.weightUnit
         if let mass = metrics.bodyMassKg { f.bodyWeightText = "\(unit.format(mass)) \(unit.rawValue)" }
         if let weekly = metrics.weightTrendWeekly {
@@ -433,9 +433,15 @@ extension CoachView {
         if let cut = CutAndSleep.advice(goals: settings.goalsSet ? settings.goals : nil, sleepDebt: metrics.sleepDebt) {
             lines.append("Cutting with high sleep debt: " + cut.message)
         }
-        if let trend = CardioFitness.trend(vitals.vo2MaxHistory.map { DayValue(date: $0.date, value: $0.value) }) {
-            let fitnessAge = CardioFitness.fitnessAge(vo2Max: trend.latest, age: settings.age, sex: settings.sex)
-            lines.append("VO₂ max \(trend.latest.formatted(.number.precision(.fractionLength(1)))) ml/kg/min, 90-day trend \(trend.direction.rawValue); fitness age about \(fitnessAge) ±\(CardioFitness.watchUncertaintyYears) (one measure, FRIEND norms)." + (CardioFitness.nudge(for: trend).map { " " + $0 } ?? ""))
+        // The VO₂ max the app scores with (`VitalsModel.vo2ForScores`); the trend is the watch's readings.
+        if let scored = vitals.vo2ForScores {
+            let fitnessAge = CardioFitness.fitnessAge(vo2Max: scored.value, age: settings.age, sex: settings.sex)
+            let source = scored.isEstimate ? "Tensile's no-test estimate, about ±5" : "Apple Watch, which tends to read low"
+            var line = "VO₂ max \(scored.value.formatted(.number.precision(.fractionLength(scored.isEstimate ? 0 : 1)))) ml/kg/min (\(source)); fitness age about \(fitnessAge) ±\(CardioFitness.watchUncertaintyYears) (one measure, FRIEND norms)."
+            if let trend = CardioFitness.trend(vitals.vo2MaxHistory.map { DayValue(date: $0.date, value: $0.value) }) {
+                line += " Watch 90-day trend \(trend.direction.rawValue)." + (CardioFitness.nudge(for: trend).map { " " + $0 } ?? "")
+            }
+            lines.append(line)
         }
         if settings.isRestMode {
             lines.append("REST MODE is on (the user is sick or resting): no strain target; suggest rest, sleep, fluids and at most easy walking, not workouts.")

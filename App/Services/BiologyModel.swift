@@ -27,7 +27,9 @@ final class BiologyModel {
     /// The next app refresh re-reads the series (after sex, age or units change).
     func markStale() { lastRefreshed = nil }
 
-    func refresh(health: HealthKitClient, settings: UserSettings, manualHRV: [Date: Double], proteinTarget: Double?) async {
+    /// - Parameter scoredVO2: the VO₂ max the app scores with (`VitalsModel.vo2ForScores`), when it's the estimate.
+    func refresh(health: HealthKitClient, settings: UserSettings, manualHRV: [Date: Double], proteinTarget: Double?,
+                 scoredVO2: (value: Double, isEstimate: Bool)? = nil) async {
         guard health.isAvailable else { return }
         isLoading = true
         defer {
@@ -100,11 +102,14 @@ final class BiologyModel {
             ))
         }
         let vo2 = (try? await vo2Task) ?? []
-        if let last = vo2.last {
-            let label = Biomarkers.vo2MaxLabel(last.value, age: settings.age, sex: settings.sex)
+        // The estimate when the app scores with it (`VO2Source`), else the watch's latest reading.
+        let estimate = scoredVO2.flatMap { $0.isEstimate ? $0.value : nil }
+        if let latest = estimate ?? vo2.last?.value {
+            let label = Biomarkers.vo2MaxLabel(latest, age: settings.age, sex: settings.sex)
             result.append(Marker(
-                id: "vo2", name: "VO₂ max", value: fmt(last.value), unit: "", status: label,
-                tone: VO2Norms.category(vo2: last.value, age: settings.age, sex: settings.sex).isBelowAverage ? .caution : .good, series: vo2
+                id: "vo2", name: estimate == nil ? "VO₂ max" : "VO₂ max (estimate)",
+                value: estimate == nil ? fmt(latest) : "≈\(Int(latest.rounded()))", unit: "", status: label,
+                tone: VO2Norms.category(vo2: latest, age: settings.age, sex: settings.sex).isBelowAverage ? .caution : .good, series: vo2
             ))
         }
         let protein = ((try? await proteinTask) ?? []).filter { $0.value > 0 }

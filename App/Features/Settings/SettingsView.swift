@@ -73,6 +73,7 @@ private struct YouSettingsSection: View {
 
 private struct ProfileSettingsSection: View {
     @Environment(UserSettings.self) private var settings
+    @AppStorage(VitalsModel.vo2SourceKey) private var vo2Source: VO2Source = .standard
     @Environment(\.healthClient) private var health
     @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 80
     @ScaledMetric(relativeTo: .body) private var wideFieldWidth: CGFloat = 110
@@ -117,6 +118,16 @@ private struct ProfileSettingsSection: View {
             }
         } footer: {
             Text("Leave it blank and the app learns it from your hardest workouts. Only type it if you've had it measured.")
+        }
+        Section {
+            Picker("VO₂ max to use", selection: $vo2Source) {
+                ForEach(VO2Source.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+        } footer: {
+            // Lambe et al., PLOS ONE 2025 (`VO2Source`).
+            Text("Body age, your fitness level and fitness age, and the coach use this one. Apple Watch read about 6 points low on average against lab tests and only measures on outdoor walks, runs and hikes; Tensile's estimate comes from your resting and max heart rate and your activity, lifting included, and is about ±5. If the one you pick has no value yet, the other is used.")
         }
     }
 

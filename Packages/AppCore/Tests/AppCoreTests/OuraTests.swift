@@ -199,3 +199,29 @@ struct SleepSourcePickTests {
         #expect(SleepSourcePreference.standard == .ring)
     }
 }
+
+struct VO2SourceTests {
+    @Test func estimateFirstByDefault() {
+        #expect(VO2Source.standard == .estimate)
+        let picked = VO2Source.pick(watch: 41, estimate: 47, prefer: .standard)
+        #expect(picked?.value == 47)
+        #expect(picked?.isEstimate == true)
+    }
+
+    @Test func eachFallsBackToTheOther() {
+        #expect(VO2Source.pick(watch: nil, estimate: 47, prefer: .watch)?.isEstimate == true)
+        #expect(VO2Source.pick(watch: 41, estimate: nil, prefer: .estimate)?.value == 41)
+        #expect(VO2Source.pick(watch: nil, estimate: nil, prefer: .estimate) == nil)
+    }
+
+    @Test func combinedIsTheMean() throws {
+        let heart = VO2MaxEstimate.Result(method: .heartRateRatio, value: 50, error: 6)
+        let activity = VO2MaxEstimate.Result(method: .activity, value: 44, error: 5)
+        let both = try #require(VO2MaxEstimate.combined([heart, activity]))
+        #expect(both.value == 47)
+        #expect(both.error == 5.5)
+        #expect(both.method == .combined)
+        #expect(VO2MaxEstimate.combined([heart]) == heart)
+        #expect(VO2MaxEstimate.combined([]) == nil)
+    }
+}

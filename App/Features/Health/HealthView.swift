@@ -60,7 +60,8 @@ struct HealthView: View {
         guard let health else { return }
         func stale(_ date: Date?) -> Bool { force || date.map { Date.now.timeIntervalSince($0) > 10 * 60 } ?? true }
         let manual = RootView.hrvByMorning(hrvReadings, camera: false)
-        let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now
+        // 28 days: the VO₂ max activity estimate averages 4 weeks of lifting (`VitalsModel`).
+        let cutoff = Calendar.current.date(byAdding: .day, value: -28, to: .now) ?? .now
         let recent = sessions.filter { !$0.isActive && $0.startedAt >= cutoff }.map(\.strainSummary)
         // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old.
         vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: heightCm)
@@ -72,7 +73,8 @@ struct HealthView: View {
             await checkIns.refreshInsights(health: health, manualHRV: manual)
         }
         if stale(biology.lastRefreshed) {
-            await biology.refresh(health: health, settings: settings, manualHRV: manual, proteinTarget: metrics.proteinTarget)
+            await biology.refresh(health: health, settings: settings, manualHRV: manual, proteinTarget: metrics.proteinTarget,
+                                  scoredVO2: vitals.vo2ForScores)
         }
         vitals.setHRVSeries(biology.hrvSeries)
     }

@@ -22,6 +22,8 @@ public enum VO2MaxEstimate {
     public enum Method: String, Sendable, Equatable {
         case heartRateRatio
         case activity
+        /// The mean of the two (`combined`).
+        case combined
     }
 
     public struct Result: Sendable, Equatable {
@@ -101,6 +103,22 @@ public enum VO2MaxEstimate {
         return Result(method: .activity, value: value, error: error)
     }
 
+    // MARK: Combined
+
+    /// The mean of the estimates there are, with their mean error. The two
+    /// methods err in different ways (one on heart rate, one on activity and
+    /// body size), so the mean is the steadier single number; its error is
+    /// left at the methods' typical error rather than narrowed, because
+    /// their errors aren't known to be independent (app choice).
+    public static func combined(_ results: [Result]) -> Result? {
+        guard !results.isEmpty else { return nil }
+        if results.count == 1, let only = results.first { return only }
+        let count = Double(results.count)
+        return Result(method: .combined,
+                      value: results.map(\.value).reduce(0, +) / count,
+                      error: results.map(\.error).reduce(0, +) / count)
+    }
+
     /// Plain words for a PA-R level, for the UI.
     public static func ratingText(_ rating: Int) -> String {
         switch rating {
@@ -111,6 +129,47 @@ public enum VO2MaxEstimate {
         case 3: "over 1 h a week of moderate activity or lifting"
         case 2: "10-60 min a week of moderate activity or lifting"
         default: "light activity only"
+        }
+    }
+}
+
+/// Which VO₂ max the app scores with: body age, the level and fitness age,
+/// the Health and Fitness pages and the coach.
+///
+/// Apple Watch's VO₂ max ran low against lab tests: 6.1 mL/kg/min under on
+/// average (95% CI 3.8-8.4), 13% mean absolute error, in 30 adults (Lambe et
+/// al., PLOS ONE 2025;20:e0323741), and it only measures on outdoor walks,
+/// runs and hikes. The app's no-test estimates (`VO2MaxEstimate`) are rough
+/// too (about ±5 mL/kg/min), so neither is a lab number: the setting is the
+/// user's choice, and the UI always says which one is in use.
+public enum VO2Source: String, Sendable, Codable, CaseIterable, Identifiable {
+    /// The app's estimate (heart rate and activity), else the watch.
+    case estimate
+    /// The watch's latest reading, else the estimate.
+    case watch
+
+    public var id: String { rawValue }
+
+    /// Settings default (the user's request: the watch reads them low).
+    public static let standard: VO2Source = .estimate
+
+    public var title: String {
+        switch self {
+        case .estimate: "Tensile estimate"
+        case .watch: "Apple Watch"
+        }
+    }
+
+    /// The value to score with and whether it is the estimate; the other
+    /// source stands in when the preferred one has nothing.
+    public static func pick(watch: Double?, estimate: Double?, prefer: VO2Source) -> (value: Double, isEstimate: Bool)? {
+        switch prefer {
+        case .estimate:
+            if let estimate { return (estimate, true) }
+            return watch.map { ($0, false) }
+        case .watch:
+            if let watch { return (watch, false) }
+            return estimate.map { ($0, true) }
         }
     }
 }

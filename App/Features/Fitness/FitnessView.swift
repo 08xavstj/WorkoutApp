@@ -399,13 +399,16 @@ private struct FitnessProgressCard: View {
     /// full card (`CardioFitness`; Kaminsky et al., Mayo Clin Proc 2015).
     private var cardioRow: some View {
         let history = vitals.vo2MaxHistory
-        let series = history.map { DayValue(date: $0.date, value: $0.value) }
-        let result = CardioFitness.assess(series, age: settings.age, sex: settings.sex)
         let start = Date.now.addingTimeInterval(-Double(CardioFitness.trendDays) * 86_400)
-        let verdict = result.map { MetricVerdict($0.label, color: $0.category.chipColor) }
+        // The value the app scores with (`VitalsModel.vo2ForScores`): the estimate by default.
+        let scored = vitals.vo2ForScores
+        let verdict: MetricVerdict? = scored.map { scored in
+            let category = VO2Norms.category(vo2: scored.value, age: settings.age, sex: settings.sex)
+            return MetricVerdict(category.name, color: category.chipColor)
+        }
         return MetricRow(
-            title: "Cardio fitness (VO₂ max)",
-            value: result.map { $0.latest.formatted(.number.precision(.fractionLength(1))) },
+            title: scored?.isEstimate == true ? "Cardio fitness (VO₂ max, estimate)" : "Cardio fitness (VO₂ max)",
+            value: scored.map { ($0.isEstimate ? "≈" : "") + $0.value.formatted(.number.precision(.fractionLength($0.isEstimate ? 0 : 1))) },
             unit: "ml/kg/min",
             spokenUnit: "millilitres per kilogram per minute",
             verdict: verdict,

@@ -459,7 +459,8 @@ struct RootView: View {
         // opens, so Today's HRV tile has its history page from the first refresh.
         // It reads 90 nights, so at most every 30 minutes (Health skips it within 10).
         if biology.hrvSeries.isEmpty || biology.lastRefreshed.map({ Date.now.timeIntervalSince($0) > 30 * 60 }) ?? true {
-            await biology.refresh(health: health, settings: settings, manualHRV: manualHRV, proteinTarget: metrics.proteinTarget)
+            await biology.refresh(health: health, settings: settings, manualHRV: manualHRV, proteinTarget: metrics.proteinTarget,
+                                  scoredVO2: vitals.vo2ForScores)
         }
         vitals.setHRVSeries(biology.hrvSeries)
         await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
@@ -707,6 +708,8 @@ private struct SettingsReactions: ViewModifier {
     let markBiologyStale: () -> Void
     /// Whose sleep comes first (`SleepSourceSetting`): sleep, HRV and recovery change with it.
     @AppStorage(SleepSourceSetting.key) private var sleepSource: SleepSourcePreference = .standard
+    /// Which VO₂ max scores (`VO2Source`): body age and the levels change with it.
+    @AppStorage(VitalsModel.vo2SourceKey) private var vo2Source: VO2Source = .standard
     @State private var oura = OuraLink.shared
 
     func body(content: Content) -> some View {
@@ -722,6 +725,7 @@ private struct SettingsReactions: ViewModifier {
             .onChange(of: settings.weightUnit) { markBiologyStale(); refresh() }
             .onChange(of: finishedSessionCount) { refresh() }
             .onChange(of: sleepSource) { markBiologyStale(); refresh() }
+            .onChange(of: vo2Source) { markBiologyStale(); refresh() }
             .onChange(of: oura.syncedAt) { markBiologyStale(); refresh() }
             .onChange(of: hrvValues) {
                 scheduleCheckIns() // a typed HRV can complete the morning check-in
