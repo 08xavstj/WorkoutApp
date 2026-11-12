@@ -222,9 +222,11 @@ struct SupersetTests {
         // now); `fill` then gives the squat its sets back.
         let short = planner.plan(focus: .legs, minutes: 20, recovery: 70, history: [:])
         #expect(short.hasSupersets)
-        #expect(short.exercises.count == 3)
-        #expect(short.exercises.map(\.supersetGroup) == [1, 1, nil])
-        #expect(short.exercises.map(\.exerciseID) == ["Barbell_Squat", "Seated_Leg_Curl", "Romanian_Deadlift"])
+        // Legs rank the leg curl and extension before the split squat now (Kubo 2019), so the
+        // 20-minute session is two pairs: squat with leg curl, Romanian deadlift with leg extension.
+        #expect(short.exercises.count == 4)
+        #expect(short.exercises.map(\.supersetGroup) == [1, 1, 2, 2])
+        #expect(short.exercises.map(\.exerciseID) == ["Barbell_Squat", "Seated_Leg_Curl", "Romanian_Deadlift", "Leg_Extensions"])
         #expect(short.exercises.first?.sets ?? 0 >= 3)
         #expect(WorkoutPlanner.estimatedMinutes(short.exercises) <= 20)
         #expect((short.estimatedMinutes ?? 0) >= 18)
@@ -267,8 +269,9 @@ struct WarmUpTests {
         #expect(plan.exercises[1].exerciseID == "Dumbbell_Shoulder_Press")
         #expect(plan.exercises[1].load == 55)
         #expect(plan.exercises[1].warmUpSets == [.init(load: 35, reps: 3)])
-        // Isolation work (the lateral raise, now third) and lifts without a weight get none.
-        #expect(plan.exercises[2].warmUpSets == nil)
+        // Isolation work (the lateral raise, after the three presses) and lifts without a weight get none.
+        #expect(plan.exercises[3].exerciseID == "Side_Lateral_Raise")
+        #expect(plan.exercises[3].warmUpSets == nil)
         // Your own workouts get the same ramp.
         let items = [TemplateItem(exerciseID: "Barbell_Bench_Press_-_Medium_Grip", name: "Bench Press", sets: 4, reps: 6...8, rpe: 8)]
         let planned = planner.prescribe(template: items, history: ["Barbell_Bench_Press_-_Medium_Grip": bench])

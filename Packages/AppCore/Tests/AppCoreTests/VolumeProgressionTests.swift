@@ -212,10 +212,10 @@ struct VolumeProgressionTests {
     ]
 
     @Test func capacityCountsDirectMovementsAndTime() {
-        // Upper has one chest movement (5 sets at most); push has three (10 in an hour).
+        // Upper has one chest movement (4 sets at most: one exercise's planned sets); push has two or more (10 in an hour).
         let chest = VolumeProgression.capacity(.chest, days: upperLower)
         #expect(chest.sessions == 2)
-        #expect(chest.timeCap == 15)
+        #expect(chest.timeCap == 14)
         // Lower 60: squat and single-leg (10); lower 30 keeps both in its four movements but holds 6.
         let quads = VolumeProgression.capacity(.quadriceps, days: upperLower)
         #expect(quads.sessions == 2)
@@ -226,24 +226,25 @@ struct VolumeProgressionTests {
     @Test func buildsTheWeekFromLastWeek() {
         let previous = VolumeProgression.WeekTargets(weekStart: monday, targetRIR: 3, targets: [
             VolumeProgression.Target(muscle: .chest, sets: 12, previous: 10, change: .added),
-            VolumeProgression.Target(muscle: .lats, sets: 10, previous: 10, change: .start),
+            VolumeProgression.Target(muscle: .lats, sets: 4, previous: 4, change: .start),
         ])
         let lastWeek: [Muscle: VolumeProgression.Performance] = [
             .chest: VolumeProgression.Performance(sets: 12),
-            .lats: VolumeProgression.Performance(sets: 10, repsDropped: ["Row"]),
+            .lats: VolumeProgression.Performance(sets: 4, repsDropped: ["Pulldown"]),
         ]
         let block = TrainingBlock.weekState(3, style: .muscle, length: 6)
         let next = VolumeProgression.week(weekStart: monday.addingTimeInterval(7 * 86_400), block: block, style: .muscle,
                                           days: upperLower, previous: previous, lastWeek: lastWeek, states: [:])
         #expect(next.target(for: .chest)?.sets == 14)
-        // Lats: only the upper day trains them (two movements, 10 sets at most).
-        #expect(next.target(for: .lats)?.sets == 10)
-        #expect(next.target(for: .lats)?.change == .heldRepsDropped(exercise: "Row"))
+        // Lats: only the upper day trains them directly, with one movement (the pulldown;
+        // rows count for the upper back), so 4 sets at most.
+        #expect(next.target(for: .lats)?.sets == 4)
+        #expect(next.target(for: .lats)?.change == .heldRepsDropped(exercise: "Pulldown"))
         // Hamstrings: no earlier target, so the block's start value.
         #expect(next.target(for: .hamstrings)?.change == .start)
         #expect(next.target(for: .hamstrings)?.sets == 10)
-        // Calves: one movement on one day holds 5.
-        #expect(next.target(for: .calves)?.sets == 5)
+        // Calves: one movement on one day holds 4.
+        #expect(next.target(for: .calves)?.sets == 4)
         #expect(next.target(for: .calves)?.change == .cappedTime)
         #expect(next.targetRIR == block.targetRIR)
         #expect(next.sets[.chest] == 14)

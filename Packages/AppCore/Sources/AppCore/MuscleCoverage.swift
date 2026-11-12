@@ -87,7 +87,12 @@ public enum MuscleCoverage {
         case .rearDelt: (.shoulders, [.middleBack])
         case .triceps: (.triceps, [])
         case .verticalPull: (.lats, [.biceps, .middleBack])
-        case .horizontalRow: (.lats, [.middleBack, .biceps])
+        // Rows are upper-back work first (mid traps, rhomboids, rear delts), with the lats
+        // helping: the same split the exercise library logs them with, so a planned row
+        // set and a logged one count for the same muscle. (They used to plan as lats and
+        // log as upper back, so the lat target could never be met and pull days were
+        // capped as if rows and pulldowns were one muscle.)
+        case .horizontalRow: (.middleBack, [.lats, .biceps])
         case .biceps: (.biceps, [])
         case .hammerCurl: (.biceps, [.forearms])
         case .squat, .singleLeg: (.quadriceps, [.glutes])
@@ -193,7 +198,7 @@ public enum MuscleCoverage {
     /// then any movement in the focus, then, with `focus` nil, the best
     /// single-joint movement anywhere.
     static func slot(for muscle: Muscle, in focus: WorkoutFocus?) -> MovementSlot? {
-        let pool = focus.map { $0.slots + [$0.extraSlot] } ?? MovementSlot.allCases
+        let pool = focus.map { $0.slots + $0.extraSlots(variant: 0) } ?? MovementSlot.allCases
         let matching = pool.filter { muscles(for: $0).primary == muscle }
         return matching.first { !$0.isCompound } ?? matching.first
     }

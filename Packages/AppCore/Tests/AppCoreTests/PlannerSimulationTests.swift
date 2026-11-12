@@ -955,7 +955,10 @@ struct LiftSimulation {
                 let done = credited[target.muscle]?.sets ?? 0
                 let ceiling = VolumeProgression.ceiling(style: style)
                 // Credit depends on the RPE reported, so only the honest lifter is held to the band.
-                if behaviour == .honest, done < Double(target.band.lowerBound) - 0.001 {
+                // A deload's sets are easier on purpose (RIR 3), so some count 0.6: when the planned
+                // sets meet the band, the credit shortfall is the deload working as designed.
+                let deloadAsPlanned = block.isDeload && actual >= target.band.lowerBound
+                if behaviour == .honest, done < Double(target.band.lowerBound) - 0.001, !deloadAsPlanned {
                     let asLogged = reported[target.muscle]?.sets ?? 0
                     output.report.add(.weeklySetsWithinBand, weekScenario, "\(target.muscle.name): \(done.formatted()) sets credited (\(asLogged.formatted()) as logged, \(actual) direct planned), target \(target.sets) (band \(target.bandText), \(target.change))")
                 } else if actual > max(target.sets, ceiling) + 4 {
@@ -1069,7 +1072,10 @@ struct LiftSimulation {
                         lastDirection = direction
                     }
                 }
-                if reversals >= 3 {
+                // A rate, not a count: three reversals in a lift trained once a week for 12 weeks,
+                // so one in four sessions. Upper days A and B both have a curl and a triceps
+                // extension now, so those lifts have twice the sessions in the same weeks.
+                if reversals >= max(3, Int((Double(hard.count) / 4).rounded(.up))) {
                     output.report.add(.progressionNoOscillation, "\(s) \(tag)", "\(tag) loads reversed \(reversals)× outside deloads: \(hard.map { "\($0.load)" }.joined(separator: " → "))")
                 }
             }

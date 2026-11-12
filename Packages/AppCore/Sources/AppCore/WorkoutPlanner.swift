@@ -94,10 +94,12 @@ public enum WorkoutFocus: String, Codable, Sendable, CaseIterable, Identifiable 
     }
 
     /// Slots in priority order (variant A); shorter sessions use the first
-    /// few. Multi-joint lifts come first: lifts done early in a session gain
-    /// more strength, while muscle growth doesn't depend on order (Nunes et
-    /// al., Eur J Sport Sci 2021; ACSM position stand, Med Sci Sports Exerc
-    /// 2009). Weekly targets and capacity (`VolumeProgression`) read this list.
+    /// few. This is what a session keeps, not the order it's done in: the
+    /// planner does multi-joint lifts first (`WorkoutPlanner.liftOrder`),
+    /// because lifts done early gain more strength while muscle growth
+    /// doesn't depend on order (Nunes et al., Eur J Sport Sci 2021; ACSM
+    /// position stand, Med Sci Sports Exerc 2009). Weekly targets and
+    /// capacity (`VolumeProgression`) read this list.
     public var slots: [MovementSlot] { slots(variant: 0) }
 
     /// How many versions the focus alternates between (`slots(variant:)`).
@@ -108,26 +110,49 @@ public enum WorkoutFocus: String, Codable, Sendable, CaseIterable, Identifiable 
         }
     }
 
-    /// The focus's slots for version A (0) or B (1). Upper and full-body
-    /// days alternate two versions, so a week of them covers side and rear
-    /// delts, an incline and an overhead press, and both pulls, with pushing
-    /// and pulling sets about even across the pair (ACSM position stand, Med
-    /// Sci Sports Exerc 2026: every major muscle group at least twice a week;
-    /// some exercise variation spreads regional growth: Kassiano et al., J
-    /// Strength Cond Res 2022, review). The exact lists are the app's choice
-    /// (audit 2026-11 §7). Side delts sit before the incline press on push
-    /// days so sessions under an hour keep them (§19), and pull days take a
-    /// second row before a second curl (§12).
+    /// The focus's slots for version A (0) or B (1), most important first.
+    ///
+    /// **Arms get their own work.** Presses and rows aren't enough for them:
+    /// - Bench pressing alone grew the triceps' lateral head but barely its
+    ///   long head; adding a triceps extension grew all of it (Brandão et al.,
+    ///   J Strength Cond Res 2020, 43 men, 10 weeks).
+    /// - Curls grew the elbow flexors about twice as much as rows (11% vs 5%;
+    ///   Mannarino et al., J Strength Cond Res 2021, 10 untrained men, each
+    ///   arm one exercise; small, so modest evidence).
+    /// So a triceps extension and a curl rank straight after the first two
+    /// or three compound lifts on push, pull and upper days, and push and
+    /// pull days take a second arm exercise from 60 minutes (the planner
+    /// picks a different one: an overhead extension then a pushdown, a curl
+    /// then a hammer curl). Rows and pulldowns already work the rear delts
+    /// (Franke et al., J Sports Med Phys Fitness 2015, EMG; cited from memory), so on upper day B the
+    /// direct rear-delt movement waits for a long session.
+    ///
+    /// **Legs get a leg curl and a leg extension early.** Squats grew the
+    /// vasti and glutes but not the rectus femoris or the hamstrings (Kubo et
+    /// al., Eur J Appl Physiol 2019), so both rank before a second
+    /// squat-pattern lift, and the lower day has a leg extension too. The
+    /// curl ranks first: when time runs out the last small lift goes, and
+    /// the quads still have the squat.
+    ///
+    /// Upper and full-body days alternate two versions, so a week of them
+    /// covers side delts, an incline and an overhead press, and both pulls,
+    /// with pushing and pulling sets about even across the pair (ACSM
+    /// position stand, Med Sci Sports Exerc 2026: every major muscle group at
+    /// least twice a week; some exercise variation spreads regional growth:
+    /// Kassiano et al., J Strength Cond Res 2022, review). Side delts rank
+    /// before the incline press on push days so sessions under an hour keep
+    /// them. The exact lists are the app's choice inside that evidence.
     public func slots(variant: Int) -> [MovementSlot] {
         let b = variant % max(1, variantCount) == 1
         switch self {
-        case .push: return [.horizontalPress, .verticalPress, .lateralRaise, .inclinePress, .triceps, .chestFly]
-        case .pull: return [.verticalPull, .horizontalRow, .rearDelt, .biceps, .horizontalRow, .core]
-        case .legs: return [.squat, .hinge, .singleLeg, .legCurl, .legExtension, .calves]
+        case .push: return [.horizontalPress, .verticalPress, .lateralRaise, .triceps, .inclinePress, .triceps]
+        case .pull: return [.verticalPull, .horizontalRow, .biceps, .rearDelt, .hammerCurl, .core]
+        case .legs: return [.squat, .hinge, .legCurl, .legExtension, .singleLeg, .calves]
         case .upper:
-            return b ? [.inclinePress, .verticalPull, .horizontalRow, .verticalPress, .rearDelt, .triceps]
+            // A's fifth is the curl and B's the triceps extension, so 45-minute upper days share them out.
+            return b ? [.inclinePress, .verticalPull, .horizontalRow, .verticalPress, .triceps, .biceps]
                      : [.horizontalPress, .horizontalRow, .verticalPull, .lateralRaise, .biceps, .triceps]
-        case .lower: return [.squat, .hinge, .singleLeg, .legCurl, .calves, .core]
+        case .lower: return [.squat, .hinge, .legCurl, .legExtension, .calves, .core]
         case .fullBody:
             // A trains the rear delts and B the side delts, so the pair
             // balances pushing and pulling sets (Full Body used to be two
@@ -141,18 +166,27 @@ public enum WorkoutFocus: String, Codable, Sendable, CaseIterable, Identifiable 
     /// in version A.
     public var extraSlot: MovementSlot { extraSlot(variant: 0) }
 
-    /// The seventh movement for a long session (`WorkoutPlanner.longSessionMinutes`):
-    /// a pattern the version hasn't covered, else a second exercise for its
-    /// biggest muscle (the planner then picks a different exercise for it).
+    /// The seventh movement for a long session: the first of `extraSlots`.
     public func extraSlot(variant: Int) -> MovementSlot {
+        extraSlots(variant: variant).first ?? .core
+    }
+
+    /// Movements beyond the six, in order: the first is the long session's
+    /// seventh; the next stands in when the core movement is left out (the
+    /// abs finisher is on) and is what `fill` adds when there's still time.
+    /// Each is a pattern the version hasn't covered, else a second exercise
+    /// for a muscle with room (the planner picks a different exercise).
+    /// Full-body days get their direct arm work here: with one press and one
+    /// pull a session, arms are the muscles furthest under the weekly band.
+    public func extraSlots(variant: Int) -> [MovementSlot] {
         let b = variant % max(1, variantCount) == 1
         switch self {
-        case .push: return .triceps           // chest already has three; a second triceps exercise
-        case .pull: return .hammerCurl        // the second back exercise is in the six
-        case .legs: return .hipThrust         // glutes as the main muscle
-        case .upper: return b ? .biceps : .verticalPress
-        case .lower: return .hipThrust
-        case .fullBody: return b ? .verticalPull : .lateralRaise
+        case .push: return [.chestFly, .lateralRaise]
+        case .pull: return [.horizontalRow, .verticalPull]
+        case .legs: return [.hipThrust, .calves]
+        case .upper: return b ? [.rearDelt, .lateralRaise] : [.verticalPress, .rearDelt]
+        case .lower: return [.singleLeg, .hipThrust]
+        case .fullBody: return b ? [.triceps, .verticalPull] : [.biceps, .lateralRaise]
         }
     }
 
@@ -222,8 +256,11 @@ public enum ExerciseCatalog {
         // with the arm at the side (Maeo et al., Eur J Sport Sci 2023).
         .triceps: [
             ex("Cable_Rope_Overhead_Triceps_Extension", "Overhead Cable Triceps Extension", .cable),
-            ex("Dumbbell_One-Arm_Triceps_Extension", "Overhead Triceps Extension", .dumbbell),
+            // Second, so a session's second triceps exercise works the arm at
+            // the side instead of repeating the overhead position (variety
+            // across positions: Kassiano et al. 2022, review; app choice).
             ex("Triceps_Pushdown_-_Rope_Attachment", "Rope Pushdown", .cable),
+            ex("Dumbbell_One-Arm_Triceps_Extension", "Overhead Triceps Extension", .dumbbell),
             ex("EZ-Bar_Skullcrusher", "EZ-Bar Skullcrusher", .ezBar, .bench),
             ex("Machine_Triceps_Extension", "Machine Triceps Extension", .machine),
             // Barbell-only gyms: a close-grip press before bench dips, which are hard on the shoulder.
@@ -255,9 +292,13 @@ public enum ExerciseCatalog {
         ],
         .biceps: [
             ex("Barbell_Curl", "Barbell Curl", .barbell),
-            ex("Dumbbell_Bicep_Curl", "Dumbbell Curl", .dumbbell),
-            // Arm behind the body: the biceps' long head works stretched.
+            // Arm behind the body: the biceps works stretched. Incline curls
+            // grew the upper part of the elbow flexors more and preacher
+            // curls the lower part (Kassiano et al., Int J Sports Med 2025,
+            // 63 untrained women), so neither is "the best": a second curl
+            // in a session is the incline one, for a different position.
             ex("Incline_Dumbbell_Curl", "Incline Dumbbell Curl", .dumbbell, .bench),
+            ex("Dumbbell_Bicep_Curl", "Dumbbell Curl", .dumbbell),
             ex("EZ-Bar_Curl", "EZ-Bar Curl", .ezBar),
             ex("Machine_Bicep_Curl", "Machine Curl", .machine),
             ex("Machine_Preacher_Curls", "Machine Preacher Curl", .machine)
@@ -352,7 +393,7 @@ public enum ExerciseCatalog {
         case .lateralRaise: ["Side delts"]
         case .triceps: ["Triceps"]
         case .verticalPull: ["Lats", "Biceps", "Upper back"]
-        case .horizontalRow: ["Lats", "Upper back", "Biceps"]
+        case .horizontalRow: ["Upper back", "Lats", "Biceps"]
         case .rearDelt: ["Rear delts", "Upper back"]
         case .biceps: ["Biceps"]
         case .hammerCurl: ["Biceps", "Forearms"]
@@ -1091,6 +1132,8 @@ public struct WorkoutPlanner: Sendable {
             if planned.sets > base { earnedSets[planned.exerciseID] = planned.sets }
             exercises.append(planned)
         }
+        // Chosen by priority, done compound lifts first (`liftOrder`).
+        exercises = Self.liftOrder(exercises)
         // This week's per-muscle targets (`VolumeProgression`) set the sets; `fit` still trims to the time.
         let deload = block?.isDeload == true
         Self.applySetGoals(&exercises, goals: muscleSetGoals, deload: deload)
@@ -1220,6 +1263,20 @@ public struct WorkoutPlanner: Sendable {
         return nil
     }
 
+    /// The order a session is done in: multi-joint lifts first, each group in
+    /// the order it was chosen, core last. A curl before a row, or a triceps
+    /// extension before a press, tires the small muscle the big lift needs:
+    /// lifts done later in a session lose reps and gain less strength, while
+    /// muscle growth is about the same in either order (Nunes et al., Eur J
+    /// Sport Sci 2021, meta-analysis; Simão et al., Sports Med 2012, review).
+    static func liftOrder(_ exercises: [PlannedExercise]) -> [PlannedExercise] {
+        func slot(_ exercise: PlannedExercise) -> MovementSlot? { ExerciseCatalog.slot(for: exercise.exerciseID) }
+        let compounds = exercises.filter { slot($0)?.isCompound == true }
+        let core = exercises.filter { slot($0) == .core }
+        let small = exercises.filter { slot($0)?.isCompound != true && slot($0) != .core }
+        return compounds + small + core
+    }
+
     /// The focus's movements for the session length (the long session adds
     /// `extraSlot`), with any priority movements moved to directly after the
     /// leading compound lifts: multi-joint lifts stay first (Nunes et al.
@@ -1229,14 +1286,28 @@ public struct WorkoutPlanner: Sendable {
     static func orderedSlots(focus: WorkoutFocus, minutes: Int, priority: [MovementSlot],
                              includeCore: Bool = true, variant: Int = 0) -> [MovementSlot] {
         let own = focus.slots(variant: variant)
-        var base = minutes >= longSessionMinutes ? own + [focus.extraSlot(variant: variant)] : own
-        if !includeCore { base.removeAll { $0 == .core } }
+        var extras = focus.extraSlots(variant: variant)
+        var base = own
+        if minutes >= longSessionMinutes, !extras.isEmpty { base.append(extras.removeFirst()) }
+        if !includeCore {
+            // The finisher covers the core: the next extra movement takes its place,
+            // so the session keeps its number of exercises.
+            let before = base.count
+            base.removeAll { $0 == .core }
+            if base.count < before, base.count < exerciseCount(minutes: minutes), !extras.isEmpty {
+                base.append(extras.removeFirst())
+            }
+        }
         let priority = includeCore ? priority : priority.filter { $0 != .core }
         guard !priority.isEmpty else { return base }
-        base.removeAll { priority.contains($0) }
-        let leading = base.prefix { $0.isCompound }
         var unique: [MovementSlot] = []
         for slot in priority where !unique.contains(slot) { unique.append(slot) }
+        // Each priority movement moves up once: a second exercise for it (push day's
+        // second triceps movement) keeps its own place.
+        for slot in unique {
+            if let index = base.firstIndex(of: slot) { base.remove(at: index) }
+        }
+        let leading = base.prefix { $0.isCompound }
         return Array(leading) + unique + Array(base.dropFirst(leading.count))
     }
 
@@ -1337,15 +1408,30 @@ public struct WorkoutPlanner: Sendable {
             guard !triedExtra else { return }
             triedExtra = true
             let used = Set(exercises.map(\.exerciseID))
-            let slot = focus.extraSlot(variant: variant)
-            guard var extra = pick(slot, excluding: used, minutes: minutes, rpe: rpe, history: history, lifter: lifter,
-                                   position: exercises.count, goals: [:]) else { return }
-            extra.sets = Self.setFloor(extra, deload: false)
-            guard underLimit(extra, in: exercises) else { return }
-            var candidate = exercises + [extra]
-            addWarmUps(&candidate, minutes: minutes)
-            guard estimate(candidate) <= minutes else { return }
-            exercises = candidate
+            // The first extra movement the session doesn't have yet, else a second
+            // exercise for one it has, the last listed first (a different exercise:
+            // `pick` skips `used`).
+            let extras = focus.extraSlots(variant: variant)
+            let present = Set(exercises.compactMap { ExerciseCatalog.slot(for: $0.exerciseID) })
+            let ordered = extras.filter { !present.contains($0) } + extras.filter { present.contains($0) }.reversed()
+            var withExtra: [PlannedExercise]?
+            for slot in ordered {
+                guard var extra = pick(slot, excluding: used, minutes: minutes, rpe: rpe, history: history, lifter: lifter,
+                                       position: exercises.count, goals: [:]) else { continue }
+                extra.sets = Self.setFloor(extra, deload: false)
+                // All of its sets must fit under the muscle's limit, not just the first.
+                if let muscle = VolumeProgression.primaryMuscle(extra), let limit = limits[muscle],
+                   (VolumeProgression.directSets(exercises)[muscle] ?? 0) + extra.sets > limit { continue }
+                // In lift order, unless supersets are already paired (their order stands).
+                let paired = exercises.contains { $0.supersetGroup != nil }
+                var candidate = paired ? exercises + [extra] : Self.liftOrder(exercises + [extra])
+                addWarmUps(&candidate, minutes: minutes)
+                guard estimate(candidate) <= minutes else { continue }
+                withExtra = candidate
+                break
+            }
+            guard let withExtra else { return }
+            exercises = withExtra
         }
     }
 
@@ -1391,8 +1477,9 @@ public struct WorkoutPlanner: Sendable {
     }
 
     /// Keeps each muscle within `VolumeProgression.sessionCap` direct sets in
-    /// the session: sets come off its latest exercise above the floor
-    /// (`setFloor`), then its latest exercise goes (one stays). The benefit
+    /// the session: sets come off its later exercises above the floor
+    /// (`setFloor`), the one with the most sets first, then off its first
+    /// lift, then its latest exercise goes (one stays). The benefit
     /// of piling sets into one session flattens after about 6-10 (Pelland et
     /// al., Sports Med 2026); a long push day had planned 16 chest sets.
     static func capSessionVolume(_ exercises: inout [PlannedExercise], minutes: Int, deload: Bool) {
@@ -1403,7 +1490,13 @@ public struct WorkoutPlanner: Sendable {
             let direct = VolumeProgression.directSets(exercises)
             guard let muscle = Muscle.allCases.first(where: { (direct[$0] ?? 0) > cap }) else { return }
             let indices = exercises.indices.filter { VolumeProgression.primaryMuscle(exercises[$0]) == muscle }
-            if let index = indices.reversed().first(where: { exercises[$0].sets > setFloor(exercises[$0], deload: deload) }) {
+            // The muscle's first lift keeps its sets longest; among the others, from the one with
+            // the most sets (the later on a tie), so the cut is shared: squat 4, split squat 3,
+            // leg extension 3, not 4 / 4 / 2.
+            let above = indices.reversed().filter { exercises[$0].sets > setFloor(exercises[$0], deload: deload) }
+            let later = above.filter { $0 != indices.first }
+            let most = later.map { exercises[$0].sets }.max()
+            if let index = later.first(where: { exercises[$0].sets == most }) ?? above.first {
                 exercises[index].sets -= 1
             } else if indices.count > 1, let last = indices.last {
                 exercises.remove(at: last)

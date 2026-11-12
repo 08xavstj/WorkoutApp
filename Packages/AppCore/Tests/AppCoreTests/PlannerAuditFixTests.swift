@@ -105,16 +105,23 @@ struct PlannerAuditFixTests {
         for count in 2...6 {
             let focuses = WeeklyPlan.focusRotation(start: .push, count: count)
             let days = focuses.enumerated().map { PlannedDay(weekday: 2 + $0.offset, time: 1080, focus: $0.element, minutes: 60) }
-            for muscle in [Muscle.chest, .lats, .quadriceps, .hamstrings] {
+            for muscle in [Muscle.chest, .quadriceps, .hamstrings] {
                 #expect(VolumeProgression.capacity(muscle, days: days).sessions >= 2, "\(count) days: \(muscle) \(focuses)")
             }
+            // The back is two tracked muscles: pulldowns are lat sessions and rows upper-back
+            // sessions (each helps the other at half credit), so between them at least two.
+            let back = VolumeProgression.capacity(.lats, days: days).sessions + VolumeProgression.capacity(.middleBack, days: days).sessions
+            #expect(back >= 2, "\(count) days: back \(focuses)")
         }
     }
 
     // §7/§8: upper and full-body versions cover side and rear delts and balance push and pull.
     @Test func upperAndFullBodyVersionsCoverTheDelts() {
         let upper = Set(WorkoutFocus.upper.slots(variant: 0) + WorkoutFocus.upper.slots(variant: 1))
-        #expect(upper.isSuperset(of: [.lateralRaise, .rearDelt, .verticalPull, .horizontalRow, .verticalPress]))
+        #expect(upper.isSuperset(of: [.lateralRaise, .verticalPull, .horizontalRow, .verticalPress, .biceps, .triceps]))
+        // Rows and pulldowns work the rear delts; the direct movement is the long session's extra.
+        #expect(WorkoutFocus.upper.extraSlots(variant: 0).contains(.rearDelt))
+        #expect(WorkoutFocus.upper.extraSlots(variant: 1).contains(.rearDelt))
         let full = WorkoutFocus.fullBody.slots(variant: 0) + WorkoutFocus.fullBody.slots(variant: 1)
         let push = full.filter { $0.muscleGroup == .push }.count
         let pull = full.filter { $0.muscleGroup == .pull }.count

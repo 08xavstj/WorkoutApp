@@ -87,9 +87,8 @@ struct WorkoutPlannerTests {
 
     @Test func shorterSessionsHaveFewerExercises() {
         let planner = WorkoutPlanner(gym: .commercialPounds)
-        // 30 min: squats and hinges rest 3 min now, so the leg curl goes rather than the big lifts
-        // dropping to two sets (`fit`).
-        #expect(planner.plan(focus: .legs, minutes: 30, recovery: nil, history: [:]).exercises.count == 3)
+        // 30 min: squat, Romanian deadlift, leg extension and leg curl (the two small lifts at two sets).
+        #expect(planner.plan(focus: .legs, minutes: 30, recovery: nil, history: [:]).exercises.count == 4)
         #expect(planner.plan(focus: .legs, minutes: 60, recovery: nil, history: [:]).exercises.count == 6)
     }
 

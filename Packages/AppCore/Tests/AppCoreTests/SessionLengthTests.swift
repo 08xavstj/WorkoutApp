@@ -18,10 +18,10 @@ struct SessionLengthTests {
         #expect(longMinutes > hourMinutes)
         #expect(hourMinutes <= 60)
         #expect((65...75).contains(longMinutes))
-        // The seventh exercise is a second triceps movement, not a repeat of the first: chest
-        // already has three, and a fourth went past the session cap (`capSessionVolume`).
+        // The hour already has two triceps movements; the seventh exercise is the chest fly.
         #expect(Set(long.exercises.map(\.exerciseID)).count == 7)
-        #expect(long.exercises.last?.exerciseID == "Dumbbell_One-Arm_Triceps_Extension")
+        #expect(long.exercises.last?.exerciseID == "Cable_Crossover")
+        #expect(long.exercises.filter { ExerciseCatalog.slot(for: $0.exerciseID) == .triceps }.count == 2)
         #expect(!long.hasSupersets)
         #expect(hour.estimatedMinutes == hourMinutes)
     }

@@ -31,7 +31,8 @@ struct MuscleCoverageTests {
         let result = try #require(MuscleCoverage.suggest(setsThisWeek: sets, states: states, sessionsLeft: 1, preferred: .legs))
         #expect(result.focus == .pull)
         // The last session of the week reaches one lagging muscle outside the focus (calves).
-        #expect(result.prioritySlots == [.verticalPull, .biceps, .calves])
+        // Lats then the upper back (rows are its movement now), then calves from outside the focus.
+        #expect(result.prioritySlots == [.verticalPull, .horizontalRow, .calves])
         #expect(!result.lagging.contains(.quadriceps))
     }
 
@@ -66,11 +67,12 @@ struct MuscleCoverageTests {
     }
 
     @Test func prioritySlotsGoAfterTheCompoundLifts() {
-        // Push puts side delts before the incline press now; pull has a second row before the core (audit 2026-11 §12, §19).
+        // Push ranks side delts and a triceps extension before the incline press, with a second
+        // triceps movement sixth; pull ranks the curl third and a hammer curl fifth.
         #expect(WorkoutPlanner.orderedSlots(focus: .push, minutes: 45, priority: [.triceps])
-                == [.horizontalPress, .verticalPress, .triceps, .lateralRaise, .inclinePress, .chestFly])
+                == [.horizontalPress, .verticalPress, .triceps, .lateralRaise, .inclinePress, .triceps])
         #expect(WorkoutPlanner.orderedSlots(focus: .pull, minutes: 45, priority: [.hinge, .hinge])
-                == [.verticalPull, .horizontalRow, .hinge, .rearDelt, .biceps, .horizontalRow, .core])
+                == [.verticalPull, .horizontalRow, .hinge, .biceps, .rearDelt, .hammerCurl, .core])
         #expect(WorkoutPlanner.orderedSlots(focus: .legs, minutes: 45, priority: []) == WorkoutFocus.legs.slots)
         // The planner then builds the session with the lagging muscle's movement in it.
         let plan = WorkoutPlanner(gym: .commercialPounds).plan(focus: .pull, minutes: 45, recovery: 80, history: [:],

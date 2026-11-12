@@ -640,13 +640,24 @@ public enum VolumeProgression {
                                 gym: GymProfile? = nil) -> (sessions: Int, timeCap: Int) {
         var sessions = 0
         var cap = 0
+        // A focus with two versions planned twice or more in the week is one A and one B
+        // (the planner alternates them), so each day counts its own version: a full-body
+        // week's pulldown day and row day are one lat session and one upper-back session.
+        // Planned once, the version isn't known ahead: the fewer of the two (`directSlots`).
+        let planned = Dictionary(grouping: days, by: \.focus).mapValues(\.count)
+        var seen: [WorkoutFocus: Int] = [:]
         for day in days {
-            let slots = directSlots(muscle, focus: day.focus, minutes: day.minutes, gym: gym)
+            let occurrence = seen[day.focus, default: 0]
+            seen[day.focus] = occurrence + 1
+            let versions = day.focus.variantCount
+            let version: Int? = versions > 1 && (planned[day.focus] ?? 0) >= versions ? occurrence % versions : nil
+            let slots = version.map { directSlots(muscle, focus: day.focus, minutes: day.minutes, variant: $0, gym: gym) }
+                ?? directSlots(muscle, focus: day.focus, minutes: day.minutes, gym: gym)
             guard slots > 0 else { continue }
             sessions += 1
             // Big lifts get about 4 sets and small ones 3 (`WorkoutPlanner.baseSets`): the share is by that weight.
             func weight(_ slot: MovementSlot) -> Double { slot.isCompound ? 4 : 3 }
-            let session = sessionSlots(focus: day.focus, minutes: day.minutes, variant: 0, gym: gym).filter { $0 != .core }
+            let session = sessionSlots(focus: day.focus, minutes: day.minutes, variant: version ?? 0, gym: gym).filter { $0 != .core }
             let total = session.reduce(0) { $0 + weight($1) }
             let mine = session.filter { MuscleCoverage.muscles(for: $0).primary == muscle }.reduce(0) { $0 + weight($1) }
             let fraction = total > 0 ? min(mine, Double(slots) * 4) / total : 0
@@ -654,7 +665,12 @@ public enum VolumeProgression {
             // none can lean on another's share: no slack, or the targets overfill the session.
             let slack = style == .endurance ? 1 : shareSlack
             let share = sessionSetBudget(minutes: day.minutes, style: style) * fraction * slack
-            cap += min(sessionCap(minutes: day.minutes), slots * TrainingBlock.setRange.upperBound,
+            // A muscle with one movement in the session is planned at most
+            // `WorkoutPlanner.maximumSetsPerExercise` (4) sets there: a fifth only comes from
+            // `fill` when time is left over. Counting 5 promised six muscles 30 sets on a
+            // 60-minute upper day that holds about 20, so every week read as "missed sets".
+            let perSlot = slots == 1 ? WorkoutPlanner.maximumSetsPerExercise : TrainingBlock.setRange.upperBound
+            cap += min(sessionCap(minutes: day.minutes), slots * perSlot,
                        max(TrainingBlock.setRange.lowerBound, Int(share.rounded())))
         }
         return (sessions, cap)
