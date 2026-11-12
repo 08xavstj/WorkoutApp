@@ -1,16 +1,14 @@
 import Foundation
 
 /// One exercise's plan in words, the same in the workout builder, the live
-/// workout's exercise header and its collapsed rows: "3 × 7 · 2 in reserve"
-/// and "82.5 kg" or "24 kg per hand".
+/// workout's exercise header and its collapsed rows: "3 × 7" and "82.5 kg"
+/// or "24 kg per hand". No reps-in-reserve part: sets work to rep goals (`RepGoal`).
 public enum Prescription {
-    /// "3 × 7 · 2 in reserve": today's rep target (`PlannedExercise.targetReps`),
-    /// or the range ("3 × 6–10") when there's none yet. No effort part without `rpe`.
-    public static func sets(_ sets: Int, repsLow: Int, repsHigh: Int, targetReps: Int?, rpe: Double?) -> String {
+    /// "3 × 7": today's rep goal (`PlannedExercise.targetReps`), or the range
+    /// ("3 × 6–10") when there's none yet. `rpe` is ignored (kept for callers).
+    public static func sets(_ sets: Int, repsLow: Int, repsHigh: Int, targetReps: Int?, rpe: Double? = nil) -> String {
         let reps = targetReps.map { "\($0)" } ?? (repsLow == repsHigh ? "\(repsHigh)" : "\(repsLow)–\(repsHigh)")
-        var parts = ["\(sets) × \(reps)"]
-        if let rpe { parts.append(ReserveText.text(rpe: rpe)) }
-        return parts.joined(separator: " · ")
+        return "\(sets) × \(reps)"
     }
 
     /// "82.5 kg", or "24 kg per hand" for dumbbells and kettlebells (the

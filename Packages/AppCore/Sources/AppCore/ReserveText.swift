@@ -130,7 +130,7 @@ public enum ReserveText {
     }
 
     private static func phrase(low: Int, high: Int) -> String {
-        if low == high, low == 1 { return "1 rep in the tank" }
-        return "\(range(low: low, high: high)) reps in the tank"
+        if low == high, low == 1 { return "1 rep left" }
+        return "\(range(low: low, high: high)) reps left"
     }
 }

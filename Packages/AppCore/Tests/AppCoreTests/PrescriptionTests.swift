@@ -3,8 +3,8 @@ import Testing
 
 struct PrescriptionTests {
     @Test func todaysTargetOrTheRange() {
-        #expect(Prescription.sets(3, repsLow: 6, repsHigh: 10, targetReps: 7, rpe: 7) == "3 × 7 · 3 reps in the tank")
-        #expect(Prescription.sets(3, repsLow: 6, repsHigh: 10, targetReps: nil, rpe: 7) == "3 × 6–10 · 3 reps in the tank")
+        #expect(Prescription.sets(3, repsLow: 6, repsHigh: 10, targetReps: 7, rpe: 7) == "3 × 7")
+        #expect(Prescription.sets(3, repsLow: 6, repsHigh: 10, targetReps: nil, rpe: 7) == "3 × 6–10")
         #expect(Prescription.sets(2, repsLow: 8, repsHigh: 8, targetReps: nil, rpe: nil) == "2 × 8")
     }
 

@@ -508,16 +508,6 @@ extension PlannedExercise {
     /// Muscles this exercise trains, primary first (`ExerciseCatalog.muscles`);
     /// empty for an exercise outside the catalog.
     public var muscles: [String] { ExerciseCatalog.muscles(forExerciseID: exerciseID) }
-
-    /// "2-3 reps in reserve": how many more reps you could do at the end of each set.
-    public var repsInReserve: String {
-        let reserve = max(0, 10 - rpe)
-        let low = Int(reserve.rounded(.down))
-        let high = Int(reserve.rounded(.up))
-        if high == 0 { return "to failure" }
-        let range = low == high ? "\(low)" : "\(low)-\(high)"
-        return "\(range) rep\(high == 1 ? "" : "s") in reserve"
-    }
 }
 
 public struct PlannedWorkout: Codable, Sendable, Equatable {
@@ -836,7 +826,7 @@ public struct WorkoutPlanner: Sendable {
                 planned.note = [estimate.note, loadNote(load: estimate.load, kind: kind)].compactMap { $0 }.joined(separator: ". ")
             } else {
                 let middle = LoadEstimator.estimateReps(reps)
-                planned.note = "First time: pick a weight you can lift \(middle) times with \(Int(10 - setRPE)) left in the tank."
+                planned.note = "First time: pick a weight you could lift about \(middle + Int(10 - setRPE)) times, and do \(middle)."
             }
         } else if !isHold, let past = history[choice.id], past.lastReps > 0 {
             bodyweightProgression(&planned, history: past)
@@ -1465,16 +1455,15 @@ public struct WorkoutPlanner: Sendable {
     static func rationale(focus: WorkoutFocus, focusReason: String?, minutes: Int, recovery: Int?,
                           rpe: Double, block: TrainingBlock.WeekState?, exercises: [PlannedExercise]) -> String {
         var parts = [rationaleLead(focus: focus, focusReason: focusReason, block: block)]
-        // What the sets actually ask (big and small lifts differ by style), not the session number.
-        let reserve = ReserveText.text(rpes: exercises.map(\.rpe), fallback: rpe)
+        // Effort shows as rep goals on the sets (`RepGoal`), not a reps-in-reserve number.
         if block != nil {
-            // The block week sets the reserve; only a low-recovery back-off needs saying.
-            if let recovery, recovery < 67 { parts.append("Effort eased for \(recovery)% recovery: sets stop with \(reserve).") }
+            // The block week sets the effort; only a low-recovery back-off needs saying.
+            if let recovery, recovery < 67 { parts.append("Effort eased for \(recovery)% recovery: rep goals are a little easier.") }
         } else if let recovery {
-            let mood = recovery < 34 ? "an easy day" : (recovery < 67 ? "a normal day" : "a day to push")
-            parts.append("Recovery \(recovery)%, \(mood): sets stop with \(reserve).")
+            let mood = recovery < 34 ? "an easy day, with easier rep goals" : (recovery < 67 ? "a normal day" : "a day to push")
+            parts.append("Recovery \(recovery)%, \(mood).")
         } else {
-            parts.append("No recovery score yet, so a moderate effort: \(reserve).")
+            parts.append("No recovery score yet, so a moderate effort.")
         }
         // Counts after `fit`, so the line never promises sets the time didn't allow.
         let sets = exercises.reduce(0) { $0 + $1.sets }

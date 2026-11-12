@@ -1,14 +1,11 @@
 import SwiftUI
 import AppCore
 
-/// Explains effort in plain words first: "reps in the tank" (reps left, the
-/// RIR-based RPE scale), a worked example, why the app asks, the reps-left ↔
+/// Explains the "reps left" tap after a set and how it moves the next set's
+/// rep goal (`RepGoal`), a worked example, why the app asks, the reps-left ↔
 /// RPE table, and how the whole-workout rating on the finish screen differs.
+/// No reps-in-reserve target is shown anywhere: the lifter works to rep goals.
 struct RPEGuideView: View {
-    /// The plan's reps in reserve, so the top explains the number on screen
-    /// ("3 reps in the tank"); nil explains the usual 2.
-    var reserve: Double? = nil
-
     @Environment(\.dismiss) private var dismiss
     /// At accessibility text sizes the rows stack instead of squeezing the
     /// text beside the number (ux-audit.md 4.8, P22).
@@ -19,19 +16,18 @@ struct RPEGuideView: View {
     @ScaledMetric(relativeTo: .subheadline) private var rangeWidth: CGFloat = 40
 
     private var stacked: Bool { dynamicTypeSize.isAccessibilitySize }
-    private var shownReserve: Double { reserve ?? 2 }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text(ReserveText.explainerBody(shownReserve))
+                    Text("Each set shows a rep goal. After the set, tap how many more clean reps you could have done. If you had more left than planned, the next set's goal goes up; if the set was a grind, it comes down.")
                         .font(.subheadline)
-                    Label(ReserveText.example(reps: 8, reserve: 2), systemImage: "lightbulb")
+                    Label("Goal 8 reps, you did 8 and had 3 more in you: the next set's goal is 9.", systemImage: "lightbulb")
                         .font(.subheadline)
                         .symbolRenderingMode(.hierarchical)
                 } header: {
-                    Text(ReserveText.explainerTitle(shownReserve))
+                    Text("Rep goals")
                 }
 
                 Section {
@@ -88,7 +84,7 @@ struct RPEGuideView: View {
             // Opaque at the medium detent (a part-height sheet is see-through glass by default).
             .scrollContentBackground(.hidden)
             .background(Theme.background)
-            .navigationTitle("Reps in the tank")
+            .navigationTitle("Reps left")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

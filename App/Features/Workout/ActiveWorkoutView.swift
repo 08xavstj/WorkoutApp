@@ -1049,7 +1049,7 @@ private struct ExerciseCard: View {
         }
         .card()
         .sheet(isPresented: $showingRPEGuide) {
-            RPEGuideView(reserve: targetRIR)
+            RPEGuideView()
                 .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $editingMachineNote) {

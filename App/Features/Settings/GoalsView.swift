@@ -83,7 +83,7 @@ struct GoalsView: View {
                 } header: {
                     Text("Training focus")
                 } footer: {
-                    Text("Muscle: 6-15 reps, close to failure. Strength: 3-6 reps on big lifts, 2-3 left in the tank. Stamina: higher reps plus Zone 2 cardio. Pick more than one if you like.")
+                    Text("Muscle: 6-15 reps, close to failure. Strength: 3-6 reps on big lifts, stopping a little short of failure. Stamina: higher reps plus Zone 2 cardio. Pick more than one if you like.")
                 }
 
                 // Long-term lift targets with a projected range (`LiftGoalProjection`).

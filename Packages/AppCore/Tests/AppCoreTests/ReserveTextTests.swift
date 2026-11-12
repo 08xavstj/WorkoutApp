@@ -5,23 +5,23 @@ struct ReserveTextTests {
     // Changed on purpose from "2 in reserve": users didn't know what "in
     // reserve" meant next to an RPE number, so the plain words lead.
     @Test func wholeHalfAndNone() {
-        #expect(ReserveText.text(2) == "2 reps in the tank")
-        #expect(ReserveText.text(1) == "1 rep in the tank")
-        #expect(ReserveText.text(2.5) == "2-3 reps in the tank")
+        #expect(ReserveText.text(2) == "2 reps left")
+        #expect(ReserveText.text(1) == "1 rep left")
+        #expect(ReserveText.text(2.5) == "2-3 reps left")
         #expect(ReserveText.text(0) == "to failure")
         #expect(ReserveText.text(-1) == "to failure")
-        #expect(ReserveText.text(0.5) == "0-1 reps in the tank")
+        #expect(ReserveText.text(0.5) == "0-1 reps left")
         // Float noise doesn't turn a whole number into a range.
-        #expect(ReserveText.text(2.0000001) == "2 reps in the tank")
-        #expect(ReserveText.text(rpe: 7.5) == "2-3 reps in the tank")
+        #expect(ReserveText.text(2.0000001) == "2 reps left")
+        #expect(ReserveText.text(rpe: 7.5) == "2-3 reps left")
         #expect(ReserveText.text(rpe: 10) == "to failure")
     }
 
     @Test func theRangeTheSetsAskFor() {
         // Big lifts at RPE 7, small ones at 8: "2-3", not the session's 6.5 ("3-4").
-        #expect(ReserveText.text(rpes: [7, 7, 8], fallback: 6.5) == "2-3 reps in the tank")
-        #expect(ReserveText.text(rpes: [7, 7], fallback: 6.5) == "3 reps in the tank")
-        #expect(ReserveText.text(rpes: [], fallback: 6.5) == "3-4 reps in the tank")
+        #expect(ReserveText.text(rpes: [7, 7, 8], fallback: 6.5) == "2-3 reps left")
+        #expect(ReserveText.text(rpes: [7, 7], fallback: 6.5) == "3 reps left")
+        #expect(ReserveText.text(rpes: [], fallback: 6.5) == "3-4 reps left")
         #expect(ReserveText.text(rpes: [10], fallback: 8) == "to failure")
     }
 
@@ -56,7 +56,7 @@ struct ReserveTextTests {
     }
 
     @Test func explainer() {
-        #expect(ReserveText.explainerTitle(3) == "What \u{201C}3 reps in the tank\u{201D} means")
+        #expect(ReserveText.explainerTitle(3) == "What \u{201C}3 reps left\u{201D} means")
         #expect(ReserveText.explainerBody(3).hasPrefix("Pick a weight you could lift for about 3 more reps than the target, and stop the set there."))
         #expect(ReserveText.explainerBody(1).contains("about 1 more rep than"))
         #expect(ReserveText.explainerBody(2.5).contains("about 2-3 more reps"))

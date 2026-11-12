@@ -220,9 +220,10 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         calendar.isDate(weekStart, inSameDayAs: other)
     }
 
-    /// One line for the AI coach.
+    /// One line for the AI coach. No reps-in-reserve number: the user works
+    /// to rep goals (`RepGoal`), so the coach shouldn't talk in RIR.
     public var coachLine: String {
-        var line = "Training block: week \(week.week) of \(week.length), RIR \(week.targetRIR)"
+        var line = "Training block: week \(week.week) of \(week.length) (the user works to rep goals per set; don't mention reps in reserve or RIR)"
         if week.isDeload { line += " (planned easier week, about half the sets)" }
         else if week.isHeld { line += " (ramp held: HRV below normal)" }
         else if week.setMultiplier > 1 { line += " (sets ×\(week.setMultiplier.formatted()))" }

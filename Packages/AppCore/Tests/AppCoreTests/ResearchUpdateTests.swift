@@ -63,7 +63,7 @@ struct GoalTests {
         let planner = WorkoutPlanner(gym: .commercialPounds, style: .strength)
         let plan = planner.plan(focus: .push, minutes: 45, recovery: 80, history: [:])
         #expect(plan.exercises.first?.reps == 3...6)
-        #expect(plan.exercises.first?.repsInReserve == "2 reps in reserve")
+        #expect(plan.exercises.first?.rpe == 8)
     }
 }
 

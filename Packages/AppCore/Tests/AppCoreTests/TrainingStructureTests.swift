@@ -117,7 +117,7 @@ struct TrainingBlockTests {
 
     @Test func coachLineIsOneSentence() {
         var block = TrainingBlock(start: monday, style: .balanced)
-        #expect(block.coachLine == "Training block: week 1 of 5, RIR 3.")
+        #expect(block.coachLine == "Training block: week 1 of 5 (the user works to rep goals per set; don't mention reps in reserve or RIR).")
         block.week = TrainingBlock.weekState(5, style: .balanced, length: 5)
         #expect(block.coachLine.contains("planned easier week"))
     }

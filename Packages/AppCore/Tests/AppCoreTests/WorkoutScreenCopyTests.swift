@@ -20,10 +20,8 @@ struct WorkoutScreenCopyTests {
         #expect(!detail.contains("Block week"))
         #expect(!detail.contains(WorkoutFocus.upper.muscles.lowercased()))
         #expect(detail.contains("60 min"))
-        // Effort is said in the sets' words: the range the exercises use (changed
-        // on purpose from the session's RPE, which the builder showed as "3-4"
-        // beside lifts at "3 in reserve").
-        #expect(detail.contains(ReserveText.text(rpes: plan.exercises.map(\.rpe), fallback: plan.targetRPE)))
+        // Effort as rep goals, not a reps-in-reserve number.
+        #expect(detail.contains("rep goals are a little easier"))
         #expect(detail.contains("50% recovery"))
     }
 

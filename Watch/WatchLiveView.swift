@@ -394,7 +394,8 @@ private struct WatchRatingPrompt: View {
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
             }
-            WatchRepsLeftGrid(plan: set.suggestedRPE.map { min(4, max(0, 10 - $0)) }) { left in
+            // No "plan" marker: the lifter works to the rep goal, not a reps-left target.
+            WatchRepsLeftGrid(plan: nil) { left in
                 model.rateSet(set, rpe: Double(10 - left))
             }
         }

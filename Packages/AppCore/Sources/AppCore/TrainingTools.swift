@@ -229,7 +229,7 @@ extension WorkoutPlanner {
                 }
             } else if kind != nil {
                 let left = Int((10 - rpe).rounded())
-                planned.note = "First time: pick a weight you can lift \(item.reps.upperBound) times with \(left) left in the tank."
+                planned.note = "First time: pick a weight you could lift about \(item.reps.upperBound + left) times, and do \(item.reps.upperBound)."
             }
             if let load = planned.load, let kind {
                 if let suggestedFrom {

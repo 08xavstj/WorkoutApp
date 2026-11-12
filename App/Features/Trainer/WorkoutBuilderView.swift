@@ -932,8 +932,8 @@ struct PlannedExerciseRow: View {
         .accessibilityHint("Swap it, mark equipment you don't have, or never plan it again")
     }
 
-    /// "3 × 7 · 2 in reserve": sets, today's reps (the range with no rep
-    /// target yet) and effort, as the live workout says it (`Prescription`).
+    /// "3 × 7": sets and today's rep goal (the range with no goal yet), as
+    /// the live workout says it (`Prescription`).
     private var prescription: String {
         Prescription.sets(exercise.sets, repsLow: exercise.reps.lowerBound, repsHigh: exercise.reps.upperBound,
                           targetReps: exercise.targetReps, rpe: exercise.rpe)
