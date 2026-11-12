@@ -627,8 +627,12 @@ final class VitalsModel {
         // rates (sleeping heart rate runs lower and would inflate the ratio), this
         // week's hard and moderate minutes, and logged lifting over 4 weeks.
         let liftingStart = now.addingTimeInterval(-28 * 86_400)
-        let liftingMinutesPerWeek = sessions.filter { $0.start >= liftingStart }
-            .reduce(0.0) { $0 + min(max(0, $1.end.timeIntervalSince($1.start)), 3 * 3_600) } / 60 / 4
+        var liftingSeconds: TimeInterval = 0
+        for session in sessions where session.start >= liftingStart {
+            let length: TimeInterval = max(0, session.end.timeIntervalSince(session.start))
+            liftingSeconds += min(length, 3 * 3_600)
+        }
+        let liftingMinutesPerWeek: Double = liftingSeconds / 60 / 4
         let estimateBMI = bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm)
         (vo2HeartEstimate, vo2ActivityEstimate) = Self.vo2Estimates(
             restingHeartRates: rhrSeries.suffix(7).map(\.value), maxHeartRate: resolvedProfile.maxHeartRate,
