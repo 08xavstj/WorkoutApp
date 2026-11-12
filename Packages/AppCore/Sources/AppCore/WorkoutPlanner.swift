@@ -134,6 +134,14 @@ public enum WorkoutFocus: String, Codable, Sendable, CaseIterable, Identifiable 
     /// curl ranks first: when time runs out the last small lift goes, and
     /// the quads still have the squat.
     ///
+    /// **Every muscle each week.** No compound lift trains the calves, and
+    /// the abs get little from them, so a calf raise and a core movement sit
+    /// inside the first five of the leg, lower, pull and full-body lists: a
+    /// 45-minute week still reaches them (each major muscle group at least
+    /// twice a week: ACSM position stand 2026; twice beat once for growth:
+    /// Schoenfeld, Ogborn & Krieger, Sports Med 2016). With the abs finisher
+    /// on, the core movement gives its place to the next one in the list.
+    ///
     /// Upper and full-body days alternate two versions, so a week of them
     /// covers side delts, an incline and an overhead press, and both pulls,
     /// with pushing and pulling sets about even across the pair (ACSM
@@ -146,19 +154,18 @@ public enum WorkoutFocus: String, Codable, Sendable, CaseIterable, Identifiable 
         let b = variant % max(1, variantCount) == 1
         switch self {
         case .push: return [.horizontalPress, .verticalPress, .lateralRaise, .triceps, .inclinePress, .triceps]
-        case .pull: return [.verticalPull, .horizontalRow, .biceps, .rearDelt, .hammerCurl, .core]
-        case .legs: return [.squat, .hinge, .legCurl, .legExtension, .singleLeg, .calves]
+        case .pull: return [.verticalPull, .horizontalRow, .biceps, .rearDelt, .core, .hammerCurl]
+        case .legs: return [.squat, .hinge, .legCurl, .legExtension, .calves, .singleLeg]
         case .upper:
             // A's fifth is the curl and B's the triceps extension, so 45-minute upper days share them out.
             return b ? [.inclinePress, .verticalPull, .horizontalRow, .verticalPress, .triceps, .biceps]
                      : [.horizontalPress, .horizontalRow, .verticalPull, .lateralRaise, .biceps, .triceps]
-        case .lower: return [.squat, .hinge, .legCurl, .legExtension, .calves, .core]
+        case .lower: return [.squat, .hinge, .legCurl, .calves, .core, .legExtension]
         case .fullBody:
-            // A trains the rear delts and B the side delts, so the pair
-            // balances pushing and pulling sets (Full Body used to be two
-            // presses to one row).
+            // One press and one pull each; A's small lifts are calves and core, B's core and
+            // side delts, so a week of full-body days reaches every muscle.
             return b ? [.hinge, .inclinePress, .horizontalRow, .singleLeg, .core, .lateralRaise]
-                     : [.squat, .horizontalPress, .verticalPull, .hinge, .core, .rearDelt]
+                     : [.squat, .horizontalPress, .verticalPull, .hinge, .calves, .core]
         }
     }
 
@@ -186,7 +193,7 @@ public enum WorkoutFocus: String, Codable, Sendable, CaseIterable, Identifiable 
         case .legs: return [.hipThrust, .calves]
         case .upper: return b ? [.rearDelt, .lateralRaise] : [.verticalPress, .rearDelt]
         case .lower: return [.singleLeg, .hipThrust]
-        case .fullBody: return b ? [.triceps, .verticalPull] : [.biceps, .lateralRaise]
+        case .fullBody: return b ? [.triceps, .calves] : [.biceps, .lateralRaise]
         }
     }
 
@@ -291,14 +298,17 @@ public enum ExerciseCatalog {
             ex("Band_Pull_Apart", "Band Pull-Apart", nil, .bands)
         ],
         .biceps: [
-            ex("Barbell_Curl", "Barbell Curl", .barbell),
+            // Dumbbells first: each arm works on its own and the wrist can turn, and their
+            // growth is no different from a barbell's in the studies there are (app choice,
+            // and the user's preference). A lift you've logged still comes first (`choose`).
+            ex("Dumbbell_Bicep_Curl", "Dumbbell Curl", .dumbbell),
             // Arm behind the body: the biceps works stretched. Incline curls
             // grew the upper part of the elbow flexors more and preacher
             // curls the lower part (Kassiano et al., Int J Sports Med 2025,
             // 63 untrained women), so neither is "the best": a second curl
             // in a session is the incline one, for a different position.
             ex("Incline_Dumbbell_Curl", "Incline Dumbbell Curl", .dumbbell, .bench),
-            ex("Dumbbell_Bicep_Curl", "Dumbbell Curl", .dumbbell),
+            ex("Barbell_Curl", "Barbell Curl", .barbell),
             ex("EZ-Bar_Curl", "EZ-Bar Curl", .ezBar),
             ex("Machine_Bicep_Curl", "Machine Curl", .machine),
             ex("Machine_Preacher_Curls", "Machine Preacher Curl", .machine)
@@ -1022,12 +1032,13 @@ public struct WorkoutPlanner: Sendable {
 
     /// How this lift progresses: your choice (`progressionModes`), else the
     /// suggestion for its equipment (`ProgressionMode.suggested`), where a
-    /// "big jump" is the next weight up from `load` being over 10% heavier.
+    /// "big jump" is the next weight up from `load` being over 10% heavier,
+    /// or over 5% for a single-joint lift (`smallLiftJumpFraction`).
     public func progressionMode(for exerciseID: String, kind: EquipmentKind?, compound: Bool, at load: Double) -> ProgressionMode {
         if let own = progressionModes[exerciseID] { return own }
         var bigJump = false
         if let kind, let next = gym.nextLoad(above: load, on: kind) {
-            bigJump = isBigJump(from: load, to: next)
+            bigJump = isBigJump(from: load, to: next, compound: compound)
         }
         return ProgressionMode.suggested(kind: kind, compound: compound, bigJump: bigJump)
     }
@@ -1704,6 +1715,17 @@ public struct WorkoutPlanner: Sendable {
     /// range: the ACSM suggests adding 2-10% at a time (position stand, Med Sci
     /// Sports Exerc 2009).
     static let routineJumpFraction = 0.10
+    /// For single-joint lifts (curls, triceps extensions, raises) a next
+    /// weight more than this much heavier makes the lift rep-first
+    /// (`progressionMode`): the lower half of the ACSM's 2-10%. Their loads
+    /// are small, so one plate or stack pin is a large share (2.5 kg on a
+    /// 25 kg curl is 10%), about three reps' worth of load by Epley, and a
+    /// step that size made the weight bounce up and down near the lifter's
+    /// limit. Adding reps builds muscle and strength as well as adding load
+    /// (Plotkin et al., PeerJ 2022). The 5% line is the app's choice; the
+    /// stand's own wording on smaller steps for small-muscle exercises
+    /// couldn't be checked here.
+    static let smallLiftJumpFraction = 0.05
     /// When the next weight up is a bigger jump than that (light dumbbells,
     /// coarse stacks), earn it by beating the top of the range by this many
     /// reps first, as the ACSM's "1-2 reps over the desired number" rule does.
@@ -2070,8 +2092,11 @@ public struct WorkoutPlanner: Sendable {
         return min(Self.maximumExtendedReps, history.lastReps + gain)
     }
 
-    func isBigJump(from current: Double, to next: Double) -> Bool {
-        current > 0 && (next - current) / current > Self.routineJumpFraction + 0.0001
+    /// More than the routine jump: over 10%, or over 5% for a single-joint
+    /// lift when choosing its progression mode (`smallLiftJumpFraction`).
+    func isBigJump(from current: Double, to next: Double, compound: Bool = true) -> Bool {
+        let limit = compound ? Self.routineJumpFraction : Self.smallLiftJumpFraction
+        return current > 0 && (next - current) / current > limit + 0.0001
     }
 
     /// Plates or per-hand weight, plus a tip when the planner is holding you

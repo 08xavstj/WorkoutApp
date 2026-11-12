@@ -1072,10 +1072,7 @@ struct LiftSimulation {
                         lastDirection = direction
                     }
                 }
-                // A rate, not a count: three reversals in a lift trained once a week for 12 weeks,
-                // so one in four sessions. Upper days A and B both have a curl and a triceps
-                // extension now, so those lifts have twice the sessions in the same weeks.
-                if reversals >= max(3, Int((Double(hard.count) / 4).rounded(.up))) {
+                if reversals >= 3 {
                     output.report.add(.progressionNoOscillation, "\(s) \(tag)", "\(tag) loads reversed \(reversals)× outside deloads: \(hard.map { "\($0.load)" }.joined(separator: " → "))")
                 }
             }
@@ -1705,7 +1702,8 @@ struct PlannerBugReproTests {
         let target = VolumeProgression.target(for: .chest, previous: nil, week: TrainingBlock.weekState(1, style: .muscle, length: 5),
                                               style: .muscle, lastWeek: nil, state: nil, sessions: 1, timeCap: 3)
         #expect(target.sets == 3)
-        #expect(target.band == 3...3)
+        // Under the 4-set floor the band allows the one set a tight session trims.
+        #expect(target.band == 2...3)
         #expect(target.change == .cappedTime)
         // Steady (stamina) weeks hold every muscle at its target at once: no share slack, so the
         // 30-minute hotel upper day's chest cap is the 3 sets it holds, not 4.

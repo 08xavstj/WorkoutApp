@@ -106,3 +106,132 @@ struct ExerciseSelectionTests {
         }
     }
 }
+
+/// Every muscle is trained each week on the default splits
+/// (docs/research/exercise-selection-2026-11.md, "The whole week").
+struct WeeklyCoverageTests {
+    let planner = WorkoutPlanner(gym: .commercialKilograms, style: .muscle)
+
+    struct Week {
+        var direct: [Muscle: Double] = [:]
+        /// Direct sets plus half for each set where the muscle helps (Pelland et al. 2026's fractional count).
+        var fractional: [Muscle: Double] = [:]
+        var sessions: [Muscle: Int] = [:]
+    }
+
+    func week(days: Int, minutes: Int, core: Bool) -> Week {
+        var week = Week()
+        var seen: [WorkoutFocus: Int] = [:]
+        for focus in WeeklyPlan.focusRotation(start: .push, count: days) {
+            let version = seen[focus, default: 0]
+            seen[focus] = version + 1
+            let plan = planner.plan(focus: focus, minutes: minutes, recovery: 70, history: [:], includeCore: core,
+                                    variant: version % focus.variantCount)
+            var hit: Set<Muscle> = []
+            for exercise in plan.exercises {
+                guard let slot = ExerciseCatalog.slot(for: exercise.exerciseID) else { continue }
+                let muscles = MuscleCoverage.muscles(for: slot)
+                week.direct[muscles.primary, default: 0] += Double(exercise.sets)
+                week.fractional[muscles.primary, default: 0] += Double(exercise.sets)
+                hit.insert(muscles.primary)
+                for helper in muscles.secondary {
+                    week.fractional[helper, default: 0] += 0.5 * Double(exercise.sets)
+                    hit.insert(helper)
+                }
+            }
+            for muscle in hit { week.sessions[muscle, default: 0] += 1 }
+        }
+        return week
+    }
+
+    static let big: [Muscle] = [.chest, .shoulders, .triceps, .biceps, .lats, .middleBack, .quadriceps, .hamstrings, .glutes]
+
+    // Each major muscle group at least twice a week (ACSM 2026; Schoenfeld, Ogborn & Krieger 2016).
+    @Test func everyBigMuscleIsTrainedTwiceAWeek() {
+        for days in 2...6 {
+            for minutes in [45, 60, 75] {
+                for core in [true, false] {
+                    let week = week(days: days, minutes: minutes, core: core)
+                    for muscle in Self.big {
+                        #expect((week.sessions[muscle] ?? 0) >= 2, "\(days) days, \(minutes) min: \(muscle)")
+                    }
+                }
+            }
+        }
+    }
+
+    // No compound lift trains the calves, and the abs get little: both need their own movement.
+    @Test func calvesAndAbsAreTrainedEveryWeek() {
+        for days in 2...6 {
+            for minutes in [45, 60, 75] {
+                for core in [true, false] {
+                    let week = week(days: days, minutes: minutes, core: core)
+                    #expect((week.direct[.calves] ?? 0) >= 3, "\(days) days, \(minutes) min: calves")
+                    if days >= 3 { #expect((week.sessions[.calves] ?? 0) >= 2, "\(days) days, \(minutes) min: calves twice") }
+                    // With the finisher on (`core` false) the abs come from it instead.
+                    if core { #expect((week.direct[.abdominals] ?? 0) >= 3, "\(days) days, \(minutes) min: abs") }
+                }
+            }
+        }
+    }
+
+    // Four or more hour-long days reach about the 10 weekly sets where growth is best
+    // (Schoenfeld, Ogborn & Krieger 2017), counting helper sets at half; shorter weeks stay
+    // over the ~4 sets that still build muscle (Pelland et al. 2026).
+    @Test func weeklySetsReachTheBandWhenTheWeekHasRoom() {
+        for days in 4...6 {
+            for minutes in [60, 75] {
+                let week = week(days: days, minutes: minutes, core: false)
+                for muscle in Self.big {
+                    #expect((week.fractional[muscle] ?? 0) >= 8, "\(days) days, \(minutes) min: \(muscle) \(week.fractional[muscle] ?? 0)")
+                }
+            }
+        }
+        for days in 2...6 {
+            for minutes in [45, 60, 75] {
+                let week = week(days: days, minutes: minutes, core: true)
+                for muscle in Self.big {
+                    #expect((week.fractional[muscle] ?? 0) >= 3, "\(days) days, \(minutes) min: \(muscle) \(week.fractional[muscle] ?? 0)")
+                }
+            }
+        }
+    }
+}
+
+/// Small lifts add reps before weight when the next step is big for them.
+struct SmallLiftProgressionTests {
+    let planner = WorkoutPlanner(gym: .commercialKilograms, style: .muscle)
+
+    @Test func aBarbellCurlOnATenPercentStepIsRepFirst() {
+        // 25 → 27.5 kg is 10%: three reps' worth of load on a curl.
+        #expect(planner.progressionMode(for: "Barbell_Curl", kind: .barbell, compound: false, at: 25) == .reps)
+        // A bench press at 100 kg moves 2.5%: load as before. So does a 60 kg row (4%).
+        #expect(planner.progressionMode(for: "Barbell_Bench_Press_-_Medium_Grip", kind: .barbell, compound: true, at: 100) == .load)
+        #expect(planner.progressionMode(for: "Bent_Over_Barbell_Row", kind: .barbell, compound: true, at: 60) == .load)
+        // A compound lift keeps the 10% line: 30 → 32.5 kg (8%) is still a routine step.
+        #expect(planner.progressionMode(for: "Standing_Military_Press", kind: .barbell, compound: true, at: 30) == .load)
+    }
+
+    @Test func theLineIsFivePercentForSingleJointLifts() {
+        #expect(planner.isBigJump(from: 25, to: 27.5, compound: false))
+        #expect(!planner.isBigJump(from: 25, to: 27.5, compound: true))
+        #expect(!planner.isBigJump(from: 60, to: 62.5, compound: false))
+        #expect(ProgressionMode.suggested(kind: .barbell, compound: false, bigJump: true) == .reps)
+        #expect(ProgressionMode.suggested(kind: .barbell, compound: true, bigJump: true) == .load)
+    }
+
+    // Rep-first keeps the heaviest recent weight: one easier day doesn't lower it for good.
+    @Test func repFirstReturnsToTheRecentHeaviestWeight() throws {
+        let afterAnEasierDay = ExerciseHistory(bestEstimatedOneRepMax: 40, lastWeight: 25, lastReps: 10, lastRPE: 8, lastDate: .now,
+                                               recentWeights: [27.5, 27.5, 25], lastSets: 3)
+        let next = try #require(planner.progression(history: afterAnEasierDay, reps: 8...12, rpe: 8.5, kind: .barbell, mode: .reps))
+        #expect(next.load == 27.5)
+    }
+
+    @Test func dumbbellCurlIsTheDefaultCurl() {
+        #expect(planner.choose(.biceps)?.id == "Dumbbell_Bicep_Curl")
+        let pull = planner.plan(focus: .pull, minutes: 60, recovery: 70, history: [:])
+        #expect(pull.exercises.contains { $0.exerciseID == "Dumbbell_Bicep_Curl" })
+        #expect(!pull.exercises.contains { $0.exerciseID == "Barbell_Curl" })
+    }
+}

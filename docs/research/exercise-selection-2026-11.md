@@ -39,6 +39,23 @@ When a muscle is over the per-session cap (10 sets), sets now come off its later
 - Rear delts on upper day B: rows and pulldowns work them (Franke et al., J Sports Med Phys Fitness 2015, EMG; from memory), so the direct movement is the long session's extra. Side delts keep a lateral raise: presses don't train them well.
 - Per-session caps mean a 90-minute push day plans about 70 minutes; the plan says so.
 
-## Known gap
+## The whole week
 
-Barbell curls in a barbell-only gym move in 2.5 kg steps, about 10% of the load, so the weight can bounce between two plates near the lifter's limit. Small lifts would do better with rep-first progression on steps over about 5% (the ACSM's 2-10% range, lower end for small muscles). Not changed here.
+Standard: each major muscle group at least twice a week (ACSM position stand 2026; twice beat once for growth: Schoenfeld, Ogborn & Krieger, Sports Med 2016), about 10 or more weekly sets for the most growth (Schoenfeld, Ogborn & Krieger, J Sports Sci 2017), with about 4 still building muscle (Pelland et al., Sports Med 2026). Sets where a muscle helps count half (Pelland's fractional count).
+
+Measured on the default splits (2-6 days, 45-75 minutes, full gym):
+
+- **Before:** calves got nothing on 2-day full-body weeks or 45-minute push/pull/legs weeks and once a week on 3 days. Without the abs finisher, 45-minute weeks on 4-6 days had no abs work.
+- **Now:** a calf raise and a core movement sit inside the first five movements of the leg, lower, pull and full-body lists. Every big muscle is trained twice a week on every split; calves at least once (twice from 3 days); abs every week (from the finisher when it's on).
+- **Sets:** four or more hour-long days give every big muscle 8+ fractional sets (most 12-20). Two or three days, or 45-minute sessions, give about 3-8: over the minimum, under the 10-set band. That is what the time allows; the plan doesn't claim more.
+- Chest on an upper/lower split has one press per upper day: 8 direct sets a week at 60 minutes, 10 at 75.
+
+`WeeklyCoverageTests` holds these.
+
+## Small lifts: reps before weight (changed)
+
+A barbell curl moves 2.5 kg at a time: 10% at 25 kg, about three reps' worth of load, and the weight bounced between two plates near the lifter's limit. Single-joint lifts are now rep-first (`ProgressionMode.reps`: hold the weight, add a rep a session to two past the range, then step) when the next weight is over 5% heavier, on any equipment. Adding reps builds muscle and strength as well as adding load (Plotkin et al., PeerJ 2022). The ACSM's range for a step is 2-10% (2009 position stand); using the lower half for small lifts is the app's choice (the stand's own wording on small-muscle exercises couldn't be checked from the build sandbox). Compound lifts keep the 10% line.
+
+## Default curl
+
+Dumbbell curl first (the user's preference; no growth difference from a barbell is established). A curl already logged still comes first, so a lifter with barbell-curl history swaps once in a workout and the planner follows.

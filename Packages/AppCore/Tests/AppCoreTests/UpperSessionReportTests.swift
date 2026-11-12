@@ -127,7 +127,10 @@ struct UpperSessionReportTests {
     /// A logged variant is preferred, but not over a pain regression.
     @Test func loggedVariantYieldsToPainRegression() {
         #expect(planner.choose(.biceps, excluding: [], history: history)?.id == "Dumbbell_Bicep_Curl")
-        #expect(planner.choose(.biceps, excluding: [], history: [:])?.id == "Barbell_Curl")
+        // With no history the default curl is the dumbbell one; a logged barbell curl is kept.
+        #expect(planner.choose(.biceps, excluding: [], history: [:])?.id == "Dumbbell_Bicep_Curl")
+        let barbell = ["Barbell_Curl": ExerciseHistory(bestEstimatedOneRepMax: 40, lastWeight: 30, lastReps: 8, lastRPE: 8, lastDate: .now)]
+        #expect(planner.choose(.biceps, excluding: [], history: barbell)?.id == "Barbell_Curl")
         var guarded = planner
         guarded.exerciseFilter = ExerciseFilter(pains: [PainReport(area: .lowerBack, level: 4, worseAfterTraining: nil, loggedAt: .now)])
         #expect(guarded.choose(.horizontalRow, excluding: [], history: history)?.id == "Seated_Cable_Rows")

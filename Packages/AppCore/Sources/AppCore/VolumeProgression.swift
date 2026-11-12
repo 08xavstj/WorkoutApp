@@ -348,9 +348,13 @@ public enum VolumeProgression {
         /// The week's band: the target, with one set fewer in each of two
         /// sessions as the bottom ("12-14"), never under `minimumSets`, or
         /// under the target when the sessions can't hold that many (`target`).
+        /// A target under `minimumSets` (one short session's worth) still
+        /// allows the one set a tight session trims, down to two: a
+        /// 45-minute leg day cuts its calf raise from 3 sets to 2 (app choice).
         public var band: ClosedRange<Int> {
             let floor = min(VolumeProgression.minimumSets, max(1, sets))
-            return max(floor, sets - 2)...max(floor, sets)
+            let low = sets < VolumeProgression.minimumSets ? max(min(sets, 2), sets - 1) : max(floor, sets - 2)
+            return low...max(floor, sets)
         }
 
         /// "12-14 sets".

@@ -216,11 +216,13 @@ struct VolumeProgressionTests {
         let chest = VolumeProgression.capacity(.chest, days: upperLower)
         #expect(chest.sessions == 2)
         #expect(chest.timeCap == 14)
-        // Lower 60: squat and single-leg (10); lower 30 keeps both in its four movements but holds 6.
+        // Lower 60: squat and leg extension; lower 30 has the squat among its four movements
+        // (squat, hinge, leg curl, calf raise).
         let quads = VolumeProgression.capacity(.quadriceps, days: upperLower)
         #expect(quads.sessions == 2)
-        #expect(quads.timeCap == 16)
-        #expect(VolumeProgression.capacity(.calves, days: [upperLower[3]]).sessions == 0)
+        #expect(quads.timeCap == 14)
+        // Calves rank fourth on the lower day, so even a 30-minute one trains them.
+        #expect(VolumeProgression.capacity(.calves, days: [upperLower[3]]).sessions == 1)
     }
 
     @Test func buildsTheWeekFromLastWeek() {
@@ -243,8 +245,8 @@ struct VolumeProgressionTests {
         // Hamstrings: no earlier target, so the block's start value.
         #expect(next.target(for: .hamstrings)?.change == .start)
         #expect(next.target(for: .hamstrings)?.sets == 10)
-        // Calves: one movement on one day holds 4.
-        #expect(next.target(for: .calves)?.sets == 4)
+        // Calves: one movement on each lower day (4 in the hour, 3 in the 30 minutes).
+        #expect(next.target(for: .calves)?.sets == 7)
         #expect(next.target(for: .calves)?.change == .cappedTime)
         #expect(next.targetRIR == block.targetRIR)
         #expect(next.sets[.chest] == 14)

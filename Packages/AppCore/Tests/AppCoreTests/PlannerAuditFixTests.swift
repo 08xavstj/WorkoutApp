@@ -72,14 +72,16 @@ struct PlannerAuditFixTests {
         #expect(planner.progression(history: onTarget, reps: 6...10, rpe: 8.5, kind: .barbell)?.load == 80)
     }
 
-    // §5: an isolation lift on weekly set goals still adds weight.
+    // §5: an isolation lift on weekly set goals still adds weight. Its 5 kg step is 8% at
+    // 60 kg, over the 5% line for single-joint lifts, so it's rep-first: a rep a session to
+    // two past the range, then the step.
     @Test func legExtensionOnWeeklyGoalsStepsUp() {
         let planner = WorkoutPlanner(gym: kg, style: .muscle)
-        #expect(planner.progressionMode(for: "Leg_Extensions", kind: .machine, compound: false, at: 60) == .load)
+        #expect(planner.progressionMode(for: "Leg_Extensions", kind: .machine, compound: false, at: 60) == .reps)
         var history = ExerciseHistory(bestEstimatedOneRepMax: 60 * (1 + 13.5 / 30), lastWeight: 60, lastReps: 10, lastRPE: 8.5,
                                       lastDate: monday, recentWeights: [60, 60, 60], lastSets: 3)
         var loads: [Double] = []
-        for _ in 0..<4 {
+        for _ in 0..<6 {
             let plan = planner.plan(focus: .legs, minutes: 60, recovery: 80, history: ["Leg_Extensions": history],
                                     muscleSetGoals: [.quadriceps: 3])
             guard let ext = plan.exercises.first(where: { $0.exerciseID == "Leg_Extensions" }), let load = ext.load else { break }
@@ -125,7 +127,9 @@ struct PlannerAuditFixTests {
         let full = WorkoutFocus.fullBody.slots(variant: 0) + WorkoutFocus.fullBody.slots(variant: 1)
         let push = full.filter { $0.muscleGroup == .push }.count
         let pull = full.filter { $0.muscleGroup == .pull }.count
-        #expect(push == pull)
+        // One press and one pull each; B's side-delt raise is the only extra pushing movement
+        // (A's small lifts are calves and core now, so every muscle is reached in the week).
+        #expect(abs(push - pull) <= 1)
         #expect(full.contains(.verticalPull))
         // The version alternates from history: after a session of A's own lifts, B.
         let didA = ["Barbell_Bench_Press_-_Medium_Grip": ExerciseHistory(bestEstimatedOneRepMax: 100, lastWeight: 80, lastReps: 8,

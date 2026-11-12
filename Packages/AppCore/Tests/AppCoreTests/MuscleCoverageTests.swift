@@ -72,7 +72,7 @@ struct MuscleCoverageTests {
         #expect(WorkoutPlanner.orderedSlots(focus: .push, minutes: 45, priority: [.triceps])
                 == [.horizontalPress, .verticalPress, .triceps, .lateralRaise, .inclinePress, .triceps])
         #expect(WorkoutPlanner.orderedSlots(focus: .pull, minutes: 45, priority: [.hinge, .hinge])
-                == [.verticalPull, .horizontalRow, .hinge, .biceps, .rearDelt, .hammerCurl, .core])
+                == [.verticalPull, .horizontalRow, .hinge, .biceps, .rearDelt, .core, .hammerCurl])
         #expect(WorkoutPlanner.orderedSlots(focus: .legs, minutes: 45, priority: []) == WorkoutFocus.legs.slots)
         // The planner then builds the session with the lagging muscle's movement in it.
         let plan = WorkoutPlanner(gym: .commercialPounds).plan(focus: .pull, minutes: 45, recovery: 80, history: [:],

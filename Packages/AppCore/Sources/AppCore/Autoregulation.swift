@@ -216,13 +216,15 @@ public enum ProgressionMode: String, Codable, Sendable, CaseIterable, Identifiab
         }
     }
 
-    /// The default when you haven't picked one: load for barbell-type lifts;
-    /// reps for bodyweight and for equipment whose next jump is big (over 10%,
-    /// ACSM 2009); load otherwise. `compound` no longer changes it (isolation
-    /// work used to default to sets).
+    /// The default when you haven't picked one: load for barbell-type
+    /// compound lifts; reps for bodyweight and for equipment whose next jump
+    /// is big (over 10%, ACSM 2009; over 5% for single-joint lifts,
+    /// `WorkoutPlanner.smallLiftJumpFraction`); load otherwise. A single-joint
+    /// barbell lift with a big jump is rep-first too: a barbell curl moves
+    /// 2.5 kg at a time, 10% at 25 kg.
     public static func suggested(kind: EquipmentKind?, compound: Bool, bigJump: Bool) -> ProgressionMode {
         switch kind {
-        case .barbell, .ezBar, .smithMachine: return .load
+        case .barbell, .ezBar, .smithMachine: return !compound && bigJump ? .reps : .load
         case nil, .bodyweight, .bands, .pullUpBar, .dipStation: return .reps
         default: break
         }
