@@ -28,6 +28,9 @@ public struct Stretch: Sendable, Equatable, Identifiable {
     public var perSide: Bool
     /// How to do it, in one or two short sentences.
     public var cue: String
+
+    /// The bundled photo's file name, without ".jpg".
+    public var imageName: String { "stretch-\(id)" }
 }
 
 /// A short daily static-stretch routine, separate from the workouts.
@@ -92,36 +95,38 @@ public enum Stretching {
     // MARK: The stretches
 
     /// Two per area, so the position varies from day to day. In the order a
-    /// session does them: standing, then kneeling, then on the floor.
+    /// session does them: standing, then kneeling, then on the floor. Each
+    /// has a photo bundled with the app (`Stretch.imageName`), from the
+    /// public-domain free-exercise-db, so they show without a connection.
     public static let catalog: [Stretch] = [
         Stretch(id: "calf-wall", name: "Wall calf stretch", area: .calves, perSide: true,
                 cue: "Hands on a wall, one leg back with the heel down and the knee straight. Lean in until the calf is tight."),
         Stretch(id: "calf-bent-knee", name: "Bent-knee calf stretch", area: .calves, perSide: true,
-                cue: "As the wall stretch, but bend the back knee with the heel down: the stretch moves lower in the calf."),
-        Stretch(id: "chest-doorway", name: "Doorway chest stretch", area: .chest, perSide: false,
-                cue: "Forearms on a door frame at shoulder height, step through until the chest opens. Keep the ribs down."),
-        Stretch(id: "chest-wall", name: "One-arm wall chest stretch", area: .chest, perSide: true,
-                cue: "Palm on a wall behind you at shoulder height, turn the body away until the chest and front of the shoulder stretch."),
-        Stretch(id: "lat-hang-reach", name: "Standing lat reach", area: .lats, perSide: true,
-                cue: "Hold a door frame or post with one hand, sit the hips back and lean away so the side of the back lengthens."),
-        Stretch(id: "lat-childs-pose", name: "Child's pose reach", area: .lats, perSide: false,
-                cue: "Kneel, sit back on the heels and walk the hands forward on the floor. Let the chest sink."),
-        Stretch(id: "hip-half-kneeling", name: "Half-kneeling hip flexor stretch", area: .hipFlexors, perSide: true,
-                cue: "One knee down, the other foot forward. Tuck the tail under and shift forward until the front of the back hip stretches."),
-        Stretch(id: "hip-couch", name: "Couch stretch", area: .hipFlexors, perSide: true,
-                cue: "Back shin up against a couch or wall, front foot forward. Stay tall: the stretch is the front of the thigh and hip."),
+                cue: "One foot a little in front of the other. Bend both knees and keep the back heel down: the stretch is low in the back calf."),
+        Stretch(id: "chest-elbows-back", name: "Elbows-back chest stretch", area: .chest, perSide: false,
+                cue: "Stand tall with both hands on your lower back, fingers down. Draw the elbows back toward each other until the chest opens."),
+        Stretch(id: "chest-stick", name: "Stick chest stretch", area: .chest, perSide: false,
+                cue: "Hold a broomstick or towel wider than your shoulders. Take it up and behind your head until the chest and front of the shoulders stretch."),
+        Stretch(id: "lat-wall", name: "Wall lat stretch", area: .lats, perSide: true,
+                cue: "Forearm on a wall or door frame above your head. Lean toward that arm and let the chest sink until the side of the back stretches."),
+        Stretch(id: "lat-childs-pose", name: "Child's pose", area: .lats, perSide: false,
+                cue: "Kneel, sit back on the heels and walk the hands forward on the floor. Let the chest sink. Skip it if your knees don't like it."),
+        Stretch(id: "hip-half-kneeling", name: "Kneeling hip flexor stretch", area: .hipFlexors, perSide: true,
+                cue: "One foot forward, the other leg stretched out behind with the knee down. Shift forward until the front of the back hip stretches."),
+        Stretch(id: "hip-side-quad", name: "Side-lying quad stretch", area: .hipFlexors, perSide: true,
+                cue: "On your side, bend the top knee and hold that foot behind you. Press the hip forward as you draw the foot back."),
         Stretch(id: "ham-seated", name: "Seated hamstring stretch", area: .hamstrings, perSide: true,
-                cue: "Sit with one leg straight and the other foot against the thigh. Hinge forward from the hips with a long back."),
+                cue: "Sit with one leg straight and the other foot against the thigh. Hinge forward from the hips and reach for the ankle."),
         Stretch(id: "ham-lying", name: "Lying hamstring stretch", area: .hamstrings, perSide: true,
-                cue: "On your back, hold one thigh and straighten that knee toward the ceiling until the back of the leg is tight."),
+                cue: "On your back with one foot on the floor, hold the other thigh and straighten that knee toward the ceiling."),
         Stretch(id: "glute-figure-four", name: "Figure-four stretch", area: .glutes, perSide: true,
-                cue: "On your back, cross one ankle over the other knee and pull the legs in until the outer hip stretches."),
-        Stretch(id: "glute-pigeon", name: "Pigeon stretch", area: .glutes, perSide: true,
-                cue: "Front shin across the floor, back leg straight behind. Lower the chest over the front leg as far as is comfortable."),
+                cue: "On your back, cross one ankle over the other knee and pull both legs in until the outer hip stretches."),
+        Stretch(id: "glute-knee-across", name: "Knee across the body", area: .glutes, perSide: true,
+                cue: "On your back with one leg straight, bring the other knee across your body and hold it down with the opposite hand. Shoulders stay on the floor."),
         Stretch(id: "adductor-butterfly", name: "Butterfly stretch", area: .adductors, perSide: false,
                 cue: "Sit with the soles together and the knees out. Sit tall and let the knees drop; lean forward a little for more."),
-        Stretch(id: "adductor-frog", name: "Frog stretch", area: .adductors, perSide: false,
-                cue: "On hands and knees, widen the knees with the shins out to the sides and rock the hips back."),
+        Stretch(id: "adductor-straddle", name: "Seated straddle stretch", area: .adductors, perSide: false,
+                cue: "Sit with the legs in a wide V. Hands on the floor, lean forward from the hips until the inner thighs stretch."),
     ]
 
     public static func stretches(for area: StretchArea) -> [Stretch] {
@@ -287,6 +292,155 @@ public enum Stretching {
         return text
     }
 
+    // MARK: How it feels (progress)
+
+    /// How a stretch felt at its end position. Most of the range gained in
+    /// the first weeks comes from tolerating the stretch better, so the same
+    /// position feeling easier is the progress (Weppler CH, Magnusson SP.
+    /// Increasing muscle extensibility: a matter of increasing length or
+    /// modifying sensation? Phys Ther 2010;90:438-449). It's a self-rating:
+    /// useful for your own trend, not a measurement. The four steps are the
+    /// app's choice.
+    public enum Feel: Int, Codable, Sendable, CaseIterable, Identifiable {
+        case veryTight = 1, tight, aLittleTight, easy
+
+        public var id: Int { rawValue }
+
+        public var title: String {
+            switch self {
+            case .veryTight: "Very tight"
+            case .tight: "Tight"
+            case .aLittleTight: "A little tight"
+            case .easy: "Easy"
+            }
+        }
+
+        /// The step nearest an average.
+        static func nearest(_ value: Double) -> Feel {
+            Feel(rawValue: min(4, max(1, Int(value.rounded())))) ?? .tight
+        }
+    }
+
+    public struct FeelEntry: Codable, Sendable, Equatable {
+        public var date: Date
+        public var area: StretchArea
+        public var feel: Feel
+
+        public init(date: Date, area: StretchArea, feel: Feel) {
+            self.date = date
+            self.area = area
+            self.feel = feel
+        }
+    }
+
+    /// Ratings an area needs, over at least `progressDays`, before a trend is shown (app choice).
+    public static let progressRatings = 4
+    public static let progressDays = 14
+
+    /// One area's trend: its first three ratings against its last three.
+    public struct AreaProgress: Sendable, Equatable, Identifiable {
+        public var area: StretchArea
+        public var first: Double
+        public var latest: Double
+        public var since: Date
+        public var ratings: Int
+
+        public var id: StretchArea { area }
+        /// Positive = feels easier.
+        public var change: Double { latest - first }
+
+        /// "Tight → A little tight" or "Steady at Tight".
+        public var text: String {
+            let from = Feel.nearest(first)
+            let to = Feel.nearest(latest)
+            return from == to ? "Steady at \(to.title.lowercased())" : "\(from.title) → \(to.title.lowercased())"
+        }
+    }
+
+    /// Trends for the areas with enough ratings (`progressRatings` over `progressDays`).
+    public static func progress(_ entries: [FeelEntry], calendar: Calendar = .current) -> [AreaProgress] {
+        StretchArea.allCases.compactMap { area in
+            let mine = entries.filter { $0.area == area }.sorted { $0.date < $1.date }
+            guard mine.count >= progressRatings, let first = mine.first, let last = mine.last,
+                  (calendar.dateComponents([.day], from: first.date, to: last.date).day ?? 0) >= progressDays else { return nil }
+            func mean(_ slice: ArraySlice<FeelEntry>) -> Double {
+                Double(slice.reduce(0) { $0 + $1.feel.rawValue }) / Double(max(1, slice.count))
+            }
+            let window = min(3, mine.count / 2)
+            return AreaProgress(area: area, first: mean(mine.prefix(window)), latest: mean(mine.suffix(window)),
+                                since: first.date, ratings: mine.count)
+        }
+    }
+
+    // MARK: Reach check
+
+    /// How far the fingertips reach in a standing toe touch with the knees
+    /// straight. Toe-touch and sit-and-reach tests track hamstring
+    /// flexibility moderately well (Mayorga-Vega D, Merino-Marban R, Viciana
+    /// J. J Sports Sci Med 2014;13:1-14, meta-analysis; cited from memory),
+    /// so it's a rough marker for your own trend.
+    public enum ToeTouch: Int, Codable, Sendable, CaseIterable, Identifiable {
+        case knees = 1, shins, ankles, toes, floor, palms
+
+        public var id: Int { rawValue }
+
+        public var title: String {
+            switch self {
+            case .knees: "Knees"
+            case .shins: "Shins"
+            case .ankles: "Ankles"
+            case .toes: "Toes"
+            case .floor: "Fingertips on the floor"
+            case .palms: "Palms flat"
+            }
+        }
+    }
+
+    /// One reach check: the toe touch, and the knee-to-wall distance for the
+    /// ankles and calves (big toe to the wall with the knee touching it and
+    /// the heel down; a reliable field test: Bennell KL, et al. Aust J
+    /// Physiother 1998;44:175-180, cited from memory).
+    public struct ReachCheck: Codable, Sendable, Equatable {
+        public var date: Date
+        public var toeTouch: ToeTouch?
+        public var kneeToWallCm: Double?
+
+        public init(date: Date, toeTouch: ToeTouch?, kneeToWallCm: Double?) {
+            self.date = date
+            self.toeTouch = toeTouch
+            self.kneeToWallCm = kneeToWallCm
+        }
+    }
+
+    /// Days between reach checks: range changes over weeks, not days (app choice).
+    public static let reachCheckDays = 28
+
+    public static func reachCheckDue(_ checks: [ReachCheck], now: Date = .now, calendar: Calendar = .current) -> Bool {
+        guard let last = checks.map(\.date).max() else { return true }
+        return (calendar.dateComponents([.day], from: last, to: now).day ?? 0) >= reachCheckDays
+    }
+
+    /// "Toe touch: shins → toes" and "Knee to wall: 8 → 10 cm", first check
+    /// against the latest; one check shows just its values.
+    public static func reachSummary(_ checks: [ReachCheck]) -> [String] {
+        let sorted = checks.sorted { $0.date < $1.date }
+        var lines: [String] = []
+        let touches = sorted.compactMap(\.toeTouch)
+        if let first = touches.first, let last = touches.last {
+            lines.append(touches.count > 1 && first != last
+                         ? "Toe touch: \(first.title.lowercased()) → \(last.title.lowercased())"
+                         : "Toe touch: \(last.title.lowercased())")
+        }
+        let walls = sorted.compactMap(\.kneeToWallCm)
+        if let first = walls.first, let last = walls.last {
+            func cm(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...1))) }
+            lines.append(walls.count > 1 && abs(first - last) >= 0.5
+                         ? "Knee to wall: \(cm(first)) → \(cm(last)) cm"
+                         : "Knee to wall: \(cm(last)) cm")
+        }
+        return lines
+    }
+
     // MARK: The session's timer
 
     /// One timed step of a session.
@@ -354,5 +508,6 @@ public enum Stretching {
         "30-second holds work as well as 60 (Bandy & Irion, Phys Ther 1994); stretch to tightness, not pain (ACSM 2011).",
         "Lifting through a full range builds flexibility about as well as stretching (Afonso et al., Healthcare 2021), so areas you lifted that way need less.",
         "Stretching doesn't speed recovery, reduce soreness, prevent injuries in general or fix posture (Afonso et al., Front Physiol 2021; Warneke et al., J Sport Health Sci 2025, expert consensus).",
+        "Early progress is mostly the same position feeling easier, before the range itself grows (Weppler & Magnusson, Phys Ther 2010), so the app tracks how each stretch feels.",
     ]
 }

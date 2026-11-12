@@ -13,7 +13,14 @@ final class StretchStore {
         var focus: [StretchArea] = []
         var remindersOn: Bool = true
         var reminderMinutes: Int = Stretching.defaultReminderMinutes
+        /// How each stretch felt (`Stretching.Feel`). Optional so files saved before it decode.
+        var feels: [Stretching.FeelEntry]? = nil
+        /// Reach checks (`Stretching.ReachCheck`), every four weeks or so.
+        var checks: [Stretching.ReachCheck]? = nil
     }
+
+    /// Feel ratings are kept this long, for the trend (app choice).
+    static let keepFeelDays = 365.0
 
     /// Entries older than this are dropped (the routine reads the last 7 days;
     /// the rest only tells which stretch variation is next).
@@ -42,6 +49,8 @@ final class StretchStore {
     private func write() {
         let cutoff = Date.now.addingTimeInterval(-Self.keepDays * 86_400)
         saved.done.removeAll { $0.date < cutoff }
+        let feelCutoff = Date.now.addingTimeInterval(-Self.keepFeelDays * 86_400)
+        saved.feels?.removeAll { $0.date < feelCutoff }
         file.saveLogged(saved, canSave: canSave)
     }
 
@@ -79,6 +88,33 @@ final class StretchStore {
             let areas = Stretching.areas(forExerciseIDs: session.exercises.map(\.exerciseID))
             return areas.isEmpty ? nil : Stretching.Lift(date: session.startedAt, areas: areas)
         }
+    }
+
+    // MARK: Progress
+
+    var feels: [Stretching.FeelEntry] { saved.feels ?? [] }
+    var progress: [Stretching.AreaProgress] { Stretching.progress(feels) }
+    var checks: [Stretching.ReachCheck] { (saved.checks ?? []).sorted { $0.date < $1.date } }
+    var reachCheckDue: Bool { Stretching.reachCheckDue(checks) }
+
+    /// Today's rating for an area, if one was given.
+    func feelToday(_ area: StretchArea) -> Stretching.Feel? {
+        feels.last { $0.area == area && Calendar.current.isDateInToday($0.date) }?.feel
+    }
+
+    /// Saves how an area's stretch felt today (one rating a day per area; a new one replaces it).
+    func rate(_ area: StretchArea, _ feel: Stretching.Feel, at date: Date = .now) {
+        var all = saved.feels ?? []
+        all.removeAll { $0.area == area && Calendar.current.isDate($0.date, inSameDayAs: date) }
+        all.append(Stretching.FeelEntry(date: date, area: area, feel: feel))
+        saved.feels = all
+        write()
+    }
+
+    func add(_ check: Stretching.ReachCheck) {
+        guard check.toeTouch != nil || check.kneeToWallCm != nil else { return }
+        saved.checks = (saved.checks ?? []) + [check]
+        write()
     }
 
     // MARK: Writing

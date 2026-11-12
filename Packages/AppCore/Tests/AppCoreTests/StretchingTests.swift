@@ -104,9 +104,9 @@ struct StretchingTests {
         #expect(steps.count == 15)
         #expect(steps.filter { $0.kind == .hold }.allSatisfy { $0.seconds == 30 })
         #expect(steps.filter { $0.kind == .hold }.reduce(0) { $0 + $1.seconds } == 300)
-        // The wall calf stretch is one side at a time; the doorway chest stretch isn't.
+        // The wall calf stretch is one side at a time; the elbows-back chest stretch isn't.
         #expect(Array(steps.prefix(3)).map(\.label) == ["Get into position", "Left side", "Right side"])
-        let chest = try? #require(routine.items.firstIndex { $0.stretch.id == "chest-doorway" })
+        let chest = try? #require(routine.items.firstIndex { $0.stretch.id == "chest-elbows-back" })
         if let chest {
             #expect(steps.filter { $0.item == chest && $0.kind == .hold }.map(\.label) == ["Hold", "Once more"])
         }
@@ -138,5 +138,52 @@ struct StretchingTests {
         #expect(Stretching.target(for: .chest, focus: []) == 5)
         #expect(Stretching.target(for: .chest, focus: [.chest]) == 8)
         #expect(Stretching.target(for: .calves, focus: [.chest]) == 3)
+    }
+
+    // MARK: Progress
+
+    func feel(_ daysAgo: Int, _ area: StretchArea, _ feel: Stretching.Feel) -> Stretching.FeelEntry {
+        Stretching.FeelEntry(date: self.daysAgo(daysAgo), area: area, feel: feel)
+    }
+
+    @Test func aTrendNeedsFourRatingsOverTwoWeeks() {
+        let few = [feel(20, .hamstrings, .veryTight), feel(10, .hamstrings, .tight), feel(1, .hamstrings, .tight)]
+        #expect(Stretching.progress(few, calendar: calendar).isEmpty)
+        let recent = (0..<5).map { feel($0, .hamstrings, .tight) }
+        #expect(Stretching.progress(recent, calendar: calendar).isEmpty)
+    }
+
+    @Test func feelingEasierShowsAsProgress() throws {
+        let entries = [feel(30, .hamstrings, .veryTight), feel(27, .hamstrings, .veryTight), feel(24, .hamstrings, .tight),
+                       feel(6, .hamstrings, .aLittleTight), feel(3, .hamstrings, .aLittleTight), feel(1, .hamstrings, .aLittleTight),
+                       feel(30, .calves, .tight), feel(20, .calves, .tight), feel(10, .calves, .tight), feel(1, .calves, .tight)]
+        let progress = Stretching.progress(entries, calendar: calendar)
+        let hamstrings = try #require(progress.first { $0.area == .hamstrings })
+        #expect(hamstrings.change > 1)
+        #expect(hamstrings.text == "Very tight → a little tight")
+        #expect(hamstrings.ratings == 6)
+        let calves = try #require(progress.first { $0.area == .calves })
+        #expect(calves.text == "Steady at tight")
+    }
+
+    @Test func reachCheckIsDueEveryFourWeeks() {
+        #expect(Stretching.reachCheckDue([], now: now, calendar: calendar))
+        let last = Stretching.ReachCheck(date: daysAgo(10), toeTouch: .shins, kneeToWallCm: 8)
+        #expect(!Stretching.reachCheckDue([last], now: now, calendar: calendar))
+        let old = Stretching.ReachCheck(date: daysAgo(28), toeTouch: .shins, kneeToWallCm: 8)
+        #expect(Stretching.reachCheckDue([old], now: now, calendar: calendar))
+    }
+
+    @Test func reachSummaryComparesFirstAndLatest() {
+        let first = Stretching.ReachCheck(date: daysAgo(56), toeTouch: .shins, kneeToWallCm: 8)
+        #expect(Stretching.reachSummary([first]) == ["Toe touch: shins", "Knee to wall: 8 cm"])
+        let latest = Stretching.ReachCheck(date: daysAgo(0), toeTouch: .toes, kneeToWallCm: 10.5)
+        #expect(Stretching.reachSummary([latest, first]) == ["Toe touch: shins → toes", "Knee to wall: 8 → 10.5 cm"])
+        #expect(Stretching.reachSummary([]).isEmpty)
+    }
+
+    @Test func everyStretchHasABundledPhotoName() {
+        #expect(Stretching.catalog.allSatisfy { $0.imageName == "stretch-\($0.id)" })
+        #expect(Stretching.catalog.count == 14)
     }
 }

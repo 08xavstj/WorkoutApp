@@ -4,7 +4,7 @@
 
 | Project | License | How it's used |
 |---|---|---|
-| [yuhonas/free-exercise-db](https://github.com/yuhonas/free-exercise-db) | Unlicense (public domain) | `App/Resources/exercises.json` (stretches removed). Images load from its GitHub repo at runtime. |
+| [yuhonas/free-exercise-db](https://github.com/yuhonas/free-exercise-db) | Unlicense (public domain) | `App/Resources/exercises.json` (stretches removed). Exercise images load from its GitHub repo at runtime; the 15 stretch photos in `App/Resources/Stretches/` are copied from it (resized) and bundled. |
 
 Apple frameworks: SwiftUI, SwiftData, HealthKit, Foundation Models.
 

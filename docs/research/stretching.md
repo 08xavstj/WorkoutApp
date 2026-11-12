@@ -33,7 +33,16 @@ Not checked against full texts from the build sandbox: the Delphi statement's ex
 - **Lifting credit:** an area lifted through a long range that week (Romanian deadlift: hamstrings; squat: glutes, inner thighs; split squat: hip flexors, glutes; presses and flyes: chest; pulldowns: lats; calf raises: calves) is credited 2 minutes a session, up to half its target, so the routine goes to areas the lifting didn't reach. The evidence is that lifting improves range of motion about as much as stretching; the minute-for-minute rate is the app's choice.
 - **Reminder:** daily at a chosen time (20:30 by default), skipped once done, and moved to an hour after a planned session when it would fall within 90 minutes before it. Off in rest mode.
 
+## Seeing progress
+
+- **How it feels.** After a session each stretch can be rated very tight, tight, a little tight or easy. Most of the range gained in the first weeks is stretch tolerance: the same position feels easier before the muscle itself changes (Weppler & Magnusson, Phys Ther 2010;90:438-449). With four ratings over two weeks an area shows its trend (its first three ratings against its last three). A self-rating: a trend for the user, not a measurement. The four steps and the thresholds are the app's choice.
+- **Reach check, about every four weeks.** A standing toe touch (knees, shins, ankles, toes, fingertips on the floor, palms flat) and, optionally, the knee-to-wall distance in cm. Toe-touch and sit-and-reach tests track hamstring flexibility moderately well (Mayorga-Vega et al., J Sports Sci Med 2014;13:1-14, meta-analysis); the knee-to-wall lunge is a reliable measure of ankle range (Bennell et al., Aust J Physiother 1998;44:175-180). Both cited from memory.
+
+## Photos
+
+Each stretch has a photo from the public-domain free-exercise-db, bundled with the app (15 files, about 360 KB) so they show without a connection. The stretches were chosen to match photos that show one person with no special equipment.
+
 ## Not done
 
-- No flexibility test, so focus areas are the user's own pick. Lower starting flexibility goes with bigger gains (Ingram 2025), which is why tight areas are the ones to pick.
+- Focus areas are the user's own pick (the feel ratings show which are tight). Lower starting flexibility goes with bigger gains (Ingram 2025), which is why tight areas are the ones to pick.
 - No stretching inside workouts: warm-ups there are ramp sets and movement (`WarmUpRoutine`).

@@ -1,6 +1,31 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import AppCore
+
+/// A stretch's photo, bundled with the app (public-domain free-exercise-db),
+/// so it shows without a connection. Nothing when the file is missing.
+struct StretchPhoto: View {
+    let name: String
+    var height: CGFloat = 200
+
+    private var image: UIImage? {
+        Bundle.main.url(forResource: name, withExtension: "jpg").flatMap { UIImage(contentsOfFile: $0.path) }
+    }
+
+    var body: some View {
+        if let image {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity)
+                .frame(height: height)
+                .clipped()
+                .clipShape(.rect(cornerRadius: 12))
+                .accessibilityHidden(true)
+        }
+    }
+}
 
 /// "5-minute stretch" in Today's Up next until it's done for the day: today's
 /// areas and the week's minutes, opening the guided session (`Stretching`).
@@ -67,7 +92,9 @@ struct StretchView: View {
     @State private var paused: TimeInterval?
     @State private var completedHolds: [Int: Int] = [:]
     @State private var finished = false
+    @State private var showingReachCheck = false
     @ScaledMetric(relativeTo: .largeTitle) private var timerSize: CGFloat = 56
+    @ScaledMetric(relativeTo: .subheadline) private var thumbnail: CGFloat = 64
 
     var body: some View {
         NavigationStack {
@@ -125,13 +152,18 @@ struct StretchView: View {
                     Chip(text: "\(week.done) of \(week.goal) min this week", color: Theme.recoveryHigh)
                 }
                 ForEach(routine.items) { item in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.stretch.name)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.primaryText)
-                        Text("\(item.stretch.area.name) · \(item.stretch.perSide ? "30 s each side" : "2 × 30 s")")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
+                    HStack(spacing: 12) {
+                        StretchPhoto(name: item.stretch.imageName, height: thumbnail)
+                            .frame(width: thumbnail * 1.4)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.stretch.name)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.primaryText)
+                            Text("\(item.stretch.area.name) · \(item.stretch.perSide ? "30 s each side" : "2 × 30 s")")
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        Spacer(minLength: 0)
                     }
                     .accessibilityElement(children: .combine)
                 }
@@ -158,10 +190,61 @@ struct StretchView: View {
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
+            progressCard
             weekCard
             focusCard
             EvidenceDisclosure(points: Stretching.evidence, title: "What stretching does and doesn't do")
         }
+    }
+
+    /// Whether it's working: how each area's stretch has felt over the weeks
+    /// (`Stretching.progress`) and the four-weekly reach check.
+    private var progressCard: some View {
+        let progress = store.progress
+        let reach = Stretching.reachSummary(store.checks)
+        return VStack(alignment: .leading, spacing: 8) {
+            CardLabel(text: "Progress")
+            if progress.isEmpty {
+                Text("After each session, tap how every stretch felt. With four ratings over two weeks, each area shows here whether it's getting easier.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(progress) { entry in
+                    HStack {
+                        Text(entry.area.name)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.primaryText)
+                        Spacer()
+                        Label(entry.text, systemImage: entry.change > 0.4 ? "arrow.up.right" : (entry.change < -0.4 ? "arrow.down.right" : "arrow.right"))
+                            .font(.caption)
+                            .foregroundStyle(entry.change > 0.4 ? Theme.recoveryHighText : Theme.secondaryText)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                Text("Since \((progress.map(\.since).min() ?? .now).formatted(date: .abbreviated, time: .omitted)). Your own rating, so a trend for you, not a measurement.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider().overlay(Theme.separator)
+            ForEach(reach, id: \.self) { line in
+                Text(line)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+            }
+            Button { showingReachCheck = true } label: {
+                Label(store.reachCheckDue ? "Do the reach check · 1 min" : "Reach check done; next in about a month",
+                      systemImage: "ruler")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.recoveryHighText)
+                    .frame(minHeight: 44, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the toe-touch and knee-to-wall check")
+        }
+        .card()
+        .sheet(isPresented: $showingReachCheck) { ReachCheckView() }
     }
 
     /// The last 7 days by area: minutes stretched, plus the credit for lifting.
@@ -223,6 +306,7 @@ struct StretchView: View {
                 .font(.title2.weight(.bold))
                 .foregroundStyle(Theme.primaryText)
                 .multilineTextAlignment(.center)
+            StretchPhoto(name: item.stretch.imageName, height: 190)
             Text(step.label)
                 .font(.headline)
                 .foregroundStyle(step.kind == .hold ? Theme.recoveryHighText : Theme.secondaryText)
@@ -269,6 +353,22 @@ struct StretchView: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
+            if seconds > 0, let routine {
+                Divider().overlay(Theme.separator)
+                Text("How did each one feel?")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Text("Optional. The same stretch feeling easier over the weeks is the progress.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                ForEach(Array(routine.items.enumerated()), id: \.element.id) { index, item in
+                    if (completedHolds[index] ?? 0) > 0 {
+                        FeelRow(stretch: item.stretch, selection: store.feelToday(item.stretch.area)) { feel in
+                            store.rate(item.stretch.area, feel)
+                        }
+                    }
+                }
+            }
             Button { dismiss() } label: {
                 Text("Done")
                     .font(.headline)
@@ -339,6 +439,110 @@ struct StretchView: View {
             let entries = Stretching.log(routine: routine, completedHolds: completedHolds, at: .now)
             store.log(entries)
             if !entries.isEmpty { Reminders.cancelTodaysStretchReminder() }
+        }
+    }
+}
+
+/// "How did it feel?" for one stretch: four taps from very tight to easy.
+private struct FeelRow: View {
+    let stretch: Stretch
+    let selection: Stretching.Feel?
+    let onPick: (Stretching.Feel) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(stretch.name)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+            HStack(spacing: 6) {
+                ForEach(Stretching.Feel.allCases) { feel in
+                    let picked = selection == feel
+                    Button { onPick(feel) } label: {
+                        Text(feel.title)
+                            .font(.caption.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                            .foregroundStyle(picked ? Color.white : Theme.recoveryHighText)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .padding(.horizontal, 2)
+                            .background(picked ? Theme.recoveryHighText : Theme.recoveryHigh.opacity(0.14), in: .rect(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(stretch.area.name): \(feel.title)")
+                    .accessibilityAddTraits(picked ? .isSelected : [])
+                }
+            }
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+}
+
+/// The four-weekly reach check: a standing toe touch and the knee-to-wall
+/// distance (`Stretching.ReachCheck`). Rough markers for your own trend.
+struct ReachCheckView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var store = StretchStore.shared
+    @State private var toeTouch: Stretching.ToeTouch?
+    @State private var measuresWall = false
+    @State private var kneeToWall = 8.0
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    StretchPhoto(name: "stretch-reach-toe-touch", height: 170)
+                        .listRowInsets(EdgeInsets())
+                    Picker("Fingertips reach", selection: $toeTouch) {
+                        Text("Not checked").tag(Stretching.ToeTouch?.none)
+                        ForEach(Stretching.ToeTouch.allCases) { level in
+                            Text(level.title).tag(Stretching.ToeTouch?.some(level))
+                        }
+                    }
+                } header: {
+                    Text("Toe touch")
+                } footer: {
+                    Text("Stand with your knees straight and reach down slowly, without bouncing. Do it at the same time of day each time, before stretching.")
+                }
+                Section {
+                    Toggle("Measure knee to wall", isOn: $measuresWall)
+                    if measuresWall {
+                        Stepper(value: $kneeToWall, in: 0...25, step: 0.5) {
+                            LabeledContent("Distance", value: "\(kneeToWall.formatted(.number.precision(.fractionLength(0...1)))) cm")
+                        }
+                    }
+                } header: {
+                    Text("Knee to wall (ankles and calves)")
+                } footer: {
+                    Text("Face a wall with one foot back from it. Find the furthest spot where your knee still touches the wall with the heel down, and measure from the big toe to the wall. Use the tighter side.")
+                }
+                Section {
+                    ForEach(Stretching.reachSummary(store.checks), id: \.self) { line in
+                        Text(line)
+                    }
+                } header: {
+                    Text("So far")
+                } footer: {
+                    Text("Check about every four weeks: range changes over weeks, not days.")
+                }
+            }
+            .navigationTitle("Reach check")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.add(Stretching.ReachCheck(date: .now, toeTouch: toeTouch, kneeToWallCm: measuresWall ? kneeToWall : nil))
+                        dismiss()
+                    }
+                    .disabled(toeTouch == nil && !measuresWall)
+                }
+            }
+            .onAppear {
+                if let last = store.checks.last?.kneeToWallCm { kneeToWall = last }
+            }
         }
     }
 }
