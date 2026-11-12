@@ -71,6 +71,7 @@ struct WorkoutAppApp: App {
                 measurements.reloadIfUnavailable()
                 NextBlockStore.shared.reloadIfUnavailable()
                 MuscleFeedbackStore.shared.reloadIfUnavailable()
+                StretchStore.shared.reloadIfUnavailable()
             }
         }
         // Notification taps and "Taken" buttons arrive through the router.
@@ -360,6 +361,7 @@ struct RootView: View {
         measurements.reloadIfUnavailable()
         NextBlockStore.shared.reloadIfUnavailable()
         MuscleFeedbackStore.shared.reloadIfUnavailable()
+        StretchStore.shared.reloadIfUnavailable()
     }
 
     private var finishedSessionCount: Int {
@@ -534,6 +536,20 @@ struct RootView: View {
             if let nudgeDay { settings.weighInNudgeDay = nudgeDay }
         }
         scheduleWorkoutReminders()
+        scheduleStretchReminders()
+    }
+
+    /// The daily stretch reminder (`Stretching`), kept clear of today's planned session.
+    private func scheduleStretchReminders() {
+        let store = StretchStore.shared
+        let slots = plannedSlots()
+        let areas = store.routine(lifts: StretchStore.lifts(from: sessions)).items.map(\.stretch.area.name)
+        let enabled = store.remindersOn && !settings.isRestMode
+        let minutes = store.reminderMinutes
+        let done = store.stretchedToday
+        Task {
+            await Reminders.scheduleStretchReminders(enabled: enabled, minutes: minutes, doneToday: done, slots: slots, areas: areas)
+        }
     }
 
     /// The weigh-in line goes on a morning reminder at most once a week, and
@@ -608,6 +624,7 @@ private struct MeasurementSheets: ViewModifier {
         content
             .sheet(isPresented: $router.showMeasurements) { BodyMeasurementsView() }
             .sheet(isPresented: $router.showBloodPressure) { BloodPressureView() }
+            .sheet(isPresented: $router.showStretch) { StretchView() }
     }
 }
 

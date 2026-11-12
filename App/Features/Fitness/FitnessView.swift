@@ -481,6 +481,8 @@ private struct FitnessProgressCard: View {
 /// old "Your workouts" card).
 private struct FitnessWorkoutsCard: View {
     @Query private var templates: [WorkoutTemplate]
+    @State private var stretch = StretchStore.shared
+    @State private var showingStretch = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -501,8 +503,17 @@ private struct FitnessWorkoutsCard: View {
                 FitnessLinkRow(title: "History", detail: "Every session you've logged", systemImage: "calendar")
             }
             .buttonStyle(.plain)
+            Divider().overlay(Theme.separator)
+            // The 5-minute stretch (`Stretching`), any time: the week's minutes are what count.
+            Button { showingStretch = true } label: {
+                FitnessLinkRow(title: "Stretch", detail: "\(stretch.weekMinutes.done) of \(stretch.weekMinutes.goal) min this week",
+                               systemImage: "figure.flexibility")
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens a guided stretch session")
         }
         .card()
+        .sheet(isPresented: $showingStretch) { StretchView() }
     }
 }
 

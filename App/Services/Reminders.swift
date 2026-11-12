@@ -19,6 +19,8 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     /// Body measurements (workoutapp://measurements) and blood pressure (workoutapp://bp) sheets.
     var showMeasurements = false
     var showBloodPressure = false
+    /// The guided stretch session (workoutapp://stretch, from its reminder).
+    var showStretch = false
     /// Settings, presented once at the root so any tab's profile button
     /// (`TabToolbar`) can open it.
     var showSettings = false
@@ -58,6 +60,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         case "plan": showWeeklyPlan = true
         case "measurements": showMeasurements = true
         case "bp": showBloodPressure = true
+        case "stretch": showStretch = true
         case "today": selectedTab = .today
         case "coach":
             // A coach check-in's question ("workoutapp://coach?q=…"), asked in the Coach tab (`CoachInbox`).
@@ -271,6 +274,50 @@ nonisolated enum Reminders {
         content.userInfo = ["link": "workoutapp://checkin/evening"]
         content.sound = .default
         return content
+    }
+
+    // MARK: Stretching
+
+    /// Days ahead the stretch reminder is scheduled. Few, because iOS keeps
+    /// only 64 pending notifications per app and doses come first; the app
+    /// reschedules on every open.
+    static let stretchReminderDays = 3
+
+    /// One reminder a day for the 5-minute stretch (`Stretching`), at the
+    /// chosen time unless a planned session starts soon after it (then an
+    /// hour after that session: `Stretching.reminderMinutes`). Today's is
+    /// skipped once you've stretched.
+    static func scheduleStretchReminders(enabled: Bool, minutes: Int, doneToday: Bool, slots: [PlannedSlot],
+                                         areas: [String]) async {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: (0..<7).map { "stretch|\($0)" })
+        guard enabled, await requestPermission() else { return }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        for offset in 0..<stretchReminderDays {
+            guard !(offset == 0 && doneToday), let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+            let session = slots.first { calendar.isDate($0.start, inSameDayAs: day) }
+            let sessionStart = session.map { slot -> Int in
+                let parts = calendar.dateComponents([.hour, .minute], from: slot.start)
+                return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+            }
+            let at = Stretching.reminderMinutes(preferred: minutes, sessionStart: sessionStart, sessionLength: nil)
+            guard let fire = fireDate(day: day, minutes: at, calendar: calendar), fire > .now else { continue }
+            let content = UNMutableNotificationContent()
+            content.title = "\(Stretching.sessionMinutes)-minute stretch"
+            // Today's areas are known; later days depend on what you do before them.
+            content.body = offset == 0 && !areas.isEmpty
+                ? "\(areas.joined(separator: ", ")). The weekly minutes are what build flexibility."
+                : "Five stretches, 30-second holds. The weekly minutes are what build flexibility."
+            content.sound = .default
+            content.userInfo = ["link": "workoutapp://stretch"]
+            await add(content, identifier: "stretch|\(offset)", at: fire, center: center, calendar: calendar)
+        }
+    }
+
+    /// Removes today's stretch reminder (the session was just done).
+    static func cancelTodaysStretchReminder() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["stretch|0"])
     }
 
     private static func add(_ content: UNMutableNotificationContent, identifier: String, at fire: Date,

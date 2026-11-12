@@ -315,6 +315,7 @@ private struct RemindersSettingsSection: View {
     @Environment(MedicationsModel.self) private var meds
     /// iOS notifications are off for the app: nothing below can arrive.
     @State private var notificationsDenied = false
+    @State private var stretch = StretchStore.shared
 
     private func minutesBinding(_ keyPath: ReferenceWritableKeyPath<UserSettings, Int>) -> Binding<Date> {
         Binding(
@@ -343,6 +344,7 @@ private struct RemindersSettingsSection: View {
                 DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
             }
             workoutRows
+            stretchRows
             // Dose reminders, creatine included, are set on each entry in the list
             // (Health › Records › Medications; ux-audit.md 4.3), so they live in one place.
             NavigationLink {
@@ -368,6 +370,33 @@ private struct RemindersSettingsSection: View {
             return "Dose reminders with a Taken button"
         }
         return "Creatine at \(time.formatted(date: .omitted, time: .shortened)) · dose reminders"
+    }
+
+    /// The daily 5-minute stretch (`Stretching`): on by default, in the evening.
+    @ViewBuilder
+    private var stretchRows: some View {
+        Toggle(isOn: Binding(get: { stretch.remindersOn }, set: { stretch.remindersOn = $0; rescheduleStretch() })) {
+            Text("Stretch reminder")
+            Text("5 minutes a day, skipped once done; moved if it's just before a session")
+        }
+        if stretch.remindersOn {
+            DatePicker("Stretch at", selection: Binding(
+                get: { Reminders.fireDate(day: .now, minutes: stretch.reminderMinutes) ?? .now },
+                set: { date in
+                    let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                    stretch.reminderMinutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+                    rescheduleStretch()
+                }
+            ), displayedComponents: .hourAndMinute)
+        }
+    }
+
+    /// Reschedules with what's known here; the app's next refresh adds today's planned session.
+    private func rescheduleStretch() {
+        let enabled = stretch.remindersOn && !settings.isRestMode
+        let minutes = stretch.reminderMinutes
+        let done = stretch.stretchedToday
+        Task { await Reminders.scheduleStretchReminders(enabled: enabled, minutes: minutes, doneToday: done, slots: [], areas: []) }
     }
 
     @ViewBuilder
