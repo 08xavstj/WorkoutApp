@@ -25,7 +25,7 @@ A rep goal can go two past the range. 12 reps with one left in a 6-10 range, tar
 
 ### 3. A merely easy set forced a weight step
 
-A set at least two reps easier than planned moved the weight up at least one step, even when the 1RM estimate said the step was too big: 16 kg × 8 with 3 left (about 11 to failure) went to 18 kg dumbbells, where 7 was the limit, and stayed there for weeks. **Now** the forced step is kept for "4 or more left" (the estimate is then only a floor); with a counted reserve the estimate decides, and the reps go up instead.
+A set at least two reps easier than planned moved the weight up at least one step, even when the 1RM estimate said the step was too big. The replay hit this once sessions were read correctly: 16 kg × 8 with 3 left (about 11 to failure) went to 18 kg dumbbells, where 7 was the limit, and stayed there for weeks. **Now** the forced step is kept for "4 or more left" (the estimate is then only a floor); with a counted reserve the estimate decides, and the reps go up instead.
 
 ## Result in the replay (12 weeks, strength +12%)
 
@@ -33,7 +33,7 @@ A set at least two reps easier than planned moved the weight up at least one ste
 |---|---|---|
 | Bench press | weight moved only mid-session; plan stuck at × 9 | 62.5 → 72.5 kg, a step every 3-4 sessions |
 | Lat pulldown | stuck at × 8 with 4+ left on set 1 | 60 → 70 kg, first sets near the target |
-| Dumbbell curl | 14 → 16 kg, or 18 kg failing at 7 | 14 → 16 → 18 kg after reaching 14 reps |
+| Dumbbell curl | 14 → 16 kg | 14 → 16 → 18 kg, the last step after reaching 14 reps |
 
 ## Still by design
 
