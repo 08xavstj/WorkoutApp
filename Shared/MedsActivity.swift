@@ -1,4 +1,5 @@
 import ActivityKit
+import AppCore
 import AppIntents
 import Foundation
 import UserNotifications
@@ -11,13 +12,43 @@ nonisolated struct MedsActivityAttributes: ActivityAttributes {
         var dose: String
         var time: Date
         var taken: Bool
+        /// When the dose joins the card (`DoseCard`): 06:00 for medications,
+        /// noon for creatine and other supplements. Optional so a card started
+        /// by an older build still decodes.
+        var showFrom: Date? = nil
+        var supplement: Bool? = nil
     }
 
     nonisolated struct ContentState: Codable, Hashable, Sendable {
         var doses: [Item]
 
-        var remaining: [Item] { doses.filter { !$0.taken } }
-        var takenCount: Int { doses.count - remaining.count }
+        /// Doses whose time on the card has come. The widget calls these when
+        /// it draws, so supplements join at noon when iOS redraws the card
+        /// (its stale date) without the app running.
+        func shown(at now: Date) -> [Item] {
+            doses.filter { ($0.showFrom ?? .distantPast) <= now }
+        }
+
+        func remaining(at now: Date) -> [Item] { shown(at: now).filter { !$0.taken } }
+        func takenCount(at now: Date) -> Int { shown(at: now).count - remaining(at: now).count }
+
+        /// The next time untaken doses join the card (noon, while supplements wait).
+        func nextReveal(after now: Date = .now) -> Date? {
+            doses.filter { !$0.taken }.compactMap(\.showFrom).filter { $0 > now }.min()
+        }
+
+        /// "Medications today", "Supplements today" or both, from what's left to take.
+        func title(at now: Date = .now) -> String {
+            let left = remaining(at: now)
+            let list = left.isEmpty ? shown(at: now) : left
+            let supplements = list.filter { $0.supplement == true }.count
+            if !list.isEmpty && supplements == list.count { return "Supplements today" }
+            return supplements == 0 ? "Medications today" : "Meds & supplements"
+        }
+
+        var remaining: [Item] { remaining(at: .now) }
+        var shown: [Item] { shown(at: .now) }
+        var takenCount: Int { takenCount(at: .now) }
     }
 
     var day: Date
@@ -64,18 +95,23 @@ nonisolated enum MedsLiveActivity {
     static func state(for day: Date = .now) -> MedsActivityAttributes.ContentState {
         let taken = MedicationStore.takenLog()
         let items = MedicationStore.doses(on: day).map { dose in
-            MedsActivityAttributes.Item(id: dose.id, name: dose.name, dose: dose.dose, time: dose.time, taken: taken[dose.id] != nil)
+            MedsActivityAttributes.Item(id: dose.id, name: dose.name, dose: dose.dose, time: dose.time, taken: taken[dose.id] != nil,
+                                        showFrom: DoseCard.showFrom(name: dose.name, day: dose.day),
+                                        supplement: DoseCard.isSupplement(dose.name))
         }
         return .init(doses: items)
     }
 
-    /// Updates running activities; ends them once everything is taken or the day is over.
+    /// Updates running activities; ends them once everything showing is taken
+    /// or the day is over. The stale date is the next time doses join the card
+    /// (noon), which is when iOS redraws it.
     static func refresh() async {
+        let now = Date.now
         for activity in Activity<MedsActivityAttributes>.activities {
             let isToday = Calendar.current.isDateInToday(activity.attributes.day)
             let state = state(for: activity.attributes.day)
-            let content = ActivityContent(state: state, staleDate: nil)
-            if !isToday || state.remaining.isEmpty {
+            let content = ActivityContent(state: state, staleDate: state.nextReveal(after: now))
+            if !isToday || state.remaining(at: now).isEmpty {
                 await activity.end(content, dismissalPolicy: isToday ? .after(.now.addingTimeInterval(10 * 60)) : .immediate)
             } else {
                 await activity.update(content)

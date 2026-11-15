@@ -336,6 +336,8 @@ final class CoachNudges {
             await refresher.refresh()
         }
         await nudges.refresh()
+        // Takes yesterday's doses card off the Lock Screen and lets noon's supplements join today's.
+        await MedsLiveActivity.refresh()
     }
 
     /// Asks iOS for a background refresh about 45 minutes before the next

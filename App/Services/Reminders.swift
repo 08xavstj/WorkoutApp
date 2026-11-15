@@ -569,17 +569,22 @@ nonisolated enum Reminders {
         try? await UNUserNotificationCenter.current().add(request)
     }
 
-    /// Starts today's medication Live Activity if there are doses left and
-    /// none is showing. iOS only lets the app start one while it's open.
+    /// Starts today's doses Live Activity if doses that show now (`DoseCard`:
+    /// medications from 06:00, creatine and supplements from noon) are left
+    /// and none is showing. Nothing before 06:00, so opening the app after
+    /// midnight doesn't leave a card on the Lock Screen all night. iOS only
+    /// lets the app start one while it's open.
     static func startMedsActivityIfNeeded() async {
         await MedsLiveActivity.refresh()
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let state = MedsLiveActivity.state()
-        guard !state.remaining.isEmpty else { return }
+        let now = Date.now
+        let state = MedsLiveActivity.state(for: now)
+        guard !state.remaining(at: now).isEmpty else { return }
         let running = Activity<MedsActivityAttributes>.activities.contains { Calendar.current.isDateInToday($0.attributes.day) }
         guard !running else { return }
-        let attributes = MedsActivityAttributes(day: Calendar.current.startOfDay(for: .now))
-        _ = try? Activity.request(attributes: attributes, content: ActivityContent(state: state, staleDate: nil), pushType: nil)
+        let attributes = MedsActivityAttributes(day: Calendar.current.startOfDay(for: now))
+        let content = ActivityContent(state: state, staleDate: state.nextReveal(after: now))
+        _ = try? Activity.request(attributes: attributes, content: content, pushType: nil)
     }
 
     static func endMedsActivities() async {

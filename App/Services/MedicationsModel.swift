@@ -63,8 +63,10 @@ final class MedicationsModel {
         creatine.map { $0.isActive && !$0.times.isEmpty } ?? false
     }
 
-    /// Reminder time in minutes after midnight (default 8:00).
-    var creatineMinutes: Int { creatine?.times.first ?? 8 * 60 }
+    /// Reminder time in minutes after midnight. Noon by default, when
+    /// supplements join the doses card (`DoseCard`); timing makes little
+    /// difference for creatine (Kreider et al., J Int Soc Sports Nutr 2017;14:18).
+    var creatineMinutes: Int { creatine?.times.first ?? DoseCard.supplementsFromHour * 60 }
 
     /// Turns the daily creatine reminder on or off, adding a 5 g creatine entry
     /// the first time. Off only clears the reminder time, so the entry (and what

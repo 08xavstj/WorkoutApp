@@ -16,7 +16,7 @@ struct MedsLiveActivityWidget: Widget {
                         .foregroundStyle(WidgetPalette.pink)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("\(context.state.takenCount)/\(context.state.doses.count) taken")
+                    Text("\(context.state.takenCount)/\(context.state.shown.count) taken")
                         .font(.subheadline.weight(.semibold))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
@@ -75,7 +75,7 @@ private struct MedsWatchView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WidgetPalette.pink)
                 Spacer(minLength: 4)
-                Text("\(state.takenCount) of \(state.doses.count) taken")
+                Text("\(state.takenCount) of \(state.shown.count) taken")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -104,11 +104,11 @@ struct MedsLockScreenView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Medications today", systemImage: "pills.fill")
+                Label(state.title(), systemImage: "pills.fill")
                     .font(.headline)
                     .foregroundStyle(WidgetPalette.pink)
                 Spacer()
-                Text("\(state.takenCount) of \(state.doses.count) taken")
+                Text("\(state.takenCount) of \(state.shown.count) taken")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WidgetPalette.secondary)
             }

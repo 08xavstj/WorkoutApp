@@ -94,10 +94,13 @@ struct UpNextCard: View {
     }
 
     /// Today's doses that are due (their time has come) and not taken yet.
+    /// Creatine and other supplements wait until noon, medications until
+    /// 06:00 (`DoseCard`, the same hours as the Lock Screen card).
     /// The full list is in Health › Records › Medications (also the Log tab and Settings).
     private func doseItems() -> [UpNextItem] {
-        meds.todayDoses
-            .filter { !meds.isTaken($0) && $0.time <= .now }
+        let now = Date.now
+        return meds.todayDoses
+            .filter { !meds.isTaken($0) && $0.time <= now && DoseCard.shows(name: $0.name, day: $0.day, at: now) }
             .map { UpNextItem(id: "dose-\($0.id)", minutes: $0.minutes, kind: .dose($0)) }
     }
 
