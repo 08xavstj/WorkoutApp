@@ -280,23 +280,24 @@ enum LiftHistory {
         for session in sessions.filter({ !$0.isActive }).sorted(by: { $0.startedAt < $1.startedAt }) {
             for exercise in session.exercises {
                 // Drop stages and mini-sets are lighter or fatigued by design: not the lift's top set.
-                let working = exercise.sets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage && $0.reps > 0 }
-                guard let top = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) else { continue }
-                // Double progression needs every set at the top weight to reach the reps, not just the best one.
-                let atTop = working.filter { abs($0.weightKg - top.weightKg) < 0.01 }
-                let e1RM = unit.fromKilograms(top.estimatedOneRepMax)
+                let working = exercise.orderedSets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage && $0.reps > 0 }
+                // The set that stands for the session, reps and rating together (`ExerciseHistory.sessionResult`).
+                guard let done = ExerciseHistory.sessionResult(working.map {
+                    ExerciseHistory.WorkingSet(weight: $0.weightKg, reps: $0.reps, rpe: $0.rpe)
+                }) else { continue }
+                let e1RM = unit.fromKilograms(done.estimatedOneRepMax)
                 let previous = result[exercise.exerciseID]
                 let previousBest = previous?.bestEstimatedOneRepMax ?? 0
-                let topWeight = unit.fromKilograms(top.weightKg)
+                let topWeight = unit.fromKilograms(done.weight)
                 // The last few top weights and last session's sets, for rep and set progression.
                 result[exercise.exerciseID] = ExerciseHistory(
                     bestEstimatedOneRepMax: max(previousBest, e1RM),
                     lastWeight: topWeight,
-                    lastReps: atTop.map(\.reps).min() ?? top.reps,
-                    lastRPE: atTop.compactMap(\.rpe).max() ?? top.rpe,
+                    lastReps: done.reps,
+                    lastRPE: done.rpe,
                     lastDate: session.startedAt,
                     recentWeights: ExerciseHistory.appending(topWeight, to: previous?.recentWeights ?? []),
-                    lastSets: working.count
+                    lastSets: done.sets
                 )
             }
         }

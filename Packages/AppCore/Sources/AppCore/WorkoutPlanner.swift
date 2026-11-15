@@ -481,6 +481,73 @@ public struct ExerciseHistory: Sendable, Equatable {
     public static func appending(_ weight: Double, to weights: [Double]) -> [Double] {
         Array((weights + [weight]).suffix(recentSessions))
     }
+
+    /// One completed working set of a session (no warm-ups, drop stages or mini-sets).
+    public struct WorkingSet: Sendable, Equatable {
+        public var weight: Double
+        public var reps: Int
+        public var rpe: Double?
+
+        public init(weight: Double, reps: Int, rpe: Double? = nil) {
+            self.weight = weight
+            self.reps = reps
+            self.rpe = rpe
+        }
+
+        /// Reps to failure the set showed: reps done plus reps left, which
+        /// the 0-4+ rating caps at 4 (`OneRepMax`).
+        var repsToFailure: Double {
+            Double(reps) + (rpe.map { max(0, min(4, 10 - $0)) } ?? 0)
+        }
+    }
+
+    /// What a session showed at its top weight: `lastWeight`, `lastReps` and `lastRPE`.
+    public struct SessionResult: Sendable, Equatable {
+        public var weight: Double
+        public var reps: Int
+        public var rpe: Double?
+        public var estimatedOneRepMax: Double
+        /// Working sets in the session, at any weight.
+        public var sets: Int
+    }
+
+    /// The set that stands for a session: its reps and its own rating together.
+    ///
+    /// The top weight is the weight of the set with the best estimated 1RM.
+    /// Among the sets at that weight, the one that showed the most reps to
+    /// failure (reps done + reps left) stands for the session; on a tie the
+    /// one with more reps, since a rating is most accurate close to failure
+    /// (Halperin et al., Sports Med 2022). Rep goals move set by set
+    /// (`RepGoal`), so the fewest reps and the hardest rating usually come
+    /// from different sets: 9 reps with 4+ left, then 11, 11, 11 with one left
+    /// read as "9 reps at RPE 9", a set nobody did, and the plan repeated the
+    /// same weight and reps for weeks. Reps at the same weight fall across
+    /// sets anyway (Willardson & Burkett, J Strength Cond Res 2006), so the
+    /// best set is the measure of what the lifter can do; the later sets
+    /// follow it through the rep goals.
+    ///
+    /// Without a rating on every one of those sets there is nothing to weigh
+    /// reps against, so the classic double-progression reading stays: every
+    /// set has to reach the reps (the fewest reps, the hardest rating logged).
+    /// Which set stands for a session is the app's choice.
+    public static func sessionResult(_ sets: [WorkingSet]) -> SessionResult? {
+        let working = sets.filter { $0.reps > 0 }
+        func oneRepMax(_ set: WorkingSet) -> Double { OneRepMax.estimate(weight: set.weight, reps: set.reps, rpe: set.rpe) }
+        guard let top = working.max(by: { oneRepMax($0) < oneRepMax($1) }) else { return nil }
+        let atTop = working.filter { abs($0.weight - top.weight) < 0.01 }
+        guard atTop.allSatisfy({ $0.rpe?.isFinite == true }) else {
+            return SessionResult(weight: top.weight, reps: atTop.map(\.reps).min() ?? top.reps,
+                                 rpe: atTop.compactMap(\.rpe).filter(\.isFinite).max(),
+                                 estimatedOneRepMax: oneRepMax(top), sets: working.count)
+        }
+        var best = top
+        for set in atTop {
+            let gap = set.repsToFailure - best.repsToFailure
+            if gap > 0.001 || (abs(gap) <= 0.001 && set.reps >= best.reps) { best = set }
+        }
+        return SessionResult(weight: top.weight, reps: best.reps, rpe: best.rpe, estimatedOneRepMax: oneRepMax(top),
+                             sets: working.count)
+    }
 }
 
 public struct PlannedExercise: Codable, Sendable, Equatable, Identifiable {
@@ -1845,6 +1912,34 @@ public struct WorkoutPlanner: Sendable {
     /// A lower effort target than last time goes lighter for that day only.
     public func progression(history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind,
                             mode: ProgressionMode = .load, lowerBody: Bool = false) -> Progression? {
+        progressionRules(history: effortEquated(history, reps: reps, rpe: rpe, kind: kind), reps: reps, rpe: rpe, kind: kind,
+                         mode: mode, lowerBody: lowerBody)
+    }
+
+    /// Reps past the top of the range at a harder effort than today's target,
+    /// read as fewer reps at that effort: 12 reps with one left is 11 with
+    /// two left (reps to failure = reps done + reps left; about one rep per
+    /// RPE point, Zourdos et al., J Strength Cond Res 2016). The set-by-set
+    /// rep goal (`RepGoal`) can take a set up to two reps past the range, and
+    /// without this a lifter who did 12, 12 at the top of a 6-10 range was
+    /// held at the same weight for being half a point over the effort target.
+    /// Only when the reps stay at or over the top afterwards, last time
+    /// wasn't a lighter day and the gym has a heavier weight; otherwise the
+    /// history is used as logged.
+    func effortEquated(_ history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind) -> ExerciseHistory {
+        guard let last = history.lastRPE, last.isFinite, last <= 10, last > rpe + 0.001,
+              history.lastReps > reps.upperBound, !history.lastWasLighter,
+              gym.nextLoad(above: history.lastWeight, on: kind) != nil else { return history }
+        let trade = Int((last - rpe).rounded(.up))
+        guard trade > 0, history.lastReps - trade >= reps.upperBound else { return history }
+        var equated = history
+        equated.lastReps -= trade
+        equated.lastRPE = last - Double(trade)
+        return equated
+    }
+
+    func progressionRules(history: ExerciseHistory, reps: ClosedRange<Int>, rpe: Double, kind: EquipmentKind,
+                          mode: ProgressionMode = .load, lowerBody: Bool = false) -> Progression? {
         let repsInReserve = max(0, 10 - rpe)
         // Last time at least `catchUpGap` reps fresher than today's target.
         let clearlyEasier = history.lastRPE.map { $0.isFinite && $0 <= rpe - Self.catchUpGap + 0.001 } ?? false
@@ -2042,10 +2137,18 @@ public struct WorkoutPlanner: Sendable {
         let target = min(wanted, history.lastWeight * (1 + rise))
         guard target.isFinite, let next = gym.nextLoad(above: history.lastWeight, on: kind),
               next <= history.lastWeight * (1 + rise) + 0.001 else { return nil }
-        // At least one step up: the set was clearly too easy (RPE 5 only says "5 or more left").
-        let load = max(next, gym.load(atMost: target, on: kind) ?? next)
-        return load
+        let estimated = gym.load(atMost: target, on: kind) ?? history.lastWeight
+        // "4 or more left" (RPE 6 and under: the top of the app's 0-4+ rating) only gives a floor
+        // for that 1RM, so the weight goes up at least one step. With a counted reserve (3 left)
+        // the estimate stands: when it says the next weight is too heavy for the middle of the
+        // range, the reps go up instead (16 kg × 8 with 3 left went to 18 kg, where 7 was the limit).
+        if lastRPE > Self.countedReserveRPE + 0.001, estimated < next - 0.001 { return nil }
+        return max(next, estimated)
     }
+
+    /// The highest RPE that only says "4 or more reps left" (the top button of
+    /// the 0-4+ rating, `ReserveText.rpe(repsLeft:)`); above it the reserve was counted.
+    public static let countedReserveRPE = 6.0
 
     /// The same weight with one rep fewer when last time went a little past
     /// today's effort target (over `VolumeProgression.effortTolerance`, at
