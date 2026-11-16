@@ -3,27 +3,12 @@ import HealthKit
 import AppCore
 
 /// Samples the app writes to Apple Health beyond workouts and blood pressure:
-/// paced-breathing sessions (mindful minutes), the morning mood (state of
-/// mind) and the session RPE as a workout effort score (docs/research/competitors.md item 7).
+/// the morning mood (state of mind) and the session RPE as a workout effort score (docs/research/competitors.md item 7).
 nonisolated extension HealthKitClient {
     /// Metadata key on dietary samples an earlier version of the app wrote as
     /// AI meal estimates. The app no longer writes them, but `estimateOnlyDays`
     /// still finds the old ones so `EstimatedIntake` can down-weight those days.
     static let estimateMetadataKey = "TensileEstimate"
-
-    // MARK: Mindful minutes
-
-    /// Saves a breathing session as a mindful-minutes sample.
-    @concurrent
-    func saveMindfulSession(start: Date, end: Date) async throws {
-        let sample = HKCategorySample(
-            type: HKCategoryType(.mindfulSession),
-            value: HKCategoryValue.notApplicable.rawValue,
-            start: start, end: max(end, start.addingTimeInterval(1)),
-            metadata: ["TensileBreathingPace": "\(Int(PacedBreathing.breathsPerMinute.rounded())) breaths/min"]
-        )
-        try await store.save(sample)
-    }
 
     // MARK: State of mind (iOS 18)
 

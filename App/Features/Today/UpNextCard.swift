@@ -10,7 +10,7 @@ import AppCore
 ///
 /// Rows: morning and evening check-in (until done), medication doses due
 /// (with Take), the caffeine cut-off, the day's movement nudge, a weigh-in
-/// reminder, the breathing offer, the day's stretch and tonight's bed-by window. Today's planned
+/// reminder, the day's stretch and tonight's bed-by window. Today's planned
 /// session is the Scores card's button, so it isn't repeated here; once today
 /// is done or a rest day, the week's next session shows ("Next: Lower · 60
 /// min", from the queue in `AdaptiveWeek`), and a session that wasn't the one
@@ -61,9 +61,6 @@ struct UpNextCard: View {
             items.append(UpNextItem(id: "weighin", minutes: settings.morningCheckInMinutes, kind: .info(
                 icon: "scalemass", color: Theme.nutrition, title: WeighInNudge.title,
                 detail: WeighInNudge.detail(lastWeighIn: metrics.lastWeighIn))))
-        }
-        if BreathingOfferRow.isOffered(metrics: metrics, checkIns: checkIns) {
-            items.append(UpNextItem(id: "breathing", minutes: now, kind: .breathing))
         }
         // The day's 5-minute stretch until it's done (`Stretching`), at its reminder time.
         if StretchOfferRow.isOffered, !metrics.restMode {
@@ -225,7 +222,6 @@ private struct UpNextItem: Identifiable {
     enum Kind {
         case checkIn(CheckInKind)
         case dose(Dose)
-        case breathing
         case stretch
         case bedtime(title: String, detail: String)
         /// Advice with no action, e.g. the caffeine cut-off.
@@ -253,8 +249,6 @@ private struct UpNextItemRow: View {
             CheckInUpNextRow(kind: kind)
         case .dose(let dose):
             DoseUpNextRow(dose: dose)
-        case .breathing:
-            BreathingOfferRow()
         case .stretch:
             StretchOfferRow()
         case .bedtime(let title, let detail):

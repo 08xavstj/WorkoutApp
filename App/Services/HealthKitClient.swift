@@ -101,8 +101,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         var types: Set<HKSampleType> = [HKObjectType.workoutType(), HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned),
          // Home blood pressure readings you type in.
          HKQuantityType(.bloodPressureSystolic), HKQuantityType(.bloodPressureDiastolic),
-         // Paced-breathing sessions, the check-in mood and the session RPE (HealthKitClient+Writes).
-         HKCategoryType(.mindfulSession), HKObjectType.stateOfMindType(), HKQuantityType(.workoutEffortScore),
+         // The check-in mood and the session RPE (HealthKitClient+Writes).
+         HKObjectType.stateOfMindType(), HKQuantityType(.workoutEffortScore),
          // Quick-estimate meals, flagged as estimates in their metadata.
          HKQuantityType(.dietaryEnergyConsumed), HKQuantityType(.dietaryProtein), HKQuantityType(.dietaryCarbohydrates),
          HKQuantityType(.dietaryFatTotal), HKQuantityType(.dietaryFiber)]

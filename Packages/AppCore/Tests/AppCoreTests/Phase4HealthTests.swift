@@ -2,64 +2,6 @@ import Foundation
 import Testing
 @testable import AppCore
 
-// MARK: - Paced breathing
-
-struct PacedBreathingTests {
-    @Test func paceIsAboutSixBreathsAMinute() {
-        // 5.5 s in + 5.5 s out (Laborde 2022; Zaccaro 2018 slow-breathing range).
-        #expect(PacedBreathing.cycleSeconds == 11)
-        #expect(abs(PacedBreathing.breathsPerMinute - 5.45) < 0.01)
-        #expect(PacedBreathing.sessionSeconds == 300)
-    }
-
-    @Test func phasesAlternateAndScaleTurnsAround() {
-        #expect(PacedBreathing.phase(at: 0).phase == .inhale)
-        #expect(PacedBreathing.phase(at: 5.4).phase == .inhale)
-        #expect(PacedBreathing.phase(at: 5.6).phase == .exhale)
-        #expect(PacedBreathing.phase(at: 11).phase == .inhale)
-        #expect(abs(PacedBreathing.phase(at: 2.75).progress - 0.5) < 1e-9)
-        // Smallest at the start of a breath in, largest at the start of a breath out.
-        #expect(abs(PacedBreathing.scale(at: 0) - 0.55) < 1e-9)
-        #expect(abs(PacedBreathing.scale(at: 5.5) - 1.0) < 1e-9)
-        #expect(abs(PacedBreathing.scale(at: 11) - 0.55) < 1e-9)
-        #expect(PacedBreathing.scale(at: 2) > PacedBreathing.scale(at: 1))
-        #expect(PacedBreathing.scale(at: 8) < PacedBreathing.scale(at: 7))
-    }
-
-    @Test func completionAndRemaining() {
-        #expect(PacedBreathing.remaining(at: 100) == 200)
-        #expect(PacedBreathing.remaining(at: 400) == 0)
-        #expect(!PacedBreathing.isComplete(at: 299.9))
-        #expect(PacedBreathing.isComplete(at: 300))
-    }
-
-    @Test func offeredOnEasyDaysAndStressfulEvenings() {
-        #expect(PacedBreathing.isOffered(easyDay: true, eveningStress: nil))
-        #expect(PacedBreathing.isOffered(easyDay: false, eveningStress: 4))
-        #expect(PacedBreathing.isOffered(easyDay: false, eveningStress: 5))
-        #expect(!PacedBreathing.isOffered(easyDay: false, eveningStress: 3))
-        #expect(!PacedBreathing.isOffered(easyDay: false, eveningStress: nil))
-    }
-
-    @Test func heartRateAveragesOnlyInsideTheWindow() {
-        let start = Date(timeIntervalSince1970: 1_800_000_000)
-        let samples = [
-            HeartRateSample(date: start.addingTimeInterval(-90), bpm: 80),
-            HeartRateSample(date: start.addingTimeInterval(-40), bpm: 62),
-            HeartRateSample(date: start.addingTimeInterval(-10), bpm: 66),
-        ]
-        let window = DateInterval(start: start.addingTimeInterval(-60), end: start)
-        #expect(PacedBreathing.averageHeartRate(samples, in: window) == 64)
-        #expect(PacedBreathing.averageHeartRate([], in: window) == nil)
-        #expect(PacedBreathing.heartRateText(before: 64, after: 58) == "Heart rate 64 → 58 bpm, down.")
-        #expect(PacedBreathing.heartRateText(before: nil, after: nil).contains("No heart rate"))
-        let session = BreathingSession(start: start, end: start.addingTimeInterval(300), heartRateBefore: 64, heartRateAfter: 58)
-        #expect(session.minutes == 5)
-        #expect(session.heartRateDrop == 6)
-        #expect(PacedBreathing.evidenceNote.contains("Laborde 2022"))
-    }
-}
-
 // MARK: - Movement breaks
 
 struct MovementBreaksTests {

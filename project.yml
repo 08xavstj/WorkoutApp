@@ -94,7 +94,7 @@ targets:
           daylight hours for training advice. You can type your city instead.
         NSHealthUpdateUsageDescription: >-
           WorkoutApp saves the gym workouts (with your effort rating), blood pressure
-          readings, breathing sessions, check-in mood and quick meal estimates you log to
+          readings, check-in mood and quick meal estimates you log to
           Apple Health.
     settings:
       base:

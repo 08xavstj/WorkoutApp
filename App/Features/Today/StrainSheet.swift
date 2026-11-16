@@ -2,8 +2,7 @@ import SwiftUI
 import AppCore
 
 /// Today's range in detail, opened from the Strain ring: today's strain
-/// against its range, where the range comes from, the breathing offer and
-/// the sessions that fit. It was a card on Home, which showed strain twice
+/// against its range, where the range comes from, and the sessions that fit. It was a card on Home, which showed strain twice
 /// next to the ring (docs/research/ux-audit.md 4.3, H2, H3).
 ///
 /// `start` opens the workout builder. The sheet passes the request up and
@@ -104,7 +103,6 @@ private struct StrainGoalCard: View {
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            BreathingOfferRow() // easy days and stressful evenings (BreathingView.swift; Laborde 2022)
             StrainStatusAdvice(
                 status: status,
                 suggestions: suggestions,
