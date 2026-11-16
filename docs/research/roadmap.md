@@ -78,7 +78,7 @@ From `health-metrics.md`, for a lifter in his 20s–40s:
 5. **Apple Health plumbing:** write session RPE as workout effort score and check-in mood as state of mind; read sleep-apnoea events, time in daylight and the iOS 26 Medications API.
 6. **Movement-break and post-meal-walk nudges** from the hourly step timeline and meal size (Buffey 2022).
 7. **Strength-for-health card:** relative e1RM against age/sex bands, labelled as an app choice (García-Hermoso 2018).
-8. **Quick-estimate food logging** through Claude on Supabase, written to Apple Health under Tensile's name, flagged as an estimate and down-weighted in maintenance.
+8. ~~Quick-estimate food logging through a cloud model.~~ Dropped: the app has no cloud AI (CLAUDE.md). Old estimate entries are still down-weighted in maintenance.
 
 ## Skip, with reasons
 

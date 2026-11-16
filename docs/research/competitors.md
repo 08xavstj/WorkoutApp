@@ -224,7 +224,7 @@ Evidence strength: **strong** (meta-analyses/RCTs, consistent), **moderate** (so
 - *Who does it best:* Whoop Proactive Check-ins and My Memory (May 2026), Garmin Active Intelligence (Aug 2026 hands-on), Fitbit/Google Health Coach.
 - *Evidence:* **weak to moderate, indirect**. Tailored prompts increase the effect of app-based activity interventions (Laranjo et al., Br J Sports Med 2021, meta-regression: text messaging and personalisation raised effect sizes). No randomised trial of LLM-generated coaching on health outcomes was found in this session; treat the LLM part as unproven and keep the triggers rule-based with the model only wording the message.
 - *Goal tailoring:* triggers chosen by goal (fat loss → weight-pace and protein; muscle → progression and volume).
-- *Effort:* medium (needs a server-side or background trigger; on-device model can word it without the Claude key).
+- *Effort:* medium (a background trigger; the on-device model words it. No cloud AI, per CLAUDE.md).
 
 **13. Export and share: CSV of workouts and daily metrics, PDF of the home-BP protocol and labs.**
 - *Who:* Apple's iOS 26 BP PDF for clinicians; Strong/Hevy CSV.
@@ -265,7 +265,7 @@ Things found in no competitor surveyed, or done better here:
 5. **Medications with known effects on HR, HRV, sleep and training**, so a beta-blocker or a new antihistamine does not read as "poor recovery".
 6. **Evidence labels and honesty**: scores say when they are app choices, sleep stages are weighted lightly, body age shows confidence, the illness watch needs two signals, and the app refuses to estimate BP or glucose from a wearable.
 7. **Caffeine cut-off from bedtime, alcohol effect, heat acclimation days, sick/rest mode** are each present in one or two competitors; Tensile is the only one with all of them, free of subscription.
-8. **Privacy**: progress photos never leave the device except for the explicit weekly analysis; the API key stays server-side; rate limits are enforced server-side.
+8. **Privacy**: progress photos never leave the device, and the coach runs only on Apple's on-device model; there is no server and no API key (CLAUDE.md).
 9. **Device-agnostic through HealthKit**: Garmin watch + Cronometer + AirPods heart rate + iPhone camera HRV in one place; Athlytic and Training Today are Apple Watch only, Whoop/Oura need their hardware.
 10. **The coach returns a startable workout card**, not a paragraph. Whoop's and Oura's assistants explain; they do not hand you a session that fits your gym.
 
