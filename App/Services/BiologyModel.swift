@@ -47,10 +47,16 @@ final class BiologyModel {
 
         // RMSSD first (typed, camera, Apple Watch beat-to-beat), never mixed with SDNN.
         let nights = (try? await health.sleepHistory(nights: 90)) ?? []
-        let rmssd = await health.nightlyRMSSD(nights: nights)
-            .merging(DailyMetricsModel.ouraRMSSD()) { _, oura in oura }
+        // The ring's and the watch's nights on one scale, as Recovery uses them
+        // (`DailyVitals.mergingOvernightRMSSD`).
+        let rmssd = DailyVitals.mergingOvernightRMSSD(preferred: DailyMetricsModel.ouraRMSSD(), other: await health.nightlyRMSSD(nights: nights),
+                                                      today: today).nights
             .merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
-        let vitals = DailyVitals.merging((try? await vitalsTask) ?? [], manualHRV: rmssd, manualOnlyHRV: true).sorted { $0.date < $1.date }
+        // Evening readings are filed under the next morning (`nightlyVitals`): a night that
+        // hasn't happened yet isn't shown, or Health read "Last reading tomorrow" after 6 pm.
+        let vitals = DailyVitals.merging((try? await vitalsTask) ?? [], manualHRV: rmssd, manualOnlyHRV: true)
+            .filter { Calendar.current.startOfDay(for: $0.date) <= today }
+            .sorted { $0.date < $1.date }
         hrvSeries = vitals.compactMap { v in v.hrvMilliseconds.map { DatedValue(date: v.date, value: $0) } }
         let rhrSeries = vitals.compactMap { v in v.restingHeartRate.map { DatedValue(date: v.date, value: $0) } }
 

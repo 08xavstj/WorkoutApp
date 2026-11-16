@@ -9,7 +9,9 @@ struct RecoveryContributorsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
+        // The evening before the night the score is from: two days back while the score is
+        // still yesterday's, so it isn't explained by drinks logged after that reading.
+        let yesterday = Calendar.current.date(byAdding: .day, value: metrics.recoveryIsFromYesterday ? -2 : -1, to: .now) ?? .now
         let drinks = checkIns.evening(on: yesterday)?.drinks
         let illness = vitals.illnessAlert(metrics: metrics, drinksLastNight: drinks, reportedSymptoms: checkIns.morning()?.isSick ?? false,
                                           daysSinceLastPeriod: checkIns.daysSinceLastPeriod())

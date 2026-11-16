@@ -436,8 +436,14 @@ final class VitalsModel {
                 let delta = last.value - mean
                 temp.value = (delta >= 0 ? "+" : "−") + fmt(abs(UnitText.temperatureDelta(fromCelsius: delta)), 1)
                 temp.unit = UnitText.temperatureSymbol + " vs usual"
-                temp.status = abs(delta) < 0.5 ? "Normal" : "Off baseline"
-                temp.tone = abs(delta) < 0.5 ? .good : .caution
+                // The history lists each night's own temperature, not a difference.
+                temp.historyUnit = UnitText.temperatureSymbol
+                // A flag needs the same 5 baseline nights the illness watch asks for
+                // (`temperatureDelta(on:)`); on night 2 "usual" is one reading.
+                if baseline.count >= 5 {
+                    temp.status = abs(delta) < 0.5 ? "Normal" : "Off baseline"
+                    temp.tone = abs(delta) < 0.5 ? .good : .caution
+                }
                 // The pill shows the shown delta: centre = your usual, each end ±0.5 °C.
                 temp.gauge = min(1, max(0, 0.5 + delta / 1.0))
             }
@@ -726,9 +732,13 @@ final class VitalsModel {
     func illnessAlert(metrics: DailyMetricsModel, drinksLastNight: Int?, reportedSymptoms: Bool,
                       daysSinceLastPeriod: Int? = nil) -> IllnessWatch.Alert? {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
+        // The day the readings belong to: before last night is scored, `metrics` still holds
+        // yesterday's resting heart rate and HRV, so "the day before" moves back with it.
+        // Otherwise one bad night was compared with itself and passed the two-day rule at midnight.
+        let midnight = calendar.startOfDay(for: .now)
+        let today = metrics.recoveryIsFromYesterday ? (calendar.date(byAdding: .day, value: -1, to: midnight) ?? midnight) : midnight
         let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
-        let respiration = respirationHistory.filter { !calendar.isDateInToday($0.date) }.map(\.value)
+        let respiration = respirationHistory.filter { $0.date < today }.map(\.value)
         let respirationBaseline = Self.meanSD(respiration)
         let rhrBaseline: (mean: Double, sd: Double)? = {
             guard let mean = metrics.baseline?.meanRHR, let sd = metrics.baseline?.sdRHR, (metrics.baseline?.nights ?? 0) >= 7 else { return nil }
@@ -754,6 +764,7 @@ final class VitalsModel {
             reportedSymptoms: reportedSymptoms || !healthSymptomDays.isEmpty,
             previousDay: previousDay,
             daysSinceLastPeriod: daysSinceLastPeriod,
+            usesFahrenheit: UnitText.usesFahrenheit,
             // Builder B: temperature as a z-score against the 30-night baseline, and the
             // week's breathing-disturbance trend (watch-features.md §1 note, 1.2).
             temperatureBaselineSD: temperatureBaselineSD(on: today),

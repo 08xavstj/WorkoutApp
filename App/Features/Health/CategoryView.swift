@@ -46,7 +46,8 @@ private struct CategoryRow: View {
 
     private var withData: Int { stats.filter { $0.value != nil }.count }
     /// Measures whose latest value is flagged (amber), never ones without data.
-    private var toWatch: Int { stats.filter { $0.value != nil && $0.tone == .caution }.count }
+    /// Only current readings count (`HealthMonitorTiles.isCurrent`): an old one isn't a flag today.
+    private var toWatch: Int { stats.filter { $0.value != nil && $0.tone == .caution && HealthMonitorTiles.isCurrent($0) }.count }
 
     private var detail: String {
         guard withData > 0 else { return "No data yet" }

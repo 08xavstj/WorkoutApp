@@ -557,7 +557,10 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             // more than 90 minutes from it is a separate session.
             guard let main = SleepSessions.main(byNight[night] ?? []) else { return nil }
             let hours = main.asleep / 3600
-            guard hours >= 2 else { return nil }
+            // Under an hour is a doze the tracker caught with the night itself missing (watch
+            // off, ring flat), not a night. The bar was 2 h, which also dropped real short
+            // nights (a red-eye, a sick child) from sleep debt. App choice.
+            guard hours >= 1 else { return nil }
             return SleepNight(date: night, hoursAsleep: hours, bedtime: main.start, wake: main.end, intervals: main.intervals)
         }
     }

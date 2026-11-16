@@ -209,13 +209,17 @@ public enum IllnessWatch {
         /// (`breathingDisturbancesRising`). A week-long trend already spans
         /// days, so it satisfies the two-day rule by itself.
         public var breathingDisturbancesRising: Bool
+        /// Show the temperature sign in °F (the app's temperature setting).
+        public var usesFahrenheit = false
 
         public init(restingHeartRate: Double? = nil, rhrBaseline: (mean: Double, sd: Double)? = nil,
                     respiratoryRate: Double? = nil, respiratoryBaseline: (mean: Double, sd: Double)? = nil,
                     temperatureDelta: Double? = nil, hrvChangePercent: Double? = nil,
                     drinksLastNight: Int? = nil, yesterdayStrain: Double? = nil, reportedSymptoms: Bool = false,
                     previousDay: PreviousDay? = nil, daysSinceLastPeriod: Int? = nil,
+                    usesFahrenheit: Bool = false,
                     temperatureBaselineSD: Double? = nil, breathingDisturbancesRising: Bool = false) {
+            self.usesFahrenheit = usesFahrenheit
             self.restingHeartRate = restingHeartRate
             self.rhrBaseline = rhrBaseline
             self.respiratoryRate = respiratoryRate
@@ -291,7 +295,7 @@ public enum IllnessWatch {
     static func bodySignals(
         restingHeartRate: Double?, rhrBaseline: (mean: Double, sd: Double)?,
         respiratoryRate: Double?, respiratoryBaseline: (mean: Double, sd: Double)?,
-        temperatureDelta: Double?, temperatureBaselineSD: Double? = nil, luteal: Bool
+        temperatureDelta: Double?, temperatureBaselineSD: Double? = nil, luteal: Bool, usesFahrenheit: Bool = false
     ) -> [Signal] {
         var signals: [Signal] = []
         if let rhr = restingHeartRate, let base = rhrBaseline,
@@ -303,7 +307,8 @@ public enum IllnessWatch {
             signals.append(Signal(id: "breathing", text: String(format: "Breathing rate +%.1f/min", rate - base.mean)))
         }
         if let delta = temperatureDelta, delta >= temperatureBar(baselineSD: temperatureBaselineSD, luteal: luteal) {
-            signals.append(Signal(id: "temperature", text: String(format: "Temperature +%.1f °C", delta)))
+            let shown = usesFahrenheit ? delta * 9 / 5 : delta
+            signals.append(Signal(id: "temperature", text: String(format: "Temperature +%.1f ", shown) + (usesFahrenheit ? "°F" : "°C")))
         }
         return signals
     }
@@ -313,7 +318,8 @@ public enum IllnessWatch {
         let today = bodySignals(
             restingHeartRate: inputs.restingHeartRate, rhrBaseline: inputs.rhrBaseline,
             respiratoryRate: inputs.respiratoryRate, respiratoryBaseline: inputs.respiratoryBaseline,
-            temperatureDelta: inputs.temperatureDelta, temperatureBaselineSD: inputs.temperatureBaselineSD, luteal: luteal
+            temperatureDelta: inputs.temperatureDelta, temperatureBaselineSD: inputs.temperatureBaselineSD, luteal: luteal,
+            usesFahrenheit: inputs.usesFahrenheit
         )
         var signals = today.map(\.text)
         if inputs.breathingDisturbancesRising {

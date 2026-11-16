@@ -47,11 +47,19 @@ enum HealthMonitorTiles {
         var result: [VitalsModel.Stat] = []
         for slot in priority {
             guard result.count < limit else { break }
-            if let stat = slot.lazy.compactMap({ vitals.stat($0) }).first(where: { $0.value != nil }) {
+            if let stat = slot.lazy.compactMap({ vitals.stat($0) }).first(where: { $0.value != nil && isCurrent($0) }) {
                 result.append(stat)
             }
         }
         return result
+    }
+
+    /// True when the stat's latest reading is from today or last night. A
+    /// blood-oxygen reading from three weeks ago isn't today's "to watch".
+    static func isCurrent(_ stat: VitalsModel.Stat, now: Date = .now, calendar: Calendar = .current) -> Bool {
+        guard let last = stat.series.last?.date else { return true }
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)) ?? now
+        return last >= yesterday
     }
 
     /// How many of the extra tiles are outside their normal today.

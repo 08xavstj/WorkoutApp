@@ -320,17 +320,17 @@ private struct MacroBars: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            MacroColumn(label: "Protein", grams: food.proteinGrams ?? 0, goal: metrics.proteinTarget, color: Theme.nutrition)
+            MacroColumn(label: "Protein", grams: food.proteinGrams, goal: metrics.proteinTarget, color: Theme.nutrition)
             if settings.hideCalories {
                 // The app's fibre target, 29 g: the top of the 25-29 g/day band
                 // where the benefit sits (Reynolds et al., Lancet 2019).
-                MacroColumn(label: "Fibre", grams: food.fiberGrams ?? 0,
+                MacroColumn(label: "Fibre", grams: food.fiberGrams,
                             goal: Micronutrients.Nutrient.fiber.target(settings.sex, age: settings.age), color: Theme.oxygen)
             } else {
                 // Carb and fat targets from the calorie split (`MacroSplit`; Helms 2014),
                 // the same numbers `MacroTargetsLine` names, with their floors.
-                MacroColumn(label: "Carbs", grams: food.carbsGrams ?? 0, goal: metrics.macroSplit?.carbsGrams, color: Theme.strain)
-                MacroColumn(label: "Fat", grams: food.fatGrams ?? 0, goal: metrics.macroSplit?.fatGrams, color: Theme.sleep)
+                MacroColumn(label: "Carbs", grams: food.carbsGrams, goal: metrics.macroSplit?.carbsGrams, color: Theme.strain)
+                MacroColumn(label: "Fat", grams: food.fatGrams, goal: metrics.macroSplit?.fatGrams, color: Theme.sleep)
             }
             if food.waterLiters ?? 0 > 0 {
                 WaterColumn()
@@ -497,10 +497,13 @@ private struct MacroColumn: View {
 
 extension MacroColumn {
     /// Grams against an optional goal; without one the bar is relative to the value.
-    init(label: String, grams value: Double, goal: Double?, color: Color) {
+    /// A nutrient the food app didn't send shows "--", not a zero.
+    init(label: String, grams: Double?, goal: Double?, color: Color) {
+        let shown = grams.map { "\(whole($0))" } ?? "--"
+        let value = grams ?? 0
         self.init(
             label: label,
-            text: goal.map { "\(whole(value))/\(whole($0)) g" } ?? "\(whole(value)) g",
+            text: goal.map { "\(shown)/\(whole($0)) g" } ?? "\(shown) g",
             fraction: value / max(goal ?? max(value, 1) * 1.2, 1),
             color: color
         )
@@ -988,7 +991,7 @@ private struct HealthMonitor: View {
         let change = metrics.recovery?.restingHeartRateChange
         let limit = Self.restingHeartRateLimit
         return MetricTile(
-            title: usesSleepingHeartRate ? "Sleeping heart rate" : "Resting heart rate",
+            title: (usesSleepingHeartRate ? "Sleeping heart rate" : "Resting heart rate") + nightSuffix,
             value: metrics.restingHeartRate.map { "\(whole($0.rounded()))" },
             unit: "bpm",
             spokenUnit: "beats per minute",
@@ -1004,6 +1007,12 @@ private struct HealthMonitor: View {
         )
     }
 
+    /// ", yesterday" on the tiles that still hold yesterday's reading (after
+    /// midnight, until last night is scored), like the Recovery ring's note.
+    private var nightSuffix: String {
+        metrics.recoveryIsFromYesterday ? ", yesterday" : ""
+    }
+
     private var hrvActionTitle: String? {
         metrics.hrv == nil ? "Add HRV" : (metrics.hrvIsManual ? "Edit" : nil)
     }
@@ -1013,7 +1022,7 @@ private struct HealthMonitor: View {
         let logValue = metrics.hrv.map { log($0) }
         let limit = Self.hrvDropLimit
         return MetricTile(
-            title: "HRV",
+            title: "HRV" + nightSuffix,
             value: metrics.hrv.map { "\(whole($0.rounded()))" },
             unit: "ms",
             spokenUnit: "milliseconds",
@@ -1034,7 +1043,7 @@ private struct HealthMonitor: View {
         let rate = metrics.respiratoryRate
         let normal = rate.map { (12...20).contains($0) } ?? true
         return MetricTile(
-            title: "Breathing rate",
+            title: "Breathing rate" + nightSuffix,
             value: rate.map { $0.formatted(.number.precision(.fractionLength(1))) },
             unit: "/min",
             spokenUnit: "breaths per minute",

@@ -187,6 +187,18 @@ struct SleepSourcePickTests {
         #expect(SleepSource.pick(night, prefer: .ring) == night)
     }
 
+    @Test func aRingFragmentDoesNotReplaceTheWatchsNight() {
+        // The ring died after 2 h (or logged an evening doze); the watch has 7 h.
+        let short = [sample(.core, 420, .watch), sample(.core, 120, .ring)]
+        #expect(SleepSource.pick(short, prefer: .ring).map(\.tracker) == [.watch])
+        // 5 h 30 of the watch's 7 h is enough (over 70%): the ring stands.
+        let enough = [sample(.core, 420, .watch), sample(.core, 330, .ring)]
+        #expect(SleepSource.pick(enough, prefer: .ring).map(\.tracker) == [.ring])
+        // Two other trackers aren't added together: the longest one is the yardstick.
+        let two = [sample(.core, 200, .watch), sample(.core, 200, .other), sample(.core, 150, .ring)]
+        #expect(SleepSource.pick(two, prefer: .ring).map(\.tracker) == [.ring])
+    }
+
     @Test func picksNightByNight() {
         let day = 86_400.0
         let first = [sample(.core, 60, .watch), sample(.core, 60, .ring)]

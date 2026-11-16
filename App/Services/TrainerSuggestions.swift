@@ -107,12 +107,16 @@ enum TrainerSuggestions {
             return ("Your 7-day HRV (\(Int(trend.average.rounded())) ms) is below your normal range (\(Int(trend.normalRange.lowerBound.rounded()))–\(Int(trend.normalRange.upperBound.rounded())) ms), so today suits an easy session: technique work, mobility or a Zone 2 ride, whichever you prefer,",
                     "anything under \(upper) strain is fine.")
         }
-        let sleptWell = (metrics.sleep?.score ?? 80) >= 75
+        // Last night's sleep, when it's in: before the night is scored there is none to speak of,
+        // and a low score isn't always a short night (it can be restless or irregular).
+        let sleepScore = metrics.recoveryIsFromYesterday ? nil : metrics.sleep?.score
+        let sleptWell = (sleepScore ?? 80) >= 75
         switch recovery.status {
         case .high:
-            return (sleptWell ? "You're recovered and slept well, so today fits your planned session:" : "You're recovered, though sleep was short. Train as planned and get to bed on time:", "your range is \(range).")
+            if sleepScore == nil { return ("You're recovered, so today fits your planned session:", "your range is \(range).") }
+            return (sleptWell ? "You're recovered and slept well, so today fits your planned session:" : "You're recovered, though last night's sleep scored low. Train as planned and get to bed on time:", "your range is \(range).")
         case .moderate:
-            return (sleptWell ? "Recovery is normal. A planned session or an easier one both fit; keep the effort controlled:" : "Recovery is normal and sleep was short. A controlled session or an easy day both fit:", "your range is \(range).")
+            return (sleptWell ? "Recovery is normal. A planned session or an easier one both fit; keep the effort controlled:" : "Recovery is normal and last night's sleep scored low. A controlled session or an easy day both fit:", "your range is \(range).")
         case .low:
             return ("Easy day: \(lowRecoveryCause(recovery.contributors)), so a light session or a walk suits today, and an early night helps:", "anything under \(upper) strain is fine.")
         }

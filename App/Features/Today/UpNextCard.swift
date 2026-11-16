@@ -78,10 +78,12 @@ struct UpNextCard: View {
         return items.sorted { $0.minutes < $1.minutes }
     }
 
-    /// Morning check-in until it's done; the evening one from noon until it's done.
+    /// Morning check-in from 04:00 (not at 00:20, before you've slept) until
+    /// mid-afternoon, when "how you slept" is stale and it only crowds out the
+    /// evening rows; the evening one from noon until it's done. App choices.
     private func checkInItems(now: Int) -> [UpNextItem] {
         var items: [UpNextItem] = []
-        if checkIns.morning() == nil {
+        if checkIns.morning() == nil, now >= RecoveryTiming.earliestWakeHour * 60, now < 15 * 60 {
             items.append(UpNextItem(id: "checkin-morning", minutes: settings.morningCheckInMinutes, kind: .checkIn(.morning)))
         }
         if checkIns.evening() == nil, now >= 12 * 60 {
@@ -131,7 +133,10 @@ struct UpNextCard: View {
     /// wake time stays put, Windred et al., Sleep 2024, and repayment comes
     /// from going to bed earlier). Opens last night's sheet with the debt.
     private func bedtimeItem() -> UpNextItem? {
-        guard let debt = metrics.sleepDebt, debt.level != .none, let window = metrics.bedtimeWindow else { return nil }
+        // After midnight the window shown would be last night's, already past.
+        let hour = Calendar.current.component(.hour, from: .now)
+        guard hour >= RecoveryTiming.earliestWakeHour,
+              let debt = metrics.sleepDebt, debt.level != .none, let window = metrics.bedtimeWindow else { return nil }
         let parts = Calendar.current.dateComponents([.hour, .minute], from: window.start)
         var minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
         // A window after midnight still comes last today.

@@ -77,12 +77,25 @@ public enum SleepSource {
         return .other
     }
 
+    /// The preferred tracker's night is used only when it covers at least this
+    /// share of the longest night another tracker recorded. A ring that died
+    /// at 2 am, was taken off, or logged only an evening doze shouldn't replace
+    /// the watch's full night. The share is the app's choice.
+    public static let minimumPreferredShare = 0.7
+
     /// One night's samples, keeping only the preferred tracker's when it
-    /// recorded any sleep that night; every sample otherwise.
+    /// recorded that night (`minimumPreferredShare`); every sample otherwise.
     public static func pick(_ samples: [SleepSample], prefer preference: SleepSourcePreference) -> [SleepSample] {
         guard let preferred = preference.preferred else { return samples }
-        let theirs = samples.filter { $0.tracker == preferred }
-        return theirs.contains { $0.stage.isAsleep } ? theirs : samples
+        func asleepSeconds(_ tracker: SleepTracker?) -> TimeInterval {
+            samples.filter { $0.tracker == tracker && $0.stage.isAsleep }
+                .reduce(0) { $0 + max(0, $1.end.timeIntervalSince($1.start)) }
+        }
+        let theirs = asleepSeconds(preferred)
+        guard theirs > 0 else { return samples }
+        let others = Set(samples.map(\.tracker)).subtracting([preferred]).map(asleepSeconds).max() ?? 0
+        guard theirs >= others * minimumPreferredShare else { return samples.filter { $0.tracker != preferred } }
+        return samples.filter { $0.tracker == preferred }
     }
 
     /// `pick` for several nights at once: samples grouped by `night`.

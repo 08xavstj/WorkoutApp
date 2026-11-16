@@ -23,7 +23,8 @@ struct OuraCard: View {
         let days = Set(contents.readiness.map(\.day)).union(contents.dailySleep.map(\.day))
         guard let day = days.max() else { return nil }
         let readiness = contents.readiness.first { $0.day == day }
-        let main = contents.periods.filter { $0.day == day && $0.type == "long_sleep" }
+        // The day's longest sleep, whatever Oura typed it, as the rest of the app does (`Oura.mainSleep`).
+        let main = contents.periods.filter { $0.day == day && $0.isSleep }
             .max { $0.bedtimeEnd.timeIntervalSince($0.bedtimeStart) < $1.bedtimeEnd.timeIntervalSince($1.bedtimeStart) }
         return Night(day: day, readiness: readiness?.score, sleepScore: contents.dailySleep.first { $0.day == day }?.score,
                      hrv: main?.averageHRV, temperature: readiness?.temperatureDeviation)
@@ -74,7 +75,7 @@ struct OuraCard: View {
 
     /// "+0.3 °C", or °F where the phone uses them (a change, so ×1.8 without the offset).
     private func temperatureText(_ celsius: Double) -> String {
-        let fahrenheit = Locale.current.measurementSystem == .us
+        let fahrenheit = UnitText.usesFahrenheit // the app's Temperature setting, as everywhere else
         let value = fahrenheit ? celsius * 1.8 : celsius
         let sign = value > 0 ? "+" : ""
         return "\(sign)\(value.formatted(.number.precision(.fractionLength(1)))) °\(fahrenheit ? "F" : "C")"

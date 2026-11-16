@@ -164,7 +164,7 @@ private struct ScoreRings: View {
             title: "Sleep",
             value: metrics.sleep.map { "\($0.score)" } ?? "--",
             unit: "",
-            subtitle: metrics.sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
+            subtitle: metrics.sleepIsFromYesterday ? "Yesterday" : metrics.sleep.map { Duration.seconds($0.asleep).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
             progress: Double(metrics.sleep?.score ?? 0) / 100,
             colors: Theme.sleepColors,
             size: size

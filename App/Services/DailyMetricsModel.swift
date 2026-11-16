@@ -37,6 +37,12 @@ final class DailyMetricsModel {
     private(set) var restingHeartRateSource: RestingHeartRateSource = .healthKit
     private(set) var respiratoryRate: Double?
     private(set) var yesterdayStrain: Double?
+    /// Strain on the day before the night `recovery` is from: yesterday's, or
+    /// the day before that while the score is still yesterday's (`recoveryIsFromYesterday`).
+    private(set) var strainBeforeScoredNight: Double?
+    /// True after midnight until last night is recorded: `sleep` is still the
+    /// night before's, so the ring isn't blank at 00:01.
+    private(set) var sleepIsFromYesterday = false
     private(set) var weekStrain: [DayStrain] = []
     /// The 7 completed days before today (today's partial day left out), for the weekly review.
     private(set) var completedWeekStrain: [DayStrain] = []
@@ -65,6 +71,10 @@ final class DailyMetricsModel {
     private(set) var deviceActiveToday: Double?
     /// Average resting calories a day from the watch (recent full days).
     private(set) var watchRestingPerDay: Double?
+    /// A full day's burn that holds still through the day: resting energy plus
+    /// the average active energy of the last week's complete days (needs 3).
+    /// The stand-in for maintenance until the food log and weigh-ins measure it.
+    private(set) var usualDailyBurn: Double?
     /// Maintenance calories from food log + weight trend, once there's enough data.
     private(set) var maintenance: AdaptiveTDEE.Result?
     /// A food-log maintenance that was too low to be real (under 1.4× resting
@@ -208,7 +218,9 @@ final class DailyMetricsModel {
             // This week's target (Monday-updated) wins while there's measured maintenance behind it.
             target = calorieTargetOverride
         } else {
-            guard let base = maintenance?.maintenance ?? calories?.projected else { return nil }
+            // Without measured maintenance, a usual full day's burn: today's running projection
+            // starts near resting metabolism and climbs 500-1,000 kcal by evening.
+            guard let base = maintenance?.maintenance ?? usualDailyBurn ?? calories?.projected else { return nil }
             guard let goals = personalGoals, let weight = bodyMassKg else { return base }
             target = GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight, goals: goals, sex: sex)
         }
@@ -460,9 +472,9 @@ final class DailyMetricsModel {
                 effect: .lowers
             ))
         }
-        if let strain = yesterdayStrain, strain >= 70 {
+        if let strain = strainBeforeScoredNight, strain >= 70 {
             items.append(RecoveryContributor(
-                id: "yesterday", name: "Yesterday's training",
+                id: "yesterday", name: recoveryIsFromYesterday ? "The day before's training" : "Yesterday's training",
                 detail: "Strain \(Int(strain.rounded()))%: a hard day usually lowers HRV and raises resting heart rate the next morning.",
                 effect: .lowers
             ))
@@ -716,6 +728,8 @@ final class DailyMetricsModel {
             let todayResult = days.last?.1 ?? .empty
             strain = todayResult
             yesterdayStrain = days.first { calendar.isDate($0.0, inSameDayAs: yesterday) }?.1.strain
+            let dayBeforeScored = calendar.date(byAdding: .day, value: -1, to: scoredDay) ?? yesterday
+            strainBeforeScoredNight = days.first { calendar.isDate($0.0, inSameDayAs: dayBeforeScored) }?.1.strain
             weekStrain = days.suffix(7).map { DayStrain(date: $0.0, strain: $0.1.strain) }
             completedWeekStrain = days.dropLast().suffix(7).map { DayStrain(date: $0.0, strain: $0.1.strain) }
             usualTrainingStrain = StrainCalculator.usualTrainingStrain(days.dropLast().map(\.1.strain))
@@ -741,16 +755,24 @@ final class DailyMetricsModel {
             var sleepCalculator = self.sleepCalculator
             sleepCalculator.baseSleepNeedHours = settings.sleepNeedHours
             sleepCalculator.age = settings.age // [Recovery research] age-scaled deep + REM target
-            sleep = sleepCalculator.score(samples: sleepSamples, previousDayStrain: yesterdayStrain, consistency: sleepConsistency)
+            let lastNight = sleepCalculator.score(samples: sleepSamples, previousDayStrain: yesterdayStrain, consistency: sleepConsistency)
             // [Recovery research] Sleep is compared with your own last 30 scores; RHR source as above.
-            SleepScoreLog.record(sleep?.score, on: today)
+            SleepScoreLog.record(lastNight?.score, on: today)
+            // After midnight, before tonight's sleep exists, keep showing the night before
+            // (labelled "Yesterday") instead of an empty ring from 00:00.
+            var earlierNight: SleepCalculator.Result?
+            if lastNight == nil, !nightOver, let earlier = try? await health.sleepSamples(forNightEnding: yesterday) {
+                earlierNight = sleepCalculator.score(samples: earlier, previousDayStrain: strainBeforeScoredNight, consistency: sleepConsistency)
+            }
+            sleep = lastNight ?? earlierNight
+            sleepIsFromYesterday = lastNight == nil && earlierNight != nil
             if let fetchedNights {
                 await backfillSleepScores(health: health, nights: fetchedNights, calculator: sleepCalculator,
                                           strainByDay: Dictionary(days.map { ($0.0, $0.1.strain) }, uniquingKeysWith: { _, last in last }),
                                           today: today, calendar: calendar)
             }
             // Before the night is over, yesterday's score with yesterday's sleep (`recoveryIsFromYesterday`).
-            let scoredSleep = nightOver ? sleep?.score : SleepScoreLog.recentScores(before: today, days: 1).last
+            let scoredSleep = nightOver ? lastNight?.score : SleepScoreLog.recentScores(before: today, days: 1).last
             recovery = recoveryCalculator.score(today: todayVitals, history: history, sleepScore: scoredSleep,
                                                 sleepScoreHistory: SleepScoreLog.recentScores(before: scoredDay),
                                                 restingHeartRateSource: rhrSource)
@@ -769,8 +791,8 @@ final class DailyMetricsModel {
             async let weight = health.latestBodyMassKg()
             async let height = health.latest(.height, unit: .meterUnit(with: .centi))
             async let bodyFat = health.latest(.bodyFatPercentage, unit: .percent())
-            async let respiratory = health.overnightRespiratoryRate(forNightEnding: today)
-            async let recentRespiratory = health.latest(.respiratoryRate, unit: HKUnit.count().unitDivided(by: .minute()), since: calendar.date(byAdding: .day, value: -3, to: today))
+            // The night the other readings are from (yesterday's until last night is scored).
+            async let respiratory = health.overnightRespiratoryRate(forNightEnding: scoredDay)
             async let measuredResting = health.restingEnergyPerDay()
             async let deviceEnergy = health.deviceEnergy(from: today, to: now)
             let windows = todaysSessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
@@ -785,10 +807,9 @@ final class DailyMetricsModel {
             let bodyFatPercent = (try? await bodyFat).map { $0 * 100 }
             self.bodyFatPercent = bodyFatPercent
             self.heightCm = heightCm
-            // Last night's average, or the latest reading if the watch logs it at other times.
-            let overnight = try? await respiratory
-            let latestRespiratory = try? await recentRespiratory
-            respiratoryRate = overnight ?? latestRespiratory
+            // The night's average only. A single older sample used to stand in when the watch
+            // was off, was shown undated as last night's and could raise an illness sign.
+            respiratoryRate = try? await respiratory
             let device = try? await deviceEnergy
             deviceRestingToday = device?.resting
             deviceActiveToday = device?.active
@@ -802,6 +823,7 @@ final class DailyMetricsModel {
             async let intakeSeries = health.dailySeries(.dietaryEnergyConsumed, unit: .kilocalorie(), days: 35, cumulative: true)
             async let weightSeries = health.dailySeries(.bodyMass, unit: .gramUnit(with: .kilo), days: 35, cumulative: false)
             async let nutrientTask = health.nutrientAverages(days: 7)
+            async let activeSeries = health.dailySeries(.activeEnergyBurned, unit: .kilocalorie(), days: 8, cumulative: true)
             let rawIntake = ((try? await intakeSeries) ?? []).filter { $0.date < today }.map { DayValue(date: $0.date, value: $0.value) }
             // Quick-estimate meals: a day logged only as this app's estimates
             // counts as a partial day, not a measured one (`EstimatedIntake`;
@@ -815,7 +837,14 @@ final class DailyMetricsModel {
             }
             // Loading is ~20 g a day; the dose text is read in grams (`DoseText`), so "120 mg" isn't loading.
             let loading = creatine.map { DoseText.isCreatineLoading($0.dose) } ?? false
-            let expected = calories?.projected
+            let pastActive = ((try? await activeSeries) ?? []).filter { $0.date < today && $0.value > 0 }.map(\.value)
+            if let restingDay = watchRestingPerDay ?? energy?.restingFullDay, pastActive.count >= 3 {
+                usualDailyBurn = restingDay + pastActive.reduce(0, +) / Double(pastActive.count)
+            } else {
+                usualDailyBurn = nil
+            }
+            // The same figure morning and evening, so "fully logged days" doesn't change with the clock.
+            let expected = usualDailyBurn ?? calories?.projected
             let measured = AdaptiveTDEE.estimate(intake: intake, weights: weights, now: now,
                                                  creatineStart: creatine?.startDate, creatineLoading: loading,
                                                  expectedExpenditure: expected)
