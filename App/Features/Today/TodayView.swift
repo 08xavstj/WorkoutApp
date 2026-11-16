@@ -968,13 +968,18 @@ private struct HealthMonitor: View {
     /// "Higher/Lower than usual" is always counted.
     private var summary: MetricVerdict? {
         guard let recovery = metrics.recovery, recovery.isCalibrated else { return nil }
-        let flags = [
-            (recovery.hrvChangePercent ?? 0) < Self.hrvDropLimit,
-            abs(recovery.restingHeartRateChange ?? 0) > Self.restingHeartRateLimit,
-            metrics.respiratoryRate.map { !(12...20).contains($0) } ?? false,
-            metrics.sleep.map { $0.asleep < $0.need * 0.9 } ?? false,
-        ].filter { $0 }.count + HealthMonitorTiles.flagCount(extras)
-        return flags == 0 ? MetricVerdict("All normal", color: Theme.recoveryHigh) : MetricVerdict("\(flags) to watch", color: Theme.recoveryModerate)
+        // Named when one or two are off ("HRV, sleep to watch"), so the chip says which.
+        var names: [String] = []
+        if (recovery.hrvChangePercent ?? 0) < Self.hrvDropLimit { names.append("HRV") }
+        if abs(recovery.restingHeartRateChange ?? 0) > Self.restingHeartRateLimit { names.append("Heart rate") }
+        if metrics.respiratoryRate.map({ !(12...20).contains($0) }) ?? false { names.append("Breathing") }
+        if metrics.sleep.map({ $0.asleep < $0.need * 0.9 }) ?? false { names.append("Sleep") }
+        names += extras.filter { HealthMonitorTiles.flaggedIDs.contains($0.id) && $0.tone == .caution }.map(\.title)
+        switch names.count {
+        case 0: return MetricVerdict("All normal", color: Theme.recoveryHigh)
+        case 1, 2: return MetricVerdict("Watch: " + names.joined(separator: ", "), color: Theme.recoveryModerate)
+        default: return MetricVerdict("\(names.count) to watch", color: Theme.recoveryModerate)
+        }
     }
 
     /// Position of a value within baseline ± 2 SD, as 0...1. Nil (no gauge)
@@ -1047,8 +1052,12 @@ private struct HealthMonitor: View {
             value: rate.map { $0.formatted(.number.precision(.fractionLength(1))) },
             unit: "/min",
             spokenUnit: "breaths per minute",
-            status: rate.map { _ -> MetricTile.Status in
-                normal ? Self.normal : MetricTile.Status(text: "Unusual", color: Theme.recoveryModerate)
+            status: rate.map { value -> MetricTile.Status in
+                // Says which way: 12-20 breaths a minute is the typical adult range asleep.
+                if normal { return Self.normal }
+                return value > 20
+                    ? MetricTile.Status(text: "Higher than typical", icon: "arrow.up", color: Theme.recoveryModerate)
+                    : MetricTile.Status(text: "Lower than typical", icon: "arrow.down", color: Theme.recoveryModerate)
             },
             gauge: rate.map { min(1, max(0, ($0 - 8) / 16)) },
             color: Theme.oxygen,

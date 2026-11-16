@@ -617,7 +617,7 @@ final class VitalsModel {
         debtStat.defaultDays = 30
         result.append(debtStat)
         var consistencyStat = Stat(
-            id: "consistency", category: .sleep, title: "Sleep consistency", icon: "clock.arrow.circlepath",
+            id: "consistency", category: .sleep, title: "Sleep regularity", icon: "clock.arrow.circlepath",
             value: sleepConsistency.map { "\($0)" }, unit: "/ 100",
             status: sleepSpreadMinutes.map { "Times vary ~\(Int($0.rounded())) min" },
             tone: (sleepConsistency ?? 100) >= 70 ? .good : .caution,

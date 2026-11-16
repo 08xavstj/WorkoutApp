@@ -128,7 +128,11 @@ final class DailyMetricsModel {
     /// needs explaining: yesterday's score before you wake, or sleep only.
     var recoveryNote: String? {
         guard let recovery else { return nil }
-        if recoveryIsFromYesterday { return "Yesterday · updates when you wake" }
+        if recoveryIsFromYesterday {
+            // In the morning you're awake and the watch simply hasn't synced or wasn't worn.
+            let hour = Calendar.current.component(.hour, from: .now)
+            return hour >= RecoveryTiming.earliestWakeHour + 3 ? "Yesterday · waiting for last night's sleep" : "Yesterday · updates when you wake"
+        }
         if recovery.isSleepOnly { return "Sleep-only estimate" }
         return nil
     }
@@ -629,7 +633,20 @@ final class DailyMetricsModel {
             // bpm), not today's: a high reading after a bad night or a drink
             // shouldn't shrink every past day's strain, and a steady value
             // keeps the 28-day cache valid.
-            let profile = settings.heartRateProfile(restingHeartRate: base.meanRHR.map { $0.rounded() } ?? todayVitals.restingHeartRate)
+            // It is Apple Health's awake resting heart rate, not the sleeping one recovery
+            // uses: heart-rate reserve (Karvonen) is defined on resting heart rate measured
+            // awake, and the sleeping value runs several bpm lower, which moved every zone
+            // edge and the strain threshold down once enough nights had it.
+            let awakeResting = healthVitals
+                .filter { calendar.startOfDay(for: $0.date) < scoredDay }
+                .sorted { $0.date > $1.date }
+                .prefix(recoveryCalculator.baselineDays)
+                .compactMap(\.restingHeartRate)
+                .filter { $0 > 0 }
+            let usualResting: Double? = awakeResting.count >= 7
+                ? (awakeResting.reduce(0, +) / Double(awakeResting.count)).rounded()
+                : base.meanRHR.map { $0.rounded() }
+            let profile = settings.heartRateProfile(restingHeartRate: usualResting ?? todayVitals.restingHeartRate)
             heartRateProfile = profile
 
             // Strain for each of the last 28 days (today last). Past days come from
