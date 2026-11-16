@@ -173,6 +173,61 @@ extension DailyVitals {
     }
 }
 
+extension DailyVitals {
+    /// Two devices' overnight RMSSD on one scale: the preferred device's
+    /// (an Oura ring) with the other's (an Apple Watch) filling its gaps.
+    ///
+    /// The same night reads differently on two devices: a ring averages
+    /// 5-minute windows over the whole sleep, a watch takes a few minute-long
+    /// recordings, and HRV changes through the night with sleep stage
+    /// (Stein & Pu, Sleep Med Rev 2012). Wearables agree with ECG on the
+    /// pattern more than on the level (Miller et al., Sensors 2022: nocturnal
+    /// HRV bias differed by device), so put straight into one baseline a new
+    /// ring's nights read as a run of unusually high or low HRV for a month.
+    ///
+    /// - With `minimumPairedNights` nights measured by both, the other
+    ///   device's nights are scaled by your own median ratio between the two.
+    /// - With fewer, the two are never mixed: whichever has more nights in the
+    ///   last 30 is used alone (the preferred one on a tie), so a new ring
+    ///   takes over once it has the longer record.
+    /// The ratio and the night counts are the app's choice.
+    ///
+    /// - Returns: the merged nights, keyed by the morning, and which device
+    ///   the scale is (`true` = the preferred one).
+    public static func mergingOvernightRMSSD(
+        preferred: [Date: Double],
+        other: [Date: Double],
+        today: Date? = nil,
+        minimumPairedNights: Int = DailyVitals.minimumPairedNights,
+        calendar: Calendar = .current
+    ) -> (nights: [Date: Double], usesPreferredScale: Bool) {
+        func byNight(_ values: [Date: Double]) -> [Date: Double] {
+            var result: [Date: Double] = [:]
+            for (date, value) in values.sorted(by: { $0.key < $1.key }) where value > 0 && value.isFinite {
+                result[calendar.startOfDay(for: date)] = value
+            }
+            return result
+        }
+        let first = byNight(preferred)
+        let second = byNight(other)
+        guard !first.isEmpty else { return (second, false) }
+        guard !second.isEmpty else { return (first, true) }
+        let ratios = first.compactMap { night, value in second[night].map { value / $0 } }.sorted()
+        if ratios.count >= minimumPairedNights {
+            let ratio = ratios[ratios.count / 2]
+            var merged = second.mapValues { $0 * ratio }
+            for (night, value) in first { merged[night] = value }
+            return (merged, true)
+        }
+        guard let anchor = today.map({ calendar.startOfDay(for: $0) }) ?? (Array(first.keys) + Array(second.keys)).max() else {
+            return (first, true)
+        }
+        let windowStart = calendar.date(byAdding: .day, value: -(hrvWindowNights - 1), to: anchor) ?? anchor
+        func recent(_ values: [Date: Double]) -> Int { values.keys.filter { $0 >= windowStart && $0 <= anchor }.count }
+        return recent(first) >= recent(second) ? (first, true) : (second, false)
+    }
+}
+
 /// Which HRV measure a baseline uses. Never mixed within one baseline.
 public enum HRVMetric: String, Sendable, Codable {
     /// Apple Health's overnight SDNN.

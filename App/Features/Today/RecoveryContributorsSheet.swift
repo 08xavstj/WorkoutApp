@@ -43,17 +43,19 @@ struct RecoveryContributorsSheet: View {
                         }
                         .card()
                     }
-                    // The caption first, so it doesn't read as the content of the disclosure above it.
-                    Text("The 0-100 score is the app's own summary of these inputs; your 7-day HRV trend is the part research backs.")
+                    // The scale in one line, the method one tap away (`RecoveryCalculator.howItWorks`).
+                    Text("A night like your usual scores about \(RecoveryCalculator.usualScore). Under \(RecoveryCalculator.moderateBand.lowerBound) is an easy day; \(RecoveryCalculator.highBand.lowerBound) or more is recovered.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
+                    EvidenceDisclosure(points: RecoveryCalculator().howItWorks, title: "How this score is worked out")
                     // Which HRV measure this is: useful, but jargon, so folded away.
                     if let metric = metrics.hrvMetric {
                         EvidenceDisclosure(points: [metrics.hrvMetricNote ?? metric], title: "About this number")
                     }
                     EvidenceDisclosure(points: [
                         "In elite athletes, HRV averaged over 7 days and compared with each person's own normal range tracked how training was going better than single mornings (Plews et al., Eur J Appl Physiol 2012).",
+                        "In trials of HRV-guided training, a 7-day average below that range meant swapping a hard session for an easy one (Javaloyes et al., Int J Sports Physiol Perform 2019). The trials were in endurance athletes; evidence for lifting is thinner.",
                         "This app's 0-100 score itself hasn't been tested in studies, so treat it as a summary, not a measurement.",
                     ])
                 }

@@ -1,23 +1,39 @@
 import Foundation
 
-/// Daily recovery 0-100: last night's HRV and resting heart rate compared with
-/// your own recent baseline, plus how well you slept.
+/// Daily recovery 0-100: how last night compares with your own recent nights.
 ///
-/// Each input becomes a z-score (how many "normal days" away from your average).
-/// HRV above baseline is good; resting heart rate above baseline is bad.
+/// Four readings go in, each as a z-score against your own last 30 nights
+/// (how many "normal days" away from your average), blended by weight:
+/// - 7-day HRV average, 35%
+/// - last night's HRV, 20%
+/// - resting (sleeping) heart rate, 25%, counted the other way round
+/// - sleep score, 20%
+/// A curve turns the blend into 1-99. Your usual night lands near 57.
 ///
-/// The HRV trend rule is from research: the 7-day rolling average of ln HRV
-/// against your normal range (baseline mean ± 0.5 SD, the "smallest
-/// worthwhile change") is the method used to guide training in trials (Plews
-/// et al., Eur J Appl Physiol 2012; Plews et al., Sports Med 2013; Buchheit,
-/// Front Physiol 2014; Javaloyes et al., IJSPP 2019, with a 4-week baseline).
+/// What research backs, and what it doesn't:
+/// - Comparing HRV and resting heart rate with a person's own baseline, not
+///   with other people, is the standard method (Plews et al., Sports Med
+///   2013; Buchheit, Front Physiol 2014).
+/// - The 7-day rolling average of ln HRV against your normal range (baseline
+///   mean ± 0.5 SD, the "smallest worthwhile change") is the rule the
+///   HRV-guided training trials used: below it, hard sessions were swapped
+///   for easy ones (Plews et al., Eur J Appl Physiol 2012; Javaloyes et al.,
+///   IJSPP 2019, 4-week baseline). Those trials were in endurance athletes
+///   and found small benefits; evidence for lifting is thinner.
+/// - No 0-100 recovery score, this one or any wearable's, has been validated
+///   against performance. The weights, the curve and the 34/67 cut-offs are
+///   the app's own choices.
 ///
-/// That trend sets the band (the validated part): below the normal range the
-/// score is capped at 33 ("easy day"), within it the score stays 34-66, and
-/// above it the score is 67 or more only when resting heart rate and sleep
-/// aren't also off. The z-score blend still moves the number inside the band,
-/// so the 0-100 figure (weights and curve) remains the app's own summary, not a
-/// validated clinical score.
+/// So the trial rule decides the "Easy day" label: when the 7-day average is
+/// below your normal range the day is an easy day whatever last night looked
+/// like, and the number can't read "Recovered". Everything else is a smooth
+/// summary: a better night always scores higher than a worse one.
+///
+/// Until November 2026 the 7-day trend also squeezed the number into a band
+/// (34-66 on most days), so a great night and a poor one both read "about
+/// 50" and a small move in the average could drop the score 30 points. Over a
+/// simulated year 78% of days fell in 34-66 and 7% read "Recovered"; now
+/// about half are Normal, a third Recovered and a sixth Easy day.
 ///
 /// Each signal needs 14 nights before it's used, since a baseline from a few
 /// nights is mostly noise.
@@ -32,8 +48,8 @@ public struct RecoveryCalculator: Sendable {
     public var restingHeartRateWeight: Double = 0.25
     public var sleepWeight: Double = 0.20
 
-    /// Score bands. They follow the 7-day HRV trend when it's known (see
-    /// `band(for:rhrEffect:sleepEffect:)`); otherwise the score alone decides.
+    /// Score bands (the app's cut-offs). A 7-day HRV trend below your normal
+    /// range makes the day an easy day whatever the score (`score(...)`).
     public static let lowBand = 1...33
     public static let moderateBand = 34...66
     public static let highBand = 67...99
@@ -72,8 +88,8 @@ public struct RecoveryCalculator: Sendable {
         public var score: Int
         public var hrvTrend: HRVTrend?
         public var status: Status
-        /// True when the 7-day HRV trend set the band; false when the score alone did
-        /// (no HRV, or not calibrated yet).
+        /// True when the 7-day HRV trend, below your normal range, made this
+        /// an easy day (the trial rule); false when the score alone set the label.
         public var bandFollowsTrend: Bool = false
         /// Percent difference from baseline, e.g. +8 means 8% above normal.
         public var hrvChangePercent: Double?
@@ -193,7 +209,6 @@ public struct RecoveryCalculator: Sendable {
         var rhrChange: Double?
         var trend: HRVTrend?
         var contributors: [RecoveryContributor] = []
-        var rhrEffect: RecoveryContributor.Effect = .neutral
         var sleepEffect: RecoveryContributor.Effect = .neutral
         var sleepBaselineNights = 0
 
@@ -203,7 +218,7 @@ public struct RecoveryCalculator: Sendable {
         if lastWeek.count >= 3, let mean = base.meanLogHRV, let sd = base.sdLogHRV, hrvReady {
             let rolling = lastWeek.reduce(0, +) / Double(lastWeek.count)
             // SWC = 0.5 × SD of ln HRV (Javaloyes et al., IJSPP 2019; Buchheit, Front Physiol 2014).
-            let swc = 0.5 * max(sd, 0.05)
+            let swc = Self.smallestWorthwhileChange * max(sd, 0.05)
             let status: HRVTrend.Status = rolling < mean - swc ? .below : (rolling > mean + swc ? .above : .within)
             let (_, weekSD) = Self.meanAndSD(lastWeek)
             trend = HRVTrend(
@@ -213,7 +228,10 @@ public struct RecoveryCalculator: Sendable {
                 variation: weekSD.map { $0 / rolling * 100 },
                 nights: lastWeek.count
             )
-            let z = (rolling - mean) / max(sd, 0.10)
+            // In units of the smallest worthwhile change (0.5 SD): −1 is the bottom of
+            // your normal range. A 7-day average moves far less than single nights, so
+            // against the nightly SD the trial's own signal barely moved the score.
+            let z = (rolling - mean) / (Self.smallestWorthwhileChange * max(sd, 0.10))
             combined += hrvTrendWeight * Self.clampZ(z)
             weightUsed += hrvTrendWeight
             let rangeText = "\(Int(exp(mean - swc).rounded()))-\(Int(exp(mean + swc).rounded())) ms"
@@ -224,7 +242,7 @@ public struct RecoveryCalculator: Sendable {
             switch status {
             case .below:
                 trendDetail = "\(averageText), below your normal \(rangeText)"
-                trendNote = "A sign to train easier, so recovery stays in the easy-day band today."
+                trendNote = "Training studies swap hard sessions for easy ones on days like this, so today is an easy day."
                 trendEffect = .lowers
             case .above:
                 trendDetail = "\(averageText), above your normal \(rangeText)"
@@ -232,7 +250,7 @@ public struct RecoveryCalculator: Sendable {
                 trendEffect = .raises
             case .within:
                 trendDetail = "\(averageText), within your normal \(rangeText)"
-                trendNote = "So recovery stays in the moderate band."
+                trendNote = nil
                 trendEffect = .neutral
             }
             contributors.append(RecoveryContributor(
@@ -267,9 +285,7 @@ public struct RecoveryCalculator: Sendable {
             combined -= restingHeartRateWeight * Self.clampZ(z)
             weightUsed += restingHeartRateWeight
             rhrChange = rhr - mean
-            // The band rule (below) still weighs the z-score; the wording uses
-            // the notable-change limit, the same one the Today tile uses.
-            rhrEffect = Self.effect(-z)
+            // Worded with the notable-change limit, the same one the Today tile uses.
             let shownEffect = Self.restingHeartRateEffect(change: rhr - mean)
             let difference = Int((rhr - mean).rounded())
             let note: String? = switch shownEffect {
@@ -320,17 +336,18 @@ public struct RecoveryCalculator: Sendable {
 
         // Rescale so missing inputs don't drag the score toward 50.
         let normalized = combined / weightUsed
-        let logistic = 1 / (1 + exp(-(1.5 * normalized + 0.3)))
+        let logistic = 1 / (1 + exp(-(Self.curveSlope * normalized + Self.curveOffset)))
         let raw = min(99, max(1, Int((logistic * 100).rounded())))
-        // The 7-day HRV trend picks the band; the blend moves the number inside it.
-        let trendBand = trend.map { Self.band(for: $0.status, rhrEffect: rhrEffect, sleepEffect: sleepEffect) }
-        let score = trendBand.map { Self.scale(raw, into: $0) } ?? raw
+        // The trial rule: a 7-day HRV average below your normal range is an easy day, and
+        // the number doesn't read "Recovered" beside that label.
+        let trendBelow = trend?.status == .below
+        let score = trendBelow ? min(raw, Self.moderateBand.upperBound) : raw
 
         return Result(
             score: score,
             hrvTrend: trend,
-            status: Self.status(for: score),
-            bandFollowsTrend: trendBand != nil,
+            status: trendBelow ? .low : Self.status(for: score),
+            bandFollowsTrend: trendBelow,
             hrvChangePercent: hrvChange,
             restingHeartRateChange: rhrChange,
             baselineHRV: base.meanLogHRV.map { exp($0) },
@@ -349,31 +366,6 @@ public struct RecoveryCalculator: Sendable {
         case Self.moderateBand: .moderate
         default: .high
         }
-    }
-
-    /// The score band the 7-day HRV trend allows. Below the normal range is an
-    /// easy day whatever last night looked like (the trial rule: Plews et al.,
-    /// Sports Med 2013; Javaloyes et al., IJSPP 2019); within it the score is
-    /// moderate; above it the score is high only when resting heart rate and
-    /// sleep don't disagree (HRV can also rise with overreaching, so a high
-    /// trend on its own isn't proof of readiness: Buchheit, Front Physiol
-    /// 2014). The 34/67 cut-offs are the app's.
-    public static func band(
-        for trend: HRVTrend.Status,
-        rhrEffect: RecoveryContributor.Effect,
-        sleepEffect: RecoveryContributor.Effect
-    ) -> ClosedRange<Int> {
-        switch trend {
-        case .below: lowBand
-        case .within: moderateBand
-        case .above: rhrEffect != .lowers && sleepEffect != .lowers ? highBand : moderateBand
-        }
-    }
-
-    /// Maps a raw 1-99 score onto a band so it still moves with the inputs.
-    static func scale(_ raw: Int, into band: ClosedRange<Int>) -> Int {
-        let fraction = Double(min(99, max(1, raw)) - 1) / 98
-        return band.lowerBound + Int((fraction * Double(band.upperBound - band.lowerBound)).rounded())
     }
 
     /// Mean and SD of your last sleep scores (SD floored at 6 points so a very
@@ -396,6 +388,30 @@ public struct RecoveryCalculator: Sendable {
     }
 
     static func clampZ(_ z: Double) -> Double { min(3, max(-3, z)) }
+
+    /// The smallest worthwhile change in ln HRV, as a share of your own SD
+    /// (Buchheit, Front Physiol 2014; Javaloyes et al., IJSPP 2019).
+    public static let smallestWorthwhileChange = 0.5
+    /// The curve from the blend to 0-100: score = 100 / (1 + e^−(slope × blend + offset)).
+    /// The offset puts a usual night at 57; the slope spreads a simulated year of
+    /// nights over about 30-80 (5th to 95th percentile) with a typical day-to-day
+    /// move of 14 points. App choices, not from research.
+    public static let curveSlope = 1.0
+    public static let curveOffset = 0.3
+    /// The method in plain words, for the recovery sheet and the coach.
+    public var howItWorks: [String] {
+        func percent(_ weight: Double) -> String { "\(Int((weight * 100).rounded()))%" }
+        return [
+            "Recovery compares last night with your own last \(baselineDays) nights, not with other people.",
+            "What goes in: your 7-day HRV average (\(percent(hrvTrendWeight))), last night's HRV (\(percent(hrvWeight))), sleeping or resting heart rate (\(percent(restingHeartRateWeight))) and your sleep score (\(percent(sleepWeight))). Each is measured against your usual; a missing one is left out and the rest share its weight.",
+            "A night like your usual scores about \(Self.usualScore). Under \(Self.moderateBand.lowerBound) is an easy day; \(Self.highBand.lowerBound) or more is recovered.",
+            "One rule comes from training studies: when your 7-day HRV average falls below your normal range, the day is an easy day whatever last night looked like.",
+            "It needs \(minimumBaselineDays) nights to learn your normal. The weights and the 0-100 scale are the app's own; no recovery score has been proven against performance.",
+        ]
+    }
+
+    /// Where a night exactly like your usual lands.
+    public static var usualScore: Int { Int((100 / (1 + exp(-curveOffset))).rounded()) }
 
     /// When a resting (or sleeping) heart rate change is worth mentioning:
     /// more than this many bpm either way from your usual. App choice, not a

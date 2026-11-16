@@ -28,33 +28,61 @@ struct RecoveryCalculatorTests {
         #expect(result.isCalibrated)
     }
 
-    /// One great night with a 7-day HRV average still inside the normal range
-    /// stays in the moderate band (the trend sets the band; the night moves
-    /// the number within it).
-    @Test func oneGreatNightWithinNormalTrendStaysModerate() throws {
+    /// One great night reads as a great night even though the 7-day HRV
+    /// average is still inside the normal range: the trend no longer squeezes
+    /// the number into 34-66.
+    @Test func oneGreatNightReadsRecovered() throws {
         let result = try #require(calculator.score(
             today: DailyVitals(date: today, hrvMilliseconds: 75, restingHeartRate: 52),
             history: history,
             sleepScore: 90
         ))
         #expect(result.hrvTrend?.status == .within)
-        #expect(result.bandFollowsTrend)
-        #expect(result.status == .moderate)
-        #expect(result.score >= 55)
-        #expect(result.score <= RecoveryCalculator.moderateBand.upperBound)
+        #expect(!result.bandFollowsTrend)
+        #expect(result.status == .high)
+        #expect(result.score >= RecoveryCalculator.highBand.lowerBound)
         #expect((result.hrvChangePercent ?? 0) > 20)
     }
 
-    @Test func oneBadNightWithinNormalTrendIsLowModerate() throws {
+    /// A clearly bad night is an easy day straight away, without waiting for
+    /// the 7-day average to fall.
+    @Test func oneBadNightReadsLow() throws {
         let result = try #require(calculator.score(
             today: DailyVitals(date: today, hrvMilliseconds: 45, restingHeartRate: 60),
             history: history,
             sleepScore: 55
         ))
         #expect(result.hrvTrend?.status == .within)
-        #expect(result.status == .moderate)
-        #expect(result.score <= 45)
-        #expect(result.score >= RecoveryCalculator.moderateBand.lowerBound)
+        #expect(result.status == .low)
+        #expect(result.score <= RecoveryCalculator.lowBand.upperBound)
+    }
+
+    @Test func aUsualNightScoresTheUsualScore() throws {
+        let result = try #require(calculator.score(
+            today: DailyVitals(date: today, hrvMilliseconds: 59.8, restingHeartRate: 55),
+            history: history,
+            sleepScore: 75
+        ))
+        #expect(abs(result.score - RecoveryCalculator.usualScore) <= 2)
+        #expect(RecoveryCalculator.usualScore == 57)
+    }
+
+    /// No cliffs: stepping last night's HRV up never lowers the score, and no
+    /// 2 ms step moves it more than a few points.
+    @Test func theScoreMovesSmoothlyWithLastNight() throws {
+        var previous: Int?
+        for hrv in stride(from: 40.0, through: 80.0, by: 2.0) {
+            let result = try #require(calculator.score(
+                today: DailyVitals(date: today, hrvMilliseconds: hrv, restingHeartRate: 55),
+                history: history,
+                sleepScore: 75
+            ))
+            if let previous {
+                #expect(result.score >= previous, "HRV \(hrv)")
+                #expect(result.score - previous <= 8, "HRV \(hrv)")
+            }
+            previous = result.score
+        }
     }
 
     @Test func weekOfLowHRVIsBelowNormalRangeAndAnEasyDay() throws {
@@ -71,13 +99,14 @@ struct RecoveryCalculatorTests {
         #expect(trend.status == .below)
         #expect(trend.nights == 7)
         #expect(result.status == .low)
-        #expect(result.score <= RecoveryCalculator.lowBand.upperBound)
+        #expect(result.bandFollowsTrend)
+        #expect(result.score <= RecoveryCalculator.moderateBand.upperBound)
         #expect(result.status.label == "Easy day")
     }
 
-    /// A week above the normal range is "high" only when resting heart rate
-    /// and sleep agree.
-    @Test func weekAboveNormalRangeIsHighUnlessRHROrSleepDisagree() throws {
+    /// A week above the normal range reads high; a raised heart rate or a bad
+    /// night pulls the number down by its weight, with no special rule.
+    @Test func weekAboveNormalRangeReadsHighAndOtherSignalsStillCount() throws {
         let highWeek = (1...6).map { day in
             DailyVitals(date: today.addingTimeInterval(Double(-day) * 86_400), hrvMilliseconds: 75, restingHeartRate: 54)
         }
@@ -96,22 +125,85 @@ struct RecoveryCalculatorTests {
             history: highWeek + older,
             sleepScore: 80
         ))
-        #expect(raisedRHR.hrvTrend?.status == .above)
-        #expect(raisedRHR.status == .moderate)
+        #expect(raisedRHR.score < high.score)
 
         let badSleep = try #require(calculator.score(
             today: DailyVitals(date: today, hrvMilliseconds: 76, restingHeartRate: 54),
             history: highWeek + older,
             sleepScore: 50
         ))
-        #expect(badSleep.status == .moderate)
+        #expect(badSleep.score < high.score)
     }
 
-    @Test func scoresScaleIntoTheirBand() {
-        #expect(RecoveryCalculator.scale(1, into: RecoveryCalculator.moderateBand) == 34)
-        #expect(RecoveryCalculator.scale(99, into: RecoveryCalculator.moderateBand) == 66)
-        #expect(RecoveryCalculator.scale(99, into: RecoveryCalculator.lowBand) == 33)
-        #expect(RecoveryCalculator.scale(1, into: RecoveryCalculator.highBand) == 67)
+    /// The trial rule: a 7-day average below your normal range is an easy
+    /// day even after one very good night, and the number can't read "Recovered".
+    @Test func trendBelowNormalIsAnEasyDayEvenAfterAGoodNight() throws {
+        let lowWeek = (1...6).map { day in
+            DailyVitals(date: today.addingTimeInterval(Double(-day) * 86_400), hrvMilliseconds: 46, restingHeartRate: 55)
+        }
+        let older = history.map { DailyVitals(date: $0.date.addingTimeInterval(-7 * 86_400), hrvMilliseconds: $0.hrvMilliseconds, restingHeartRate: $0.restingHeartRate) }
+        let result = try #require(calculator.score(
+            today: DailyVitals(date: today, hrvMilliseconds: 70, restingHeartRate: 50),
+            history: lowWeek + older,
+            sleepScore: 95
+        ))
+        #expect(result.hrvTrend?.status == .below)
+        #expect(result.bandFollowsTrend)
+        #expect(result.status == .low)
+        #expect(result.score <= RecoveryCalculator.moderateBand.upperBound)
+    }
+
+    /// A simulated year of nights (HRV, heart rate and sleep moving partly
+    /// together, with week-long drifts): the score uses the whole scale, most
+    /// days are normal, and "Recovered" isn't a rarity. Before November 2026
+    /// 78% of these days fell in 34-66 and 7% read "Recovered".
+    @Test func aYearOfNightsUsesTheWholeScale() throws {
+        var generator = SimFixtures.SplitMix(state: 42)
+        func normal() -> Double {
+            let first = Double.random(in: 1e-9...1, using: &generator)
+            let second = Double.random(in: 0...1, using: &generator)
+            return (-2 * log(first)).squareRoot() * cos(2 * .pi * second)
+        }
+        var vitals: [DailyVitals] = []
+        var sleeps: [Int] = []
+        var scores: [Int] = []
+        var statuses: [RecoveryCalculator.Status: Int] = [:]
+        var drift = 0.0
+        for day in 0..<400 {
+            drift = 0.6 * drift + 0.48 * normal()
+            let night = normal()
+            let hrv = exp(log(48) + 0.18 * (0.5 * drift + 0.6 * night + 0.6 * normal()))
+            let heartRate = 54 - 2.5 * (0.5 * drift + 0.5 * night + 0.7 * normal())
+            let sleep = Int(min(100, max(30, 78 + 9 * (0.3 * drift + 0.5 * night + 0.8 * normal()))))
+            let tonight = DailyVitals(date: today.addingTimeInterval(Double(day) * 86_400), hrvMilliseconds: hrv, restingHeartRate: heartRate)
+            if day >= 40 {
+                let result = try #require(calculator.score(today: tonight, history: vitals, sleepScore: sleep, sleepScoreHistory: sleeps))
+                scores.append(result.score)
+                statuses[result.status, default: 0] += 1
+            }
+            vitals.append(tonight)
+            sleeps.append(sleep)
+        }
+        let sorted = scores.sorted()
+        let total = Double(scores.count)
+        let median = sorted[sorted.count / 2]
+        #expect((50...64).contains(median), "median \(median)")
+        #expect(sorted[sorted.count / 20] < 40, "5th percentile \(sorted[sorted.count / 20])")
+        #expect(sorted[sorted.count * 19 / 20] > 75, "95th percentile \(sorted[sorted.count * 19 / 20])")
+        let share = statuses.mapValues { Double($0) / total }
+        #expect((0.40...0.65).contains(share[.moderate] ?? 0), "normal \(share[.moderate] ?? 0)")
+        #expect((0.20...0.40).contains(share[.high] ?? 0), "recovered \(share[.high] ?? 0)")
+        #expect((0.08...0.25).contains(share[.low] ?? 0), "easy \(share[.low] ?? 0)")
+    }
+
+    @Test func howItWorksNamesTheWeightsAndTheScale() {
+        let text = calculator.howItWorks.joined(separator: " ")
+        #expect(text.contains("35%") && text.contains("20%") && text.contains("25%"))
+        #expect(text.contains("about 57"))
+        #expect(text.contains("Under 34") && text.contains("67 or more"))
+    }
+
+    @Test func bandCutOffs() {
         #expect(RecoveryCalculator.status(for: 33) == .low)
         #expect(RecoveryCalculator.status(for: 34) == .moderate)
         #expect(RecoveryCalculator.status(for: 67) == .high)
@@ -503,5 +595,53 @@ struct ManualHRVTests {
         let merged = DailyVitals.merging([], manualHRV: [earlier: 50, morning: 55], calendar: calendar)
         #expect(merged.map(\.hrvMilliseconds) == [55, 50])
         #expect(merged[0].restingHeartRate == nil)
+    }
+}
+
+@Suite("Two devices' overnight HRV on one scale")
+struct OvernightRMSSDMergeTests {
+    private let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+    private let today = Date(timeIntervalSince1970: 1_800_000_000)
+    private func night(_ daysAgo: Int) -> Date { calendar.startOfDay(for: today.addingTimeInterval(Double(-daysAgo) * 86_400)) }
+
+    @Test("A new ring doesn't join the watch's baseline until nights overlap")
+    func newRingWaits() {
+        let watch = Dictionary(uniqueKeysWithValues: (3..<30).map { (night($0), 40.0) })
+        let ring = Dictionary(uniqueKeysWithValues: (0..<3).map { (night($0), 62.0) })
+        let merged = DailyVitals.mergingOvernightRMSSD(preferred: ring, other: watch, today: today, calendar: calendar)
+        #expect(!merged.usesPreferredScale)
+        #expect(merged.nights == watch)
+    }
+
+    @Test("With five shared nights the watch's nights are scaled to the ring's")
+    func scaledByYourOwnRatio() throws {
+        let watch = Dictionary(uniqueKeysWithValues: (0..<30).map { (night($0), 40.0) })
+        let ring = Dictionary(uniqueKeysWithValues: (0..<5).map { (night($0), 60.0) })
+        let merged = DailyVitals.mergingOvernightRMSSD(preferred: ring, other: watch, today: today, calendar: calendar)
+        #expect(merged.usesPreferredScale)
+        #expect(merged.nights.count == 30)
+        #expect(merged.nights[night(2)] == 60)
+        let older = try #require(merged.nights[night(20)])
+        #expect(abs(older - 60) < 0.001)
+    }
+
+    @Test("Without shared nights the device with the longer recent record is used alone")
+    func noOverlapSwitchesWhenTheRingHasMoreNights() {
+        let watch = Dictionary(uniqueKeysWithValues: (16..<30).map { (night($0), 40.0) })
+        let ring = Dictionary(uniqueKeysWithValues: (0..<16).map { (night($0), 60.0) })
+        let merged = DailyVitals.mergingOvernightRMSSD(preferred: ring, other: watch, today: today, calendar: calendar)
+        #expect(merged.usesPreferredScale)
+        #expect(merged.nights == ring)
+    }
+
+    @Test("One device alone passes through")
+    func single() {
+        let watch = [night(1): 40.0, night(2): 0, night(3): 42.0]
+        #expect(DailyVitals.mergingOvernightRMSSD(preferred: [:], other: watch, calendar: calendar).nights == [night(1): 40.0, night(3): 42.0])
+        #expect(DailyVitals.mergingOvernightRMSSD(preferred: watch, other: [:], calendar: calendar).usesPreferredScale)
     }
 }

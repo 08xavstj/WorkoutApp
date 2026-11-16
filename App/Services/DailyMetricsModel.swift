@@ -108,8 +108,8 @@ final class DailyMetricsModel {
 
     /// Oura's overnight RMSSD by morning (direct link) when the ring comes
     /// first for sleep; empty otherwise. Oura averages the whole sleep, the
-    /// watch a few minute-long recordings, so the two can differ a little:
-    /// both are RMSSD, though, never mixed with SDNN (`DailyVitals.resolvingHRV`).
+    /// watch a few minute-long recordings, so the two differ in level and are
+    /// put on one scale before use (`DailyVitals.mergingOvernightRMSSD`).
     nonisolated static func ouraRMSSD() -> [Date: Double] {
         SleepSourceSetting.current == .ring ? OuraCache.shared.nightlyRMSSD() : [:]
     }
@@ -568,9 +568,12 @@ final class DailyMetricsModel {
             // with gaps filled from the other via your own ratio. Camera readings are
             // taken awake in the morning, so they only stand in when there's no overnight HRV.
             // With the Oura ring first (`SleepSourceSetting`), Oura's overnight RMSSD
-            // (the direct link's average over the whole sleep) replaces the watch's for
-            // the nights it has, so recovery keeps its HRV on nights the watch is off.
-            let beatToBeat = await health.nightlyRMSSD(nights: nights).merging(Self.ouraRMSSD()) { _, oura in oura }
+            // (the direct link's average over the whole sleep) is used for the nights it has.
+            // The ring and the watch read the same night differently, so the watch's nights are
+            // scaled to the ring's by your own ratio, or one device is used alone until enough
+            // nights have both (`DailyVitals.mergingOvernightRMSSD`).
+            let beatToBeat = DailyVitals.mergingOvernightRMSSD(preferred: Self.ouraRMSSD(), other: await health.nightlyRMSSD(nights: nights),
+                                                               today: today, calendar: calendar).nights
             let rmssd = beatToBeat.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
             let selection = DailyVitals.resolvingHRV(healthVitals, overnightRMSSD: rmssd, morningHRV: morningHRV,
                                                      today: today, calendar: calendar)
