@@ -388,6 +388,8 @@ extension CoachNudges {
         f.checkInDone = isToday && checkIns?.morning() != nil
         f.weighInDue = WeighInNudge.isDue(goals: metrics.goals, lastWeighIn: metrics.lastWeighIn, now: fire)
         f.sleepDebtHours = metrics.sleepDebt?.hours
+        // The insomnia path: short nights are the plan, so no debt or short-night tip (`SleepWindow`).
+        f.sleepWindow = metrics.sleepWindowOn
         // The latest bed-by window's clock times stand in for tonight's: worked out
         // before the day starts, it is last night's or the coming night's, and the
         // wake time and need it comes from change little from one night to the next.
@@ -434,7 +436,9 @@ extension CoachNudges {
         let calendar = Calendar.current
         f.restMode = settings.isRestMode
         if let window {
-            f.bedByText = window.windowText
+            // The insomnia path: "Bed from 23:45, when sleepy", not "In bed by" (`SleepWindow`).
+            f.sleepWindow = window.isSleepWindow
+            f.bedByText = window.isSleepWindow ? window.start.formatted(date: .omitted, time: .shortened) : window.windowText
             f.bedByReason = window.reason
         }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) {
@@ -515,7 +519,10 @@ extension CoachNudges {
             f.bodyMassKg = metrics.bodyMassKg
             f.proteinSoFarGrams = metrics.nutritionToday?.proteinGrams
             f.proteinTargetGrams = metrics.proteinTarget
-            if let window = metrics.bedtimeWindow, window.start > now {
+            if let window = metrics.bedtimeWindow, window.isSleepWindow {
+                // Not "a full night's sleep" under the insomnia path's window (`SleepWindow`).
+                f.sleepWindowText = "\(window.start.formatted(date: .omitted, time: .shortened)) to \(window.wake.formatted(date: .omitted, time: .shortened))"
+            } else if let window = metrics.bedtimeWindow, window.start > now {
                 f.bedByText = window.windowText
             }
         }

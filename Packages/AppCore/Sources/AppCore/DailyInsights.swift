@@ -121,6 +121,9 @@ public enum DailyInsights {
         public var hrv: [DayValue] = []
         public var sleepHours: [DayValue] = []
         public var sleepRegularity: Int?
+        /// The insomnia path's sleep window is on (`SleepWindow`): shorter
+        /// nights are the plan, so "you're sleeping less" isn't said.
+        public var sleepWindowOn = false
         /// Full days only (leave today out until it is over).
         public var steps: [DayValue] = []
         public var vo2Max: [DayValue] = []
@@ -432,6 +435,7 @@ public enum DailyInsights {
     static func sleepLength(_ c: Context) -> Candidate? {
         guard let shift = Self.shift(c.inputs.sleepHours, c) else { return nil }
         let variant = shift.delta >= 0 ? "up" : "down"
+        if variant == "down" && c.inputs.sleepWindowOn { return nil }
         guard abs(shift.delta) >= c.needed("sleepWeek", variant, enter: sleepEnterHours, exit: sleepExitHours) else { return nil }
         let up = variant == "up"
         let minutes = max(5, Int((abs(shift.delta) * 60 / 5).rounded()) * 5)

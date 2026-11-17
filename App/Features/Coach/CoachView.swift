@@ -322,6 +322,8 @@ extension CoachView {
         f.remHours = metrics.sleep.map { $0.rem / 3600 }
         f.sleepInterruptions = metrics.sleep?.interruptions
         f.sleepDebtHours = metrics.sleepDebt?.hours
+        // The insomnia path: answers keep to the window, not the debt (`SleepWindow.coachFact`).
+        f.sleepWindowFact = SleepWindowStore.shared.course.map(SleepWindow.coachFact)
 
         // The same numbers as Today's calorie card; hidden with the Settings switch.
         if !settings.hideCalories {
@@ -432,11 +434,14 @@ extension CoachView {
             lines.append("7-day HRV \(whole(trend.average)) ms, normal range \(whole(trend.normalRange.lowerBound))-\(whole(trend.normalRange.upperBound)) ms (\(trend.status.rawValue)).\(metrics.trainEasyToday ? " HRV-guided: an easy day suits today." : "")")
         }
         if let consistency = metrics.sleepConsistency { lines.append("Sleep Regularity Index \(consistency)/100 (last week).") }
-        if let debt = metrics.sleepDebt {
+        if let course = SleepWindowStore.shared.course {
+            lines.append(SleepWindow.coachFact(course))
+        } else if let debt = metrics.sleepDebt {
             lines.append("Sleep debt \(debt.hours.formatted(.number.precision(.fractionLength(1)))) h over 14 nights (need \(settings.sleepNeedHours.formatted()) h)" + (debt.plan.map { "; plan: " + $0 } ?? "") + ".")
         }
         // Cut × sleep debt (`CutAndSleep`, Nedeltcheva 2010) and the 90-day VO₂ max trend (`CardioFitness.trend`).
-        if let cut = CutAndSleep.advice(goals: settings.goalsSet ? settings.goals : nil, sleepDebt: metrics.sleepDebt) {
+        if let cut = CutAndSleep.advice(goals: settings.goalsSet ? settings.goals : nil, sleepDebt: metrics.sleepDebt,
+                                        sleepWindowOn: metrics.sleepWindowOn) {
             lines.append("Cutting with high sleep debt: " + cut.message)
         }
         // The VO₂ max the app scores with (`VitalsModel.vo2ForScores`); the trend is the watch's readings.

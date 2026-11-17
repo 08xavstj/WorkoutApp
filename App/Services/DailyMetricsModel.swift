@@ -473,7 +473,9 @@ final class DailyMetricsModel {
         if let debt = sleepDebt, debt.level == .moderate || debt.level == .high {
             items.append(RecoveryContributor(
                 id: "sleepDebt", name: "Sleep debt",
-                detail: "\(debt.hours.formatted(.number.precision(.fractionLength(1)))) h behind your sleep need over the last two weeks. Sleep debt builds up slowly and you feel it less than it affects you.",
+                detail: sleepWindowOn
+                    ? "\(debt.hours.formatted(.number.precision(.fractionLength(1)))) h behind your sleep need over the last two weeks. Expected while your sleep window is on; it's short on purpose for a few weeks."
+                    : "\(debt.hours.formatted(.number.precision(.fractionLength(1)))) h behind your sleep need over the last two weeks. Sleep debt builds up slowly and you feel it less than it affects you.",
                 effect: .lowers
             ))
         }
@@ -578,6 +580,19 @@ final class DailyMetricsModel {
                 usualWakeMinutes: BedtimeWindow.usualWakeMinutes(nights.suffix(14).map(\.wake)),
                 regularity: sleepConsistency, plannedSessionStart: plannedSessionTomorrow, now: now
             )
+            // The insomnia path (`SleepWindowStore`): reviews due weeks, stops on an apnoea
+            // flag or a shift pattern, and while it runs the bed-by window is its sleep window.
+            let sleepWindow = SleepWindowStore.shared
+            sleepWindow.reloadIfUnavailable()
+            // A failed read (locked phone) isn't a week without nights: nothing is judged then.
+            if sleepWindow.isActive, fetchedNights != nil {
+                let apnoeaNights = (try? await health.sleepApneaNights(days: 30))?.count ?? 0
+                sleepWindow.refresh(nights: nights, sleepNeedHours: settings.sleepNeedHours, resting: settings.isRestMode,
+                                    apnoeaFlaggedNights: apnoeaNights, now: now)
+            }
+            if let window = sleepWindow.bedtimeWindow(sleepNeedHours: settings.sleepNeedHours, now: now) {
+                bedtimeWindow = window
+            }
 
             // One HRV measure for every night (`DailyVitals.resolvingHRV`): overnight
             // RMSSD (Apple Watch: Health's own RMSSD readings on iOS 27, else beat-to-beat;

@@ -277,7 +277,8 @@ struct WeeklyReviewView: View {
         if record.planned > 0, !Consistency.weekKept(planned: record.planned, done: record.done) {
             suggestions.append("Keep the 15-minute version ready for busy days")
         }
-        if let debt = metrics.sleepDebt, debt.level == .moderate || debt.level == .high {
+        // Not while the insomnia path's sleep window is on: the window is short on purpose.
+        if !metrics.sleepWindowOn, let debt = metrics.sleepDebt, debt.level == .moderate || debt.level == .high {
             suggestions.append("In bed \(debt.extraMinutesPerNight ?? 30) minutes earlier on three nights")
         }
         if let regularity = metrics.sleepConsistency, regularity < 70 {
