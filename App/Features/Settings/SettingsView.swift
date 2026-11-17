@@ -12,7 +12,6 @@ import AppCore
 /// shared with the workout screens, is still a sheet.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var showingRPEGuide = false
 
     var body: some View {
         NavigationStack {
@@ -23,7 +22,7 @@ struct SettingsView: View {
                         ProfileSettingsSection()
                     }
                     SettingsPageLink(title: "Training", detail: "Gym, rest timer, warm-up, Apple Watch", icon: "dumbbell.fill", id: "training") {
-                        TrainingSettingsSection(showRPEGuide: { showingRPEGuide = true })
+                        TrainingSettingsSection()
                     }
                     SettingsPageLink(title: "Notifications", detail: "Daily messages, reminders, doses", icon: "bell.fill", id: "notifications") {
                         CoachCheckInsSettingsSection()
@@ -51,7 +50,6 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showingRPEGuide) { RPEGuideView() }
         }
     }
 }
@@ -251,7 +249,9 @@ private struct TrainingSettingsSection: View {
     @AppStorage(RestPreferences.globalKey) private var restSeconds = 0
     /// How rest end is signalled (`RestAlertPolicy`); in the App Group for the Live Activity's buttons.
     @AppStorage(RestAlertMode.key, store: SharedStore.defaults) private var restAlerts = RestAlertMode.watchFirst
-    let showRPEGuide: () -> Void
+    /// The guide opens from its own row: this section now sits on a pushed
+    /// page, so the sheet is presented from here, not from the Settings root.
+    @State private var showingRPEGuide = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -307,10 +307,13 @@ private struct TrainingSettingsSection: View {
                 Text("Abs finisher")
                 Text("Added on top of planned workouts")
             }
-            Button(action: showRPEGuide) {
+            Button {
+                showingRPEGuide = true
+            } label: {
                 LabeledContent("Reps left guide", value: "How the rating works")
             }
             .accessibilityIdentifier("settings-reps-left-guide") // UI tests (ScreenshotTests)
+            .sheet(isPresented: $showingRPEGuide) { RPEGuideView() }
             LiftingExperienceRows()
             EvidenceDisclosure(points: Self.details, title: "How these work")
         } header: {

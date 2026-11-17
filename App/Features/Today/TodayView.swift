@@ -695,16 +695,7 @@ private struct CalorieDetailsSheet: View {
                     )
                 }
                 if !settings.hideCalories, let summary = metrics.calories {
-                    // The numbers first, then where they come from.
-                    Section {
-                        if let target = metrics.calorieTarget {
-                            row("Daily target", target, bold: true)
-                        }
-                        row("Burned so far", summary.burnedSoFar)
-                        row("Eaten today", summary.eaten ?? 0)
-                    } header: {
-                        Text("Today")
-                    }
+                    // Target and eaten are in the ring above; what was burned is under "Burned" below.
                     Section {
                         Text(metrics.maintenance.map { "Your maintenance is \(whole($0.maintenance).formatted()) kcal, worked out from \($0.loggedDays) fully logged days of food and your weight trend." }
                              ?? "Maintenance is estimated from your watch until there are 14 fully logged days of food and enough weigh-ins.")

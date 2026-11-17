@@ -248,13 +248,15 @@ final class ScreenshotTests: XCTestCase {
         for section in sections {
             guard tap(app, [section.key], name: "Settings \(section.name)") else { continue }
             capture(app, "settings-\(section.name)", pages: section.pages)
+            // First, while the page is where the capture left it (the row is on its second
+            // screen): a long search here swipes down at the top and can close the Settings sheet.
+            if section.name == "training", tap(app, ["settings-reps-left-guide", "Reps left guide"], name: "Settings reps-left guide", scroll: false) {
+                capture(app, "settings-rpe-guide", pages: 1)
+                dismissSheet(app)
+            }
             for inner in section.inner where tap(app, inner.keys, name: "Settings \(inner.name)") {
                 capture(app, "settings-\(inner.name)", pages: 1)
                 back(app)
-            }
-            if section.name == "training", tap(app, ["settings-reps-left-guide", "Reps left guide"], name: "Settings reps-left guide") {
-                capture(app, "settings-rpe-guide", pages: 1)
-                dismissSheet(app)
             }
             back(app)
         }
