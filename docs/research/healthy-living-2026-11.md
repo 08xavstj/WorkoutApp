@@ -279,6 +279,8 @@ Ranked by expected health payoff, strength of evidence, and how little it adds t
 | Export and backup | `competitors-2026-11.md` rec. 4 | Stands. Not a health feature; protects the data everything else relies on. |
 | Paced breathing | `roadmap.md` phase 4 | Stays removed (see 2c). |
 
+**Owner's decision, 17 Nov 2026.** The owner asked for three of the items above (a "How did it feel?" rating after each workout, a monthly PHQ-2 and GAD-2, and a preventive-care checklist), then chose to follow this research and drop them; only item 10, the low-mood rule, was built. The rating is dropped because only feelings during exercise predict later activity and a rating taken afterwards measures the part with no link (Rhodes & Kates 2015), while adding a post-workout step he had asked to cut. The questionnaires are dropped because screening helps only when it leads to care, Apple Health already offers the PHQ-9 and GAD-7, and they would add another recurring prompt where item 10 covers the practical part. The checklist is dropped because recommendations differ by country and go stale, and the measurement reminders already cover blood pressure, waist and grip.
+
 ---
 
 ## 5. Not to build

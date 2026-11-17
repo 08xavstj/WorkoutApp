@@ -58,6 +58,16 @@ final class CheckInStore {
     func morning(on day: Date = .now) -> MorningCheckIn? { saved.mornings[key(day)] }
     func evening(on day: Date = .now) -> EveningCheckIn? { saved.evenings[key(day)] }
 
+    /// Each morning's mood answer (1-5) since `start`, by the check-in's day,
+    /// for the low-mood rule (`LowMoodRule.days`).
+    func morningMoods(since start: Date) -> [Date: Int] {
+        var result: [Date: Int] = [:]
+        for morning in saved.mornings.values where morning.day >= start {
+            if let mood = morning.mood { result[morning.day] = mood }
+        }
+        return result
+    }
+
     /// Whether the evening check-in itself is done for `day`: the form was
     /// saved (`EveningCheckIn.isDone`). A drink logged on its own makes a
     /// record for the day too, and that isn't the check-in.

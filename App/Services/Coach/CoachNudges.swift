@@ -197,7 +197,8 @@ final class CoachNudges {
         }
         var body = message.body
         var reworded = false
-        if friendlyWording, let line = await CoachNudgeWriter.reword(message.body) {
+        // A low-mood sentence keeps the app's own careful words (`CoachCheckIns.mayReword`).
+        if friendlyWording, CoachCheckIns.mayReword(message), let line = await CoachNudgeWriter.reword(message.body) {
             body = line
             reworded = true
         }
@@ -396,7 +397,35 @@ extension CoachNudges {
         let bedtime = CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes, calendar: calendar)
         let cutoff = CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: CaffeineTiming.referenceDoseMg)
         f.caffeineCutoffText = CaffeineTiming.clockText(cutoff, calendar: calendar)
+        if isToday { addLowMood(to: &f, now: now, calendar: calendar) }
         return f
+    }
+
+    /// The low-mood rule's facts for today's message (`LowMoodRule`, LowMood.swift).
+    /// Today only: a message written ahead knows neither tomorrow's mood nor its rest day.
+    private func addLowMood(to f: inout CoachCheckIns.MorningFacts, now: Date, calendar: Calendar) {
+        guard let checkIns else { return }
+        f.lowMood = Self.lowMoodFinding(checkIns: checkIns, now: now, calendar: calendar)
+        f.illnessFlagged = checkIns.morning()?.isSick == true
+        f.restForRecovery = metrics?.dayGuidance?.kind == .recovery
+        guard let finding = f.lowMood, finding.fortnightApplies else { return }
+        let last = defaults.object(forKey: Self.lowMoodRaisedKey) as? Date
+        f.lowMoodRaiseDue = LowMoodRule.raiseDue(lastRaised: last, on: now, calendar: calendar)
+        // Said today: the same day's rebuilds keep it, then it waits a week (`LowMoodRule.raiseEveryDays`).
+        if f.lowMoodRaiseDue, !f.illnessFlagged, !f.restMode, last.map({ !calendar.isDate($0, inSameDayAs: now) }) ?? true {
+            defaults.set(now, forKey: Self.lowMoodRaisedKey)
+        }
+    }
+
+    private static let lowMoodRaisedKey = "coachLowMoodRaisedOn"
+
+    /// Three or more low mornings in the last week, from the check-ins' mood
+    /// and, on days without one, Apple Health's State of Mind (`LowMoodRule.days`).
+    /// Also read by `WorkoutVoice`, so the reminders turn plain on the same days.
+    static func lowMoodFinding(checkIns: CheckInStore, now: Date, calendar: Calendar = .current) -> LowMoodRule.Finding? {
+        let start = calendar.date(byAdding: .day, value: -LowMoodRule.fortnightDays, to: calendar.startOfDay(for: now)) ?? now
+        let days = LowMoodRule.days(mornings: checkIns.morningMoods(since: start), health: checkIns.moods, calendar: calendar)
+        return LowMoodRule.finding(days: days, on: now, calendar: calendar)
     }
 
     private func eveningFacts(window: BedtimeWindow.Result?, now: Date) -> CoachCheckIns.EveningFacts {

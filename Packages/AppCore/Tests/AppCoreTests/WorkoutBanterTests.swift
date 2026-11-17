@@ -65,6 +65,7 @@ struct WorkoutBanterTests {
         case .illness: facts.illnessFlagged = true
         case .restMode: facts.restMode = true
         case .restDay: facts.isRestDay = true
+        case .keepPlain: facts.keepPlain = true
         default: break
         }
         if situation != .pain { facts.painArea = nil }
