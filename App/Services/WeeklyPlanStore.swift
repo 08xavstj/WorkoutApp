@@ -753,7 +753,7 @@ final class WeeklyPlanStore {
         if let ifThen = plan.sortedDays.compactMap(\.ifThen).first, !ifThen.isEmpty { line += " (\(ifThen))" }
         line += "; done \(sessionsDone(sessions: sessions, extra: extra, now: now)) of \(plan.sessionTarget) so far"
         if result.plannedWeeks > 0 { line += "; consistency \(result.label) on plan" }
-        if !plan.changes.isEmpty { line += ". Changes this week: " + plan.changes.prefix(3).joined(separator: "; ") }
+        if !plan.changes.isEmpty { line += ". Changes this week: " + plan.changes.prefix(3).map(\.title).joined(separator: "; ") }
         // The queue (`AdaptiveWeek`): what's next and why sessions were swapped.
         if let state = freshAdaptive(now: now), !plan.isFlexible {
             if let next = state.week.next { line += ". Next in the queue: \(next.focus.shortTitle.lowercased()) \(WeeklyPlan.weekdayName(next.session.weekday))" }

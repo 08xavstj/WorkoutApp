@@ -24,7 +24,7 @@ public struct WeeklyChange: Codable, Sendable, Equatable, Identifiable, Expressi
         case caffeineCutoff
         /// In bed by the end of the bed-by window on N nights (`BedtimeWindow`).
         case bedByWindow
-        /// Up within half an hour of one wake time (regular timing: Windred et al., Sleep 2024).
+        /// Up within an hour of one wake time (regular timing: Windred et al., Sleep 2024).
         case wakeTime
         /// The per-meal protein dose at N meals a day (`ProteinMeals`; Schoenfeld & Aragon, JISSN 2018).
         case proteinMeals
@@ -130,7 +130,7 @@ extension WeeklyChange {
 
     public static func wakeTime(minutes: Int) -> WeeklyChange {
         WeeklyChange(kind: .wakeTime,
-                     title: "Up within \(WeeklyChangeReview.wakeToleranceMinutes) minutes of \(CaffeineTiming.clockText(minutes)), every day",
+                     title: "Up within an hour of \(CaffeineTiming.clockText(minutes)), every day",
                      target: Double(minutes))
     }
 
@@ -296,11 +296,11 @@ public enum WeeklyChangeSuggestions {
 /// changes tested (Benjamini-Hochberg). Short of that it reports the numbers
 /// and declines to say more.
 public enum WeeklyChangeReview {
-    /// Minutes either side of the wake time that still count as kept: a
-    /// one-hour band. App's choice; the cohort behind sleep regularity gives
-    /// no figure (Windred et al., Sleep 2024), and `SleepRegularity` already
-    /// treats about an hour of shift as the line.
-    public static let wakeToleranceMinutes = 30
+    /// Minutes either side of the wake time that still count as kept: "within
+    /// an hour". App's choice; the cohort behind sleep regularity gives no
+    /// figure (Windred et al., Sleep 2024), and the weekend-shift note
+    /// (`SleepRegularity.midpointShift`) also treats about an hour as the line.
+    public static let wakeToleranceMinutes = 60
 
     /// Vigorous minutes inside one recorded cardio workout for it to count as
     /// a hard session. App's choice, anchored on two findings: intervals did
@@ -658,8 +658,16 @@ public enum WeeklyChangeReview {
     /// The most vigorous minutes inside one recorded cardio workout, from the
     /// heart rate during it; nil when no workout is long enough or none has
     /// heart rate.
-    public static func cardioVigorousMinutes(workouts: [DateInterval], heartRate: [HeartRateSample], profile: HeartRateProfile) -> Int? {
-        let counts = workouts.filter { $0.duration >= Double(hardSessionMinimumMinutes) * 60 }.compactMap { workout -> Int? in
+    /// - Parameter lifting: logged lifting sessions. A recorded workout that
+    ///   overlaps one is the watch's record of that session, not cardio, so it
+    ///   is left out (hard sets raise heart rate too).
+    public static func cardioVigorousMinutes(workouts: [DateInterval], lifting: [DateInterval] = [],
+                                             heartRate: [HeartRateSample], profile: HeartRateProfile) -> Int? {
+        let cardio = workouts.filter { workout in
+            workout.duration >= Double(hardSessionMinimumMinutes) * 60
+                && !lifting.contains { $0.start < workout.end && workout.start < $0.end }
+        }
+        let counts = cardio.compactMap { workout -> Int? in
             let inside = heartRate.filter { workout.contains($0.date) }
             return inside.isEmpty ? nil : IntensityMinutes.count(inside, profile: profile).vigorous
         }

@@ -2,8 +2,9 @@ import SwiftUI
 import SwiftData
 import AppCore
 
-/// The Monday review: last week in plain numbers, then three changes for this
-/// week that the user edits and confirms, saved on the week's plan.
+/// The Monday review: last week in plain numbers, the health basics, how last
+/// week's changes went, then this week's change (one by default, up to
+/// three), saved on the week's plan.
 ///
 /// Self-monitoring works best combined with goal setting, feedback and a
 /// review of goals (Michie et al., Health Psychol 2009: 0.42 vs 0.26), and
@@ -13,11 +14,21 @@ import AppCore
 struct WeeklyReviewView: View {
     @Environment(WeeklyPlanStore.self) private var store
     @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(CheckInStore.self) private var checkIns
     @Environment(UserSettings.self) private var settings
     @Environment(MuscleModel.self) private var muscles
+    @Environment(\.healthClient) private var health
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
-    @State private var changes = ["", "", ""]
+    @AppStorage(HealthyLivingSettings.drinkLimitKey) private var drinkLimit: Double?
+    /// This week's changes as chosen so far (`WeeklyPlan.changes`).
+    @State private var changes: [WeeklyChange] = []
+    @State private var customText = ""
+    @State private var writingCustom = false
+    @State private var food = WeeklyReviewData.FoodTimes()
+    /// Last week worked out once per load, not on every keystroke.
+    @State private var snapshot: Snapshot?
     @State private var loaded = false
     @State private var showingPlan = false
 
@@ -28,7 +39,10 @@ struct WeeklyReviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    ReviewNumbersCard(lines: lines)
+                    ReviewNumbersCard(lines: lines, basics: snapshot?.basics)
+                    if let reports = snapshot?.reports, !reports.isEmpty {
+                        ChangeReportCard(reports: reports)
+                    }
                     if let identity = identityLine {
                         Text(identity)
                             .font(.subheadline.weight(.semibold))
@@ -56,10 +70,10 @@ struct WeeklyReviewView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save changes") { confirm() }
-                        .accessibilityHint("Saves this week's three changes to your plan")
+                        .accessibilityHint("Saves this week's changes to your plan")
                 }
             }
-            .task { load() }
+            .task { await load() }
             .sheet(isPresented: $showingPlan) { WeeklyPlanView() }
         }
     }
@@ -68,19 +82,61 @@ struct WeeklyReviewView: View {
 
     private var changesCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CardLabel(text: "Three changes for this week", color: Theme.liftingText)
-            Text("Suggested from the numbers; change them to anything you'd rather do.")
+            CardLabel(text: changes.count > 1 ? "Changes for this week" : "One change for this week", color: Theme.liftingText)
+            Text("Suggested from last week's numbers. \"Checked for you\" means no ticking: next Monday this page shows how many days it was kept. One is plenty; up to \(WeeklyChange.maximumCount) if you want.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
-            ForEach(0..<3, id: \.self) { index in
-                TextField("Change \(index + 1)", text: $changes[index], axis: .vertical)
-                    .lineLimit(1...3)
-                    .font(.subheadline)
-                    .padding(12)
-                    .background(Theme.cardRaised, in: .rect(cornerRadius: 14))
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(changes) { change in
+                ChangeRow(change: change) { changes.removeAll { $0.id == change.id } }
+            }
+            if writingCustom {
+                HStack(spacing: 8) {
+                    TextField("Your own change", text: $customText, axis: .vertical)
+                        .lineLimit(1...3)
+                        .font(.subheadline)
+                        .submitLabel(.done)
+                        .accessibilityIdentifier("review-change-custom-field")
+                    Button("Add") { addCustom() }
+                        .font(.subheadline.weight(.semibold))
+                        .disabled(customText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("review-change-custom-add")
+                }
+                .padding(12)
+                .background(Theme.cardRaised, in: .rect(cornerRadius: 14))
+            } else if changes.count < WeeklyChange.maximumCount {
+                addMenu
             }
         }
         .card(tint: Theme.lifting)
+    }
+
+    /// Choices the data can check first, then the plain ideas, then free text.
+    private var addMenu: some View {
+        let pool = options.filter { option in !changes.contains { $0.id == option.id } }
+        return Menu {
+            let measured = pool.filter(\.isMeasured)
+            if !measured.isEmpty {
+                Section("Checked for you") {
+                    ForEach(measured) { option in
+                        Button(option.title) { changes.append(option) }
+                    }
+                }
+            }
+            let ideas = pool.filter { !$0.isMeasured }
+            if !ideas.isEmpty {
+                Section("Not measured") {
+                    ForEach(ideas) { option in
+                        Button(option.title) { changes.append(option) }
+                    }
+                }
+            }
+            Button("Write your own", systemImage: "pencil") { writingCustom = true }
+        } label: {
+            Label(changes.isEmpty ? "Choose a change" : "Add another", systemImage: "plus.circle")
+                .font(.subheadline.weight(.semibold))
+        }
+        .accessibilityIdentifier("review-change-add")
     }
 
     private var planCard: some View {
@@ -104,7 +160,7 @@ struct WeeklyReviewView: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
             } else {
-                Text("No training days yet. Save changes keeps the three changes; the days can come later.")
+                Text("No training days yet. Save changes keeps this week's changes; the days can come later.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -126,7 +182,6 @@ struct WeeklyReviewView: View {
     private var lines: [ReviewLine] {
         var lines: [ReviewLine] = []
         lines.append(sessionsLine)
-        if let strain = strainLine { lines.append(strain) }
         if let sleep = sleepLine { lines.append(sleep) }
         if let hrv = hrvLine { lines.append(hrv) }
         if let sets = setsLine { lines.append(sets) }
@@ -166,34 +221,18 @@ struct WeeklyReviewView: View {
         return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done)", detail: "No plan last week to compare with.")
     }
 
-    /// The 7 completed days before today (today isn't over, so its strain
-    /// would pull the average down), with training days counted the same way
-    /// as everywhere else (`WeeklyPlanStore.trainingDays`).
-    private var strainLine: ReviewLine? {
-        let week = metrics.completedWeekStrain
-        let values = week.map(\.strain)
-        guard !values.isEmpty else { return nil }
-        let average = values.reduce(0, +) / Double(values.count)
-        let calendar = Calendar.current
-        let trained = Set(trainingDays.map { calendar.startOfDay(for: $0) })
-        let active = week.filter { trained.contains(calendar.startOfDay(for: $0.date)) }.count
-        // Last week only: today's target range belongs on Today, not in this review.
-        let detail = "\(active) of \(values.count) were training days."
-        return ReviewLine(id: "strain", title: "Average day strain, last 7 days", value: strainText(average), detail: detail)
-    }
-
+    /// Sleep debt. Regularity is one of the basics (`HealthFloors`), so it isn't repeated here.
     private var sleepLine: ReviewLine? {
-        let debt = metrics.sleepDebt
-        let regularity = metrics.sleepConsistency
-        guard debt != nil || regularity != nil else { return nil }
+        guard let debt = metrics.sleepDebt else { return nil }
         // The same rule as Health: "Caught up" only at zero; a debt under an hour says so.
-        let value = debt.map { debt -> String in
-            guard debt.hours > 0 else { return "Caught up" }
+        let value: String
+        if debt.hours > 0 {
             let behind = SleepText.hours(debt.hours) + " behind"
-            return debt.level == .none ? behind + " (under 1 h)" : behind
-        } ?? "No debt data"
-        let detail = regularity.map { "Regularity \($0)/100 over the last week" + ($0 >= 70 ? ", a regular pattern." : "; a steadier wake time helps more than extra hours (Windred 2024).") }
-        return ReviewLine(id: "sleep", title: "Sleep debt, \(debt?.windowLabel ?? "14 nights")", value: value, detail: detail)
+            value = debt.level == .none ? behind + " (under 1 h)" : behind
+        } else {
+            value = "Caught up"
+        }
+        return ReviewLine(id: "sleep", title: "Sleep debt, \(debt.windowLabel)", value: value, detail: nil)
     }
 
     private var hrvLine: ReviewLine? {
@@ -268,46 +307,99 @@ struct WeeklyReviewView: View {
         return "You've trained at least twice a week for \(weeks) weeks running. That's someone who lifts."
     }
 
-    // MARK: Changes
+    // MARK: Last week, worked out
 
-    /// Plain suggestions from the same numbers; the user edits them.
-    private var suggestedChanges: [String] {
-        var suggestions: [String] = []
-        let record = lastWeekRecord
-        if record.planned > 0, !Consistency.weekKept(planned: record.planned, done: record.done) {
-            suggestions.append("Keep the 15-minute version ready for busy days")
-        }
-        if let debt = metrics.sleepDebt, debt.level == .moderate || debt.level == .high {
-            suggestions.append("In bed \(debt.extraMinutesPerNight ?? 30) minutes earlier on three nights")
-        }
-        if let regularity = metrics.sleepConsistency, regularity < 70 {
-            suggestions.append("Same wake time every day, weekends too")
-        }
-        if let target = metrics.proteinTarget, let protein = metrics.nutritionYesterday?.proteinGrams, protein < target * 0.8 {
-            suggestions.append("Protein with every meal")
-        }
-        if metrics.trainEasyToday {
-            suggestions.append("Keep the first session of the week easy")
-        }
-        if let weekly = metrics.weightTrendWeekly, let mass = metrics.bodyMassKg, settings.goalsSet {
-            switch WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: mass, goals: settings.goals) {
-            case .losingTooFast: suggestions.append("Eat a little more; the pace is faster than planned")
-            case .gainingTooFast: suggestions.append("Trim a little; the pace is faster than planned")
-            case .fine: break
-            }
-        }
-        for filler in ["Train at the planned time, even if shorter", "A walk after lunch", "Phone out of the bedroom"] where suggestions.count < 3 {
-            suggestions.append(filler)
-        }
-        return Array(suggestions.prefix(3))
+    /// The basics, the report on last week's changes and this week's
+    /// suggestions, from the same days (`WeeklyReviewData`).
+    struct Snapshot {
+        var basics: HealthFloors.Result
+        var reports: [WeeklyChangeReview.Report]
+        /// Best first; the first is chosen by default (`WeeklyChangeSuggestions.suggested`).
+        var suggestions: [WeeklyChange]
+        /// Everything the data can check, for the menu.
+        var measurable: [WeeklyChange]
     }
 
-    private func load() {
-        guard !loaded else { return }
-        loaded = true
-        let saved = store.plan(for: thisWeek)?.changes ?? []
-        let base = saved.isEmpty ? suggestedChanges : saved
-        changes = (0..<3).map { $0 < base.count ? base[$0] : "" }
+    private func makeSnapshot() -> Snapshot {
+        let calendar = Calendar.current
+        let sources = WeeklyReviewData.Sources(metrics: metrics, vitals: vitals, checkIns: checkIns,
+                                               trainingDays: trainingDays, food: food)
+        let earlierStart = calendar.date(byAdding: .day, value: -7 * WeeklyReviewData.earlierWeeks, to: lastWeek) ?? lastWeek
+        let week = WeeklyReviewData.days(from: lastWeek, count: 7, sources)
+        let earlier = WeeklyReviewData.days(from: earlierStart, count: 7 * WeeklyReviewData.earlierWeeks, sources)
+        let floors = HealthFloors.week(from: week, sleepRegularity: WeeklyReviewData.sleepRegularity(metrics, weekStart: lastWeek))
+        let basics = HealthFloors.assess(floors)
+        let context = suggestionContext(floors: floors, days: week + earlier)
+        let reports = WeeklyChangeReview.report(changes: store.plan(for: lastWeek)?.changes ?? [], week: week, earlier: earlier)
+        return Snapshot(basics: basics, reports: reports,
+                        suggestions: WeeklyChangeSuggestions.suggested(basics: basics, context: context),
+                        measurable: WeeklyChangeSuggestions.measurable(context))
+    }
+
+    /// What the app knows for this week's suggestions.
+    private func suggestionContext(floors: HealthFloors.Week, days: [WeeklyChangeReview.Day]) -> WeeklyChangeSuggestions.Context {
+        var context = WeeklyChangeSuggestions.Context()
+        if !metrics.recentBedtimes.isEmpty {
+            // The same "last coffee by" as Today's Up next row (`TodayHabits.caffeine`).
+            context.caffeineCutoffMinutes = CaffeineTiming.cutoffMinutes(bedtimeMinutes: CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes), mg: 100)
+        }
+        context.bedByMinutes = metrics.bedtimeWindow.map { WeeklyChange.eveningMinutes($0.end) }
+        context.usualWakeMinutes = BedtimeWindow.usualWakeMinutes(metrics.sleepNights.suffix(14).map(\.wake))
+        context.hasMealTimes = WeeklyReviewData.hasMealTimes(food)
+        context.drinkLimit = drinkLimit
+        if floors.drinkNightsLogged >= HealthFloors.drinksMinimumNights { context.lastWeekDrinks = floors.drinks }
+        // A drinks change only for someone who drinks and logs it.
+        context.logsDrinks = days.contains { ($0.drinks ?? 0) > 0 }
+        context.vigorousMinutes = floors.vigorousMinutes
+        if let debt = metrics.sleepDebt, debt.level == .moderate || debt.level == .high {
+            context.sleepDebtExtraMinutes = debt.extraMinutesPerNight ?? 30
+        }
+        if let target = metrics.proteinTarget, let protein = metrics.nutritionYesterday?.proteinGrams, protein < target * 0.8 {
+            context.proteinLow = true
+        }
+        let record = lastWeekRecord
+        context.weekNotKept = record.planned > 0 && !Consistency.weekKept(planned: record.planned, done: record.done)
+        context.trainEasy = metrics.trainEasyToday
+        if let weekly = metrics.weightTrendWeekly, let mass = metrics.bodyMassKg, settings.goalsSet {
+            context.weightPace = WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: mass, goals: settings.goals)
+        }
+        return context
+    }
+
+    /// Suggestions first, then the other checkable choices, then plain ideas; no repeats.
+    private var options: [WeeklyChange] {
+        guard let snapshot else { return WeeklyChangeSuggestions.plainIdeas }
+        var seen = Set<String>()
+        return (snapshot.suggestions + snapshot.measurable + WeeklyChangeSuggestions.plainIdeas).filter { seen.insert($0.id).inserted }
+    }
+
+    // MARK: Changes
+
+    private func load() async {
+        snapshot = makeSnapshot()
+        if !loaded {
+            loaded = true
+            let saved = store.plan(for: thisWeek)?.changes ?? []
+            // One tracked change by default; more only when the owner adds them
+            // (healthy-living-2026-11.md §3 item 4: three can feel like homework).
+            changes = saved.isEmpty ? Array((snapshot?.suggestions ?? []).prefix(WeeklyChange.defaultCount)) : saved
+        }
+        // The food app's timed entries, for caffeine and protein per meal; then again with them.
+        if let health {
+            food = await WeeklyReviewData.loadFoodTimes(health: health, lastWeek: lastWeek)
+            snapshot = makeSnapshot()
+        }
+    }
+
+    private func addCustom() {
+        let text = customText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let change = WeeklyChange(text: text)
+        if !changes.contains(where: { $0.id == change.id }), changes.count < WeeklyChange.maximumCount {
+            changes.append(change)
+        }
+        customText = ""
+        writingCustom = false
     }
 
     private func confirm() {
@@ -318,7 +410,9 @@ struct WeeklyReviewView: View {
             ?? WeeklyPlan(weekStart: thisWeek,
                           plannedDays: store.newWeekDays(from: last?.plannedDays ?? [], weekStart: thisWeek, sessions: sessions),
                           mode: last?.mode ?? .fixedDays, sessionsPerWeek: last?.sessionsPerWeek, cardio: last?.cardio)
-        plan.changes = changes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        // Text still in the field counts, as it did when the changes were three text fields.
+        if writingCustom { addCustom() }
+        plan.changes = Array(changes.prefix(WeeklyChange.maximumCount))
         store.save(plan)
         dismiss()
     }
@@ -335,6 +429,8 @@ private struct ReviewLine: Identifiable {
 
 private struct ReviewNumbersCard: View {
     let lines: [ReviewLine]
+    /// The five health basics, shown after the training days.
+    let basics: HealthFloors.Result?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -354,8 +450,178 @@ private struct ReviewNumbersCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                if line.id == "sessions", let basics {
+                    BasicsRow(result: basics)
+                }
             }
         }
         .card()
+    }
+}
+
+/// "Basics: 4 of 5", opening to the five checks (`HealthFloors`). Ticks and
+/// numbers only: no percentage, and no colour for a check that wasn't met
+/// (healthy-living-2026-11.md §3 item 1: it must not read as a score).
+private struct BasicsRow: View {
+    let result: HealthFloors.Result
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.snappy) { open.toggle() }
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Basics")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                        Text(result.summary)
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(Theme.primaryText)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                        .rotationEffect(.degrees(open ? 180 : 0))
+                        .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Basics, \(result.summary)")
+            .accessibilityValue(open ? "Open" : "Closed")
+            .accessibilityHint("Shows active minutes, strength days, steps, sleep regularity and drinks")
+            .accessibilityIdentifier("review-basics")
+            if open {
+                ForEach(result.checks) { check in
+                    BasicsCheckRow(check: check)
+                }
+                Text(HealthFloors.evidenceNote)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct BasicsCheckRow: View {
+    let check: HealthFloors.Check
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(check.met == true ? Theme.recoveryHigh : Theme.secondaryText)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(check.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                    Spacer(minLength: 8)
+                    Text(check.valueText)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(Theme.primaryText)
+                }
+                Text("Line: " + check.targetText)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let note = check.note {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(check.met == true ? "Met" : check.met == false ? "Not met" : "No data")
+    }
+
+    private var icon: String {
+        switch check.met {
+        case true?: "checkmark.circle.fill"
+        case false?: "circle"
+        case nil: "minus.circle"
+        }
+    }
+}
+
+/// How last week's changes went: days kept and what moved, with the caveat
+/// that one week proves nothing (`WeeklyChangeReview`).
+private struct ChangeReportCard: View {
+    let reports: [WeeklyChangeReview.Report]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CardLabel(text: reports.count == 1 ? "Last week's change" : "Last week's changes")
+            ForEach(reports) { report in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(report.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(report.kept)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(Theme.primaryText)
+                    if let moved = report.moved {
+                        Text(moved)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if reports.contains(where: \.change.isMeasured) {
+                Text(WeeklyChangeReview.caveat)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+        .accessibilityIdentifier("review-last-week-changes")
+    }
+}
+
+/// One chosen change, with whether the app checks it.
+private struct ChangeRow: View {
+    let change: WeeklyChange
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(change.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(change.isMeasured ? "Checked for you" : "Not measured")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Spacer(minLength: 8)
+            Button(action: remove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove \(change.title)")
+            .accessibilityIdentifier("review-change-remove-\(change.id)")
+        }
+        .padding(.leading, 12)
+        .padding(.vertical, 4)
+        .background(Theme.cardRaised, in: .rect(cornerRadius: 14))
     }
 }

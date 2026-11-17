@@ -63,6 +63,11 @@ final class VitalsModel {
     private(set) var stress: StressEstimate.Result?
     private(set) var bloodOxygen: Double?
     private(set) var intensityMinutes: IntensityMinutes.Result?
+    /// Per day (start of day) over the heart rate on hand, about two weeks:
+    /// moderate and vigorous minutes, and the most vigorous minutes inside one
+    /// recorded cardio workout (`WeeklyChangeReview.cardioVigorousMinutes`).
+    private(set) var intensitySplitByDay: [Date: IntensityMinutes.Result] = [:]
+    private(set) var cardioVigorousByDay: [Date: Int] = [:]
     private(set) var bodyAge: BodyAge.Result?
 
     /// One no-test VO₂ max estimate with the inputs it used, for the cardio card.
@@ -295,6 +300,8 @@ final class VitalsModel {
         )
         stress = derived.stressToday
         intensityMinutes = derived.intensityWeek
+        intensitySplitByDay = derived.intensitySplitByDay
+        cardioVigorousByDay = derived.cardioVigorousByDay
         restingHeartRateHistory = rhrSeries
         // 30 nights of sleeping heart rate from the nightly cache the recovery
         // baseline also fills (`nightlySleepingHeartRate`), so the history isn't
@@ -484,7 +491,9 @@ final class VitalsModel {
             tone: intensity.total >= IntensityMinutes.weeklyGoal ? .good : .neutral,
             gauge: min(1, Double(intensity.total) / Double(IntensityMinutes.weeklyGoal)),
             series: derived.intensityByDay,
-            footnote: "\(intensity.moderate) moderate + \(intensity.vigorous) vigorous ×2, from heart rate. Goal 150 a week."
+            // The vigorous count on its own line, against the cohort reference (Ahmadi 2022; `IntensityMinutes.vigorousLine`).
+            footnote: "\(intensity.moderate) moderate + \(intensity.vigorous) vigorous ×2, from heart rate. Goal 150 a week.\n"
+                + IntensityMinutes.vigorousLine(intensity.vigorous)
         ))
         result.append(Self.strengthDaysStat(sessions: sessions, now: now))
         result.append(todayStat("active", "Active energy", "flame.fill", series: get(try? await active), unit: "kcal", digits: 0, today: latestToday))
@@ -969,6 +978,11 @@ final class VitalsModel {
         var sleepingHeartRate: SleepingHeartRate.Result?
         var sleepingHeartRateByNight: [DatedValue] = []
         var intensityByDay: [DatedValue] = []
+        /// Moderate and vigorous minutes per day (start of day), and the most
+        /// vigorous minutes inside one recorded cardio workout that day, for
+        /// the weekly review (`HealthFloors`, `WeeklyChangeReview`).
+        var intensitySplitByDay: [Date: IntensityMinutes.Result] = [:]
+        var cardioVigorousByDay: [Date: Int] = [:]
     }
 
     @concurrent
@@ -1025,7 +1039,13 @@ final class VitalsModel {
                 let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
                 let samples = sorted.filter { $0.date >= day && $0.date < next }
                 if !samples.isEmpty {
-                    derived.intensityByDay.append(DatedValue(date: day, value: Double(IntensityMinutes.count(samples, profile: profile).total)))
+                    let minutes = IntensityMinutes.count(samples, profile: profile)
+                    derived.intensityByDay.append(DatedValue(date: day, value: Double(minutes.total)))
+                    derived.intensitySplitByDay[day] = minutes
+                    let started = workouts.filter { $0.start >= day && $0.start < next }
+                    if let hard = WeeklyChangeReview.cardioVigorousMinutes(workouts: started, lifting: lifting, heartRate: samples, profile: profile) {
+                        derived.cardioVigorousByDay[day] = hard
+                    }
                 }
                 day = next
             }

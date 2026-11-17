@@ -132,7 +132,8 @@ enum DemoData {
         let thisWeek = WeeklyPlan.weekStart(containing: demo.now, calendar: calendar)
         for weeksAgo in (0...5).reversed() {
             let weekStart = calendar.date(byAdding: .day, value: -7 * weeksAgo, to: thisWeek) ?? thisWeek
-            store.save(WeeklyPlan(weekStart: weekStart, plannedDays: days))
+            // Last week carries one tracked change, so the Monday review has a report to show.
+            store.save(WeeklyPlan(weekStart: weekStart, plannedDays: days, changes: weeksAgo == 1 ? [.stepsAverage()] : []))
         }
         store.restartBlock(now: demo.day(21))
         store.refreshBlock(now: demo.now)

@@ -238,6 +238,9 @@ struct CheckInView: View {
                     AlcoholLogView(day: evening.day)
                 }
             }
+            // The week's count against the owner's own limit, when one is set (`DrinkLimit`).
+            DrinkLimitEveningLine(day: evening.day,
+                                  tonight: store.evening(on: evening.day)?.standardDrinks ?? evening.drinks.map { Double($0) })
         } header: {
             Text("Alcohol")
         } footer: {

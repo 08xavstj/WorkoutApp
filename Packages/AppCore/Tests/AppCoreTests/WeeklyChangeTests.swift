@@ -118,16 +118,17 @@ struct WeeklyChangeTests {
         #expect(WeeklyChangeReview.kept(late, on: day(0)) == nil)
     }
 
-    @Test func wakeTimeHasAHalfHourEitherSide() {
+    @Test func wakeTimeHasAnHourEitherSide() {
         let change = WeeklyChange.wakeTime(minutes: 6 * 60 + 30)
-        #expect(WeeklyChangeReview.wakeToleranceMinutes == 30)
-        #expect(WeeklyChangeReview.kept(change, on: day(0) { $0.wakeMinutes = 6 * 60 }) == true)
-        #expect(WeeklyChangeReview.kept(change, on: day(0) { $0.wakeMinutes = 7 * 60 }) == true)
-        #expect(WeeklyChangeReview.kept(change, on: day(0) { $0.wakeMinutes = 7 * 60 + 1 }) == false)
-        #expect(WeeklyChangeReview.kept(change, on: day(0) { $0.wakeMinutes = 5 * 60 + 59 }) == false)
-        // Round the clock: a 00:10 wake against a 23:50 target is 20 minutes away.
+        #expect(change.title.hasPrefix("Up within an hour of "))
+        #expect(WeeklyChangeReview.wakeToleranceMinutes == 60)
+        #expect(WeeklyChangeReview.kept(change, on: day(0) { $0.wakeMinutes = 5 * 60 + 30 }) == true)
+        #expect(WeeklyChangeReview.kept(change, on: day(0) { $0.wakeMinutes = 7 * 60 + 30 }) == true)
+        #expect(WeeklyChangeReview.kept(change, on: day(0) { $0.wakeMinutes = 7 * 60 + 31 }) == false)
+        #expect(WeeklyChangeReview.kept(change, on: day(0) { $0.wakeMinutes = 5 * 60 + 29 }) == false)
+        // Round the clock: a 00:40 wake against a 23:50 target is 50 minutes away.
         let night = WeeklyChange.wakeTime(minutes: 23 * 60 + 50)
-        #expect(WeeklyChangeReview.kept(night, on: day(0) { $0.wakeMinutes = 10 }) == true)
+        #expect(WeeklyChangeReview.kept(night, on: day(0) { $0.wakeMinutes = 40 }) == true)
     }
 
     @Test func proteinMealsNeedMealTimes() {
@@ -383,6 +384,11 @@ struct WeeklyChangeTests {
         let later = DateInterval(start: start.addingTimeInterval(86_400), duration: 40 * 60)
         #expect(WeeklyChangeReview.cardioVigorousMinutes(workouts: [later], heartRate: samples, profile: profile) == nil)
         #expect(WeeklyChangeReview.cardioVigorousMinutes(workouts: [], heartRate: samples, profile: profile) == nil)
+        // The watch's record of a logged lifting session is not cardio.
+        let session = DateInterval(start: start.addingTimeInterval(-600), duration: 50 * 60)
+        #expect(WeeklyChangeReview.cardioVigorousMinutes(workouts: [ride], lifting: [session], heartRate: samples, profile: profile) == nil)
+        let morningLift = DateInterval(start: start.addingTimeInterval(-10 * 3600), duration: 3600)
+        #expect(WeeklyChangeReview.cardioVigorousMinutes(workouts: [ride], lifting: [morningLift], heartRate: samples, profile: profile) == 18)
     }
 
     // MARK: Suggestions
@@ -430,7 +436,7 @@ struct WeeklyChangeTests {
         context.logsDrinks = true
         let full = WeeklyChangeSuggestions.measurable(context)
         #expect(Set(full.map(\.kind)) == Set(WeeklyChange.Kind.allCases).subtracting([.custom]))
-        #expect(full.allSatisfy(\.isMeasured))
+        #expect(full.allSatisfy { $0.isMeasured })
     }
 
     @Test func aDrinksChangeStartsFromTheOwnersLimitOrOneTierDown() {

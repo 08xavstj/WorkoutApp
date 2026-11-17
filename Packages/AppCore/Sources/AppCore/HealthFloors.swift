@@ -185,6 +185,49 @@ public enum HealthFloors {
                         sleepRegularityCheck(week), drinksCheck(week)])
     }
 
+    /// Days with heart rate before a week's active minutes are judged: a
+    /// week with fewer would undercount (app's choice).
+    public static let activeMinutesMinimumDays = 5
+
+    /// The week's numbers from its seven days, as the weekly-change report
+    /// reads them (`WeeklyChangeReview.Day`), so the "Basics" row and the
+    /// report on a steps or drinks change count the same days.
+    /// - Parameter sleepRegularity: the week's Sleep Regularity Index, which
+    ///   needs the nights' sleep intervals rather than a number per day.
+    public static func week(from days: [WeeklyChangeReview.Day], sleepRegularity: Int?) -> Week {
+        var week = Week(sleepRegularity: sleepRegularity)
+        let withHeartRate = days.filter { $0.moderateMinutes != nil || $0.vigorousMinutes != nil }
+        if withHeartRate.count >= activeMinutesMinimumDays {
+            week.moderateMinutes = withHeartRate.compactMap(\.moderateMinutes).reduce(0, +)
+            week.vigorousMinutes = withHeartRate.compactMap(\.vigorousMinutes).reduce(0, +)
+        }
+        let strength = days.compactMap(\.strengthSession)
+        if !strength.isEmpty { week.strengthDays = strength.filter { $0 }.count }
+        let steps = days.compactMap(\.steps).filter { $0 > 0 }
+        if !steps.isEmpty {
+            week.averageSteps = steps.reduce(0, +) / Double(steps.count)
+            week.stepDays = steps.count
+        }
+        let drinks = days.compactMap(\.drinks)
+        if !drinks.isEmpty {
+            week.drinks = drinks.reduce(0, +)
+            week.drinkNightsLogged = drinks.count
+        }
+        return week
+    }
+
+    /// The Sleep Regularity Index of one Monday-to-Sunday week: noon on the
+    /// Sunday before through noon on the Monday after, so all seven nights
+    /// that begin in the week are compared with the one before (eight
+    /// noon-to-noon days, as the rolling score on the Sleep page uses eight
+    /// nights).
+    public static func sleepRegularity(asleep: [DateInterval], weekStart: Date, calendar: Calendar = .current) -> Int? {
+        let start = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: weekStart))
+            .flatMap { calendar.date(bySettingHour: 12, minute: 0, second: 0, of: $0) }
+        guard let start else { return nil }
+        return SleepRegularity.score(asleep: asleep, start: start, days: 8, calendar: calendar)
+    }
+
     /// One sentence for under the opened list.
     public static let evidenceNote = "These lines come from the WHO guideline and large cohort studies: people who met them lived longer. That is a link, not proof that meeting them is the cause."
 

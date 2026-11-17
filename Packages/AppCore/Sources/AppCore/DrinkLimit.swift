@@ -44,7 +44,8 @@ public enum DrinkLimit {
         /// Drinks a week over the evenings that were logged, so an evening
         /// that wasn't logged doesn't count as a dry one. Nil with too few.
         public var weeklyAverage: Double? {
-            nightsLogged >= DrinkLimit.minimumNightsLogged ? totalDrinks / Double(nightsLogged) * 7 : nil
+            // Multiplied first, so whole counts give whole averages (12 over 28 nights is 3, not 2.999...).
+            nightsLogged >= DrinkLimit.minimumNightsLogged ? totalDrinks * Double(AlcoholWeek.nights) / Double(nightsLogged) : nil
         }
     }
 
@@ -98,5 +99,5 @@ public enum DrinkLimit {
     }
 
     /// One line, shown only when `staysInTopTier`.
-    public static let clinicianLine = "Seven or more a week for four weeks running. Cutting down from here goes better with a doctor or an alcohol service than with an app."
+    public static let clinicianLine = "Seven or more a week for four weeks running. If cutting down is hard, a doctor or an alcohol service can help in ways an app can't."
 }

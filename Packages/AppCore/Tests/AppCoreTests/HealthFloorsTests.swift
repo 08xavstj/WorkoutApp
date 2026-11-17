@@ -134,6 +134,71 @@ struct HealthFloorsTests {
         }
     }
 
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    /// Seven days as the app reads them, into one week's numbers: unknown
+    /// days are left out, never counted as zero.
+    @Test func aWeekIsBuiltFromItsDays() {
+        let monday = utc.date(from: DateComponents(year: 2026, month: 11, day: 9))!
+        let days = (0..<7).map { offset -> WeeklyChangeReview.Day in
+            var day = WeeklyChangeReview.Day(date: utc.date(byAdding: .day, value: offset, to: monday)!)
+            if offset < 6 { // the watch was off on Sunday
+                day.moderateMinutes = 12
+                day.vigorousMinutes = offset == 2 ? 20 : 0
+            }
+            day.strengthSession = [0, 2, 4, 5].contains(offset)
+            day.steps = offset == 6 ? 0 : 6_000 + Double(offset) * 300 // Sunday's 0 is a missing count
+            if offset != 3 { day.drinks = offset == 5 ? 3 : 0 }
+            return day
+        }
+        let week = HealthFloors.week(from: days, sleepRegularity: 77)
+        #expect(week.moderateMinutes == 72)
+        #expect(week.vigorousMinutes == 20)
+        #expect(week.strengthDays == 4)
+        #expect(week.stepDays == 6)
+        #expect(week.averageSteps == 6_750)
+        #expect(week.drinks == 3)
+        #expect(week.drinkNightsLogged == 6)
+        #expect(week.sleepRegularity == 77)
+        let result = HealthFloors.assess(week)
+        #expect(result.summary == "1 of 5") // strength only: 112 min, 6,750 steps, 77, 3 drinks
+        #expect(result.firstUnmet == .activeMinutes)
+
+        // Heart rate on four days is too thin to judge the week's minutes.
+        let thin = days.enumerated().map { index, day -> WeeklyChangeReview.Day in
+            var day = day
+            if index >= 4 { day.moderateMinutes = nil; day.vigorousMinutes = nil }
+            return day
+        }
+        #expect(HealthFloors.week(from: thin, sleepRegularity: nil).moderateMinutes == nil)
+        // Sessions not known at all: no number, not zero.
+        let unknown = days.map { day -> WeeklyChangeReview.Day in var day = day; day.strengthSession = nil; return day }
+        #expect(HealthFloors.week(from: unknown, sleepRegularity: nil).strengthDays == nil)
+    }
+
+    /// The week's regularity compares each of its seven nights with the one before.
+    @Test func sleepRegularityCoversTheWeeksSevenNights() {
+        let monday = utc.date(from: DateComponents(year: 2026, month: 11, day: 9))!
+        func night(_ offset: Int, bed: Double, hours: Double) -> DateInterval {
+            let evening = utc.date(byAdding: .day, value: offset, to: monday)!
+            return DateInterval(start: evening.addingTimeInterval(bed * 3600), duration: hours * 3600)
+        }
+        // Sunday night before the week through Sunday night: 23:00-07:00 every night.
+        let steady = (-1...6).map { night($0, bed: 23, hours: 8) }
+        #expect(HealthFloors.sleepRegularity(asleep: steady, weekStart: monday, calendar: utc) == 100)
+        // Monday, Wednesday and Friday nights three hours later: six of the
+        // seven pairs differ by six hours, so about 57.
+        let shifted = (-1...6).map { night($0, bed: [0, 2, 4].contains($0) ? 26 : 23, hours: 8) }
+        let score = HealthFloors.sleepRegularity(asleep: shifted, weekStart: monday, calendar: utc) ?? 0
+        #expect(score < HealthFloors.sleepRegularity && score > 50)
+        // Three nights is too few.
+        #expect(HealthFloors.sleepRegularity(asleep: Array(steady.prefix(3)), weekStart: monday, calendar: utc) == nil)
+    }
+
     /// The one stated difference: a stamina goal raises Longevity's line to
     /// 300; the floor stays 150 for everyone.
     @Test func aStaminaGoalRaisesLongevitysLineNotTheFloor() {

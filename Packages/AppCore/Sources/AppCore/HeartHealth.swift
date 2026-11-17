@@ -119,8 +119,9 @@ public enum IntensityMinutes {
     /// total. 2 is the WHO guideline's own exchange rate: 150-300 moderate or
     /// 75-150 vigorous minutes a week (Bull et al., Br J Sports Med 2020).
     /// Wrist-accelerometer data from 73,485 UK Biobank adults put it nearer 4
-    /// for all-cause mortality and 8-9 for cardiovascular death and type 2
-    /// diabetes (Biswas et al., Nat Commun 2025;16:8315), but that is one
+    /// for all-cause mortality (4.1), 7.8 for cardiovascular death and 9.4 for
+    /// type 2 diabetes (Biswas et al., Nat Commun 2025;16:8315; abstract
+    /// checked on PubMed, PMID 41168243), but that is one
     /// cohort, observational, with intensity classed by a wrist accelerometer
     /// rather than heart rate as here. So the constant stays at the
     /// guideline's 2, which can only undercount hard work, and vigorous
