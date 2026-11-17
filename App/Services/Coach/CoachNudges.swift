@@ -408,7 +408,8 @@ extension CoachNudges {
             f.tomorrowSession = session(on: tomorrow, now: now)
         }
         let evening = checkIns.evening(on: now)
-        f.checkInDone = evening != nil
+        // The form saved, not just a drink logged (`EveningCheckIn.isDone`).
+        f.checkInDone = evening?.isDone ?? false
         f.drinksToday = evening?.drinks
         if let evening, let mg = evening.caffeineMg, mg > 0, let last = evening.lastCaffeineMinutes {
             let bedtime: Int

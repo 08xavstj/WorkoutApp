@@ -82,18 +82,18 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSHealthShareUsageDescription: >-
-          WorkoutApp reads your heart rate, HRV, resting heart rate, sleep, workouts,
+          Tensile reads your heart rate, HRV, resting heart rate, sleep, workouts,
           body weight and food log (for example from Cronometer) to calculate your
           daily scores and give coaching advice.
         NSCameraUsageDescription: >-
-          WorkoutApp uses the camera for your front and side progress photos (saved only
+          Tensile uses the camera for your front and side progress photos (saved only
           inside the app, not in your Photos library) and, with the flashlight, to measure
           your heart rate variability from your fingertip.
         NSLocationWhenInUseUsageDescription: >-
-          WorkoutApp uses your location once to get local weather, air quality and
+          Tensile uses your location once to get local weather, air quality and
           daylight hours for training advice. You can type your city instead.
         NSHealthUpdateUsageDescription: >-
-          WorkoutApp saves the gym workouts (with your effort rating), blood pressure
+          Tensile saves the gym workouts (with your effort rating), blood pressure
           readings, check-in mood and quick meal estimates you log to
           Apple Health.
     settings:

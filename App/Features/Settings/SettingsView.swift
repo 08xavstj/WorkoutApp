@@ -313,9 +313,18 @@ private struct LiftingExperienceRows: View {
 private struct RemindersSettingsSection: View {
     @Environment(UserSettings.self) private var settings
     @Environment(MedicationsModel.self) private var meds
+    @Environment(AppRouter.self) private var router
     /// iOS notifications are off for the app: nothing below can arrive.
     @State private var notificationsDenied = false
+    /// iOS hasn't been asked yet: reminders that are on can't arrive until it is.
+    @State private var notificationsNotAsked = false
     @State private var stretch = StretchStore.shared
+    /// The coach's morning or evening message replaces the plain check-in reminder (`CoachNudges`).
+    @State private var nudges = CoachNudges.shared
+    /// Today's doses as a Lock Screen card (`MedsLiveActivity`); on unless switched off.
+    @AppStorage(MedsLiveActivity.enabledKey, store: SharedStore.defaults) private var dosesOnLockScreen = true
+    /// Waist, grip and blood pressure reminders (`Reminders.measurementRemindersKey`); on unless switched off.
+    @AppStorage(Reminders.measurementRemindersKey) private var measurementReminders = true
 
     private func minutesBinding(_ keyPath: ReferenceWritableKeyPath<UserSettings, Int>) -> Binding<Date> {
         Binding(
@@ -332,19 +341,44 @@ private struct RemindersSettingsSection: View {
         Section {
             if notificationsDenied {
                 NotificationsOffBanner(detail: "Check-in, workout and dose reminders won't arrive until you allow them.")
+            } else if notificationsNotAsked {
+                // Reminders never ask at launch; a switch below asks when it's turned on, and so does this.
+                Button(action: askForNotifications) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Allow notifications")
+                        Text("Reminders that are on can't arrive until iOS is allowed to send them.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
             }
             Toggle(isOn: $settings.checkInRemindersOn) {
                 Text("Check-in reminders")
-                Text("Morning and evening, skipped once done")
+                Text(checkInDetail)
             }
             // On an always-present row: a modifier on the Section would run per row.
             .trackingNotificationsDenied($notificationsDenied)
+            .task {
+                notificationsNotAsked = await CoachNudges.permissionNotYetAsked()
+            }
+            // Asked from another switch (the coach's, below): the row above goes.
+            .onChange(of: router.remindersVersion) { notificationsNotAsked = false }
+            .onChange(of: settings.checkInRemindersOn) { _, on in
+                if on { askForNotifications() }
+            }
             if settings.checkInRemindersOn {
-                DatePicker("Morning", selection: minutesBinding(\.morningCheckInMinutes), displayedComponents: .hourAndMinute)
-                DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
+                checkInTimeRows
             }
             workoutRows
             stretchRows
+            Toggle(isOn: $measurementReminders) {
+                Text("Measurement reminders")
+                Text("Monthly waist, grip twice a year, blood pressure re-check")
+            }
+            .onChange(of: measurementReminders) { _, on in
+                if on { askForNotifications() }
+                Task { await Reminders.measurementRemindersChanged() }
+            }
             // Dose reminders, creatine included, are set on each entry in the list
             // (Health › Records › Medications; ux-audit.md 4.3), so they live in one place.
             NavigationLink {
@@ -357,10 +391,61 @@ private struct RemindersSettingsSection: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
             }
+            Toggle(isOn: $dosesOnLockScreen) {
+                Text("Doses on the Lock Screen")
+                Text("A card with Taken buttons, from two hours before a dose; supplements from noon")
+            }
+            .onChange(of: dosesOnLockScreen) { _, on in
+                Task {
+                    if on {
+                        await Reminders.startMedsActivityIfNeeded()
+                    } else {
+                        await Reminders.endMedsActivities()
+                    }
+                }
+            }
         } header: {
             Text("Reminders")
         } footer: {
-            Text("Today's doses also show on your Lock Screen.")
+            Text("Every reminder here can be switched off, and iOS is only asked to allow notifications when you turn one on.")
+        }
+    }
+
+    /// Asks iOS to allow notifications if it hasn't been asked yet (a reminder
+    /// was just switched on), then has the app schedule everything that is on.
+    private func askForNotifications() {
+        Task {
+            guard await CoachNudges.permissionNotYetAsked() else { return }
+            let allowed = await Reminders.requestPermission()
+            notificationsNotAsked = false
+            notificationsDenied = !allowed
+            if allowed { router.remindersVersion += 1 }
+        }
+    }
+
+    /// Which check-in prompts this switch sends, given the coach's messages.
+    private var checkInDetail: String {
+        switch (nudges.morningOn, nudges.eveningOn) {
+        case (false, false): "Morning and evening, skipped once done"
+        case (true, false): "Evening only; the coach's morning message replaces the morning one"
+        case (false, true): "Morning only; the coach's evening message replaces the evening one"
+        case (true, true): "Replaced by the coach's morning and evening messages"
+        }
+    }
+
+    /// The reminder times. A time the coach's message replaces is shown as
+    /// that, not as a picker for a reminder that won't be sent.
+    @ViewBuilder
+    private var checkInTimeRows: some View {
+        if nudges.morningOn {
+            LabeledContent("Morning", value: "Coach message instead")
+        } else {
+            DatePicker("Morning", selection: minutesBinding(\.morningCheckInMinutes), displayedComponents: .hourAndMinute)
+        }
+        if nudges.eveningOn {
+            LabeledContent("Evening", value: "Coach message instead")
+        } else {
+            DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
         }
     }
 
@@ -372,12 +457,16 @@ private struct RemindersSettingsSection: View {
         return "Creatine at \(time.formatted(date: .omitted, time: .shortened)) · dose reminders"
     }
 
-    /// The daily 5-minute stretch (`Stretching`): on by default, in the evening.
+    /// The daily 5-minute stretch (`Stretching`): off until switched on, in the evening.
     @ViewBuilder
     private var stretchRows: some View {
-        Toggle(isOn: Binding(get: { stretch.remindersOn }, set: { stretch.remindersOn = $0; rescheduleStretch() })) {
+        Toggle(isOn: Binding(get: { stretch.remindersOn }, set: { on in
+            stretch.remindersOn = on
+            if on { askForNotifications() }
+            rescheduleStretch()
+        })) {
             Text("Stretch reminder")
-            Text("5 minutes a day, skipped once done; moved if it's just before a session")
+            Text("5 minutes a day, skipped once done; moved or skipped around a session")
         }
         if stretch.remindersOn {
             DatePicker("Stretch at", selection: Binding(
@@ -406,6 +495,9 @@ private struct RemindersSettingsSection: View {
             Text("Workout reminders")
             Text("30 min before a planned training day")
         }
+        .onChange(of: settings.workoutRemindersOn) { _, on in
+            if on { askForNotifications() }
+        }
         if settings.workoutRemindersOn, Reminders.workoutRemindersPaused {
             Text("Paused after two went unanswered. Confirm next week's plan to resume.")
                 .font(.footnote)
@@ -414,7 +506,11 @@ private struct RemindersSettingsSection: View {
         // The same setting as This week › Weekly review.
         Toggle(isOn: $settings.weeklyReviewOn) {
             Text("Monday review reminder")
-            Text("Last week in numbers, three changes")
+            Text("Last week in numbers, three changes; skipped once you've opened it")
+        }
+        .onChange(of: settings.weeklyReviewOn) {
+            // Asks iOS when this is the switch that turns it on (`Reminders.scheduleWeeklyReview`).
+            Task { await Reminders.rescheduleWeeklyReview() }
         }
         if settings.weeklyReviewOn {
             DatePicker("Review time", selection: minutesBinding(\.weeklyReviewMinutes), displayedComponents: .hourAndMinute)

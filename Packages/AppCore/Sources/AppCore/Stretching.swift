@@ -492,13 +492,28 @@ public enum Stretching {
     /// The reminder moves if it falls this close before a planned session (`reminderMinutes`).
     public static let clearBeforeSessionMinutes = 90
 
-    /// Minutes after midnight for today's reminder: the chosen time, unless a
-    /// planned session starts within `clearBeforeSessionMinutes` after it;
-    /// then an hour after that session's planned end (Behm 2016: long static
-    /// holds just before lifting lower strength for a while).
-    public static func reminderMinutes(preferred: Int, sessionStart: Int?, sessionLength: Int?) -> Int {
-        guard let start = sessionStart, preferred <= start, start - preferred < clearBeforeSessionMinutes else { return preferred }
-        return min(23 * 60, start + (sessionLength ?? 60) + 60)
+    /// The latest the reminder may fire: 22:00 (app's choice; a stretch prompt
+    /// later than that lands at bedtime, and nobody asked for it there).
+    public static let latestReminderMinutes = 22 * 60
+    /// A planned session's length when the plan doesn't say (app's choice).
+    public static let assumedSessionMinutes = 60
+
+    /// Minutes after midnight for the day's reminder, or nil for none that
+    /// day. The chosen time, unless a planned session starts within
+    /// `clearBeforeSessionMinutes` after it or is still running at it; then
+    /// an hour after that session's planned end (Behm 2016: long static
+    /// holds just before lifting lower strength for a while). A moved
+    /// reminder is never later than `latestReminderMinutes`: when it would
+    /// be, the day gets no reminder instead of a late one. A time you chose
+    /// yourself is kept as it is on days it's clear of the session.
+    public static func reminderMinutes(preferred: Int, sessionStart: Int?, sessionLength: Int?) -> Int? {
+        guard let start = sessionStart else { return preferred }
+        let end = start + (sessionLength ?? assumedSessionMinutes)
+        let justBefore = preferred <= start && start - preferred < clearBeforeSessionMinutes
+        let during = preferred > start && preferred < end
+        guard justBefore || during else { return preferred }
+        let moved = end + 60
+        return moved <= latestReminderMinutes ? moved : nil
     }
 
     /// Short, honest lines for the UI.

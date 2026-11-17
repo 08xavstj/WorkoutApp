@@ -262,7 +262,7 @@ struct RootView: View {
         .sheet(isPresented: $router.showProgressPhotos) {
             ProgressPhotosView()
         }
-        .sheet(item: $router.checkIn, onDismiss: scheduleCheckInReminders) { kind in
+        .sheet(item: $router.checkIn, onDismiss: checkInClosed) { kind in
             CheckInView(kind: kind)
         }
         .modifier(WeeklySheets(router: router))
@@ -301,6 +301,8 @@ struct RootView: View {
                 // Takes effect only once Health access is granted (safe to repeat).
                 health?.enableBackgroundDelivery()
             }
+            // None of these asks iOS to allow notifications: that prompt comes only when
+            // the user turns a reminder on (`Reminders.notificationsAllowed`).
             scheduleCheckInReminders() // after the refresh, so the evening reminder carries tonight's bed-by window
             measurements.scheduleReminders() // monthly waist, 6-monthly grip ("measure|waist", "measure|grip")
             await Reminders.scheduleDoses()
@@ -335,8 +337,10 @@ struct RootView: View {
             reloadMedications: { medications.reload() },
             openWorkout: { if let active = sessions.first(where: \.isActive) { launcher.activeSession = active } },
             refresh: { Task { await refresher.refresh() } },
+            hasActiveSession: sessions.contains(where: \.isActive),
             scheduleCheckIns: scheduleCheckInReminders,
             scheduleWorkouts: scheduleWorkoutReminders,
+            rescheduleEverything: rescheduleEverything,
             setRestMode: { metrics.restMode = settings.isRestMode },
             markBiologyStale: { biology.markStale() }
         ))
@@ -424,9 +428,16 @@ struct RootView: View {
         }
         // Personal calories (docs/research/calories.md): training status from the whole lifting log.
         metrics.trainingStatus = TrainingStatus.resolve(reported: settings.liftingExperience, sessionDates: sessions.filter { !$0.isActive }.map(\.startedAt))
-        // The direct Oura link first (at most every 30 minutes), so last night's ring
-        // sleep and HRV are there for the scores (`OuraLink`, `SleepSourceSetting`).
-        await OuraLink.shared.syncIfDue()
+        // The direct Oura link (at most every 30 minutes; `OuraLink`, `SleepSourceSetting`).
+        // With the app open the scores come first, from what the phone already has: on a
+        // poor connection the download can take 20-40 s, and when it lands the `syncedAt`
+        // observer (`SettingsReactions`) refreshes again with last night's ring data. In a
+        // background wake nobody is waiting and that observer may not exist, so it is awaited.
+        if UIApplication.shared.applicationState == .background {
+            await OuraLink.shared.syncIfDue()
+        } else {
+            Task { await OuraLink.shared.syncIfDue() }
+        }
         await metrics.refresh(health: health, settings: settings, sessions: recent, manualHRV: manualHRV, morningHRV: cameraHRV)
         // Training block (`TrainingBlock`): the trainer's style from the goals, then this week's
         // state; a week that starts with 7-day HRV below normal holds the ramp instead of adding sets.
@@ -451,6 +462,8 @@ struct RootView: View {
             updateWatchFace()
             // Rewrite the coach's morning message with last night's recovery (`CoachNudges`).
             await CoachNudges.shared.refresh()
+            // The Lock Screen doses card: yesterday's comes down, and a dose whose time is near joins.
+            await MedsLiveActivity.refresh()
             return
         }
         // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old (`BodyMeasurementsStore`).
@@ -489,16 +502,27 @@ struct RootView: View {
     /// phone is locked), so a failed read never blanks a good snapshot. Before
     /// the night is over, recovery is yesterday's, so the widget shows none
     /// rather than yesterday's score as today's.
+    ///
+    /// The widget and Today show the same numbers. HRV is Today's tile value
+    /// (`metrics.hrv`), not whatever was logged last: a morning camera reading
+    /// only shows when it is the HRV the app scores (`hrvMetricNote`). While
+    /// the tile still holds yesterday's, only an overnight value typed today
+    /// counts as today's. Strain is nil ("--") until there's something to
+    /// count, by the same rule as Today's ring (`ScoresCard.shownStrain`).
     private func updateWidget() {
         guard metrics.errorMessage == nil, metrics.lastUpdated != nil else { return }
-        let todayHRV = hrvReadings.first { Calendar.current.isDateInToday($0.date) }
+        let calendar = Calendar.current
+        let typedOvernight = hrvReadings.first { calendar.isDateInToday($0.date) && $0.source != "Camera" }?.milliseconds
+        let hrv = metrics.recoveryIsFromYesterday ? typedOvernight : metrics.hrv
+        let strain = metrics.strain?.strain
+        let hasStrainData = (strain ?? 0) > 0 || metrics.todaysHeartRateReadings > 0 || !metrics.activities.isEmpty
         Reminders.updateWidget(WidgetSnapshot(
             updated: .now,
-            hrv: todayHRV?.milliseconds ?? metrics.hrv,
-            hrvDate: (todayHRV != nil || (metrics.hrv != nil && !metrics.recoveryIsFromYesterday)) ? Calendar.current.startOfDay(for: .now) : nil,
+            hrv: hrv,
+            hrvDate: hrv != nil ? calendar.startOfDay(for: .now) : nil,
             recovery: metrics.recoveryIsFromYesterday ? nil : metrics.recovery?.score,
-            strain: metrics.strain?.strain,
-            logsHRV: hrvReadings.contains { $0.date >= (Calendar.current.date(byAdding: .day, value: -14, to: .now) ?? .now) }
+            strain: hasStrainData ? strain : nil,
+            logsHRV: hrvReadings.contains { $0.date >= (calendar.date(byAdding: .day, value: -14, to: .now) ?? .now) }
         ))
     }
 
@@ -511,13 +535,32 @@ struct RootView: View {
 
     // MARK: - Reminders: one morning, one evening, workouts before planned slots only
 
+    /// The check-in sheet closed: today's reminder for a check-in just saved
+    /// goes, and the coach's evening note stops asking for it (`CoachNudges`).
+    private func checkInClosed() {
+        scheduleCheckInReminders()
+        Task { await CoachNudges.shared.refresh() }
+    }
+
+    /// Notifications were just allowed (asked from a reminder switch in
+    /// Settings): schedule every reminder that is on.
+    private func rescheduleEverything() {
+        scheduleCheckInReminders()
+        Task {
+            // Waist, grip and blood pressure, from the due dates last worked out.
+            await Reminders.measurementRemindersChanged()
+            await Reminders.scheduleDoses()
+        }
+    }
+
     private func scheduleCheckInReminders() {
         let calendar = Calendar.current
         let enabled = settings.checkInRemindersOn
         let morning = settings.morningCheckInMinutes
         let evening = settings.eveningCheckInMinutes
         let checkedIn = checkIns.morning() != nil
-        let eveningDone = checkIns.evening() != nil
+        // The form saved, not just a drink logged tonight (`EveningCheckIn.isDone`).
+        let eveningDone = checkIns.eveningDone()
         // HRV is "in" from Apple Health or a typed reading. If you never type
         // HRV (none in the last week), the reminder doesn't wait for it.
         let weekAgo = calendar.date(byAdding: .day, value: -7, to: .now) ?? .now
@@ -533,7 +576,9 @@ struct RootView: View {
                 hrvMissing: hrvMissing, logsHRV: typesHRV, weighInNudge: weighIn, bedByTonight: bedBy,
                 morningOn: !CoachNudges.shared.morningOn, eveningOn: !CoachNudges.shared.eveningOn
             )
-            if let nudgeDay { settings.weighInNudgeDay = nudgeDay }
+            if let nudgeDay, settings.weighInNudgeDay != nudgeDay { settings.weighInNudgeDay = nudgeDay }
+            // The Monday review's one-shot reminders (none in rest mode or once it's opened; `Reminders.scheduleWeeklyReview`).
+            await Reminders.rescheduleWeeklyReview()
         }
         scheduleWorkoutReminders()
         scheduleStretchReminders()
@@ -553,15 +598,13 @@ struct RootView: View {
     }
 
     /// The weigh-in line goes on a morning reminder at most once a week, and
-    /// only while a lose/gain goal has had no weigh-in for 3+ days (`WeighInNudge`).
+    /// only while a lose/gain goal has had no weigh-in for 3+ days
+    /// (`WeighInNudge`). It stays on the reminder that carries it until that
+    /// one has fired, then waits a week (`ReminderRules.weighInLineDue`).
     private var weighInNudgeDue: Bool {
         let goals = settings.goalsSet ? settings.goals : nil
         guard WeighInNudge.isDue(goals: goals, lastWeighIn: metrics.lastWeighIn) else { return false }
-        guard let last = settings.weighInNudgeDay else { return true }
-        let today = Calendar.current.startOfDay(for: .now)
-        // Still on a reminder that hasn't fired: keep it. Otherwise wait a week.
-        if last >= today { return true }
-        return (Calendar.current.dateComponents([.day], from: last, to: today).day ?? 0) >= 7
+        return ReminderRules.weighInLineDue(lastCarried: settings.weighInNudgeDay, morningMinutes: settings.morningCheckInMinutes, now: .now)
     }
 
     /// Planned slots over the next week from the weekly plan (this week's and,
@@ -573,9 +616,14 @@ struct RootView: View {
 
     private func scheduleWorkoutReminders() {
         let slots = plannedSlots()
-        let enabled = settings.workoutRemindersOn && !settings.isRestMode
-        let trained = Set(WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentLiftingDays))
-        Task { await Reminders.scheduleWorkoutReminders(slots: slots, enabled: enabled, trainedDays: trained) }
+        let restMode = settings.isRestMode
+        let enabled = settings.workoutRemindersOn && !restMode
+        var trained = Set(WeeklyPlanStore.trainingDays(sessions: sessions, extra: metrics.recentLiftingDays))
+        // A session started today (even before its planned time) is today's training: no reminder for it.
+        if sessions.contains(where: { $0.isActive && Calendar.current.isDateInToday($0.startedAt) }) {
+            trained.insert(Calendar.current.startOfDay(for: .now))
+        }
+        Task { await Reminders.scheduleWorkoutReminders(slots: slots, enabled: enabled, trainedDays: trained, restMode: restMode) }
     }
 }
 
@@ -611,6 +659,10 @@ private struct WeeklySheets: ViewModifier {
         content
             .sheet(isPresented: $router.showWeeklyReview) { WeeklyReviewView() }
             .sheet(isPresented: $router.showWeeklyPlan) { WeeklyPlanView() }
+            .onChange(of: router.showWeeklyReview) { _, showing in
+                // Opened: no reminder for it this Monday (`Reminders.scheduleWeeklyReview`).
+                if showing { Task { await Reminders.noteWeeklyReviewOpened() } }
+            }
     }
 }
 
@@ -718,8 +770,11 @@ private struct SettingsReactions: ViewModifier {
     let reloadMedications: () -> Void
     let openWorkout: () -> Void
     let refresh: () -> Void
+    /// A workout is running: its day gets no "planned session in 30 minutes".
+    let hasActiveSession: Bool
     let scheduleCheckIns: () -> Void
     let scheduleWorkouts: () -> Void
+    let rescheduleEverything: () -> Void
     let setRestMode: () -> Void
     /// Sex, age and units change the norms and stored display values: re-read Biology at once.
     let markBiologyStale: () -> Void
@@ -734,6 +789,10 @@ private struct SettingsReactions: ViewModifier {
             .modifier(RouterReactions(router: router, reloadMedications: reloadMedications, openWorkout: openWorkout))
             .modifier(ReminderReactions(settings: settings, plans: plans,
                                         scheduleCheckIns: scheduleCheckIns, scheduleWorkouts: scheduleWorkouts))
+            .modifier(ReminderStateReactions(settings: settings, router: router, hasActiveSession: hasActiveSession,
+                                             finishedSessionCount: finishedSessionCount,
+                                             scheduleCheckIns: scheduleCheckIns, scheduleWorkouts: scheduleWorkouts,
+                                             rescheduleEverything: rescheduleEverything))
             .onChange(of: settings.goals) { refresh() }
             .onChange(of: settings.restModeUntil) { setRestMode() }
             .onChange(of: settings.sleepNeedHours) { refresh() }
@@ -783,3 +842,34 @@ private struct ReminderReactions: ViewModifier {
     }
 }
 
+/// Reschedules reminders when what they depend on changes, so a reminder for
+/// something already done or switched off never waits for the next launch.
+private struct ReminderStateReactions: ViewModifier {
+    let settings: UserSettings
+    let router: AppRouter
+    let hasActiveSession: Bool
+    let finishedSessionCount: Int
+    let scheduleCheckIns: () -> Void
+    let scheduleWorkouts: () -> Void
+    let rescheduleEverything: () -> Void
+    @State private var nudges = CoachNudges.shared
+
+    func body(content: Content) -> some View {
+        content
+            // A session started or finished (also early): today's workout reminder goes.
+            .onChange(of: hasActiveSession) { scheduleWorkouts() }
+            .onChange(of: finishedSessionCount) { scheduleWorkouts() }
+            // Rest mode: pending workout and stretch reminders, the Monday review and
+            // tomorrow's coach morning message change now, not at the next foreground.
+            .onChange(of: settings.restModeUntil) {
+                scheduleCheckIns()
+                Task { await CoachNudges.shared.refresh() }
+            }
+            // The coach's morning or evening message replaces the plain check-in
+            // reminder (and gives it back when switched off): never both.
+            .onChange(of: nudges.morningOn) { scheduleCheckIns() }
+            .onChange(of: nudges.eveningOn) { scheduleCheckIns() }
+            // iOS was just allowed to send notifications (`AppRouter.remindersVersion`).
+            .onChange(of: router.remindersVersion) { rescheduleEverything() }
+    }
+}

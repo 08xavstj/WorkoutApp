@@ -137,6 +137,17 @@ struct StretchView: View {
             }
             .task(id: timerKey) { await runStep() }
             .sensoryFeedback(.impact(weight: .medium), trigger: stepIndex)
+            // The screen stays on while a hold is being timed (the phone would
+            // lock during the first one), and locks as usual again once the
+            // routine is paused, finished or closed.
+            .onChange(of: keepsScreenAwake) { _, awake in
+                UIApplication.shared.isIdleTimerDisabled = awake
+            }
+            .onDisappear {
+                // Swiped down mid-routine: what was held still counts.
+                if stepIndex != nil, !finished { finish() }
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
         }
     }
 
@@ -382,6 +393,11 @@ struct StretchView: View {
     }
 
     // MARK: Timer
+
+    /// A routine is running and not paused.
+    private var keepsScreenAwake: Bool {
+        stepIndex != nil && !finished && paused == nil
+    }
 
     /// Restarts the step's wait whenever the step or the pause changes.
     private var timerKey: String {

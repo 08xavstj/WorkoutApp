@@ -177,12 +177,18 @@ final class OuraLink {
         case signedOut
         case http(Int)
         case membership
+        /// Oura refused the developer app's client ID or secret.
+        case wrongCredentials
+        /// Oura refused the sign-in code (used, expired, or the redirect address differs).
+        case codeRefused
 
         var errorDescription: String? {
             switch self {
             case .signedOut: "Signed out of Oura."
             case let .http(code): "Oura answered with error \(code)."
             case .membership: "Oura needs an active membership to share data with other apps."
+            case .wrongCredentials: "Oura didn't accept the client ID or secret. Check both against your app at developer.ouraring.com."
+            case .codeRefused: "Oura didn't accept the sign-in. Check that the redirect address here matches your Oura app's, then try again."
             }
         }
     }
@@ -264,8 +270,15 @@ final class OuraLink {
         request.httpBody = Oura.tokenRequestBody(grant, clientID: clientID, clientSecret: secret)
         let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        // A refused refresh token (400/401) means signing in again.
-        if code == 400 || code == 401 { throw OuraError.signedOut }
+        if code == 400 || code == 401 {
+            // The real reason, from OAuth's error field (RFC 6749 §5.2): a wrong
+            // client secret is "invalid_client", not a sign-out.
+            let reason = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error"] as? String
+            if reason == "invalid_client" || reason == "unauthorized_client" { throw OuraError.wrongCredentials }
+            // A refused refresh token means signing in again; a refused sign-in code never signed in.
+            if case .refresh = grant { throw OuraError.signedOut }
+            throw reason == nil && code == 401 ? OuraError.wrongCredentials : OuraError.codeRefused
+        }
         guard (200..<300).contains(code) else { throw OuraError.http(code) }
         return try JSONDecoder().decode(Oura.TokenResponse.self, from: data)
     }

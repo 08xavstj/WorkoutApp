@@ -140,10 +140,16 @@ private struct CreatineSuggestionCard: View {
 /// Today's doses with a tap-to-take check.
 struct TodayDosesList: View {
     @Environment(MedicationsModel.self) private var meds
+    /// Only the doses still to take (the evening check-in's "not ticked off yet").
+    var untakenOnly = false
+
+    private var doses: [Dose] {
+        untakenOnly ? meds.todayDoses.filter { !meds.isTaken($0) } : meds.todayDoses
+    }
 
     var body: some View {
         VStack(spacing: 10) {
-            ForEach(meds.todayDoses) { dose in
+            ForEach(doses) { dose in
                 let taken = meds.isTaken(dose)
                 Button {
                     meds.toggle(dose)
@@ -291,6 +297,12 @@ struct MedicationEditor: View {
     @Environment(\.dismiss) private var dismiss
     /// The user changed the schedule or times, so the name no longer sets them.
     @State private var scheduleTouched = false
+    /// The weekly schedule came from the name (`applyUsualSchedule`), so a
+    /// name that stops being a weekly medicine takes it back.
+    @State private var scheduleFromName = false
+    @State private var confirmingDelete = false
+    /// Asked once before saving a new weekly medicine with no reminder time.
+    @State private var confirmingNoReminder = false
 
     private var isNew: Bool { !meds.medications.contains(where: { $0.id == medication.id }) }
 
@@ -319,11 +331,29 @@ struct MedicationEditor: View {
                 if !isNew {
                     Section {
                         Button("Delete medication", role: .destructive) {
-                            meds.delete(medication)
-                            dismiss()
+                            confirmingDelete = true
                         }
                     }
                 }
+            }
+            .confirmationDialog("Delete \(medication.name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                Button("Delete medication", role: .destructive) {
+                    meds.delete(medication)
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its reminders and its notes on your training go too. To pause it instead, turn off Currently taking.")
+            }
+            .confirmationDialog("Save without a reminder?", isPresented: $confirmingNoReminder, titleVisibility: .visible) {
+                Button("Add a \(timeText(Self.defaultReminderMinutes)) reminder") {
+                    medication.times = [Self.defaultReminderMinutes]
+                    save()
+                }
+                Button("Save without a reminder") { save() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(medication.name.trimmingCharacters(in: .whitespaces)) has no reminder time yet, so you won't be reminded and it won't show in Today's doses.")
             }
             .navigationTitle(medication.name.isEmpty ? "Add medication" : medication.name)
             .navigationBarTitleDisplayMode(.inline)
@@ -334,10 +364,12 @@ struct MedicationEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        medication.name = medication.name.trimmingCharacters(in: .whitespaces)
-                        medication.times = Array(Set(medication.times)).sorted()
-                        meds.save(medication)
-                        dismiss()
+                        // A new weekly injection with no time would never remind: say so once, here.
+                        if isNew, medication.isActive, medication.plan.isLessThanDaily, medication.times.isEmpty {
+                            confirmingNoReminder = true
+                        } else {
+                            save()
+                        }
                     }
                     .disabled(medication.name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
@@ -345,15 +377,38 @@ struct MedicationEditor: View {
         }
     }
 
+    /// The time offered for a weekly medicine saved without one (app's
+    /// choice: 9:00, the hour the other occasional reminders use).
+    private static let defaultReminderMinutes = 9 * 60
+    /// The reminder a new entry starts with (the same as `MedicationsView.addMedication`).
+    private static let newEntryMinutes = 8 * 60
+
+    private func save() {
+        medication.name = medication.name.trimmingCharacters(in: .whitespaces)
+        medication.times = Array(Set(medication.times)).sorted()
+        meds.save(medication)
+        dismiss()
+    }
+
     /// A new weekly GLP-1 (Ozempic, Mounjaro…) starts as "Weekly on today"
     /// with no reminder time, instead of the 8:00 daily default: a daily
     /// reminder for a weekly injection invites a double dose. The user picks
     /// the day and time; once they touch the schedule the name stops setting it.
+    /// While the name is still being typed it can stop being a weekly one
+    /// ("Wegovy" → "Wegovy pill", which is daily): the schedule the name set
+    /// then goes back to the daily default.
     private func applyUsualSchedule(for name: String) {
-        guard isNew, !scheduleTouched, medication.schedule == nil,
-              MedicationKnowledge.usualSchedule(for: name) == .weekdays else { return }
-        medication.schedule = .weekly(onWeekdayOf: .now)
-        medication.times = []
+        guard isNew, !scheduleTouched else { return }
+        let weekly = MedicationKnowledge.usualSchedule(for: name) == .weekdays
+        if weekly, medication.schedule == nil {
+            medication.schedule = .weekly(onWeekdayOf: .now)
+            medication.times = []
+            scheduleFromName = true
+        } else if !weekly, scheduleFromName {
+            medication.schedule = nil
+            medication.times = [Self.newEntryMinutes]
+            scheduleFromName = false
+        }
     }
 }
 
@@ -550,6 +605,7 @@ struct MedicationDetailView: View {
     @State private var label: DrugLabel?
     @State private var labelState = "Loading the FDA label…"
     @State private var editing: Medication?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         let current = meds.medications.first { $0.id == medication.id } ?? medication
@@ -641,7 +697,11 @@ struct MedicationDetailView: View {
         .toolbar {
             Button("Edit") { editing = current }
         }
-        .sheet(item: $editing) { MedicationEditor(medication: $0) }
+        // Deleted from the editor: back to the list once the editor has closed,
+        // not this page for a medication that's gone (its Edit would add it again).
+        .sheet(item: $editing, onDismiss: {
+            if !meds.medications.contains(where: { $0.id == medication.id }) { dismiss() }
+        }) { MedicationEditor(medication: $0) }
         .task(id: current.name) {
             do {
                 label = try await DrugLabelClient.fetch(current.name)

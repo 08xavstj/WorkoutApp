@@ -89,7 +89,17 @@ nonisolated struct Dose: Codable, Sendable, Hashable, Identifiable {
 
     /// Stable key, e.g. "UUID|2026-10-18|480".
     var id: String {
-        "\(medicationID.uuidString)|\(Self.dayKey(day))|\(minutes)"
+        Self.id(medicationID: medicationID, day: day, minutes: minutes)
+    }
+
+    /// The key of the dose of `medicationID` on `day` (its start) at `minutes` after midnight.
+    static func id(medicationID: UUID, day: Date, minutes: Int) -> String {
+        "\(medicationID.uuidString)|\(dayKey(day))|\(minutes)"
+    }
+
+    /// "UUID|2026-10-18|": what every dose of one medication on one day starts with.
+    static func dayPrefix(medicationID: UUID, day: Date) -> String {
+        "\(medicationID.uuidString)|\(dayKey(day))|"
     }
 
     /// The clock time on that day. Set by hour and minute (not seconds after
@@ -131,11 +141,28 @@ nonisolated enum MedicationStore {
     static func markTaken(_ doseID: String, at date: Date = .now) {
         guard !SharedStore.loadChecked([String: Date].self, key: takenKey).unreadable else { return }
         var log = takenLog()
-        log[doseID] = date
+        // The first time stands: a second tap (the notification's Taken after
+        // the app's) mustn't move "Taken 8:02" to later.
+        if log[doseID] == nil { log[doseID] = date }
         // Keep 60 days of history.
         let cutoff = Date.now.addingTimeInterval(-60 * 86_400)
         log = log.filter { $0.value > cutoff }
         SharedStore.save(log, key: takenKey)
+    }
+
+    /// Moves taken entries to new dose ids (a reminder time was edited, and
+    /// the id carries the time), so a dose ticked off today stays ticked.
+    static func moveTaken(_ moves: [(from: String, to: String)]) {
+        guard !moves.isEmpty, !SharedStore.loadChecked([String: Date].self, key: takenKey).unreadable else { return }
+        var log = takenLog()
+        var changed = false
+        for move in moves {
+            guard let date = log[move.from] else { continue }
+            log[move.from] = nil
+            if log[move.to] == nil { log[move.to] = date }
+            changed = true
+        }
+        if changed { SharedStore.save(log, key: takenKey) }
     }
 
     static func unmark(_ doseID: String) {

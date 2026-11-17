@@ -104,3 +104,57 @@ struct CheckInProgressFilterTests {
         #expect(CheckInInsights.uncovered(progress, by: []).count == 3)
     }
 }
+
+struct EveningCheckInDoneTests {
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/London")!
+        return calendar
+    }
+
+    private func time(day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
+    }
+
+    @Test func aDrinkLoggedOnItsOwnIsNotTheCheckIn() {
+        var evening = EveningCheckIn(day: time(day: 16, 0))
+        evening.alcohol = [AlcoholEntry(kind: .beer, millilitres: 355, abv: 5)]
+        evening.syncDrinksFromAlcohol()
+        #expect(evening.drinks == 1)
+        #expect(!evening.isDone)
+        // The drinks log emptied again: still not the check-in.
+        evening.alcohol = []
+        evening.syncDrinksFromAlcohol()
+        #expect(!evening.isDone)
+        // Saving the form marks it done, drinks or not.
+        evening.completed = true
+        #expect(evening.isDone)
+    }
+
+    @Test func recordsFromBeforeTheFlagCountWhenAnythingButDrinksWasAnswered() throws {
+        var old = EveningCheckIn(day: time(day: 15, 0))
+        old.stress = 2
+        #expect(old.isDone)
+        var caffeine = EveningCheckIn(day: time(day: 15, 0))
+        caffeine.caffeineMg = 95
+        #expect(caffeine.isDone)
+        #expect(!EveningCheckIn(day: time(day: 15, 0)).isDone)
+        // A record saved before `completed` existed still decodes.
+        let legacy = Data(#"{"day":0,"drinks":2,"stress":3}"#.utf8)
+        let decoded = try JSONDecoder().decode(EveningCheckIn.self, from: legacy)
+        #expect(decoded.completed == nil)
+        #expect(decoded.isDone)
+        // And the flag survives a round trip.
+        var done = EveningCheckIn(day: time(day: 15, 0))
+        done.completed = true
+        let again = try JSONDecoder().decode(EveningCheckIn.self, from: JSONEncoder().encode(done))
+        #expect(again.completed == true)
+    }
+
+    @Test func beforeFourTheEveningIsStillYesterdays() {
+        #expect(EveningCheckIn.day(for: time(day: 16, 21, 30), calendar: calendar) == time(day: 16, 0))
+        #expect(EveningCheckIn.day(for: time(day: 17, 0, 30), calendar: calendar) == time(day: 16, 0))
+        #expect(EveningCheckIn.day(for: time(day: 17, 3, 59), calendar: calendar) == time(day: 16, 0))
+        #expect(EveningCheckIn.day(for: time(day: 17, 4), calendar: calendar) == time(day: 17, 0))
+    }
+}

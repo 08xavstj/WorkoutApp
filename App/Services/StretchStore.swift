@@ -11,7 +11,10 @@ final class StretchStore {
     private struct Saved: Codable {
         var done: [Stretching.Done] = []
         var focus: [StretchArea] = []
-        var remindersOn: Bool = true
+        /// Off until switched on in Settings (reminders are opt-in). A file
+        /// saved by an earlier build carries its own value, so a choice
+        /// already stored is kept.
+        var remindersOn: Bool = false
         var reminderMinutes: Int = Stretching.defaultReminderMinutes
         /// How each stretch felt (`Stretching.Feel`). Optional so files saved before it decode.
         var feels: [Stretching.FeelEntry]? = nil

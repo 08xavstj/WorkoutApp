@@ -36,6 +36,8 @@ struct SupplementKnowledgeTests {
 
     @Test func unknownAndPartialNamesDontMatch() {
         #expect(SupplementKnowledge.match("Metoprolol") == nil)
+        // A salt form, not creatine.
+        #expect(SupplementKnowledge.match("Doxycycline Monohydrate") == nil)
         #expect(SupplementKnowledge.match("") == nil)
         // "Testosterone" alone is a medication (MedicationKnowledge), not a booster.
         #expect(SupplementKnowledge.match("Testosterone") == nil)

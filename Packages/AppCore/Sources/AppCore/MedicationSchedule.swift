@@ -143,6 +143,19 @@ public struct MedicationSchedule: Codable, Sendable, Hashable {
         guard (1...names.count).contains(weekday) else { return "" }
         return names[weekday - 1]
     }
+
+    /// Which old reminder time each new one replaces when a medication's
+    /// times are edited (old minutes → new minutes), so a dose already ticked
+    /// off today stays ticked under its new time. Times kept as they are
+    /// aren't listed; the ones that went are paired with the ones that came,
+    /// in time order (the first changed dose stays the first).
+    public static func carriedTimes(old: [Int], new: [Int]) -> [Int: Int] {
+        let removed = Set(old).subtracting(new).sorted()
+        let added = Set(new).subtracting(old).sorted()
+        var result: [Int: Int] = [:]
+        for (from, to) in zip(removed, added) { result[from] = to }
+        return result
+    }
 }
 
 extension MedicationKnowledge {

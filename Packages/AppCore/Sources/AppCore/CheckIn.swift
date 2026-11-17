@@ -78,9 +78,33 @@ public struct EveningCheckIn: Codable, Sendable, Equatable {
     public var feelings: [String]?
     /// Optional "what's affecting it", as `MoodAssociation` raw values (Apple association names).
     public var associations: [String]?
+    /// True once the evening form itself was saved. Optional so records from
+    /// before it still decode; a drink logged on its own (Log › Drinks)
+    /// makes a record without it, which must not count as the check-in.
+    public var completed: Bool?
 
     public init(day: Date) {
         self.day = day
+    }
+
+    /// Whether the evening check-in counts as done: the form was saved, or,
+    /// for a record from before `completed` existed (or one only the drinks
+    /// log wrote), anything other than drinks was answered.
+    public var isDone: Bool {
+        if let completed { return completed }
+        return caffeineMg != nil || lastCaffeineMinutes != nil || stress != nil || lastMealMinutes != nil
+            || nicotine != nil || sauna != nil || coldPlunge != nil || mood != nil || feelings != nil || associations != nil
+    }
+
+    /// Before this hour the evening still belongs to the day before: a form
+    /// filled in or a drink logged at 01:00 is about last night (app's choice).
+    public static let dayRolloverHour = 4
+
+    /// The start of the day an evening entry made at `now` belongs to.
+    public static func day(for now: Date, calendar: Calendar = .current) -> Date {
+        let today = calendar.startOfDay(for: now)
+        guard calendar.component(.hour, from: now) < dayRolloverHour else { return today }
+        return calendar.date(byAdding: .day, value: -1, to: today) ?? today
     }
 
     /// Valence for the evening's State of Mind entry: the mood when given,

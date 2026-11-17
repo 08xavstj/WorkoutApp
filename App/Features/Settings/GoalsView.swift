@@ -12,6 +12,9 @@ struct GoalsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var goals = Goals()
     @State private var targetText = ""
+    /// The saved goals are read once: coming back from a pushed page (the lift
+    /// goal editor) must not replace what was changed or added since.
+    @State private var loaded = false
     @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 90
     /// True when pushed onto another NavigationStack.
     var pushed = false
@@ -130,6 +133,8 @@ struct GoalsView: View {
                 }
             }
             .onAppear {
+                guard !loaded else { return }
+                loaded = true
                 goals = settings.goalsSet ? settings.goals : suggestion
                 holdRateAtMaximum()
                 targetText = goals.targetWeightKg.map { settings.weightUnit.display($0).formatted(.number.precision(.fractionLength(0...1))) } ?? ""

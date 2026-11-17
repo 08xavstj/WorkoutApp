@@ -24,7 +24,11 @@ struct CheckInView: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     @State private var morning = MorningCheckIn(day: Calendar.current.startOfDay(for: .now))
-    @State private var evening = EveningCheckIn(day: Calendar.current.startOfDay(for: .now))
+    /// Before 04:00 the evening form is still last night's (`EveningCheckIn.day(for:)`).
+    @State private var evening = EveningCheckIn(day: EveningCheckIn.day(for: .now))
+    /// The saved answers are read once: coming back from "Log by type and
+    /// amount" (or the camera) must not wipe what was typed since.
+    @State private var loaded = false
     @State private var hrv: Double?
     @State private var hrvSource = "Garmin"
     @State private var showingCameraHRV = false
@@ -62,6 +66,11 @@ struct CheckInView: View {
             }
             .onAppear {
                 Logger.diagnostics.notice("check-in screen appeared: \(kind.rawValue, privacy: .public)")
+                guard !loaded else {
+                    syncDrinksFromLog()
+                    return
+                }
+                loaded = true
                 load()
             }
             .onDisappear {
@@ -238,10 +247,10 @@ struct CheckInView: View {
                 Text(HeatAndCold.saunaNote)
             }
         }
-        let untaken = meds.todayDoses.filter { !meds.isTaken($0) }
-        if !untaken.isEmpty {
+        // Only the doses still to take; ticking one here takes it off the list.
+        if meds.todayDoses.contains(where: { !meds.isTaken($0) }) {
             Section("Medications not ticked off yet") {
-                TodayDosesList()
+                TodayDosesList(untakenOnly: true)
             }
         }
     }
@@ -306,10 +315,21 @@ struct CheckInView: View {
 
     private func load() {
         if let saved = store.morning() { morning = saved }
-        if let saved = store.evening() { evening = saved }
+        if let saved = store.evening(on: evening.day) { evening = saved }
         if kind == .morning { carryOverPains() }
         hrv = todayHRV?.milliseconds
         hrvSource = todayHRV?.source ?? "Garmin"
+    }
+
+    /// Back from "Log by type and amount": only the drinks are read again
+    /// (they were saved there). Everything typed in this form stays.
+    private func syncDrinksFromLog() {
+        guard kind == .evening else { return }
+        let logged = store.evening(on: evening.day)
+        guard logged?.alcohol != nil || evening.alcohol != nil else { return }
+        evening.alcohol = logged?.alcohol
+        evening.drinks = logged?.drinks
+        evening.lastDrinkMinutes = logged?.lastDrinkMinutes
     }
 
     /// Pain still current from earlier days (`PainGuard.active`, 7 days) is
@@ -386,6 +406,8 @@ struct CheckInView: View {
                 evening.alcohol = logged.alcohol
                 evening.syncDrinksFromAlcohol()
             }
+            // The form itself was saved: only this makes the evening check-in done.
+            evening.completed = true
             store.save(evening)
             // Evening mood (or, failing that, the stress scale turned around) →
             // a momentary emotion in Apple Health (watch-features.md 4.2).

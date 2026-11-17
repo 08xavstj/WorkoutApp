@@ -133,3 +133,23 @@ struct GripAdviceUnitTests {
         #expect(GripStrength.advice(.average, age: 30, sex: .male).contains("kg"))
     }
 }
+
+struct MedicationCarriedTimesTests {
+    @Test func aChangedTimeCarriesTheOldOne() {
+        // 08:00 → 08:30: the dose ticked off at 08:00 is the 08:30 one now.
+        #expect(MedicationSchedule.carriedTimes(old: [480], new: [510]) == [480: 510])
+        // Two doses, the evening one moved: the morning one isn't touched.
+        #expect(MedicationSchedule.carriedTimes(old: [480, 1200], new: [480, 1260]) == [1200: 1260])
+        // Both moved: paired in time order.
+        #expect(MedicationSchedule.carriedTimes(old: [480, 1200], new: [540, 1320]) == [480: 540, 1200: 1320])
+    }
+
+    @Test func addedOrRemovedTimesCarryNothing() {
+        #expect(MedicationSchedule.carriedTimes(old: [480], new: [480]).isEmpty)
+        #expect(MedicationSchedule.carriedTimes(old: [480], new: [480, 1200]).isEmpty)
+        #expect(MedicationSchedule.carriedTimes(old: [480, 1200], new: [480]).isEmpty)
+        #expect(MedicationSchedule.carriedTimes(old: [], new: [480]).isEmpty)
+        // One removed and two added: the removed one becomes the earlier new one.
+        #expect(MedicationSchedule.carriedTimes(old: [480], new: [420, 1200]) == [480: 420])
+    }
+}

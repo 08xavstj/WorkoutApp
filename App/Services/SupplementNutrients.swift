@@ -7,14 +7,22 @@ nonisolated enum SupplementNutrients {
     /// Days averaged, the same window as the food log.
     static let days = 7
 
-    /// Doses taken in the last `days` days, today included.
+    /// Doses taken in the last `days` days, today included. Counted by
+    /// medication and day, not by the exact reminder time: a dose's id carries
+    /// its time, so editing the time would otherwise drop the days before it.
     static func takenDoses(now: Date = .now, calendar: Calendar = .current) -> [Micronutrients.SupplementDose] {
-        let taken = MedicationStore.takenLog()
+        let takenIDs = MedicationStore.takenLog().keys
+        let medications = MedicationStore.medications()
         var doses: [Micronutrients.SupplementDose] = []
         for offset in 0..<days {
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
-            for dose in MedicationStore.doses(on: day, calendar: calendar) where taken[dose.id] != nil {
-                doses.append(Micronutrients.SupplementDose(name: dose.name, dose: dose.dose))
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
+            let day = calendar.startOfDay(for: date)
+            for medication in medications where medication.isDue(on: day, calendar: calendar) {
+                let prefix = Dose.dayPrefix(medicationID: medication.id, day: day)
+                let count = takenIDs.filter { $0.hasPrefix(prefix) }.count
+                for _ in 0..<count {
+                    doses.append(Micronutrients.SupplementDose(name: medication.name, dose: medication.dose))
+                }
             }
         }
         return doses

@@ -31,6 +31,9 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var openWorkout = 0
     /// Bumped when doses change outside the app (Live Activity, notification).
     var dosesVersion = 0
+    /// Bumped when iOS has just been allowed to send notifications (asked from a
+    /// reminder switch in Settings), so every reminder that is on gets scheduled.
+    var remindersVersion = 0
     /// A link from a tapped notification, opened once the app is fully on
     /// screen. Presenting a sheet while iOS is still bringing the app to the
     /// front (or launching it) fails or crashes, so it waits for `.active`.
@@ -40,15 +43,22 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     func openPendingLink() {
         guard let url = pendingLink else { return }
         pendingLink = nil
-        Logger.diagnostics.notice("opening pending link \(url.absoluteString, privacy: .public)")
+        Logger.diagnostics.notice("opening pending link \(Self.loggable(url), privacy: .public)")
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(500))
             self.open(url)
         }
     }
 
+    /// A link for the log without its query or fragment: a sign-in redirect
+    /// carries its one-time code there, and a coach link the user's question.
+    nonisolated static func loggable(_ url: URL) -> String {
+        let base = "\(url.scheme ?? "")://\(url.host() ?? "")\(url.path())"
+        return url.query() == nil && url.fragment() == nil ? base : base + "?<redacted>"
+    }
+
     func open(_ url: URL) {
-        Logger.diagnostics.notice("router.open \(url.absoluteString, privacy: .public)")
+        Logger.diagnostics.notice("router.open \(Self.loggable(url), privacy: .public)")
         guard url.scheme == "workoutapp" else { return }
         switch url.host() {
         case "hrv": showHRVEntry = true
@@ -74,7 +84,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     /// screen first and open the check-in once it has gone.
     private func openCheckIn(_ kind: CheckInKind) {
         let otherOpen = showHRVEntry || showMedications || showProgressPhotos || showWeeklyReview || showWeeklyPlan
-            || showMeasurements || showBloodPressure || showSettings || (checkIn != nil && checkIn != kind)
+            || showMeasurements || showBloodPressure || showStretch || showSettings || (checkIn != nil && checkIn != kind)
         guard otherOpen else {
             checkIn = kind
             return
@@ -86,6 +96,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         showWeeklyPlan = false
         showMeasurements = false
         showBloodPressure = false
+        showStretch = false
         showSettings = false
         checkIn = nil
         Task { @MainActor in
@@ -132,7 +143,8 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
             switch action {
             case DoseNotifications.takenAction:
                 MedicationStore.markTaken(doseID)
-                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Reminders.snoozeIdentifier(for: doseID)])
+                // Its reminder and any snooze, waiting or already delivered.
+                DoseNotifications.clear(doseID)
                 await MedsLiveActivity.refresh()
                 dosesVersion += 1
                 return
@@ -179,7 +191,20 @@ nonisolated enum Reminders {
         UNUserNotificationCenter.current().setNotificationCategories([dose, Self.coachCategory])
     }
 
-    /// Asks once; returns whether notifications are allowed.
+    /// Whether notifications are allowed. Never asks: every schedule below uses
+    /// this, so nothing that runs at launch or in the background can put up
+    /// iOS's permission prompt. The prompt comes only from `requestPermission`,
+    /// called when the user turns a reminder on.
+    static func notificationsAllowed() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: return true
+        default: return false
+        }
+    }
+
+    /// Asks once (only from a reminder switch or a saved dose time, never from
+    /// a launch-time schedule); returns whether notifications are allowed.
     static func requestPermission() async -> Bool {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
@@ -219,7 +244,7 @@ nonisolated enum Reminders {
         let center = UNUserNotificationCenter.current()
         let ids = (0..<7).flatMap { ["checkin|m|\($0)", "checkin|e|\($0)"] }
         center.removePendingNotificationRequests(withIdentifiers: ids)
-        guard enabled, await requestPermission() else { return nil }
+        guard enabled, await notificationsAllowed() else { return nil }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         var nudgeDay: Date?
@@ -252,7 +277,8 @@ nonisolated enum Reminders {
             content.body = "Add last night's HRV; the rest of the check-in is done."
             content.userInfo = ["link": "workoutapp://hrv"]
         } else {
-            content.body = asksForHRV ? "Last night's HRV and how you feel. 30 seconds." : "How you feel this morning. 30 seconds."
+            // "About a minute", as Up next says ("Morning check-in · 1 min"): the form has HRV, sleep, soreness, pain and mood.
+            content.body = asksForHRV ? "Last night's HRV and how you feel. About a minute." : "How you slept and how you feel. About a minute."
             content.userInfo = ["link": "workoutapp://checkin/morning"]
         }
         if weighIn {
@@ -264,12 +290,13 @@ nonisolated enum Reminders {
         return content
     }
 
-    /// Evening reflection: one win plus how the day felt (behaviour-change.md rec. 10),
+    /// Evening reflection, in the words of the form itself and its Up next row
+    /// ("Evening check-in · 1 min · Caffeine, drinks and how the day went"),
     /// with tonight's bed-by window when known (`BedtimeWindow`).
     static func eveningContent(bedBy: String?) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = "Evening check-in"
-        content.body = "One win and how today felt. 45 seconds."
+        content.body = "Caffeine, drinks and how the day went. About a minute."
         if let bedBy { content.body += " In bed by \(bedBy) tonight." }
         content.userInfo = ["link": "workoutapp://checkin/evening"]
         content.sound = .default
@@ -284,14 +311,15 @@ nonisolated enum Reminders {
     static let stretchReminderDays = 3
 
     /// One reminder a day for the 5-minute stretch (`Stretching`), at the
-    /// chosen time unless a planned session starts soon after it (then an
-    /// hour after that session: `Stretching.reminderMinutes`). Today's is
-    /// skipped once you've stretched.
+    /// chosen time unless a planned session starts soon after it or is on at
+    /// that time (then an hour after that session, or not at all that day
+    /// when that would be after 22:00: `Stretching.reminderMinutes`). Today's
+    /// is skipped once you've stretched.
     static func scheduleStretchReminders(enabled: Bool, minutes: Int, doneToday: Bool, slots: [PlannedSlot],
                                          areas: [String]) async {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: (0..<7).map { "stretch|\($0)" })
-        guard enabled, await requestPermission() else { return }
+        guard enabled, await notificationsAllowed() else { return }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         for offset in 0..<stretchReminderDays {
@@ -301,8 +329,8 @@ nonisolated enum Reminders {
                 let parts = calendar.dateComponents([.hour, .minute], from: slot.start)
                 return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
             }
-            let at = Stretching.reminderMinutes(preferred: minutes, sessionStart: sessionStart, sessionLength: nil)
-            guard let fire = fireDate(day: day, minutes: at, calendar: calendar), fire > .now else { continue }
+            guard let at = Stretching.reminderMinutes(preferred: minutes, sessionStart: sessionStart, sessionLength: nil),
+                  let fire = fireDate(day: day, minutes: at, calendar: calendar), fire > .now else { continue }
             let content = UNMutableNotificationContent()
             content.title = "\(Stretching.sessionMinutes)-minute stretch"
             // Today's areas are known; later days depend on what you do before them.
@@ -363,7 +391,7 @@ nonisolated enum Reminders {
     static let workoutLeadMinutes = 30
     /// Ignored reminders in a row before they pause: each prompt spends attention
     /// and repeated ones habituate (Klasnja et al., Ann Behav Med 2019).
-    static let ignoredBeforePause = 2
+    static let ignoredBeforePause = WorkoutReminderRules.ignoredBeforePause
 
     /// "2027-01-10": sortable, one per day.
     static func dayKey(_ day: Date, calendar: Calendar = .current) -> String {
@@ -388,29 +416,39 @@ nonisolated enum Reminders {
     static func resumeWorkoutReminders() { WorkoutReminderLog.resume() }
 
     /// One reminder per planned slot over the next week, `workoutLeadMinutes`
-    /// before it, with the user's if-then line in the body.
+    /// before it, with the user's if-then line in the body. None for a day
+    /// already trained on (a session started or finished early, or a watch
+    /// workout): the reminder would be for something already done.
     /// - Parameters:
     ///   - slots: planned slots (from `WeeklyPlanStore`); none means no reminders.
-    ///   - trainedDays: start-of-day dates with a logged or watch workout, so an
-    ///     answered reminder (trained without tapping) doesn't count as ignored.
-    static func scheduleWorkoutReminders(slots: [PlannedSlot], enabled: Bool, trainedDays: Set<Date>, now: Date = .now) async {
+    ///   - trainedDays: start-of-day dates with a logged, running or watch workout.
+    ///     They get no reminder, and a reminder answered that way (trained
+    ///     without tapping) doesn't count as ignored.
+    ///   - restMode: rest mode is on. Today then never counts as an ignored reminder.
+    static func scheduleWorkoutReminders(slots: [PlannedSlot], enabled: Bool, trainedDays: Set<Date>, restMode: Bool = false,
+                                         now: Date = .now) async {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix("workout|") }
         center.removePendingNotificationRequests(withIdentifiers: pending)
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
-        WorkoutReminderLog.updatePause(trainedDays: trainedDays, today: today, calendar: calendar)
+        let trainedKeys = Set(trainedDays.map { dayKey($0, calendar: calendar) })
+        if restMode { WorkoutReminderLog.noteTapped(dayKey: dayKey(today, calendar: calendar)) }
+        WorkoutReminderLog.updatePause(trainedKeys: trainedKeys, today: today, calendar: calendar, now: now)
+        var scheduled: [String: Date] = [:]
+        // Whatever happens below, the log ends up holding what fired and what is pending now:
+        // a reminder removed above (switched off, rest mode, paused, plan changed) never went out.
+        defer { WorkoutReminderLog.noteScheduled(scheduled, now: now) }
         guard enabled, !WorkoutReminderLog.isPaused else { return }
         let upcoming = slots.filter { $0.start > now }.sorted { $0.start < $1.start }
-        guard !upcoming.isEmpty, await requestPermission() else { return }
-        var scheduled: [String] = []
+        guard !upcoming.isEmpty, await notificationsAllowed() else { return }
         for slot in upcoming where scheduled.count < 7 {
             let fire = slot.start.addingTimeInterval(-TimeInterval(workoutLeadMinutes * 60))
             guard fire > now else { continue }
             let key = dayKey(calendar.startOfDay(for: slot.start), calendar: calendar)
-            // One a day: a second slot the same day rides on the first.
-            guard !scheduled.contains(key) else { continue }
-            scheduled.append(key)
+            // One a day: a second slot the same day rides on the first. None once the day is trained.
+            guard scheduled[key] == nil, !trainedKeys.contains(key) else { continue }
+            scheduled[key] = fire
             let content = UNMutableNotificationContent()
             content.title = "\(slot.name) at \(slot.start.formatted(date: .omitted, time: .shortened))"
             content.body = slot.ifThen ?? "Your planned session in \(workoutLeadMinutes) minutes. The short version counts too."
@@ -418,19 +456,22 @@ nonisolated enum Reminders {
             content.userInfo = ["link": "workoutapp://plan"]
             await add(content, identifier: workoutIdentifier(forDayKey: key), at: fire, center: center, calendar: calendar)
         }
-        WorkoutReminderLog.noteScheduled(dayKeys: scheduled, today: today, calendar: calendar)
     }
 
     /// Which workout reminders went out, which were tapped, and whether they're
-    /// paused. In UserDefaults so the notification delegate can write to it off
-    /// the main actor.
+    /// paused (`WorkoutReminderRules`). In UserDefaults so the notification
+    /// delegate can write to it off the main actor.
     enum WorkoutReminderLog {
+        /// Day key → when that day's reminder fires (seconds since 1970).
+        static let fireTimesKey = "workoutReminderFireTimes"
+        /// The list older builds kept (day keys only); read once, then dropped.
         static let scheduledKey = "workoutRemindersScheduled"
         static let tappedKey = "workoutRemindersTapped"
         static let pausedKey = "workoutRemindersPaused"
 
         static var isPaused: Bool { UserDefaults.standard.bool(forKey: pausedKey) }
 
+        /// Marks a day's reminder as answered: tapped, or excused by rest mode.
         static func noteTapped(dayKey: String) {
             var tapped = UserDefaults.standard.stringArray(forKey: tappedKey) ?? []
             guard !tapped.contains(dayKey) else { return }
@@ -438,26 +479,39 @@ nonisolated enum Reminders {
             UserDefaults.standard.set(Array(tapped.suffix(30)), forKey: tappedKey)
         }
 
-        /// Keeps past days (they may still count as ignored) and replaces the upcoming ones.
-        static func noteScheduled(dayKeys: [String], today: Date, calendar: Calendar) {
-            let todayKey = Reminders.dayKey(today, calendar: calendar)
-            let past = (UserDefaults.standard.stringArray(forKey: scheduledKey) ?? []).filter { $0 < todayKey }
-            let merged = Array((past + dayKeys).sorted().suffix(30))
-            UserDefaults.standard.set(merged, forKey: scheduledKey)
+        /// The log: day key → fire time. The older list has no times: its past
+        /// days count as fired, and its upcoming ones are dropped (they are
+        /// pending reminders, which every reschedule replaces).
+        static func log() -> [String: Date] {
+            let defaults = UserDefaults.standard
+            var log: [String: Date] = [:]
+            let todayKey = Reminders.dayKey(.now)
+            for key in defaults.stringArray(forKey: scheduledKey) ?? [] where key < todayKey {
+                log[key] = Date(timeIntervalSince1970: 0)
+            }
+            for (key, seconds) in defaults.dictionary(forKey: fireTimesKey) as? [String: Double] ?? [:] {
+                log[key] = Date(timeIntervalSince1970: seconds)
+            }
+            return log
         }
 
-        /// Pauses when the last `ignoredBeforePause` past reminders were neither tapped nor followed by training.
-        static func updatePause(trainedDays: Set<Date>, today: Date, calendar: Calendar) {
+        private static func save(_ log: [String: Date]) {
+            let defaults = UserDefaults.standard
+            defaults.set(log.mapValues(\.timeIntervalSince1970), forKey: fireTimesKey)
+            defaults.removeObject(forKey: scheduledKey)
+        }
+
+        /// Keeps the reminders that have fired (today's too) and replaces the pending ones with `scheduled`.
+        static func noteScheduled(_ scheduled: [String: Date], now: Date) {
+            save(WorkoutReminderRules.logAfterReschedule(log(), scheduled: scheduled, now: now))
+        }
+
+        /// Pauses when the last `ignoredBeforePause` delivered reminders were neither tapped nor followed by training.
+        static func updatePause(trainedKeys: Set<String>, today: Date, calendar: Calendar, now: Date) {
             guard !isPaused else { return }
-            let todayKey = Reminders.dayKey(today, calendar: calendar)
-            let scheduled = (UserDefaults.standard.stringArray(forKey: scheduledKey) ?? []).filter { $0 < todayKey }
             let tapped = Set(UserDefaults.standard.stringArray(forKey: tappedKey) ?? [])
-            let trained = Set(trainedDays.map { Reminders.dayKey($0, calendar: calendar) })
-            var ignored = 0
-            for key in scheduled.sorted().reversed() {
-                if tapped.contains(key) || trained.contains(key) { break }
-                ignored += 1
-            }
+            let ignored = WorkoutReminderRules.ignoredInARow(log: log(), answered: tapped.union(trainedKeys),
+                                                             todayKey: Reminders.dayKey(today, calendar: calendar), now: now)
             if ignored >= ignoredBeforePause {
                 UserDefaults.standard.set(true, forKey: pausedKey)
             }
@@ -466,6 +520,7 @@ nonisolated enum Reminders {
         static func resume() {
             UserDefaults.standard.set(false, forKey: pausedKey)
             UserDefaults.standard.removeObject(forKey: scheduledKey)
+            UserDefaults.standard.removeObject(forKey: fireTimesKey)
             UserDefaults.standard.removeObject(forKey: tappedKey)
         }
     }
@@ -473,7 +528,7 @@ nonisolated enum Reminders {
     // MARK: Medications
 
     /// Snoozed reminders use their own prefix so rescheduling doesn't remove them.
-    static func snoozeIdentifier(for doseID: String) -> String { "dose-snooze|\(doseID)" }
+    static func snoozeIdentifier(for doseID: String) -> String { DoseNotifications.snoozeIdentifier(for: doseID) }
 
     /// The dose a notification is for, whether it's the scheduled one or a snooze.
     static func doseID(fromIdentifier identifier: String) -> String? {
@@ -487,9 +542,13 @@ nonisolated enum Reminders {
         calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day)
     }
 
-    /// The most dose reminders kept pending. iOS keeps only 64 per app, and
-    /// check-ins (14), workouts (up to 7), the rest timer and snoozes need room too.
-    static let maxPendingDoses = 35
+    /// The most dose reminders kept pending. iOS keeps only 64 per app (the
+    /// soonest 64; the rest are dropped without a word), and the other kinds
+    /// need room too: check-ins 14, workouts up to 7, stretch 3
+    /// (`stretchReminderDays`), measurements 3 (waist, grip, blood pressure),
+    /// coach messages up to 3, the Monday review 2 and the rest timer 1 = 33.
+    /// 33 + 28 = 61, which leaves 3 for snoozed doses. App's choice within that limit.
+    static let maxPendingDoses = 28
 
     /// At most this many of the pending dose reminders go to medications taken
     /// less often than daily, so daily doses can't crowd a weekly one out.
@@ -505,7 +564,9 @@ nonisolated enum Reminders {
     /// repeating ones: a dose ticked off early (here or on the Lock Screen)
     /// then never fires, which matters most for a weekly injection, and each
     /// reminder carries the id of its own day's dose.
-    static func scheduleDoses() async {
+    /// - Parameter ask: the user has just saved a dose time, so iOS may ask to
+    ///   allow notifications. Otherwise (launch, foreground) it never does.
+    static func scheduleDoses(ask: Bool = false) async {
         let center = UNUserNotificationCenter.current()
         let pendingIDs = await center.pendingNotificationRequests().map(\.identifier)
         let taken = MedicationStore.takenLog()
@@ -539,7 +600,9 @@ nonisolated enum Reminders {
         daily.sort { $0.fire < $1.fire }
         let chosenLessOften = Array(lessOften.prefix(maxPendingLessOftenDoses))
         let upcoming = chosenLessOften + daily.prefix(maxPendingDoses - chosenLessOften.count)
-        guard !upcoming.isEmpty, await requestPermission() else { return }
+        guard !upcoming.isEmpty else { return }
+        let allowed = ask ? await requestPermission() : await notificationsAllowed()
+        guard allowed else { return }
         for (dose, fire) in upcoming {
             let content = UNMutableNotificationContent()
             content.title = "Time for \(dose.name)"
@@ -570,27 +633,43 @@ nonisolated enum Reminders {
     }
 
     /// Starts today's doses Live Activity if doses that show now (`DoseCard`:
-    /// medications from 06:00, creatine and supplements from noon) are left
-    /// and none is showing. Nothing before 06:00, so opening the app after
-    /// midnight doesn't leave a card on the Lock Screen all night. iOS only
+    /// two hours before their time, medications never before 06:00, creatine
+    /// and supplements never before noon) are left and none is showing.
+    /// Nothing before 06:00, so opening the app after midnight doesn't leave a
+    /// card on the Lock Screen all night. Not when the card is switched off in
+    /// Settings, and not again the same day after the user swiped it away,
+    /// until a dose that wasn't on it joins (`DoseCard.mayStart`). iOS only
     /// lets the app start one while it's open.
     static func startMedsActivityIfNeeded() async {
-        await MedsLiveActivity.refresh()
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        await MedsLiveActivity.refresh() // also ends the card when it's switched off
+        guard MedsLiveActivity.isEnabled, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         let now = Date.now
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: now)
         let state = MedsLiveActivity.state(for: now)
-        guard !state.remaining(at: now).isEmpty else { return }
-        let running = Activity<MedsActivityAttributes>.activities.contains { Calendar.current.isDateInToday($0.attributes.day) }
-        guard !running else { return }
-        let attributes = MedsActivityAttributes(day: Calendar.current.startOfDay(for: now))
-        let content = ActivityContent(state: state, staleDate: state.nextReveal(after: now))
-        _ = try? Activity.request(attributes: attributes, content: content, pushType: nil)
+        let remaining = state.remaining(at: now).map(\.id)
+        guard !remaining.isEmpty else { return }
+        let todays = Activity<MedsActivityAttributes>.activities.filter { calendar.isDateInToday($0.attributes.day) }
+        // Only a card that is really showing counts: one iOS ended or the user dismissed doesn't.
+        guard !todays.contains(where: { MedsLiveActivity.isLive($0) }) else { return }
+        guard DoseCard.mayStart(remaining: remaining, dayKey: Dose.dayKey(day), last: MedsLiveActivity.cardLog) else { return }
+        // An "All taken" card the app ended a moment ago goes before the new one shows.
+        for activity in todays where activity.activityState == .ended {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        let attributes = MedsActivityAttributes(day: day)
+        let content = ActivityContent(state: state, staleDate: MedsLiveActivity.staleDate(for: state, day: day, now: now))
+        guard (try? Activity.request(attributes: attributes, content: content, pushType: nil)) != nil else { return }
+        MedsLiveActivity.noteOffered(remaining, day: day, started: true)
     }
 
+    /// Takes every doses card off the Lock Screen (the card was switched off in Settings).
     static func endMedsActivities() async {
         for activity in Activity<MedsActivityAttributes>.activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
+        // Not a card the user swiped away: switching the card back on today may show it again.
+        MedsLiveActivity.noteEndedByApp(day: .now)
     }
 
     /// Saves what the widget shows and asks it to redraw: when anything
@@ -607,30 +686,70 @@ nonisolated enum Reminders {
 
     // MARK: - Weekly review
 
+    /// The repeating reminder older builds set; removed on every reschedule.
     static let weeklyReviewIdentifier = "review|weekly"
+    /// Mondays kept pending: two, so a week without opening the app still gets its reminder.
+    static let weeklyReviewMondays = 2
+    private static let weeklyReviewOpenedKey = "weeklyReviewOpenedAt"
+    private static let weeklyReviewSeenOnKey = "weeklyReviewSeenOn"
 
-    /// One repeating reminder every Monday at `minutes` after midnight, opening
-    /// the weekly review. A new week is a "fresh start" landmark (Dai et al.,
-    /// Manag Sci 2014) and reviewing goals is what makes self-monitoring work
-    /// (Michie et al., Health Psychol 2009); a fixed, user-chosen time does as
-    /// well as inferred timing (Morrison et al., PLoS One 2017, cited from
-    /// memory in docs/research/behaviour-change.md).
+    private static var weeklyReviewIdentifiers: [String] {
+        [weeklyReviewIdentifier] + (0..<weeklyReviewMondays).map { "review|weekly|\($0)" }
+    }
+
+    /// Rest mode, read from where `UserSettings` keeps it, for code off the main actor.
+    private static var restModeOn: Bool {
+        (UserDefaults.standard.object(forKey: "restModeUntil") as? Date ?? .distantPast) > .now
+    }
+
+    /// One reminder on each of the next Mondays at `minutes` after midnight,
+    /// opening the weekly review. A new week is a "fresh start" landmark (Dai
+    /// et al., Manag Sci 2014) and reviewing goals is what makes
+    /// self-monitoring work (Michie et al., Health Psychol 2009); a fixed,
+    /// user-chosen time does as well as inferred timing (Morrison et al., PLoS
+    /// One 2017, cited from memory in docs/research/behaviour-change.md).
+    /// One-shot rather than repeating, so it can be left out: none in rest
+    /// mode, and none on a Monday whose review was already opened
+    /// (`ReminderRules.weeklyReviewFireDates`). iOS is asked for permission
+    /// only on the call that first sees the reminder switched on.
     static func scheduleWeeklyReview(enabled: Bool, minutes: Int) async {
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [weeklyReviewIdentifier])
-        guard enabled, await requestPermission() else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "Weekly review"
-        content.body = "Last week in plain numbers, then three changes for this week. Two minutes."
-        content.sound = .default
-        content.userInfo = ["link": "workoutapp://review"]
-        var components = DateComponents()
-        components.weekday = 2 // Monday
-        components.hour = minutes / 60
-        components.minute = minutes % 60
-        let request = UNNotificationRequest(identifier: weeklyReviewIdentifier, content: content,
-                                            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true))
-        try? await center.add(request)
+        center.removePendingNotificationRequests(withIdentifiers: weeklyReviewIdentifiers)
+        let defaults = UserDefaults.standard
+        // Off the last time this ran and on now: the user has just switched it on.
+        let justTurnedOn = enabled && (defaults.object(forKey: weeklyReviewSeenOnKey) as? Bool) == false
+        defaults.set(enabled, forKey: weeklyReviewSeenOnKey)
+        guard enabled, !restModeOn else { return }
+        let allowed = justTurnedOn ? await requestPermission() : await notificationsAllowed()
+        guard allowed else { return }
+        let calendar = Calendar.current
+        let opened = defaults.object(forKey: weeklyReviewOpenedKey) as? Date
+        let fires = ReminderRules.weeklyReviewFireDates(now: .now, minutes: minutes, lastOpened: opened,
+                                                        count: weeklyReviewMondays, calendar: calendar)
+        for (index, fire) in fires.enumerated() {
+            let content = UNMutableNotificationContent()
+            content.title = "Weekly review"
+            content.body = "Last week in plain numbers, then three changes for this week. Two minutes."
+            content.sound = .default
+            content.userInfo = ["link": "workoutapp://review"]
+            await add(content, identifier: "review|weekly|\(index)", at: fire, center: center, calendar: calendar)
+        }
+    }
+
+    /// The same, with the switch and time read from where `UserSettings` keeps
+    /// them (default 8:00), for callers that don't hold the settings.
+    static func rescheduleWeeklyReview() async {
+        let defaults = UserDefaults.standard
+        await scheduleWeeklyReview(enabled: defaults.bool(forKey: "weeklyReviewOn"),
+                                   minutes: defaults.object(forKey: "weeklyReviewMinutes") as? Int ?? 8 * 60)
+    }
+
+    /// The weekly review was opened: today's reminder for it, pending or
+    /// already delivered, goes.
+    static func noteWeeklyReviewOpened() async {
+        UserDefaults.standard.set(Date.now, forKey: weeklyReviewOpenedKey)
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: weeklyReviewIdentifiers)
+        await rescheduleWeeklyReview()
     }
 
     // MARK: - Measurements
@@ -643,16 +762,56 @@ nonisolated enum Reminders {
     /// check-in alone).
     static let measurementMinutes = 9 * 60
 
+    /// Settings › Reminders › "Measurement reminders" (waist, grip, blood
+    /// pressure). On unless switched off.
+    static let measurementRemindersKey = "measurementRemindersOn"
+    static var measurementRemindersOn: Bool {
+        UserDefaults.standard.object(forKey: measurementRemindersKey) as? Bool ?? true
+    }
+
+    private static func lastDueKey(_ identifier: String) -> String { "lastDue|" + identifier }
+
+    /// Remembers the due date last asked for (nil clears it), so switching
+    /// the reminders back on can restore them without the screens that know it.
+    private static func noteDue(_ due: Date?, _ identifier: String) {
+        if let due {
+            UserDefaults.standard.set(due, forKey: lastDueKey(identifier))
+        } else {
+            UserDefaults.standard.removeObject(forKey: lastDueKey(identifier))
+        }
+    }
+
+    /// "Measurement reminders" was switched: off removes the pending ones,
+    /// on schedules them again from the due dates last known.
+    static func measurementRemindersChanged() async {
+        let defaults = UserDefaults.standard
+        if !measurementRemindersOn {
+            // A reminder that was only waiting never went out: forget it, so switching
+            // back on reminds when due and not a whole interval later (`OverdueReminder`).
+            for identifier in [waistReminderIdentifier, gripReminderIdentifier, bloodPressureReminderIdentifier] {
+                if let fire = defaults.object(forKey: lastReminderKey(identifier)) as? Date, fire > .now {
+                    defaults.removeObject(forKey: lastReminderKey(identifier))
+                }
+            }
+        }
+        await scheduleMeasurementReminders(waistDue: defaults.object(forKey: lastDueKey(waistReminderIdentifier)) as? Date,
+                                           gripDue: defaults.object(forKey: lastDueKey(gripReminderIdentifier)) as? Date)
+        await scheduleBloodPressureReminder(due: defaults.object(forKey: lastDueKey(bloodPressureReminderIdentifier)) as? Date)
+    }
+
     /// The monthly waist reminder and the 6-monthly grip reminder
     /// (`WaistToHeightRatio.nextDue`, `GripStrength.nextDue`; Ashwell 2012,
     /// EWGSOP2 via docs/research/health-metrics.md). A nil due date clears that
     /// reminder. One reminder when due (the next morning if that has passed),
     /// then, while still not done, one a full interval later (`OverdueReminder`),
-    /// not every morning the app is opened.
+    /// not every morning the app is opened. None while "Measurement reminders"
+    /// is off in Settings.
     static func scheduleMeasurementReminders(waistDue: Date?, gripDue: Date?) async {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [waistReminderIdentifier, gripReminderIdentifier])
-        guard waistDue != nil || gripDue != nil, await requestPermission() else { return }
+        noteDue(waistDue, waistReminderIdentifier)
+        noteDue(gripDue, gripReminderIdentifier)
+        guard measurementRemindersOn, waistDue != nil || gripDue != nil, await notificationsAllowed() else { return }
         let calendar = Calendar.current
         if let waistDue, let fire = overdueFireDate(identifier: waistReminderIdentifier, due: waistDue,
                                                     intervalDays: WaistToHeightRatio.intervalDays, calendar: calendar) {
@@ -682,7 +841,8 @@ nonisolated enum Reminders {
     static func scheduleBloodPressureReminder(due: Date?) async {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [bloodPressureReminderIdentifier])
-        guard let due, await requestPermission() else { return }
+        noteDue(due, bloodPressureReminderIdentifier)
+        guard measurementRemindersOn, let due, await notificationsAllowed() else { return }
         let calendar = Calendar.current
         guard let fire = overdueFireDate(identifier: bloodPressureReminderIdentifier, due: due,
                                          intervalDays: bloodPressureRepeatDays, calendar: calendar) else { return }

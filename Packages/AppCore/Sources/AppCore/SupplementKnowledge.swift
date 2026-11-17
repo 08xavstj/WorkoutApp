@@ -136,7 +136,8 @@ public enum SupplementKnowledge {
     static let strengthEntries: [Entry] = [
         Entry(
             id: "creatine", name: "Creatine monohydrate",
-            names: ["creatine", "creapure", "monohydrate"],
+            // Not "monohydrate" alone: it's a salt form of many medicines ("Doxycycline Monohydrate").
+            names: ["creatine", "creapure"],
             category: .strengthAndMuscle,
             claims: [
                 c("Strength and lean mass", .strong, "The best-studied sports supplement: a few percent more strength and about 1 kg more lean mass over a training block, in hundreds of trials (ISSN 2017; Delpino 2022 meta-analysis)."),

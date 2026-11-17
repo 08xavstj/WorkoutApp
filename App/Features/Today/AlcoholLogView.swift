@@ -9,8 +9,11 @@ struct AlcoholLogView: View {
     @State private var day: Date
     @State private var showingAdd = false
 
-    init(day: Date = .now) {
-        _day = State(initialValue: Calendar.current.startOfDay(for: day))
+    /// - Parameter day: the evening to log for. Without one it's tonight's, or
+    ///   last night's before 04:00 (`EveningCheckIn.day(for:)`): a drink logged
+    ///   at 01:00 belongs to the evening before.
+    init(day: Date? = nil) {
+        _day = State(initialValue: day.map { Calendar.current.startOfDay(for: $0) } ?? EveningCheckIn.day(for: .now))
     }
 
     private var calendar: Calendar { .current }
@@ -66,6 +69,9 @@ struct AlcoholLogView: View {
         }
     }
 
+    /// Saves the drinks on the day's evening record. A record made here has no
+    /// `completed` flag, so a logged drink never marks the evening check-in
+    /// as done (`EveningCheckIn.isDone`).
     private func update(_ change: (inout [AlcoholEntry]) -> Void) {
         var evening = store.evening(on: day) ?? EveningCheckIn(day: day)
         var list = evening.alcohol ?? []
@@ -210,8 +216,8 @@ private struct AddDrinkSheet: View {
     private func add() {
         let parts = Calendar.current.dateComponents([.hour, .minute], from: time)
         var minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
-        // A drink after midnight belongs to the evening before.
-        if minutes < 5 * 60 { minutes += 24 * 60 }
+        // A drink after midnight belongs to the evening before (the same 04:00 line as the day it's saved on).
+        if minutes < EveningCheckIn.dayRolloverHour * 60 { minutes += 24 * 60 }
         for _ in 0..<count {
             onAdd(AlcoholEntry(kind: kind, millilitres: millilitres, abv: abv, minutes: addTime ? minutes : nil))
         }

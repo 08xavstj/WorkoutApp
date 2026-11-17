@@ -192,7 +192,7 @@ struct CoachCheckInsTests {
         checkShape(message)
         #expect(message.title == "In bed by 21:50–22:20")
         #expect(message.body.contains("Worked back from 8 h need, up at 6:30, ready for Upper tomorrow."))
-        #expect(message.body.contains("45-second check-in"))
+        #expect(message.body.contains("one-minute check-in: caffeine, drinks and how the day went"))
         #expect(message.link == CoachCheckIns.eveningCheckInLink)
     }
 

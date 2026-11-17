@@ -32,8 +32,9 @@ struct ProfileBasicsView: View {
     }
 }
 
-/// The four fields, as one Form section. Fields Apple Health fills stay
-/// editable in Settings › Profile.
+/// The four fields, as one Form section. A field Apple Health fills is shown
+/// read-only and marked "Health", as in Settings › Profile: the next sync
+/// would overwrite anything typed over it (`UserSettings.syncProfile`).
 struct ProfileBasicsRows: View {
     @Environment(UserSettings.self) private var settings
     @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 80
@@ -41,30 +42,50 @@ struct ProfileBasicsRows: View {
     /// Inches alongside pounds, centimetres alongside kilograms; stored in cm.
     private var heightUnit: LengthUnit { settings.weightUnit == .pounds ? .inches : .centimeters }
 
+    /// Apple Health filled this field and keeps it up to date.
+    private func locked(_ field: String) -> Bool {
+        settings.profileFromHealth && settings.healthFilledFields.contains(field)
+    }
+
+    /// " · Health" when Apple Health filled this field (the same mark as Settings › Profile).
+    private func source(_ field: String) -> String {
+        locked(field) ? " · Health" : ""
+    }
+
+    private var anyFromHealth: Bool {
+        ["sex", "age", "height", "weight"].contains(where: locked)
+    }
+
     var body: some View {
         Section {
-            SexPickerRow()
-            AgePickerRow()
-            LabeledContent("Height") {
+            SexPickerRow(suffix: source("sex"))
+                .disabled(locked("sex"))
+            AgePickerRow(suffix: source("age"))
+                .disabled(locked("age"))
+            LabeledContent("Height\(source("height"))") {
                 HStack(spacing: 4) {
                     TextField("Not set", value: heightBinding, format: .number)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: fieldWidth)
+                        .disabled(locked("height"))
                     Text(heightUnit.rawValue).foregroundStyle(Theme.secondaryText)
                 }
             }
-            LabeledContent("Weight") {
+            LabeledContent("Weight\(source("weight"))") {
                 HStack(spacing: 4) {
                     TextField("Not set", value: weightBinding, format: .number)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: fieldWidth)
+                        .disabled(locked("weight"))
                     Text(settings.weightUnit.rawValue).foregroundStyle(Theme.secondaryText)
                 }
             }
         } footer: {
-            Text("Heart-rate zones, calories, fitness norms and body age depend on these. They stay on this iPhone.")
+            Text(anyFromHealth
+                 ? "Heart-rate zones, calories, fitness norms and body age depend on these. They stay on this iPhone. Fields marked \"Health\" are from Apple Health and update by themselves; change them in the Health app, or turn off Fill in from Apple Health in Settings to type your own."
+                 : "Heart-rate zones, calories, fitness norms and body age depend on these. They stay on this iPhone.")
         }
     }
 

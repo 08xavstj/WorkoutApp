@@ -127,11 +127,26 @@ struct StretchingTests {
         #expect(Stretching.reminderMinutes(preferred: evening, sessionStart: nil, sessionLength: nil) == evening)
         // Session at 18:00: already over by 20:30.
         #expect(Stretching.reminderMinutes(preferred: evening, sessionStart: 18 * 60, sessionLength: 60) == evening)
-        // Session at 21:00: the reminder waits until an hour after it ends (capped at 23:00).
-        #expect(Stretching.reminderMinutes(preferred: evening, sessionStart: 21 * 60, sessionLength: 60) == 23 * 60)
+        // Session at 21:00: an hour after it ends would be 23:00, past 22:00, so no reminder that day.
+        #expect(Stretching.reminderMinutes(preferred: evening, sessionStart: 21 * 60, sessionLength: 60) == nil)
         #expect(Stretching.reminderMinutes(preferred: 7 * 60, sessionStart: 7 * 60 + 30, sessionLength: 45) == 9 * 60 + 15)
         // Session three hours later: far enough.
         #expect(Stretching.reminderMinutes(preferred: 7 * 60, sessionStart: 10 * 60, sessionLength: 60) == 7 * 60)
+    }
+
+    @Test func theReminderNeverFiresDuringASessionOrAfterTen() {
+        let evening = Stretching.defaultReminderMinutes
+        // Session 20:00-21:00: 20:30 is mid-session, so it moves to 22:00 (an hour after the end), the latest allowed.
+        #expect(Stretching.reminderMinutes(preferred: evening, sessionStart: 20 * 60, sessionLength: 60) == 22 * 60)
+        // Session 20:15-21:15: an hour after is 22:15, too late: skipped.
+        #expect(Stretching.reminderMinutes(preferred: evening, sessionStart: 20 * 60 + 15, sessionLength: 60) == nil)
+        // No length known: an hour is assumed.
+        #expect(Stretching.reminderMinutes(preferred: 18 * 60 + 30, sessionStart: 18 * 60, sessionLength: nil) == 20 * 60)
+        // Right at the session's end is not "during".
+        #expect(Stretching.reminderMinutes(preferred: 19 * 60, sessionStart: 18 * 60, sessionLength: 60) == 19 * 60)
+        // A time the user chose after 22:00 is kept on a day without a clash.
+        #expect(Stretching.reminderMinutes(preferred: 22 * 60 + 30, sessionStart: nil, sessionLength: nil) == 22 * 60 + 30)
+        #expect(Stretching.reminderMinutes(preferred: 22 * 60 + 30, sessionStart: 9 * 60, sessionLength: 60) == 22 * 60 + 30)
     }
 
     @Test func targetsFollowTheFocus() {

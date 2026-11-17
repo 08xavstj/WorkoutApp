@@ -31,7 +31,7 @@ Not checked against full texts from the build sandbox: the Delphi statement's ex
 - **Weekly minutes per area:** 5 each (Thomas's floor). With focus areas picked: 8 for those (Ingram's level-off), 3 for the rest. The 3 is the app's choice.
 - **Today's five:** the areas furthest behind their minutes over the last 7 days, the longest unstretched first on a tie.
 - **Lifting credit:** an area lifted through a long range that week (Romanian deadlift: hamstrings; squat: glutes, inner thighs; split squat: hip flexors, glutes; presses and flyes: chest; pulldowns: lats; calf raises: calves) is credited 2 minutes a session, up to half its target, so the routine goes to areas the lifting didn't reach. The evidence is that lifting improves range of motion about as much as stretching; the minute-for-minute rate is the app's choice.
-- **Reminder:** daily at a chosen time (20:30 by default), skipped once done, and moved to an hour after a planned session when it would fall within 90 minutes before it. Off in rest mode.
+- **Reminder:** off until switched on in Settings (app choice: reminders are opt-in). Then daily at a chosen time (20:30 by default), skipped once done, and moved to an hour after a planned session when it would fall within 90 minutes before it or during it; when that would be later than 22:00 the day gets no reminder (app choice). Off in rest mode.
 
 ## Seeing progress
 

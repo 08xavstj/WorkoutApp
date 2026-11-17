@@ -58,6 +58,11 @@ final class CheckInStore {
     func morning(on day: Date = .now) -> MorningCheckIn? { saved.mornings[key(day)] }
     func evening(on day: Date = .now) -> EveningCheckIn? { saved.evenings[key(day)] }
 
+    /// Whether the evening check-in itself is done for `day`: the form was
+    /// saved (`EveningCheckIn.isDone`). A drink logged on its own makes a
+    /// record for the day too, and that isn't the check-in.
+    func eveningDone(on day: Date = .now) -> Bool { evening(on: day)?.isDone ?? false }
+
     func save(_ checkIn: MorningCheckIn) {
         reloadIfUnavailable()
         saved.mornings[key(checkIn.day)] = checkIn

@@ -416,7 +416,8 @@ public enum CoachCheckIns {
             // Caffeine within about 9 h of bed cuts sleep by ~45 min on average (Gardiner et al., Sleep Med Rev 2023).
             sentences.append("Today's late caffeine can cost some sleep, so tomorrow's score may dip a little.")
         } else if !f.checkInDone {
-            sentences.append("A 45-second check-in: one win and how today felt.")
+            // The same words as the form's row in Up next and the plain reminder (`Reminders.eveningContent`).
+            sentences.append("A one-minute check-in: caffeine, drinks and how the day went.")
         }
         guard !sentences.isEmpty else { return nil }
         let link = f.checkInDone ? coachLink(question: eveningQuestion) : eveningCheckInLink

@@ -7,20 +7,26 @@ import WidgetKit
 struct MedsLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MedsActivityAttributes.self) { context in
-            MedsActivityContent(state: context.state)
+            MedsActivityContent(state: context.state, day: context.attributes.day)
         } dynamicIsland: { context in
-            DynamicIsland {
+            // A card left over from yesterday (the app hasn't run since) shows no doses, only where to go.
+            let isToday = MedsCardDay.isToday(context.attributes.day)
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Label("Meds", systemImage: "pills.fill")
                         .font(.headline)
                         .foregroundStyle(WidgetPalette.pink)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("\(context.state.takenCount)/\(context.state.shown.count) taken")
-                        .font(.subheadline.weight(.semibold))
+                    if isToday {
+                        Text("\(context.state.takenCount)/\(context.state.shown.count) taken")
+                            .font(.subheadline.weight(.semibold))
+                    }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    if let next = context.state.remaining.first {
+                    if !isToday {
+                        Text(MedsCardDay.staleText).font(.subheadline)
+                    } else if let next = context.state.remaining.first {
                         DoseRow(item: next, dark: true)
                     } else {
                         Text("All done for today").font(.subheadline)
@@ -29,9 +35,11 @@ struct MedsLiveActivityWidget: Widget {
             } compactLeading: {
                 Image(systemName: "pills.fill").foregroundStyle(WidgetPalette.pink)
             } compactTrailing: {
-                Text("\(context.state.remaining.count)")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(WidgetPalette.pink)
+                if isToday {
+                    Text("\(context.state.remaining.count)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(WidgetPalette.pink)
+                }
             } minimal: {
                 Image(systemName: "pills.fill").foregroundStyle(WidgetPalette.pink)
             }
@@ -42,12 +50,38 @@ struct MedsLiveActivityWidget: Widget {
     }
 }
 
+/// Whether a card still belongs to today. iOS redraws the card at its stale
+/// date (the end of its day, `MedsLiveActivity.staleDate`), so a card the app
+/// couldn't take down overnight stops showing yesterday's doses.
+nonisolated enum MedsCardDay {
+    static let staleText = "Open Tensile for today's doses"
+
+    static func isToday(_ day: Date) -> Bool { Calendar.current.isDateInToday(day) }
+}
+
 /// Lock Screen (`.medium`) or Apple Watch Smart Stack (`.small`) layout.
 private struct MedsActivityContent: View {
     let state: MedsActivityAttributes.ContentState
+    /// The day the card was started for.
+    let day: Date
     @Environment(\.activityFamily) private var family
 
     var body: some View {
+        if !MedsCardDay.isToday(day) {
+            Label(MedsCardDay.staleText, systemImage: "pills.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(WidgetPalette.pink)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(family == .small ? 12 : 16)
+                .activityBackgroundTint(Color.white.opacity(0.92))
+                .widgetURL(URL(string: "workoutapp://meds"))
+        } else {
+            today
+        }
+    }
+
+    @ViewBuilder
+    private var today: some View {
         switch family {
         case .small:
             MedsWatchView(state: state)

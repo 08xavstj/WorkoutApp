@@ -13,6 +13,7 @@ struct CoachCheckInsSettingsSection: View {
     @State private var kindToTurnOn: CoachCheckIns.Kind?
     @State private var notificationsDenied = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(AppRouter.self) private var router
 
     var body: some View {
         Section {
@@ -28,7 +29,7 @@ struct CoachCheckInsSettingsSection: View {
         } header: {
             Text("Coach check-ins")
         } footer: {
-            Text("Up to three short messages a day, none when there's nothing new, and fewer if you don't open them. They're worked out on this iPhone from your own data; nothing is sent anywhere. The timing and limits are app choices.")
+            Text("Up to three short messages a day, none when there's nothing new, and fewer if you don't open them. The morning and evening ones take the place of the plain check-in reminders above, so you never get both. They're worked out on this iPhone from your own data; nothing is sent anywhere. The timing and limits are app choices.")
         }
         .alert("Let the coach message you?", isPresented: $explainingPermission) {
             Button("Continue") {
@@ -64,7 +65,8 @@ struct CoachCheckInsSettingsSection: View {
     }
 
     private func finishTurningOn() async {
-        await nudges.requestPermission()
+        // Just allowed: the other reminders that are on can be scheduled now too (`AppRouter.remindersVersion`).
+        if await nudges.requestPermission() { router.remindersVersion += 1 }
         notificationsDenied = await Self.isDenied()
         // On even when notifications are refused: the Coach tab still gets the messages.
         if let kind = kindToTurnOn { set(kind, true) }

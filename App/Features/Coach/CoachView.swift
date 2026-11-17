@@ -224,7 +224,12 @@ struct CoachView: View {
     }
 
     private func sendDraft() async {
+        // Return while the coach is still answering: keep the draft (the send
+        // button is disabled then too) instead of clearing a message that
+        // `CoachModel.send` would drop.
+        guard !coach.isThinking else { return }
         let text = draft
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draft = ""
         await send(text)
     }
@@ -394,7 +399,8 @@ extension CoachView {
     func lastWorkoutFact(_ session: WorkoutSession) -> CoachFacts.LastWorkout {
         let calendar = Calendar.current
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: session.startedAt), to: calendar.startOfDay(for: .now)).day ?? 0
-        let unit = settings.weightUnit
+        // The gym's lifting unit, as the workout summary and the coach's note use (not the body-weight unit).
+        let unit = gym.liftingUnit
         let volume = session.totalVolumeKg
         let volumeText: String? = volume > 0
             ? "\(unit.display(volume).formatted(.number.precision(.fractionLength(0)))) \(unit.rawValue)" : nil

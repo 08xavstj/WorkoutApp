@@ -22,12 +22,25 @@ final class MedicationsModel {
     func save(_ medication: Medication) {
         var all = MedicationStore.medications()
         if let index = all.firstIndex(where: { $0.id == medication.id }) {
+            carryTakenToday(from: all[index], to: medication)
             all[index] = medication
         } else {
             all.append(medication)
         }
         MedicationStore.save(all)
-        changed()
+        // Saving a dose time is turning a reminder on: the one place iOS may ask to allow notifications.
+        changed(askForNotifications: medication.isActive && !medication.times.isEmpty)
+    }
+
+    /// A dose's id carries its time, so an edited reminder time would make a
+    /// dose already ticked off today due again. Today's taken entries move to
+    /// the new times (`MedicationSchedule.carriedTimes`).
+    private func carryTakenToday(from old: Medication, to new: Medication) {
+        let today = Calendar.current.startOfDay(for: .now)
+        let moves = MedicationSchedule.carriedTimes(old: old.times, new: new.times).map { from, to in
+            (from: Dose.id(medicationID: new.id, day: today, minutes: from), to: Dose.id(medicationID: new.id, day: today, minutes: to))
+        }
+        MedicationStore.moveTaken(moves)
     }
 
     func delete(_ medication: Medication) {
@@ -40,14 +53,16 @@ final class MedicationsModel {
             MedicationStore.unmark(dose.id)
         } else {
             MedicationStore.markTaken(dose.id)
+            // Its reminder (and any snooze) goes too, pending or already on the Lock Screen.
+            DoseNotifications.clear(dose.id)
         }
         changed()
     }
 
-    private func changed() {
+    private func changed(askForNotifications: Bool = false) {
         reload()
         Task {
-            await Reminders.scheduleDoses()
+            await Reminders.scheduleDoses(ask: askForNotifications)
             await Reminders.startMedsActivityIfNeeded()
         }
     }

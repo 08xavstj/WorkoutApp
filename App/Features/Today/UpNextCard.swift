@@ -86,7 +86,7 @@ struct UpNextCard: View {
         if checkIns.morning() == nil, now >= RecoveryTiming.earliestWakeHour * 60, now < 15 * 60 {
             items.append(UpNextItem(id: "checkin-morning", minutes: settings.morningCheckInMinutes, kind: .checkIn(.morning)))
         }
-        if checkIns.evening() == nil, now >= 12 * 60 {
+        if !checkIns.eveningDone(), now >= 12 * 60 {
             items.append(UpNextItem(id: "checkin-evening", minutes: settings.eveningCheckInMinutes, kind: .checkIn(.evening)))
         }
         return items
@@ -99,7 +99,7 @@ struct UpNextCard: View {
     private func doseItems() -> [UpNextItem] {
         let now = Date.now
         return meds.todayDoses
-            .filter { !meds.isTaken($0) && $0.time <= now && DoseCard.shows(name: $0.name, day: $0.day, at: now) }
+            .filter { !meds.isTaken($0) && $0.time <= now && DoseCard.shows(name: $0.name, day: $0.day, minutes: $0.minutes, at: now) }
             .map { UpNextItem(id: "dose-\($0.id)", minutes: $0.minutes, kind: .dose($0)) }
     }
 
