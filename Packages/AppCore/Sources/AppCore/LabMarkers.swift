@@ -60,8 +60,9 @@ public enum LabMarkers {
                    athleteLow: athleteLow)
     }
 
-    /// Lipids and HbA1c: every 1-2 years when normal (guideline practice; health-metrics report).
-    static let lipidRetest = "Every 1-2 years if normal, and about 3 months after a big change in diet or weight."
+    /// Lipids: at least every 4-6 years from 20 (2019 ACC/AHA primary prevention
+    /// guideline, verified); sooner when raised (`BloodTestSchedule`).
+    static let lipidRetest = "Every 5 years if normal (guidelines say every 4-6 from age 20); yearly if a result was outside the range, and about 3 months after a big change in diet or weight."
 
     public static let all: [Marker] = [
         Marker(id: "ldl", name: "LDL cholesterol", panel: "Lipids", aliases: ["ldl", "ldl-c", "ldl cholesterol", "ldl chol calc", "ldl cholesterol calculated"],
@@ -84,7 +85,7 @@ public enum LabMarkers {
                units: [u("mg/dL", high: 100), u("g/L", high: 1.0)],
                about: "Counts the particles that carry cholesterol into arteries; a sharper heart-risk measure than LDL, and the one to watch if LDL looks fine but ApoB doesn't (Johannesen et al. 2021). Under 100 mg/dL is the usual goal; European guidelines use under 80 at high risk.",
                // Johannesen et al., JACC 2021 (discordant ApoB); health-metrics report: re-test after a bulk.
-               retest: "Every 1-2 years if normal, and after a long bulk (a surplus with lots of saturated fat raises it)."),
+               retest: "With each cholesterol panel (every 5 years if normal), and after a long bulk (a surplus with lots of saturated fat raises it)."),
         // EAS consensus (Kronenberg et al., Eur Heart J 2022; from memory in the audit): > 50 mg/dL or > 125 nmol/L high, 30-50 grey zone.
         Marker(id: "lpa", name: "Lp(a)", panel: "Lipids", aliases: ["lp(a)", "lpa", "lipoprotein(a)", "lipoprotein (a)", "lipoprotein a"],
                units: [u("mg/dL", high: 50), u("nmol/L", high: 125)],
@@ -93,11 +94,12 @@ public enum LabMarkers {
         Marker(id: "hba1c", name: "HbA1c", panel: "Blood sugar", aliases: ["hba1c", "a1c", "hemoglobin a1c", "haemoglobin a1c", "glycated hemoglobin"],
                units: [u("%", high: 5.6), u("mmol/mol", high: 38)],
                about: "Average blood sugar over about 3 months. 5.7-6.4% is the prediabetes range; 6.5% is the diagnostic threshold doctors use, and it needs a repeat test.",
-               retest: "Yearly if normal."),
+               // ADA Standards of Care 2026, Rec 2.12b-c and Table 2.5 (`BloodTestSchedule`).
+               retest: "From 35, every 3 years if normal; yearly in the prediabetes range (5.7-6.4%)."),
         Marker(id: "glucose", name: "Fasting glucose", panel: "Blood sugar", aliases: ["glucose", "fasting glucose", "glucose, fasting", "glucose fasting"],
                units: [u("mg/dL", 70...99), u("mmol/L", 3.9...5.5)],
                about: "Blood sugar after not eating for 8 hours. 100-125 mg/dL (5.6-6.9 mmol/L) is the prediabetes range. A hard session or a high-protein meal the day before can nudge it up.",
-               retest: "Yearly if normal; test fasted and rested."),
+               retest: "From 35, every 3 years if normal (yearly in the prediabetes range); test fasted and rested."),
         // Sim et al., Eur J Appl Physiol 2019 (after Peeling 2007): in athletes ferritin < 35 µg/L is stage-1 iron
         // deficiency and < 20 stage 2 (thresholds from memory in the audit); the app flags under 30 for both sexes.
         Marker(id: "ferritin", name: "Ferritin", panel: "Iron", aliases: ["ferritin"],

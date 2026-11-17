@@ -107,6 +107,8 @@ public enum Longevity {
         case alcohol
         case headphoneSound
         case mood
+        // Longevity+Gaps.swift: shown only when they apply.
+        case bloodTests, saturatedFat
     }
 
     public struct Measure: Sendable, Equatable, Identifiable {
@@ -218,6 +220,10 @@ public enum Longevity {
         /// 14-day average State of Mind valence, -1...1, and its entry count.
         public var moodValence: Double?
         public var moodEntries = 0
+        /// Blood tests and their due dates (`BloodTestSchedule`); the row shows only when one is due.
+        public var bloodTests: [BloodTestSchedule.Due] = []
+        /// The week's saturated fat (`SaturatedFat.week`); nil when the food app sends none.
+        public var saturatedFat: SaturatedFat.Week?
 
         public init(age: Int, sex: BiologicalSex, goals: Goals? = nil) {
             self.age = age
@@ -239,7 +245,7 @@ public enum Longevity {
             alcohol(inputs),
             headphoneSound(inputs),
             mood(inputs)
-        ]
+        ] + gapMeasures(inputs)
         let areas = Area.allCases.map { area in
             AreaResult(area: area, measures: all.filter { $0.area == area })
         }
