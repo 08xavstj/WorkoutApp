@@ -348,6 +348,8 @@ struct RootView: View {
         ))
         // [Widgets] Plan, queue and rest-mode changes reach the widgets and the watch face at once.
         .modifier(GlanceReactions(router: router, plans: weeklyPlans, restModeUntil: settings.restModeUntil, update: updateGlances))
+        // Illness or pain logged between refreshes: the workout reminder's words follow at once.
+        .modifier(WorkoutCautionReactions(scheduleWorkouts: scheduleWorkoutReminders))
     }
 
     /// UI tests pass `-skipHealthPrompt YES` to act like a phone that has
@@ -910,5 +912,32 @@ private struct ReminderStateReactions: ViewModifier {
             .onChange(of: nudges.eveningOn) { scheduleCheckIns() }
             // iOS was just allowed to send notifications (`AppRouter.remindersVersion`).
             .onChange(of: router.remindersVersion) { rescheduleEverything() }
+    }
+}
+
+/// Workout reminders turn plain on a day with illness or pain flagged
+/// (`WorkoutBanter.Caution`). Recovery and the 7-day HRV (`trainEasyToday`)
+/// only change in `refreshMetrics`, which reschedules at its end; this covers
+/// what changes between refreshes: a morning check-in's symptoms or pain,
+/// "I feel fine", and pain logged from the trainer.
+private struct WorkoutCautionReactions: ViewModifier {
+    @Environment(CheckInStore.self) private var checkIns
+    @State private var painLog = PainLogStore.shared
+    let scheduleWorkouts: () -> Void
+
+    private struct Key: Equatable {
+        var sick: Bool
+        /// Active pain, "area:level", newest per area (`PainGuard.active`).
+        var pains: [String]
+    }
+
+    private var key: Key {
+        let pains = PainGuard.active(painLog.allReports(checkIns: checkIns, health: []), today: .now)
+        return Key(sick: checkIns.morning()?.isSick == true,
+                   pains: pains.map { "\($0.area.rawValue):\($0.level)" }.sorted())
+    }
+
+    func body(content: Content) -> some View {
+        content.onChange(of: key) { scheduleWorkouts() }
     }
 }

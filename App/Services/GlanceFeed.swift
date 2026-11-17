@@ -30,6 +30,15 @@ enum GlanceFeed {
 
         // From the start of today, so today's session stays in (done or not).
         var planned = plans.upcomingSlots(now: today, trainingDays: trainingDays)
+        // No plan or a flexible week this week: `upcomingSlots` stops at its end, so next
+        // week's fixed plan joins here. Without it Monday would read "Rest day" with next week planned.
+        if plans.plan(containing: now)?.isFlexible ?? true, let following = plans.plan(for: weekEnd), !following.isFlexible {
+            for day in following.sortedDays {
+                if let start = following.start(of: day), start > today { planned.append((day: day, start: start)) }
+            }
+        }
+        // This week's sessions came from a queue worked out here, not the one today's guidance read.
+        var queuedHere = false
         // A fixed week whose queue wasn't worked out today (a background wake,
         // before Today has been on screen): this week from the queue all the
         // same, so a session that moved shows on the day that takes it.
@@ -44,6 +53,7 @@ enum GlanceFeed {
                 return (day: slot.session, start: start)
             }
             planned = queued + planned
+            queuedHere = true
         }
         let slots = planned
             .filter { $0.start < horizon }
@@ -72,10 +82,15 @@ enum GlanceFeed {
         // Tonight's window only: one that has already ended says nothing about tonight.
         let window = metrics.bedtimeWindow.flatMap { $0.end > now ? $0 : nil }
         let restMode = (restUntil ?? .distantPast) > now
+        // Today's guidance calls it a rest day from the queue it was given (`DailyMetricsModel.dayGuidance`).
+        // When that isn't today's queue and the sessions above came from a fresh one, the two can disagree
+        // (a moved session read "Rest day"): the sessions win.
+        let guidanceIsToday = !queuedHere || (metrics.adaptiveWeek.map { calendar.isDate($0.day, inSameDayAs: now) } ?? false)
+        let guidanceRest = guidanceIsToday && metrics.dayGuidance?.isRestDay == true
         return PlanGlance.Plan(
             updated: now, hasPlan: hasPlan, slots: slots, weekEnd: weekEnd, nextWeek: nextWeek,
             doneAt: doneAt,
-            restToday: restMode || metrics.restMode || metrics.dayGuidance?.isRestDay == true,
+            restToday: restMode || metrics.restMode || guidanceRest,
             bedByStart: window?.start, bedByEnd: window?.end,
             weekDone: hasPlan ? progress.map { min($0.done, $0.target) } : nil,
             weekPlanned: hasPlan ? progress?.target : nil,
@@ -94,6 +109,8 @@ enum GlanceFeed {
         snapshot.sleep = metrics.sleepIsFromYesterday ? nil : metrics.sleep?.score
         snapshot.band = snapshot.recovery == nil ? nil : metrics.recovery?.status.rawValue
         snapshot.calibrating = metrics.recovery.map { !$0.isCalibrated }
+        // The HRV widget's 7-day trend: the signal that guides training, not one night (Plews 2012; Javaloyes 2019).
+        snapshot.hrvTrend = snapshot.recovery == nil ? nil : metrics.recovery?.hrvTrend?.status.rawValue
         let target = metrics.targetStrain
         snapshot.targetLower = target?.lowerBound
         snapshot.targetUpper = target?.upperBound
