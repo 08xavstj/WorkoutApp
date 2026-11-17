@@ -150,7 +150,8 @@ final class BlockHistoryStore {
         current.reachedDeload = current.reachedDeload || block.week.isDeload
         current.end = calendar.date(byAdding: .day, value: 7 * current.weeksRun, to: current.start) ?? current.start
         current.weeks = Self.merged(current.weeks, records, from: current.start, to: current.end)
-        if let targets, block.covers(weekStart: targets.weekStart, calendar: calendar) {
+        // A planned busy week's third-of-the-sets targets aren't the block's (`BusyWeek`): left out.
+        if let targets, !block.week.isBusy, block.covers(weekStart: targets.weekStart, calendar: calendar) {
             var sets: [String: Int] = [:]
             for target in targets.targets { sets[target.muscle.rawValue] = target.sets }
             let snapshot = WeekTargetsSnapshot(weekStart: targets.weekStart, isDeload: block.week.isDeload, sets: sets)

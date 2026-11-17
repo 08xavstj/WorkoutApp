@@ -149,6 +149,7 @@ struct MyGymView: View {
                 if draft.has(.machine) {
                     stackSection("Machine stacks", stack: $draft.machineStack)
                 }
+                CardioMachinesSection(machines: $draft.cardioMachines) // for the weekly interval session (`HardCardio`)
 
                 Section("What the trainer will use") {
                     Text(WorkoutPlanner(gym: draft).gymSummary())

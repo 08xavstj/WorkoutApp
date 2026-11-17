@@ -102,6 +102,8 @@ enum WorkoutVoice {
         facts.hour = parts.hour
         facts.weekday = parts.weekday
         facts.isDeloadWeek = plans.projectedBlockWeek(now: slot.start)?.isDeload ?? false
+        // A planned busy week holds, it doesn't build (`BusyWeek`): no line asks for a record or calls a lift stuck.
+        if plans.plan(containing: slot.start)?.isBusy == true { facts.lift = nil }
         return facts
     }
 

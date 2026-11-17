@@ -496,6 +496,9 @@ extension CoachNudges {
         }
         if let plans {
             let extra = metrics?.recentLiftingDays ?? []
+            // After a missed planned session or 7+ days off, one sentence says it's the first back (`FirstSessionBack`).
+            let earlier = WeeklyPlanStore.trainingDays(sessions: all.filter { $0.startedAt < session.startedAt }, extra: extra)
+            f.firstSessionBack = FirstSessionBack.applies(sessionDay: session.startedAt, earlierTrainingDays: earlier, plans: plans.plans)
             if let next = plans.adaptiveWeek(sessions: all, extra: extra, checkIns: checkIns, muscles: muscles, now: now)?.next {
                 f.nextSession = CoachCheckIns.Session(slot: next)
                 f.nextDayText = Self.dayText(next.date, now: now)

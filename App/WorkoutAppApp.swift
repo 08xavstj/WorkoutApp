@@ -317,6 +317,7 @@ struct RootView: View {
         }
         .modifier(PendingLinkOpener(router: router))
         .modifier(WatchSyncBootstrap()) // Apple Watch app (`WatchSync`)
+        .background { PlanCalendarSyncView() } // planned sessions in Apple Calendar, when switched on
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 medications.reload()
@@ -481,7 +482,8 @@ struct RootView: View {
                                   scoredVO2: vitals.vo2ForScores)
         }
         vitals.setHRVSeries(biology.hrvSeries)
-        await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday)
+        await muscles.refresh(sessions: sessions.filter { !$0.isActive }, library: library, health: health, hrvBelowNormal: metrics.trainEasyToday,
+                              busyWeeks: weeklyPlans.plans.filter(\.isBusy).map(\.weekStart))
         weeklyPlans.refreshVolume(muscles: muscles)
         // End-of-block report (`BlockHistoryStore`): follows the block and archives it when a new one starts.
         BlockHistoryStore.shared.observe(block: weeklyPlans.block,

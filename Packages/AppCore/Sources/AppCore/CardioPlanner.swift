@@ -304,10 +304,10 @@ public enum CardioPlanner {
     /// Planned cardio minutes for the week, toward the 150-300 band.
     public static func plannedMinutes(_ cardio: EasyCardio?, goals: Goals? = nil) -> Int {
         guard let cardio else { return 0 }
-        // With the hard session chosen, one easy session fewer (`slots`); its own minutes are said on its row.
-        let hard = cardio.hard != nil && !HardCardio.isHardCut(goals)
-        let easy = min(EasyCardio.maximumPerWeek, cardio.sessionsPerWeek) - (hard ? 1 : 0)
-        return max(0, easy) * cardio.minutes
+        // With the hard session chosen, one easy session fewer (`slots`), and the hard session's own minutes.
+        let hard = HardCardio.isHardCut(goals) ? nil : cardio.hard
+        let easy = min(EasyCardio.maximumPerWeek, cardio.sessionsPerWeek) - (hard == nil ? 0 : 1)
+        return max(0, easy) * cardio.minutes + (hard?.session.totalMinutes ?? 0)
     }
 
     /// "60 planned minutes toward the 150-minute WHO floor (easy cardio counts as moderate)."

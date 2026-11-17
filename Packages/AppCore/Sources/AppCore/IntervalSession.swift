@@ -4,28 +4,42 @@ import Foundation
 // intervals with their targets, cool-down. Foundation only and Codable, with
 // no reference to anything else in AppCore, so the Watch app (which does not
 // link AppCore) can compile this one file and run the session: add
-// `Packages/AppCore/Sources/AppCore/IntervalSession.swift` to its sources in
-// project.yml, as `RepDetection.swift` is, and send `encoded()` over
-// WatchConnectivity (`Data` is a property-list type). Every type is declared
-// `nonisolated`, so in a target whose default isolation is the main actor the
-// value still decodes and is read on any thread.
+// `Packages/AppCore/Sources/AppCore/IntervalSession.swift` (and, for the bpm
+// bands, `IntervalSession+Zones.swift`, which needs only
+// `HeartRateZoneScheme.swift`) to its sources in project.yml, as
+// `CardioZoneTracker.swift` is, and send `encoded()` over WatchConnectivity
+// (`Data` is a property-list type). Every type is declared `nonisolated`, so
+// in a target whose default isolation is the main actor the value still
+// decodes and is read on any thread.
+//
+// Targets are named the way the Watch's cardio mode names them
+// (`CardioTarget`): "easy" is `HeartRateZoneScheme.easyBand`, the band easy
+// cardio and the Watch's Easy target use, and the hard intervals are zones of
+// whichever scheme the user picked. So the phone, the Watch and the zone
+// settings always agree on the numbers.
 //
 // The protocol itself:
 // - Four rounds of four minutes at 90-95% of maximum heart rate with three
 //   minutes of active rest at 70% raised VO2max by 7.2% in eight weeks, more
 //   than the same work done at lactate threshold or as long slow distance
-//   (Helgerud J et al. Aerobic high-intensity intervals improve VO2max more
+//   (Helgerud J, et al. Aerobic high-intensity intervals improve VO2max more
 //   than moderate training. Med Sci Sports Exerc 2007;39(4):665-671; 40
-//   moderately trained men, three sessions a week; abstract read 2026-11-17).
+//   moderately trained men, three sessions a week for eight weeks; abstract
+//   read 2026-11-17 through PubMed E-utilities). Tensile offers one session a
+//   week, a smaller dose than the trial: the app's choice, said in the UI.
 // - Across 53 trials, long intervals (2 minutes or more), 15 minutes or more
 //   of hard work in a session, and 4-12 weeks or more did most; short, small
-//   doses still worked against doing nothing (Wen D et al. J Sci Med Sport
-//   2019;22(8):941-947; abstract read 2026-11-17). So the standard session
-//   has 16 hard minutes and the short one 12, which is under that line: the
-//   UI says so.
-// - The work target starts at 85%, not 90%, because heart rate takes a minute
-//   or two to climb in each round; the warm-up and cool-down lengths and the
-//   effort numbers are the app's choice.
+//   doses still beat doing nothing (Wen D, et al. Effects of different
+//   protocols of high intensity interval training for VO2max improvements in
+//   adults. J Sci Med Sport 2019;22(8):941-947; abstract read 2026-11-17). So
+//   the standard session has 16 hard minutes and the short one 12, under that
+//   line: the UI says so.
+// - Helgerud's 70% of maximum for the easy minutes sits inside the easy band
+//   (40-60% of heart-rate reserve, or 64-76% of maximum without a resting
+//   rate). Zones 4-5 cover 90-95% of maximum on both the percent-of-maximum
+//   and the heart-rate-reserve scales. Heart rate lags a minute or two behind
+//   effort in each round, so the effort cue leads. Warm-up and cool-down
+//   lengths and the effort numbers are the app's choice.
 
 /// One cardio session, step by step.
 public nonisolated struct IntervalSession: Codable, Sendable, Equatable, Identifiable {
@@ -57,6 +71,18 @@ public nonisolated struct IntervalSession: Codable, Sendable, Equatable, Identif
             case .outdoorRide: "figure.outdoor.cycle"
             }
         }
+
+        /// The Watch cardio mode's activity (`CardioActivity.rawValue`), so
+        /// the Watch can start the right workout type.
+        public var watchActivity: String {
+            switch self {
+            case .bike: "indoorCycle"
+            case .rower: "rower"
+            case .treadmill: "treadmill"
+            case .outdoorRun: "outdoorRun"
+            case .outdoorRide: "outdoorCycle"
+            }
+        }
     }
 
     public nonisolated enum Phase: String, Codable, Sendable {
@@ -75,45 +101,53 @@ public nonisolated struct IntervalSession: Codable, Sendable, Equatable, Identif
         public var isHard: Bool { self == .work }
     }
 
-    /// What to hold during a step, three ways, so it can be run with or
-    /// without a heart-rate reading.
+    /// The heart-rate band to hold during a step.
+    public nonisolated enum Band: Codable, Sendable, Equatable, Hashable {
+        /// No band: slow down as you like (the cool-down).
+        case none
+        /// The easy band (`HeartRateZoneScheme.easyBand`, the Watch's "Easy").
+        case easy
+        /// From the start of zone `low` up to the end of zone `high` in the
+        /// user's scheme; zone 5 has no top.
+        case zones(low: Int, high: Int)
+
+        /// The Watch cardio mode's stored target (`CardioTarget.storage`):
+        /// "off", "easy", or the lower zone ("z4"). For a zone range the
+        /// Watch should hold the whole range (`IntervalSession+Zones`), so
+        /// going above the lower zone is never a "too hard" tap.
+        public var watchStorage: String {
+            switch self {
+            case .none: "off"
+            case .easy: "easy"
+            case .zones(let low, _): "z\(low)"
+            }
+        }
+
+        /// "Easy", "Zone 4-5".
+        public var title: String {
+            switch self {
+            case .none: "Easy or slower"
+            case .easy: "Easy"
+            case .zones(let low, let high): low == high ? "Zone \(low)" : "Zone \(low)-\(high)"
+            }
+        }
+    }
+
+    /// What to hold during a step: a heart-rate band and an effort, so it
+    /// can be run with or without a heart-rate reading.
     public nonisolated struct Target: Codable, Sendable, Equatable {
-        /// Heart-rate zone, 1-5, on the common scale by percent of maximum
-        /// heart rate (zone 1 50-60%, 2 60-70%, 3 70-80%, 4 80-90%, 5 90-100%).
-        /// A reader with its own zones should use the percentages instead.
-        public var lowZone: Int
-        public var highZone: Int
-        /// Percent of maximum heart rate.
-        public var lowPercent: Int
-        public var highPercent: Int
-        /// Beats per minute, once a maximum heart rate is known (`withHeartRates`).
-        public var lowBPM: Int?
-        public var highBPM: Int?
+        public var band: Band
         /// Effort out of 10.
         public var lowEffort: Int
         public var highEffort: Int
         /// The talk test, in plain words.
         public var cue: String
 
-        public init(zones: ClosedRange<Int>, percent: ClosedRange<Int>, effort: ClosedRange<Int>, cue: String) {
-            lowZone = zones.lowerBound
-            highZone = zones.upperBound
-            lowPercent = percent.lowerBound
-            highPercent = percent.upperBound
+        public init(band: Band, effort: ClosedRange<Int>, cue: String) {
+            self.band = band
             lowEffort = effort.lowerBound
             highEffort = effort.upperBound
             self.cue = cue
-        }
-
-        /// "Zone 4-5", "Zone 2".
-        public var zoneText: String {
-            lowZone == highZone ? "Zone \(lowZone)" : "Zone \(lowZone)-\(highZone)"
-        }
-
-        /// "150-168 bpm" when known, else "85-95% of max heart rate".
-        public var heartRateText: String {
-            if let lowBPM, let highBPM { return "\(lowBPM)-\(highBPM) bpm" }
-            return "\(lowPercent)-\(highPercent)% of max heart rate"
         }
 
         /// "Effort 8-9 of 10".
@@ -198,19 +232,6 @@ public nonisolated struct IntervalSession: Codable, Sendable, Equatable, Identif
         return nil
     }
 
-    /// The same session with each target's beats per minute filled in from
-    /// a maximum heart rate.
-    public func withHeartRates(maximum: Double) -> IntervalSession {
-        guard maximum.isFinite, maximum > 0 else { return self }
-        var copy = self
-        for index in copy.steps.indices {
-            let target = copy.steps[index].target
-            copy.steps[index].target.lowBPM = Int((maximum * Double(target.lowPercent) / 100).rounded())
-            copy.steps[index].target.highBPM = Int((maximum * Double(target.highPercent) / 100).rounded())
-        }
-        return copy
-    }
-
     // MARK: Sending
 
     /// JSON, for a file or a WatchConnectivity message.
@@ -243,30 +264,34 @@ public nonisolated struct IntervalSession: Codable, Sendable, Equatable, Identif
     /// Hard and easy interval lengths (Helgerud 2007).
     public static let workSeconds = 240
     public static let recoverySeconds = 180
+    /// The hard band: zones 4-5 hold Helgerud's 90-95% of maximum on either
+    /// scale; the lower edge leaves room for heart rate climbing in each round.
+    public static let workBand = Band.zones(low: 4, high: 5)
 
-    static let warmUpTarget = Target(zones: 1...2, percent: 55...70, effort: 3...5,
-                                     cue: "Build up slowly; you can still talk in full sentences")
-    static let workTarget = Target(zones: 4...5, percent: 85...95, effort: 8...9,
-                                   cue: "Hard: a few words at a time, not a sentence. A pace you can hold for all four minutes")
-    static let recoveryTarget = Target(zones: 2...2, percent: 60...70, effort: 3...4,
-                                       cue: "Keep moving easily until your breathing settles")
-    static let coolDownTarget = Target(zones: 1...2, percent: 50...65, effort: 2...3,
-                                       cue: "Easy, slowing down")
+    static let warmUpTarget = Target(band: .easy, effort: 3...5,
+                                     cue: "Build up slowly; you can still talk in full sentences.")
+    static let workTarget = Target(band: workBand, effort: 8...9,
+                                   cue: "Hard: a few words at a time, not a sentence. A pace you can hold for all four minutes; heart rate climbs toward 90-95% of your maximum by the end.")
+    static let recoveryTarget = Target(band: .easy, effort: 3...4,
+                                       cue: "Keep moving easily until your breathing settles.")
+    static let coolDownTarget = Target(band: .none, effort: 2...3,
+                                       cue: "Easy, slowing down.")
 
     static func make(id: String, rounds: Int, warmUp: Int, coolDown: Int, modality: Modality) -> IntervalSession {
+        let rounds = max(1, rounds)
         var steps: [Step] = []
         func add(_ phase: Phase, _ seconds: Int, _ target: Target, round: Int? = nil) {
             steps.append(Step(index: steps.count, phase: phase, seconds: seconds, target: target, round: round))
         }
         add(.warmUp, warmUp, warmUpTarget)
-        for round in 1...max(1, rounds) {
+        for round in 1...rounds {
             add(.work, workSeconds, workTarget, round: round)
             // The cool-down follows the last hard interval directly.
             if round < rounds { add(.recovery, recoverySeconds, recoveryTarget, round: round) }
         }
         add(.coolDown, coolDown, coolDownTarget)
         return IntervalSession(id: "\(id)-\(modality.rawValue)",
-                               title: "\(max(1, rounds)) × \(workSeconds / 60) min · \(modality.label)",
-                               modality: modality, rounds: max(1, rounds), steps: steps)
+                               title: "\(rounds) × \(workSeconds / 60) min · \(modality.label)",
+                               modality: modality, rounds: rounds, steps: steps)
     }
 }

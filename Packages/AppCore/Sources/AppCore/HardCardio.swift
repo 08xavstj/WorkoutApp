@@ -18,8 +18,13 @@ import Foundation
 /// - Cardio beside lifting doesn't cost muscle or maximal strength; explosive
 ///   strength may suffer when both share a session (Schumann M et al., Sports
 ///   Med 2022;52:601-612).
-/// Lang, Milanović, Ahmadi and Schumann are as read for
-/// docs/research/healthy-living-2026-11.md (PubMed abstracts), not re-verified here.
+/// Milanović 2015 and Ahmadi 2022 (Eur Heart J 2022;43(46):4801-4814: 15-20
+/// vigorous minutes a week, 16-40% lower mortality hazard; optimum about 54)
+/// were re-read from their PubMed abstracts on 2026-11-17. Lang 2024 and
+/// Schumann 2022 are as read for docs/research/healthy-living-2026-11.md, not
+/// re-verified here. The trials gave intervals two or three times a week
+/// (Helgerud 2007: three); one a week is the app's smaller dose, chosen so the
+/// lifting stays first, and the UI says the evidence for it is thinner.
 ///
 /// The risks are rules:
 /// - **Offered, never scheduled by default**, and only when a reason applies
@@ -261,7 +266,7 @@ public enum HardCardio {
 
     /// What the session gives, and what it doesn't promise.
     public static func promise(_ session: IntervalSession) -> String {
-        var text = "About \(session.totalMinutes) minutes, \(session.hardMinutes) of them hard: vigorous minutes toward the 15-20 a week linked with lower mortality in wearable data (Ahmadi 2022; an association, not proof). No promise about your VO2 max number: a watch estimates it slowly, and only from outdoor walks and runs."
+        var text = "About \(session.totalMinutes) minutes, \(session.hardMinutes) of them hard: vigorous minutes toward the 15-20 a week linked with lower mortality in wearable data (Ahmadi 2022; an association, not proof). No promise about your VO2 max number: a watch estimates it slowly, and only from outdoor walks and runs. The interval trials ran two or three sessions a week; one a week is a smaller dose with less evidence behind it."
         if session.hardMinutes < 15 {
             text += " The longer session's 16 hard minutes are nearer what the trials found works best (Wen 2019)."
         }

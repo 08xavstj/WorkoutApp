@@ -45,6 +45,7 @@ struct ThisWeekCard: View {
         VStack(alignment: .leading, spacing: 14) {
             header(consistency)
             TravelGymChip() // only while a travel gym is active
+            if plan?.isBusy == true { BusyWeekNote() } // a planned busy week (`BusyWeek`)
             if let plan, plan.isFlexible {
                 FlexibleWeekRow(plan: plan, sessions: sessions)
                 FlexibleNextSlot(sessions: sessions)
@@ -59,7 +60,10 @@ struct ThisWeekCard: View {
             } else {
                 noPlan
             }
-            if plan != nil { CardioWeekRows() }
+            if plan != nil {
+                CardioWeekRows()
+                HardCardioWeekRow() // the week's interval session, once taken (`HardCardio`)
+            }
             ThisWeekDeloadLine()
             if let note = consistency.note {
                 Text(note)

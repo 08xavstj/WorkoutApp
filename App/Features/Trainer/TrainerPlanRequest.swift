@@ -26,13 +26,16 @@ struct TrainerPlanRequest {
 
     /// The finisher after the short-session rule (`AbsFinisher.length`).
     var effectiveFinisher: AbsFinisher.Length {
-        AbsFinisher.length(finisherLength, sessionMinutes: minutes, isShortVersion: isShortVersion)
+        // A busy week's session is the main lifts only (`BusyWeek`): no finisher.
+        if block?.isBusy == true { return .off }
+        return AbsFinisher.length(finisherLength, sessionMinutes: minutes, isShortVersion: isShortVersion)
     }
 
     /// The session, without the finisher (`finisher(for:)` adds it).
     func plan(gym: GymStore, plans: WeeklyPlanStore, muscles: MuscleModel, metrics: DailyMetricsModel,
               settings: UserSettings, sessions: [WorkoutSession], history: [String: ExerciseHistory]) -> PlannedWorkout {
         plans.gym = gym.profile
+        if block?.isBusy == true { return busyPlan(gym: gym, metrics: metrics, settings: settings, history: history) }
         let goals = plans.sessionSetGoals(focus: focus, minutes: minutes, muscles: muscles, sessions: sessions,
                                           extra: metrics.recentLiftingDays)
         return gym.planner.plan(focus: focus, minutes: minutes, recovery: metrics.recoveryForTraining, history: history,
@@ -46,6 +49,25 @@ struct TrainerPlanRequest {
                                 includeCore: effectiveFinisher == .off,
                                 age: settings.ageIsSet ? settings.age : nil,
                                 anchorOneRepMaxKg: LiftAnchorsStore.shared.anchors)
+    }
+
+    /// A planned busy week's session (`BusyWeek.session`): the planner's
+    /// session at full length, cut to its main lifts for one or two hard sets
+    /// at the weights it chose (exercises and loads the gym supports), to fit
+    /// `minutes`. No weekly set goals: the week holds, it doesn't build.
+    private func busyPlan(gym: GymStore, metrics: DailyMetricsModel, settings: UserSettings,
+                          history: [String: ExerciseHistory]) -> PlannedWorkout {
+        var planner = gym.planner
+        planner.exerciseFilter = exerciseFilter
+        let full = gym.planner.plan(focus: focus, minutes: max(minutes, BusyWeek.planningMinutes), recovery: metrics.recoveryForTraining,
+                                    history: history, block: block, focusReason: focusReason, prioritySlots: prioritySlots,
+                                    bodyMassKg: metrics.bodyMassKg, sex: metrics.sex,
+                                    trainingStatus: metrics.trainingStatus ?? .novice,
+                                    exerciseFilter: exerciseFilter.isEmpty ? nil : exerciseFilter,
+                                    includeCore: false,
+                                    age: settings.ageIsSet ? settings.age : nil,
+                                    anchorOneRepMaxKg: LiftAnchorsStore.shared.anchors)
+        return BusyWeek.session(from: full, minutes: minutes, planner: planner, warmUpMinutes: warmUpMinutes)
     }
 
     /// Exercises from this many days back count as recent, so the finisher

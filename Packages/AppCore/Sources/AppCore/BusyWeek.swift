@@ -13,11 +13,11 @@ import Foundation
 ///   adaptations in young and older adults. Med Sci Sports Exerc
 ///   2011;43(7):1177-1187; abstract read 2026-11-17).
 /// - Strength and size can be held for up to 32 weeks on one session a week
-///   and one set per exercise as long as the load is kept (Spiering BA,
-///   Mujika I, Sharp MA, Foulis SA. Maintaining physical performance: the
-///   minimal dose of exercise needed to preserve endurance and strength over
-///   time. J Strength Cond Res 2021;35(5):1449-1458; narrative review, as read
-///   for docs/research/healthy-living-2026-11.md, not re-verified here).
+///   and one set per exercise as long as the load is kept; older adults may
+///   need two sessions and two or three sets (Spiering BA, Mujika I, Sharp
+///   MA, Foulis SA. Maintaining physical performance: the minimal dose of
+///   exercise needed to preserve endurance and strength over time. J Strength
+///   Cond Res 2021;35(5):1449-1458; narrative review; abstract read 2026-11-17).
 /// - One set of 6-12 reps at about 70-85% of 1RM, taken close to failure, two
 ///   or three times a week, still raised squat and bench 1RM in trained men
 ///   over 8-12 weeks (Androulakis-Korakakis P, Fisher JP, Steele J. Sports Med
@@ -186,6 +186,21 @@ public struct BusyWeek: Codable, Sendable, Equatable {
         let words = ["Three", "Four", "Five", "Six"]
         let count = weeks - 3 < words.count ? words[weeks - 3] : "\(weeks)"
         return "\(count) busy weeks in a row have held what you have. Build again this week?"
+    }
+
+    /// The last training day as the restart and "first session back" rules
+    /// should see it: a planned busy week counts as seen through its last
+    /// day (up to today), so its planned gap never reads as time away and
+    /// the seven days are counted from the end of it.
+    public static func lastSeen(lastTrained: Date?, plans: [WeeklyPlan], now: Date = .now, calendar: Calendar = .current) -> Date? {
+        let today = calendar.startOfDay(for: now)
+        let busyEnds = plans.filter(\.isBusy).compactMap { plan -> Date? in
+            let start = calendar.startOfDay(for: plan.weekStart)
+            guard start <= today, let sunday = calendar.date(byAdding: .day, value: 6, to: start) else { return nil }
+            return min(sunday, today)
+        }
+        let candidates = busyEnds + (lastTrained.map { [calendar.startOfDay(for: $0)] } ?? [])
+        return candidates.max()
     }
 
     // MARK: Sets
