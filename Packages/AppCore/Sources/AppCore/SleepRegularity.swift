@@ -130,6 +130,29 @@ extension SleepRegularity {
                 ? "Your weekend sleep sits within about an hour of weekdays, which keeps your body clock in one place (Phillips 2017)."
                 : "Weekend sleep more than about an hour off weekdays shifts your body clock, like a small time-zone change twice a week (Phillips 2017). Keeping the wake time within an hour matters more than the bedtime."
         }
+
+        /// The same line, said with what else the app knows:
+        /// - With moderate or high sleep debt, a later weekend isn't scolded.
+        ///   The National Sleep Foundation's panel agreed that regular timing
+        ///   matters and that "when insufficient sleep is obtained during the
+        ///   week/work days, weekend/non-work day catch-up sleep may be
+        ///   beneficial" (Sletten et al., Sleep Health 2023; expert consensus,
+        ///   no trial). The next step is still an earlier night, the same
+        ///   advice as the sleep-debt plan (`SleepDebt.Result.plan`), so the
+        ///   two lines agree.
+        /// - While the insomnia path's sleep window is on (`SleepWindow`),
+        ///   the fixed wake time wins: no lie-in, whatever the week was like.
+        /// - Otherwise, and for a weekend that runs earlier, it is `note`.
+        public func note(sleepDebt: SleepDebt.Level?, sleepWindowOn: Bool = false) -> String {
+            if isWithinTarget { return note }
+            if sleepWindowOn {
+                return "While your sleep window is on, the fixed wake time wins: up at the same time at weekends too, even after a short week. A lie-in takes away the sleepiness the window builds for the next night."
+            }
+            if minutes > 0, sleepDebt == .moderate || sleepDebt == .high {
+                return "With sleep debt this high the weekend lie-in was probably worth it: catch-up sleep helps when the week ran short (Sletten 2023, an expert consensus, not a trial). Next time an earlier night repays it without moving your body clock."
+            }
+            return note
+        }
     }
 
     /// - Parameter nights: bed and wake times; a night is a weekend night when
@@ -179,8 +202,11 @@ extension SleepRegularity {
 /// later nights partly makes up for short ones (Banks et al., Sleep 2010: one
 /// longer recovery night restores part of the loss, more with more sleep;
 /// Kitamura et al., Sci Rep 2016: debt is paid back over days), so longer
-/// nights pay the debt down. (Sletten et al., Sleep Health 2023 is the NSF
-/// consensus on sleep regularity, not on catch-up sleep.)
+/// nights pay the debt down. The National Sleep Foundation's consensus panel
+/// agreed both that regular timing matters and that, when sleep in the week
+/// falls short, weekend catch-up sleep "may be beneficial" (Sletten et al.,
+/// Sleep Health 2023; abstract read 17 Nov 2026. An earlier note here said the
+/// paper wasn't about catch-up sleep; it is one of its three questions).
 ///
 /// The number shown is the running total in hours. The level (Low / Moderate
 /// / High) is **the app's choice, not a published scale**: it is set on the

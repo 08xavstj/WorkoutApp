@@ -67,9 +67,18 @@ public enum BedtimeWindow {
         public var wakeForSession: Bool
         /// Shown when the Sleep Regularity Index is low.
         public var regularityNote: String?
+        /// True while the insomnia path is on (`SleepWindow`,
+        /// `BedtimeWindow.sleepWindow`): `start` is then the earliest bedtime
+        /// of a fixed sleep window, not a time to be in bed by, and the wake
+        /// time is fixed. Show `headline`, not "in bed by".
+        public var isSleepWindow = false
 
         /// "8 h need (about 8 h 55 min in bed) + 40 min of debt to repay, up at 6:30"
+        /// In sleep-window mode: "6 h 45 min sleep window, up at 6:30 every day".
         public var reason: String {
+            if isSleepWindow {
+                return "\(Self.hoursMinutes(timeInBedHours)) sleep window, up at \(Self.clock(wake)) every day"
+            }
             var parts = "\(Self.hours(needHours)) need"
             if timeInBedHours > needHours { parts += " (about \(Self.hoursMinutes(timeInBedHours)) in bed)" }
             if repaymentMinutes > 0 { parts += " + \(repaymentMinutes) min of debt to repay" }
@@ -82,7 +91,16 @@ public enum BedtimeWindow {
         public var windowText: String { "\(Self.clock(start))–\(Self.clock(end))" }
 
         /// "8 h need + 40 min of debt to repay, up at 6:30 → in bed by 21:50–22:20"
-        public var line: String { "\(reason) → in bed by \(windowText)" }
+        /// In sleep-window mode: "… → bed from 23:45, when sleepy".
+        public var line: String {
+            isSleepWindow ? "\(reason) → bed from \(Self.clock(start)), when sleepy" : "\(reason) → in bed by \(windowText)"
+        }
+
+        /// The one line to show for tonight in either mode: "In bed by
+        /// 21:50–22:20", or "Bed from 23:45, up at 6:30" in sleep-window mode.
+        public var headline: String {
+            isSleepWindow ? "Bed from \(Self.clock(start)), up at \(Self.clock(wake))" : "In bed by \(windowText)"
+        }
 
         static func hours(_ value: Double) -> String {
             "\(value.formatted(.number.precision(.fractionLength(0...2)))) h"
