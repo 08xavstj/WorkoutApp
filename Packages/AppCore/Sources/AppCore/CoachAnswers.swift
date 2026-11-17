@@ -79,6 +79,9 @@ public struct CoachFacts: Sendable, Equatable {
     public var sleepInterruptions: Int?
     /// Hours behind the sleep need over the last 14 nights.
     public var sleepDebtHours: Double?
+    /// While the insomnia path's sleep window is on (`SleepWindow.coachFact`):
+    /// sleep debt and "an earlier night" are left out, and answers keep to the window.
+    public var sleepWindowFact: String?
 
     // Food
     public var caloriesEaten: Double?
@@ -341,7 +344,13 @@ public enum CoachAnswers {
             if !inputs.isEmpty { lines.append("It comes from " + inputs.joined(separator: ", ") + ".") }
         }
         if f.hrvBelowNormal { lines.append("Your 7-day HRV is also below your normal range, which caps today at an easy day.") }
-        let action: String = if recovery < RecoveryCalculator.moderateBand.lowerBound { "Make today easy and protect tonight's sleep; the score usually lifts within a day or two." } else if recovery < RecoveryCalculator.highBand.lowerBound { "A normal session is fine; an earlier night helps tomorrow's score." } else { "Good day for your harder session." }
+        var action: String = if recovery < RecoveryCalculator.moderateBand.lowerBound { "Make today easy and protect tonight's sleep; the score usually lifts within a day or two." } else if recovery < RecoveryCalculator.highBand.lowerBound { "A normal session is fine; an earlier night helps tomorrow's score." } else { "Good day for your harder session." }
+        // The sleep window's nights are short on purpose (`SleepWindow`): no "earlier night".
+        if f.sleepWindowFact != nil, recovery < RecoveryCalculator.highBand.lowerBound {
+            action = recovery < RecoveryCalculator.moderateBand.lowerBound
+                ? "Make today easy; your sleep window keeps nights short for a few weeks, so a lower score is expected."
+                : "A normal session is fine. Keep to your sleep window tonight."
+        }
         return Answer(question: .whyRecovery, text: lines.joined(separator: " "), action: action)
     }
 
@@ -366,6 +375,12 @@ public enum CoachAnswers {
         if !stages.isEmpty {
             let detail = stages.joined(separator: ", ")
             lines.append(detail.prefix(1).uppercased() + String(detail.dropFirst()) + ".")
+        }
+        if f.sleepWindowFact != nil {
+            // The insomnia path: the window wins over the need and the debt (`SleepWindow`).
+            lines.append("Your sleep window is on, so shorter nights are the plan for now and sleep debt is paused.")
+            return Answer(question: .sleep, text: lines.joined(separator: " "),
+                          action: "Keep to the window: up at the same time, and bed only when sleepy.")
         }
         if let debt = f.sleepDebtHours, debt >= 2 {
             lines.append("Over the last two weeks you're about \(debt.formatted(h1)) h behind your need; that builds quietly, so an earlier night or two pays it back.")
@@ -668,7 +683,11 @@ public enum CoachAnswers {
             if let hours = f.sleepHours { lines.append("Sleep \(hours.formatted(h1)) h" + (f.sleepNeedHours.map { " of \($0.formatted(h1)) h needed" } ?? "") + (f.sleepScore.map { ", score \($0)" } ?? "") + ".") }
             if let hrv = f.hrv { lines.append("HRV \(Int(hrv.rounded())) ms" + (f.hrvChangePercent.map { " (\(signed($0, 0))% vs baseline)" } ?? "") + ".") }
             if let rhr = f.restingHeartRate { lines.append("Resting heart rate \(Int(rhr.rounded())) bpm" + (f.restingHeartRateChange.map { " (\(signed($0, 1)) vs baseline)" } ?? "") + ".") }
-            if let debt = f.sleepDebtHours, debt >= 2 { lines.append("Sleep debt \(debt.formatted(h1)) h over 14 nights.") }
+            if let window = f.sleepWindowFact {
+                lines.append(window)
+            } else if let debt = f.sleepDebtHours, debt >= 2 {
+                lines.append("Sleep debt \(debt.formatted(h1)) h over 14 nights.")
+            }
             if let yesterday = f.yesterdayStrain { lines.append("Yesterday's strain \(strainText(yesterday))%.") }
             if topic == .general, let steps = f.steps { lines.append("Steps today \(whole(steps)).") }
         }

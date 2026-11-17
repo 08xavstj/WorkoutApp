@@ -561,6 +561,8 @@ private struct SleepSettingsSection: View {
                 get: { settings.isRestMode },
                 set: { settings.setRestMode($0) }
             ))
+            // The insomnia path's way in (`SleepWindowView`); nothing else of it shows until it applies.
+            SleepWindowSettingsRow()
         } header: {
             Text("Sleep & rest")
         } footer: {

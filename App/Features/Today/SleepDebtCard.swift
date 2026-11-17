@@ -81,7 +81,8 @@ struct LastNightSleepSheet: View {
             }
             if let shift = SleepMidpointShift.current(metrics.sleepNights) {
                 // Social jet lag: weekday vs weekend sleep midpoint, 1-hour target (Phillips 2017).
-                row("Weekend shift", shift.text, detail: shift.note)
+                // A lie-in after a short week isn't scolded; the sleep window's fixed wake time wins (Sletten 2023).
+                row("Weekend shift", shift.text, detail: shift.note(sleepDebt: metrics.sleepDebt?.level, sleepWindowOn: metrics.sleepWindowOn))
             }
         }
         .card()
@@ -115,7 +116,11 @@ struct LastNightSleepSheet: View {
                 Text(debt.isCaughtUp ? "Caught up" : SleepText.hours(debt.hours))
                     .font(.title2.weight(.bold))
                     .foregroundStyle(Theme.primaryText)
-                if let plan = debt.plan {
+                // The insomnia path: the debt plan and the bed-by rows give way to the sleep window.
+                if let course = SleepWindowStore.shared.course {
+                    SleepWindowDebtRows(course: course,
+                                        window: SleepWindowStore.shared.bedtimeWindow(sleepNeedHours: settings.sleepNeedHours))
+                } else if let plan = debt.plan {
                     Text(plan)
                         .font(.subheadline)
                         .foregroundStyle(Theme.primaryText)
@@ -135,6 +140,7 @@ struct LastNightSleepSheet: View {
     private var needCaption: String {
         let need = SleepText.hours(settings.sleepNeedHours)
         let source = settings.sleepNeedIsDefault ? "the app's default" : "your setting"
+        if metrics.sleepWindowOn { return "Counted against \(need) asleep a night (\(source)). Paused while your sleep window is on." }
         return "Counted against \(need) asleep a night (\(source); change it in Settings). Short nights add up; longer nights pay them back."
     }
 
@@ -153,7 +159,8 @@ struct LastNightSleepSheet: View {
     /// reaction times in athletes (Mah et al., Sleep 2011).
     @ViewBuilder
     private var bedByRows: some View {
-        if let window = metrics.bedtimeWindow {
+        // Not while the sleep window is on: `SleepWindowDebtRows` shows tonight then.
+        if let window = metrics.bedtimeWindow, !window.isSleepWindow, !metrics.sleepWindowOn {
             Divider().overlay(Theme.separator)
             Text("Tonight: in bed by \(window.windowText)")
                 .font(.subheadline.weight(.semibold))

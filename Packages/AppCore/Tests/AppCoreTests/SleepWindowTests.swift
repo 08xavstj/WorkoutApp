@@ -125,6 +125,12 @@ struct SleepWindowTests {
         #expect(state.mayAsk(now: day(190)))
         state.refusedDay = day(150)
         #expect(!state.mayAsk(now: day(200)))
+        // "Not now" counts the same.
+        var later = SleepWindow.State(notNowDay: day(10))
+        #expect(!later.mayAsk(now: day(99)))
+        #expect(later.mayAsk(now: day(100)))
+        later.notNowDay = nil
+        #expect(later.mayAsk(now: day(11)))
     }
 
     // MARK: Who it isn't offered to
@@ -679,6 +685,83 @@ struct SleepWindowTests {
         #expect(!message.body.contains("in bed by"))
     }
 
+    @Test func theMorningMessageDropsDebtAndShortNightTipsUnderASleepWindow() throws {
+        var f = CoachCheckIns.MorningFacts()
+        f.recovery = 60
+        f.sleepHours = 6
+        f.sleepNeedHours = 7.5
+        f.sleepDebtHours = 6
+        f.bedByText = "21:50–22:20"
+        f.caffeineCutoffText = "1:30 PM"
+        // Without the window: the debt tip.
+        #expect(try #require(CoachCheckIns.morning(f)).body.contains("Sleep debt is 6 h"))
+        f.sleepWindow = true
+        let body = try #require(CoachCheckIns.morning(f)).body
+        #expect(!body.lowercased().contains("sleep debt"))
+        #expect(!body.contains("short night"))
+        #expect(!body.contains("in bed by"))
+        // Debt alone, no recovery or session: nothing to say but the check-in.
+        var debtOnly = CoachCheckIns.MorningFacts()
+        debtOnly.sleepDebtHours = 6
+        debtOnly.sleepWindow = true
+        #expect(CoachCheckIns.morning(debtOnly) == nil)
+    }
+
+    @Test func theCoachKeepsToTheWindow() throws {
+        let running = course(windowMinutes: 405)
+        var f = CoachFacts()
+        f.sleepHours = 6
+        f.sleepNeedHours = 7.5
+        f.sleepDebtHours = 5
+        let before = try #require(CoachAnswers.sleep(f))
+        #expect(before.text.contains("earlier night"))
+        #expect(before.action?.contains("earlier") == true)
+        f.sleepWindowFact = SleepWindow.coachFact(running)
+        let answer = try #require(CoachAnswers.sleep(f))
+        #expect(!answer.text.contains("earlier"))
+        #expect(answer.text.contains("sleep debt is paused"))
+        #expect(answer.action?.contains("Keep to the window") == true)
+        // The on-device model's facts carry the window, not the debt.
+        let lines = CoachAnswers.factLines(for: "should I sleep more", topic: .recovery, facts: f)
+        #expect(lines.contains { $0.hasPrefix("Sleep window on (week 1 of 8,") })
+        #expect(!lines.contains { $0.hasPrefix("Sleep debt") })
+        #expect(SleepWindow.coachFact(running).contains("don't suggest earlier nights"))
+    }
+
+    @Test func theInsightsFeedDoesNotSayYoureSleepingLessUnderASleepWindow() {
+        func inputs(windowOn: Bool) -> DailyInsights.Inputs {
+            var i = DailyInsights.Inputs(day: day(35, hour: 9), calendar: calendar)
+            // Four weeks at about 7.5 h, then a week at about 6.3 h (the window's first week).
+            i.sleepHours = (0...35).map { DayValue(date: day($0, hour: 7), value: ($0 >= 29 ? 6.3 : 7.5) + Double($0 % 3) * 0.1) }
+            i.sleepWindowOn = windowOn
+            return i
+        }
+        #expect(DailyInsights.evaluate(inputs(windowOn: false)).feed.today.contains { $0.id == "sleepWeek" })
+        #expect(!DailyInsights.evaluate(inputs(windowOn: true)).feed.today.contains { $0.id == "sleepWeek" })
+    }
+
+    @Test func theCutAdviceDoesNotSendHimToTheDebtPlanUnderASleepWindow() throws {
+        var goals = Goals()
+        goals.weight = .lose
+        let debt = try #require(SleepDebt.compute(nightlyHours: Array(repeating: 6, count: 14), needHours: 8))
+        let regular = try #require(CutAndSleep.advice(goals: goals, sleepDebt: debt))
+        #expect(regular.message.contains("sleep plan"))
+        let window = try #require(CutAndSleep.advice(goals: goals, sleepDebt: debt, sleepWindowOn: true))
+        #expect(!window.message.contains("sleep plan"))
+        #expect(window.message.contains("sleep window"))
+        #expect(window.suggestedRatePercent == regular.suggestedRatePercent)
+    }
+
+    @Test func theUpNextLineSaysTheWeekOrWhatNext() {
+        var running = course(windowMinutes: 390)
+        #expect(SleepWindow.rowDetail(running) == "Sleep window · week 1 of 8 · only when sleepy")
+        running.reviews = (1...4).map { SleepWindow.Review(week: $0, nights: 7, efficiencyPercent: 82, change: .held, windowMinutes: 390) }
+        #expect(running.isStalled)
+        #expect(SleepWindow.rowDetail(running).contains("tap for what next"))
+        running.continuedPastStall = true
+        #expect(SleepWindow.rowDetail(running) == "Sleep window · week 5 of 8 · only when sleepy")
+    }
+
     // MARK: Words
 
     /// Every sentence the path can show.
@@ -693,6 +776,7 @@ struct SleepWindowTests {
             SleepWindow.needsNightsText, SleepWindow.nothingToShortenText(proposal), SleepWindow.basisText(proposal),
             SleepWindow.heading(running), SleepWindow.windowText(windowMinutes: 405, wakeMinutes: 390),
             SleepWindow.AskReason.mornings(14).text, SleepWindow.AskReason.efficiency(80).text,
+            SleepWindow.rowDetail(running), SleepWindow.coachFact(running),
         ]
         copy += SleepWindow.rules(running) + SleepWindow.evidence
         copy += SleepWindow.Frequency.allCases.map(\.label)

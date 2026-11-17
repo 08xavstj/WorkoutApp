@@ -202,6 +202,10 @@ public enum CoachCheckIns {
         public var sleepDebtHours: Double?
         /// Tonight's bed-by window, "22:00–22:30".
         public var bedByText: String?
+        /// The insomnia path's sleep window is on (`SleepWindow`): short
+        /// nights are the plan, so neither sleep debt nor "after a short night"
+        /// is mentioned.
+        public var sleepWindow = false
         /// Latest coffee for your usual bedtime (`CaffeineTiming.cutoffMinutes`), "2:10 pm".
         public var caffeineCutoffText: String?
         /// This morning's check-in is saved. The morning message is the one
@@ -274,7 +278,7 @@ public enum CoachCheckIns {
             kind: .morning, title: "Morning check-in", body: "How you slept and how you feel. About a minute.",
             link: morningCheckInLink, question: nil, priority: .low)
         if f.restMode { return checkInOnly } // Rest mode pauses nudges (Settings › Rest mode).
-        let debt = (f.sleepDebtHours ?? 0) >= notableSleepDebtHours ? f.sleepDebtHours : nil
+        let debt = !f.sleepWindow && (f.sleepDebtHours ?? 0) >= notableSleepDebtHours ? f.sleepDebtHours : nil
         guard f.recovery != nil || f.session != nil || debt != nil else { return checkInOnly }
 
         let easy = isEasy(f)
@@ -344,7 +348,7 @@ public enum CoachCheckIns {
         if let debt, let bedBy = f.bedByText {
             return "Sleep debt is \(hours(debt)) h; in bed by \(bedBy) tonight starts to repay it."
         }
-        if let asleep = f.sleepHours, let need = f.sleepNeedHours, need - asleep >= shortNightHours,
+        if !f.sleepWindow, let asleep = f.sleepHours, let need = f.sleepNeedHours, need - asleep >= shortNightHours,
            let cutoff = f.caffeineCutoffText {
             // Caffeine within about 9 h of bed costs ~45 min of sleep (Gardiner et al., Sleep Med Rev 2023).
             return "After a short night, a last coffee by \(cutoff) protects tonight's sleep."

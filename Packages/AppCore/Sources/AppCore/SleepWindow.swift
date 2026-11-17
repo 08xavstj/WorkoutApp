@@ -4,7 +4,8 @@ import Foundation
 /// someone who says he struggles to fall or stay asleep three or more nights a
 /// week and that it affects his days. It is a mode of the bed-by window
 /// (`BedtimeWindow.sleepWindow`), shown only when it applies; for everyone
-/// else nothing here appears. Research: docs/research/sleep-window.md.
+/// else nothing here appears. Research: docs/research/sleep-window-2026-11.md
+/// (what was checked at the source and what wasn't).
 ///
 /// What it is, and why these parts and no others:
 /// - A fixed wake time every day and a time in bed set to recent sleep, widened
@@ -15,13 +16,12 @@ import Foundation
 ///   added nothing (1.01) and relaxation may hinder (0.81) (Furukawa et al.,
 ///   JAMA Psychiatry 2024). So there are no tips, breathing or relaxation here.
 /// - Alone, the window beat sleep-hygiene advice in 642 adults in primary
-///   care: insomnia severity −3.05 points at six months, d = −0.74 (Kyle et
-///   al., Lancet 2023, the HABIT trial); as a single component it has a
-///   conditional recommendation (Edinger et al., J Clin Sleep Med 2021, AASM).
-/// - The rules are the HABIT trial's, from its published intervention table
-///   (Kyle et al., BMJ Open 2020;10:e036248, supplementary table 1), because
-///   it is the largest trial, was delivered briefly and then self-run by the
-///   participant, and is the more cautious rule where manuals differ.
+///   care: insomnia severity −3.05 points at six months, d = −0.74, with no
+///   serious adverse event judged related (Kyle et al., Lancet 2023, the
+///   HABIT trial; abstract read). As a single component it has a conditional
+///   recommendation (Edinger et al., J Clin Sleep Med 2021, AASM; full text read).
+/// - Where the sources' numbers differ, the app takes the more cautious one
+///   (more time in bed, slower to narrow) and says so at each constant.
 ///
 /// Limits, all from the sources:
 /// - It makes people sleepier and slower for the first weeks: objective sleep
@@ -30,10 +30,13 @@ import Foundation
 ///   at three months (Kyle et al., Sleep 2014). The app warns about driving
 ///   every time the plan is shown.
 /// - It is not offered with the conditions in `Exclusion`.
-/// - A wrist tracker over-counts sleep in people lying awake (European
-///   Insomnia Guideline, Riemann et al., J Sleep Res 2023: devices based on
-///   actigraphy "overestimate sleep" and trackers "should in general be
-///   discouraged for patients with insomnia" until validated). So the owner's
+/// - A wrist tracker over-counts sleep in people lying awake: in 42 adults
+///   with insomnia a Fitbit and a research actigraph both "overestimated
+///   total sleep time and sleep efficiency" and caught only 39-45% of time
+///   awake (Kahawage et al., J Sleep Res 2020, against polysomnography;
+///   abstract read). The European guideline does not recommend actigraphy
+///   for the routine assessment of insomnia (Riemann et al., J Sleep Res
+///   2023; abstract read). So the owner's
 ///   answers open the path, never the tracker; the tracker's efficiency is
 ///   called an estimate; and every place the tracker's error matters it errs
 ///   towards a longer window.
@@ -42,38 +45,45 @@ public enum SleepWindow {
 
     // MARK: - Numbers
 
-    /// Nights a week of trouble that count: "at least three nights per week
-    /// for 3 months with associated daytime sequelae" are the minimal criteria
-    /// for chronic insomnia (European Insomnia Guideline 2023, after DSM-5 and
-    /// ICSD-3). The app applies them to the owner's answers; it diagnoses nothing.
+    /// Nights a week of trouble that count: three nights a week for three
+    /// months, with effects on the day, is the frequency and duration in the
+    /// DSM-5 and ICSD-3 definitions of chronic insomnia, which the HABIT trial
+    /// recruited on (Kyle et al., BMJ Open 2020 protocol; the definitions
+    /// themselves not re-read). The app applies them to the owner's answers;
+    /// it diagnoses nothing.
     public static let nightsPerWeek = 3
     /// See `nightsPerWeek`.
     public static let months = 3
 
-    /// Minutes added to recent average sleep for the first window. The HABIT
-    /// trial and Spielman's original method use average sleep alone; a
-    /// variant uses sleep plus 30 minutes (Edinger et al., JAMA 2001, as
-    /// described in Kyle et al., Sleep 2014; Edinger's paper not re-verified).
-    /// The longer window is the more cautious one, so +30.
+    /// Minutes added to recent average sleep for the first window. Kyle et al.
+    /// (Sleep 2014, full text read) and the AASM guideline ("time in bed is
+    /// initially limited to the average sleep duration") use average sleep
+    /// alone; Kyle 2014 notes a variant of average sleep plus 30 minutes
+    /// (Edinger et al., JAMA 2001; Edinger's paper not re-read). The longer
+    /// window is the more cautious one, so +30.
     public static let extraMinutes = 30
-    /// Shortest time in bed, minutes. Trials used 4.5 h (Spielman 1987, per
-    /// Kyle 2014) or 5 h (Kyle 2014; HABIT); the European guideline lists
-    /// "4.5, 5 or 6 hr" as the minimums in use. Six is the most cautious, and
-    /// Kyle 2014 warns a 4.5 h minimum "may lead to impairment greater than
-    /// that observed" at 5 h. Without a clinician watching, six.
+    /// Shortest time in bed, minutes. Kyle 2014 used 5 h, notes that "some
+    /// laboratories and therapists set a minimum TIB as low as 4.5 h", and
+    /// warns that 4.5 h "may lead to impairment greater than that observed"
+    /// (full text read). Six hours is longer than any minimum in those
+    /// sources: the app's choice, because nobody watches over the course here
+    /// as a nurse or a clinician would.
     public static let floorMinutes = 360
-    /// Minutes the window moves at a weekly review (HABIT; Kyle 2014).
+    /// Minutes the window moves at a weekly review (Kyle 2014: 15 min, full text read).
     public static let stepMinutes = 15
-    /// Days between reviews: weekly, on the week's average (HABIT).
+    /// Days between reviews: weekly, on the week's diary average (Kyle 2014;
+    /// HABIT's four weekly sessions, Kyle et al., BMJ Open 2020).
     public static let reviewDays = 7
-    /// Whole-percent sleep efficiency from which the window widens. HABIT:
-    /// "SE ≥ 85% increase TIB by 15 minutes". Spielman's rule as used in Kyle
-    /// 2014 widens only at 90%; widening sooner is the more cautious choice
-    /// (the guideline gives both: "thresholds of > 85% or 90%").
+    /// Whole-percent sleep efficiency from which the window widens. Kyle 2014
+    /// widened at 90% or more (full text read); other protocols widen at 85%
+    /// (said to be HABIT's rule, from a supplementary table that couldn't be
+    /// fetched: not re-verified). Widening sooner is the more cautious choice,
+    /// so 85%, also the usual mark of good sleep (Ohayon et al., Sleep Health 2017).
     public static let widenPercent = 85
-    /// Whole-percent sleep efficiency under which the window narrows. HABIT:
-    /// "SE = 80-84% no change", "SE ≤ 79% decrease TIB by 15 minutes". Kyle
-    /// 2014 narrows under 85%; narrowing later is the more cautious choice.
+    /// Whole-percent sleep efficiency under which the window narrows by one
+    /// step. Kyle 2014 narrowed under 85% (full text read); a band of 80-84%
+    /// with no change is said to be HABIT's (not re-verified). Narrowing later,
+    /// and only by the smallest step, is the more cautious choice: under 80%.
     public static let narrowBelowPercent = 80
     /// Nights with data a week needs before the window is changed (app's
     /// choice; HABIT averaged a 7-day diary, and a missing night is not a bad night).
@@ -84,17 +94,18 @@ public enum SleepWindow {
     public static let baselineNights = 14
     public static let minimumBaselineNights = 7
     /// Weeks after which the path ends by itself. Spielman's programme ran 8
-    /// weeks (Spielman et al., Sleep 1987) and "CBT-I and classic SRT ... often
-    /// last for 6-8 w" (Kyle 2014). Past that, still struggling means seeing someone.
+    /// weeks (Spielman et al., Sleep 1987; abstract read) and "CBT-I and
+    /// classic SRT ... often last for 6-8 w" (Kyle 2014). Past that, still
+    /// struggling means seeing someone.
     public static let maximumWeeks = 8
     /// Weekly reviews in a row without a wider window after which the app
     /// suggests seeing someone (app's choice; four weeks was the whole of
     /// HABIT's nurse-led phase).
     public static let stalledReviews = 4
-    /// "About 20 minutes" awake before getting up. The guideline's rule has no
-    /// number ("get out of bed when unable to sleep", AASM 2021); 15-20 minutes
-    /// is the usual clinic handout wording (seen in a search summary only, not
-    /// re-verified). The copy says "what feels like" so nobody watches a clock.
+    /// "About 20 minutes" awake before getting up. The AASM guideline's
+    /// stimulus-control rule has no number ("get out of bed when unable to
+    /// sleep", full text read); about 20 minutes is the usual handout wording
+    /// (not re-verified). The copy says "what feels like" so nobody watches a clock.
     public static let awakeMinutes = 20
     /// Sleep efficiency under which four weeks of tracker nights make the app
     /// ask the question: 85% or more is the mark of good sleep (Ohayon et al.,
@@ -161,7 +172,7 @@ public enum SleepWindow {
             case .fewer:
                 return "Then there's nothing to change. The odd bad night is normal."
             case .recent:
-                return "A rough few weeks usually passes by itself, so the app leaves your nights alone. If it's still going after \(SleepWindow.months) months, answer again in Settings › Sleep & nutrition."
+                return "The app only sets a sleep window once the trouble has lasted \(SleepWindow.months) months, as the usual definitions ask. If it's still going then, answer again in Settings › Sleep & nutrition."
             case .lasting:
                 return "If your days are fine, your sleep is doing its job. Nothing to change."
             }
@@ -221,7 +232,8 @@ public enum SleepWindow {
 
     // MARK: - Who it isn't for
 
-    /// Reasons not to offer the window. Each is from a source:
+    /// Reasons not to offer the window. Each is from a source (HABIT and AASM
+    /// read at the source; the European guideline's wording not re-read):
     /// - HABIT's exclusions (Kyle et al., BMJ Open 2020): pregnant or planning
     ///   pregnancy in the next 6 months; another sleep disorder (restless legs,
     ///   obstructive sleep apnoea, narcolepsy) diagnosed or positive on a
@@ -263,8 +275,8 @@ public enum SleepWindow {
             case .pregnancy: "I'm pregnant, or may be in the next six months"
             case .safetyCriticalWork: "I drive for work, or operate heavy machinery"
             case .verySleepy: "I already fight to stay awake in the day"
-            case .selfHarm: "I've had thoughts of ending my life"
-            case .otherCondition: "I have dementia or memory problems, am having cancer treatment, have major surgery coming, or have a condition that gets worse when I lose sleep"
+            case .selfHarm: "I've recently had thoughts of ending my life"
+            case .otherCondition: "I have dementia or memory problems, am in cancer care now, have major surgery coming, or have a condition that gets worse when I lose sleep"
             case .alreadyHelped: "I'm already working on my sleep with a clinician or a programme"
             }
         }
@@ -458,14 +470,15 @@ public enum SleepWindow {
     public static func propose(nights: [Night], sleepNeedHours: Double, usualWakeMinutes: Int?) -> Proposal? {
         let recent = nights.suffix(baselineNights).filter { $0.asleepHours > 0 }
         guard recent.count >= minimumBaselineNights, let usualWakeMinutes else { return nil }
-        let average = recent.map(\.asleepHours).reduce(0, +) / Double(recent.count) * 60
+        // Whole minutes first, so floating-point noise can't push a round figure up a step.
+        let average = Int((recent.map(\.asleepHours).reduce(0, +) / Double(recent.count) * 60).rounded())
         let regular = regularMinutes(sleepNeedHours: sleepNeedHours)
         // Up to the next 5 minutes: the longer side.
-        let raw = Int(((average + Double(extraMinutes)) / 5).rounded(.up)) * 5
+        let raw = (average + extraMinutes + 4) / 5 * 5
         let window = min(regular, max(floorMinutes, raw))
         // The wake time to the nearest 5 minutes, so the bedtime is a round time too.
         let wake = (Int((Double(usualWakeMinutes) / 5).rounded()) * 5) % 1440
-        return Proposal(windowMinutes: window, averageSleepMinutes: Int(average.rounded()), nightsUsed: recent.count,
+        return Proposal(windowMinutes: window, averageSleepMinutes: average, nightsUsed: recent.count,
                         regularMinutes: regular, wakeMinutes: wake)
     }
 
@@ -736,23 +749,26 @@ public enum SleepWindow {
         public var outcome: Outcome?
         /// The day the last course ended.
         public var endedDay: Date?
+        /// The day he closed the question with "Not now".
+        public var notNowDay: Date?
 
         public init(answers: Answers? = nil, refusals: [Refusal]? = nil, refusedDay: Date? = nil,
-                    course: Course? = nil, outcome: Outcome? = nil, endedDay: Date? = nil) {
+                    course: Course? = nil, outcome: Outcome? = nil, endedDay: Date? = nil, notNowDay: Date? = nil) {
             self.answers = answers
             self.refusals = refusals
             self.refusedDay = refusedDay
             self.course = course
             self.outcome = outcome
             self.endedDay = endedDay
+            self.notNowDay = notNowDay
         }
 
         /// Whether the app may raise the question by itself: never while a
         /// course runs or an ending is unread, and not within 90 days of an
-        /// answer, a refusal or a course.
+        /// answer, a refusal, a course or a "Not now".
         public func mayAsk(now: Date = .now) -> Bool {
             guard course == nil, outcome == nil else { return false }
-            let last = [answers?.day, refusedDay, endedDay].compactMap { $0 }.max()
+            let last = [answers?.day, refusedDay, endedDay, notNowDay].compactMap { $0 }.max()
             guard let last else { return true }
             return now.timeIntervalSince(last) >= Double(SleepWindow.askAgainDays) * 86_400
         }
@@ -817,6 +833,21 @@ public enum SleepWindow {
         "Sleep window · week \(course.week) of \(maximumWeeks)"
     }
 
+    /// The line under tonight's bedtime row (Up next): the week, or the
+    /// suggestion to see someone once the window has stalled.
+    public static func rowDetail(_ course: Course) -> String {
+        if course.isStalled && !course.continuedPastStall { return "No progress in 4 weeks: tap for what next" }
+        return "Sleep window · week \(course.week) of \(maximumWeeks) · only when sleepy"
+    }
+
+    /// One fact for the coach (on-device), so its answers keep to the window
+    /// instead of suggesting more sleep: "Sleep window on, week 2 of 8: …".
+    public static func coachFact(_ course: Course) -> String {
+        "Sleep window on (week \(course.week) of \(maximumWeeks), a few weeks of shorter, fixed time in bed for trouble sleeping): "
+            + windowText(windowMinutes: course.windowMinutes, wakeMinutes: course.wakeMinutes)
+            + ", same wake time every day, bed only when sleepy. Sleep debt is paused: don't suggest earlier nights, longer sleep or a lie-in."
+    }
+
     /// What an ending says, and what to do next.
     public static func outcomeText(_ outcome: Outcome) -> String {
         let wake = clock(outcome.wakeMinutes)
@@ -841,11 +872,11 @@ public enum SleepWindow {
 
     /// The studies behind it, for the evidence disclosure.
     public static let evidence = [
-        "A shorter, fixed sleep window beat sleep-hygiene advice in 642 adults in primary care (Kyle et al., Lancet 2023). The weekly rule here is that trial's.",
+        "A shorter, fixed sleep window beat sleep-hygiene advice in 642 adults in primary care (Kyle et al., Lancet 2023).",
         "Across 241 trials, a restricted sleep window and getting out of bed when awake were among the parts that helped; sleep-hygiene advice added nothing and relaxation may get in the way (Furukawa et al., JAMA Psychiatry 2024). That's why there are no tips here.",
-        "It makes people sleepier and slower to react for the first weeks (Kyle et al., Sleep 2014).",
-        "The six-hour minimum is the app's choice, the longest of the minimums in use (4.5, 5 or 6 hours: European Insomnia Guideline 2023).",
-        "Wrist trackers overestimate sleep in people who lie awake (European Insomnia Guideline 2023), so your answers start this, not the tracker.",
+        "It makes people sleepier and slower to react for the first weeks, back to normal by three months (Kyle et al., Sleep 2014).",
+        "That study widened the window at 90% asleep, narrowed it under 85% and never went under 5 hours. The app widens sooner, narrows later and never goes under 6 hours: the cautious end, because no one is checking in with you.",
+        "Wrist trackers overestimated sleep and missed more than half the time awake in adults with insomnia (Kahawage et al., J Sleep Res 2020), so your answers start this, not the tracker.",
     ]
 
     /// "6 h 45 min"

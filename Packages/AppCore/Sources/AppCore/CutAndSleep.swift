@@ -35,11 +35,20 @@ public enum CutAndSleep {
     }
 
     /// Nil unless the goal is to lose weight and the 14-night sleep debt is high.
-    public static func advice(goals: Goals?, sleepDebt: SleepDebt.Result?) -> Advice? {
+    /// - Parameter sleepWindowOn: the insomnia path's sleep window is on
+    ///   (`SleepWindow`): the nights are short on purpose for a few weeks, so
+    ///   the advice keeps the slower rate but doesn't send him to the sleep-debt plan.
+    public static func advice(goals: Goals?, sleepDebt: SleepDebt.Result?, sleepWindowOn: Bool = false) -> Advice? {
         guard let goals, goals.weight == .lose, let sleepDebt, sleepDebt.level == triggerLevel else { return nil }
         let slower = slowerRate(than: goals.weeklyRatePercent)
         let debt = sleepDebt.hours.formatted(.number.precision(.fractionLength(0...1)))
         var message = "In a 14-day trial on the same diet, people sleeping 5.5 h instead of 8.5 h lost 55% less fat and 60% more lean mass (Nedeltcheva 2010; a small study). You're \(debt) h behind over 14 nights, so easing the deficit this week keeps more muscle: "
+        if sleepWindowOn {
+            message = "In a 14-day trial on the same diet, people sleeping 5.5 h instead of 8.5 h lost 55% less fat and 60% more lean mass (Nedeltcheva 2010; a small study). Your sleep window keeps nights short for a few weeks, so easing the deficit until it ends keeps more muscle: "
+            message += slower.map { "pick \($0.formatted(.number.precision(.fractionLength(0...2))))% a week in Goals for now." }
+                ?? "you're already at the slowest rate, so hold the target rather than tightening it."
+            return Advice(message: message, suggestedRatePercent: slower)
+        }
         if let slower {
             message += "pick \(slower.formatted(.number.precision(.fractionLength(0...2))))% a week in Goals for now, and follow the sleep plan first."
         } else {

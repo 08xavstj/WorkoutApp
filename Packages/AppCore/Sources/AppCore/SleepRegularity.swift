@@ -149,7 +149,7 @@ extension SleepRegularity {
                 return "While your sleep window is on, the fixed wake time wins: up at the same time at weekends too, even after a short week. A lie-in takes away the sleepiness the window builds for the next night."
             }
             if minutes > 0, sleepDebt == .moderate || sleepDebt == .high {
-                return "With sleep debt this high the weekend lie-in was probably worth it: catch-up sleep helps when the week ran short (Sletten 2023, an expert consensus, not a trial). Next time an earlier night repays it without moving your body clock."
+                return "With this much sleep debt the weekend lie-in was probably worth it: catch-up sleep may help when the week ran short (Sletten 2023, an expert consensus, not a trial). Next time an earlier night repays it without moving your body clock."
             }
             return note
         }

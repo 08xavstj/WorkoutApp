@@ -67,6 +67,7 @@ struct UpNextCard: View {
             items.append(UpNextItem(id: "stretch", minutes: StretchStore.shared.reminderMinutes, kind: .stretch))
         }
         if let bedtime = bedtimeItem() { items.append(bedtime) }
+        if let sleepWindow = sleepWindowItem(now: now) { items.append(sleepWindow) }
         if let cardio = cardioItem(now: now) { items.append(cardio) }
         items += weekQueueItems(now: now)
         // Builder B: the watch flagged possible hypertension and no 7-day home
@@ -135,8 +136,17 @@ struct UpNextCard: View {
     private func bedtimeItem() -> UpNextItem? {
         // After midnight the window shown would be last night's, already past.
         let hour = Calendar.current.component(.hour, from: .now)
-        guard hour >= RecoveryTiming.earliestWakeHour,
-              let debt = metrics.sleepDebt, debt.level == .moderate || debt.level == .high, let window = metrics.bedtimeWindow else { return nil }
+        guard hour >= RecoveryTiming.earliestWakeHour else { return nil }
+        // The insomnia path: every day while it runs, as the sleep window, never as debt.
+        if let course = SleepWindowStore.shared.course {
+            // Ill (rest mode): the window is paused and nothing is pushed (`SleepWindow.restingNote`).
+            guard !settings.isRestMode,
+                  let window = SleepWindowStore.shared.bedtimeWindow(sleepNeedHours: settings.sleepNeedHours) else { return nil }
+            return UpNextItem(id: "bedtime", minutes: Self.eveningMinutes(window.start), kind: .bedtime(
+                title: window.headline, detail: SleepWindow.rowDetail(course)))
+        }
+        guard let debt = metrics.sleepDebt, debt.level == .moderate || debt.level == .high, let window = metrics.bedtimeWindow,
+              !window.isSleepWindow else { return nil }
         let parts = Calendar.current.dateComponents([.hour, .minute], from: window.start)
         var minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
         // A window after midnight still comes last today.
@@ -144,6 +154,27 @@ struct UpNextCard: View {
         return UpNextItem(id: "bedtime", minutes: minutes, kind: .bedtime(
             title: "In bed by \(window.windowText) tonight",
             detail: "Sleep debt \(SleepText.hours(debt.hours))"))
+    }
+
+    /// A bedtime as an Up next minute: after midnight still comes last today.
+    private static func eveningMinutes(_ date: Date) -> Int {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        return minutes < 12 * 60 ? minutes + 24 * 60 : minutes
+    }
+
+    /// The insomnia path's question, only when the data suggests asking
+    /// (`SleepWindow.askReason`) and not within 90 days of an answer; or the
+    /// ending of a course until it's read. Nothing otherwise, ever.
+    private func sleepWindowItem(now: Int) -> UpNextItem? {
+        let store = SleepWindowStore.shared
+        if store.state.outcome != nil {
+            return UpNextItem(id: "sleep-window", minutes: now, kind: .sleepWindow(
+                title: "Sleep window finished", detail: "What it found, and what next", askReason: nil))
+        }
+        guard !metrics.restMode, let reason = store.askReason(nights: metrics.sleepNights, checkIns: checkIns) else { return nil }
+        return UpNextItem(id: "sleep-window", minutes: settings.morningCheckInMinutes, kind: .sleepWindow(
+            title: SleepWindow.questionTitle, detail: "Two questions", askReason: reason))
     }
 
     /// The weekly plan's easy cardio on its day (any day in a flexible week)
@@ -235,6 +266,8 @@ private struct UpNextItem: Identifiable {
         case bloodPressure(Date)
         /// A session that wasn't the suggested one: ask why once (`SwapQuestionButton`).
         case swapQuestion(planned: WorkoutFocus, chosen: WorkoutFocus)
+        /// The insomnia path's question, or a course's ending (`SleepWindowView`).
+        case sleepWindow(title: String, detail: String, askReason: SleepWindow.AskReason?)
     }
 
     let id: String
@@ -265,6 +298,31 @@ private struct UpNextItemRow: View {
             BloodPressureUpNextRow(flagged: flagged)
         case .swapQuestion(let planned, let chosen):
             SwapQuestionButton(planned: planned, chosen: chosen)
+        case .sleepWindow(let title, let detail, let askReason):
+            SleepWindowUpNextRow(title: title, detail: detail, askReason: askReason)
+        }
+    }
+}
+
+/// Opens the insomnia path's page (`SleepWindowView`) as a sheet.
+private struct SleepWindowUpNextRow: View {
+    let title: String
+    let detail: String
+    let askReason: SleepWindow.AskReason?
+    @State private var showing = false
+
+    var body: some View {
+        Button { showing = true } label: {
+            UpNextRow(icon: "bed.double.fill", color: Theme.sleep, title: title, detail: detail) {
+                UpNextChevron()
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("upnext-sleep-window")
+        .sheet(isPresented: $showing) {
+            SleepWindowView(askReason: askReason)
+                .presentationBackground(Theme.background)
         }
     }
 }

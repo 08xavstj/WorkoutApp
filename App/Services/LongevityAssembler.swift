@@ -104,6 +104,8 @@ enum LongevityAssembler {
         inputs.hrv = dayValues(m.biology.hrvSeries)
         inputs.sleepHours = dayValues(m.vitals.stat("sleepAverage")?.series)
         inputs.sleepRegularity = m.metrics.sleepConsistency
+        // Shorter nights are the plan while the insomnia path's window is on (`SleepWindow`).
+        inputs.sleepWindowOn = m.metrics.sleepWindowOn
         inputs.steps = dayValues(m.vitals.stat("steps")?.series).filter { $0.date < today }
         inputs.vo2Max = dayValues(m.vitals.vo2MaxHistory)
         inputs.activeMinutes = dayValues(m.vitals.stat("intensity")?.series)

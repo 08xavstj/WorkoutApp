@@ -718,7 +718,7 @@ private struct CalorieDetailsSheet: View {
                         PersonalCalorieNotes(cycleNote: CycleEnergy.note(sex: metrics.sex, daysSinceLastPeriod: checkIns.daysSinceLastPeriod()))
                         // Cut × sleep debt (`CutAndSleep`, Nedeltcheva 2010): advice to pick a
                         // slower rate; the weekly adjustment itself is unchanged.
-                        if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt) {
+                        if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt, sleepWindowOn: metrics.sleepWindowOn) {
                             Text(CutAndSleep.title + ". " + cut.message)
                         }
                         // Carbs by training day (`NutritionTargets.carbsText`: Burke 2011; Kerksick 2017) and
@@ -1134,7 +1134,7 @@ private struct HiddenCaloriesSafetyLines: View {
     @Environment(DailyMetricsModel.self) private var metrics
 
     var body: some View {
-        if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt) {
+        if let cut = CutAndSleep.advice(goals: metrics.goals, sleepDebt: metrics.sleepDebt, sleepWindowOn: metrics.sleepWindowOn) {
             Label(CutAndSleep.title + ". " + cut.message, systemImage: "moon.zzz.fill")
                 .font(Theme.Typography.context)
                 .foregroundStyle(Theme.recoveryModerateText)
