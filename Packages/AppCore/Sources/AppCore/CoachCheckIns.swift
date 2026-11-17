@@ -122,6 +122,7 @@ public enum CoachCheckIns {
     public static let scheme = "workoutapp"
     public static let todayLink = "\(scheme)://today"
     public static let eveningCheckInLink = "\(scheme)://checkin/evening"
+    public static let morningCheckInLink = "\(scheme)://checkin/morning"
 
     /// "workoutapp://coach?q=How%20should%20I%20train%20today%3F"
     public static func coachLink(question: String?) -> String {
@@ -203,6 +204,13 @@ public enum CoachCheckIns {
         public var bedByText: String?
         /// Latest coffee for your usual bedtime (`CaffeineTiming.cutoffMinutes`), "2:10 pm".
         public var caffeineCutoffText: String?
+        /// This morning's check-in is saved. The morning message is the one
+        /// daily prompt (it took over from a separate check-in reminder), so
+        /// it asks for the check-in until it's done.
+        public var checkInDone = true
+        /// A weigh-in is due (`WeighInNudge`): a lose or gain goal with no
+        /// reading for a few days. Said only when there is no other tip.
+        public var weighInDue = false
 
         public init() {}
     }
@@ -254,9 +262,14 @@ public enum CoachCheckIns {
     /// The morning briefing, or nil when there is nothing useful to say
     /// (rest mode, or no recovery, session or sleep debt to speak of).
     public static func morning(_ f: MorningFacts) -> Message? {
-        if f.restMode { return nil } // Rest mode pauses nudges (Settings › Rest mode).
+        // With nothing else to say, the message is the check-in prompt alone, or nothing once
+        // that's done. Rest mode pauses the training plan, not the check-in (it asks how you feel).
+        let checkInOnly: Message? = f.checkInDone ? nil : Message(
+            kind: .morning, title: "Morning check-in", body: "How you slept and how you feel. About a minute.",
+            link: morningCheckInLink, question: nil, priority: .low)
+        if f.restMode { return checkInOnly } // Rest mode pauses nudges (Settings › Rest mode).
         let debt = (f.sleepDebtHours ?? 0) >= notableSleepDebtHours ? f.sleepDebtHours : nil
-        guard f.recovery != nil || f.session != nil || debt != nil else { return nil }
+        guard f.recovery != nil || f.session != nil || debt != nil else { return checkInOnly }
 
         let easy = isEasy(f)
         let session = f.restDay ? nil : f.session
@@ -273,13 +286,27 @@ public enum CoachCheckIns {
 
         var sentences: [String] = []
         if let state = morningState(f, easy: easy) { sentences.append(state) }
-        if let tip = morningTip(f, session: session, easy: easy, debt: debt) { sentences.append(tip) }
-        guard !sentences.isEmpty else { return nil }
+        if let tip = morningTip(f, session: session, easy: easy, debt: debt) {
+            sentences.append(tip)
+        } else if f.weighInDue {
+            // Regular self-weighing goes with better weight control (Zheng et al., Obesity 2015;
+            // Madigan et al., IJBNPA 2015).
+            sentences.append("Step on the scale this morning: regular weigh-ins keep your trend honest.")
+        }
+        guard !sentences.isEmpty else { return checkInOnly }
 
         let priority: Priority = easy ? .high : (session != nil ? .normal : .low)
-        return Message(kind: .morning, title: title, body: body(sentences), link: todayLink,
+        // One message for the morning: the plan, then the check-in when it's still open and fits.
+        var text = body(sentences)
+        if !f.checkInDone, text.count + morningCheckInAsk.count < maxBodyCharacters {
+            text += " " + morningCheckInAsk
+        }
+        return Message(kind: .morning, title: title, body: text, link: todayLink,
                        question: morningQuestion, priority: priority)
     }
+
+    /// The check-in line on the morning message; the form is the first row of Today's Up next.
+    static let morningCheckInAsk = "Your one-minute check-in is on Today."
 
     static func isEasy(_ f: MorningFacts) -> Bool {
         if f.hrvBelowNormal || f.session?.easy == true { return true }

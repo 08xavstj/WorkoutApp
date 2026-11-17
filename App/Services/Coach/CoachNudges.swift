@@ -382,6 +382,10 @@ extension CoachNudges {
             f.restDay = guidance.isRestDay
         }
         f.session = session(on: fire, now: now)
+        // The morning message is the one daily prompt: it asks for the check-in until it's
+        // saved (a message written ahead for tomorrow always does), and mentions a due weigh-in.
+        f.checkInDone = isToday && checkIns?.morning() != nil
+        f.weighInDue = WeighInNudge.isDue(goals: metrics.goals, lastWeighIn: metrics.lastWeighIn, now: fire)
         f.sleepDebtHours = metrics.sleepDebt?.hours
         // The latest bed-by window's clock times stand in for tonight's: worked out
         // before the day starts, it is last night's or the coming night's, and the

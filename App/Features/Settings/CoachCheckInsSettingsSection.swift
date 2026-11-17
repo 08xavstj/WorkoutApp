@@ -3,7 +3,9 @@ import UIKit
 import UserNotifications
 import AppCore
 
-/// Settings › Coach check-ins: the messages the coach sends first
+/// Settings › Notifications › Daily messages: the one morning and one evening
+/// message that carry the plan and the check-in (there is no separate
+/// check-in reminder), and the note after a workout: what the coach sends first
 /// (`CoachNudges`). Off until turned on; the first switch explains, then
 /// asks iOS for notification permission. Without permission the messages
 /// still appear in the Coach tab.
@@ -17,9 +19,9 @@ struct CoachCheckInsSettingsSection: View {
 
     var body: some View {
         Section {
-            CoachKindToggle(kind: .morning, detail: "Today's plan and one tip, after you wake", nudges: nudges, turnOn: turnOn)
+            CoachKindToggle(kind: .morning, detail: "Recovery, today's session and your check-in, after you wake", nudges: nudges, turnOn: turnOn)
+            CoachKindToggle(kind: .evening, detail: "Bed-by time, tomorrow's session and your check-in", nudges: nudges, turnOn: turnOn)
             CoachKindToggle(kind: .postWorkout, detail: "What you did and what helps next", nudges: nudges, turnOn: turnOn)
-            CoachKindToggle(kind: .evening, detail: "Bed-by time and tomorrow's session", nudges: nudges, turnOn: turnOn)
             if nudges.anyOn {
                 CoachQuietHoursRows(nudges: nudges)
                 if notificationsDenied {
@@ -27,9 +29,9 @@ struct CoachCheckInsSettingsSection: View {
                 }
             }
         } header: {
-            Text("Coach check-ins")
+            Text("Daily messages")
         } footer: {
-            Text("Up to three short messages a day, none when there's nothing new, and fewer if you don't open them. The morning and evening ones take the place of the plain check-in reminders above, so you never get both. They're worked out on this iPhone from your own data; nothing is sent anywhere. The timing and limits are app choices.")
+            Text("One message in the morning and one in the evening, each with the plan and the check-in together. None when there's nothing new, and fewer if you don't open them. They're worked out on this iPhone from your own data; nothing is sent anywhere. The timing and limits are app choices.")
         }
         .alert("Let the coach message you?", isPresented: $explainingPermission) {
             Button("Continue") {

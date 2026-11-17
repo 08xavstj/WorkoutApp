@@ -25,9 +25,9 @@ struct SettingsView: View {
                     SettingsPageLink(title: "Training", detail: "Gym, rest timer, warm-up, Apple Watch", icon: "dumbbell.fill", id: "training") {
                         TrainingSettingsSection(showRPEGuide: { showingRPEGuide = true })
                     }
-                    SettingsPageLink(title: "Notifications", detail: "Reminders, doses, coach messages", icon: "bell.fill", id: "notifications") {
-                        RemindersSettingsSection()
+                    SettingsPageLink(title: "Notifications", detail: "Daily messages, reminders, doses", icon: "bell.fill", id: "notifications") {
                         CoachCheckInsSettingsSection()
+                        RemindersSettingsSection()
                     }
                     SettingsPageLink(title: "Sleep & nutrition", detail: "Sleep need, rest mode, calories", icon: "bed.double.fill", id: "sleep-nutrition") {
                         SleepSettingsSection()
@@ -370,8 +370,6 @@ private struct RemindersSettingsSection: View {
     /// iOS hasn't been asked yet: reminders that are on can't arrive until it is.
     @State private var notificationsNotAsked = false
     @State private var stretch = StretchStore.shared
-    /// The coach's morning or evening message replaces the plain check-in reminder (`CoachNudges`).
-    @State private var nudges = CoachNudges.shared
     /// Today's doses as a Lock Screen card (`MedsLiveActivity`); on unless switched off.
     @AppStorage(MedsLiveActivity.enabledKey, store: SharedStore.defaults) private var dosesOnLockScreen = true
     /// Waist, grip and blood pressure reminders (`Reminders.measurementRemindersKey`); on unless switched off.
@@ -388,10 +386,9 @@ private struct RemindersSettingsSection: View {
     }
 
     var body: some View {
-        @Bindable var settings = settings
         Section {
             if notificationsDenied {
-                NotificationsOffBanner(detail: "Check-in, workout and dose reminders won't arrive until you allow them.")
+                NotificationsOffBanner(detail: "Workout and dose reminders won't arrive until you allow them.")
             } else if notificationsNotAsked {
                 // Reminders never ask at launch; a switch below asks when it's turned on, and so does this.
                 Button(action: askForNotifications) {
@@ -403,29 +400,20 @@ private struct RemindersSettingsSection: View {
                     }
                 }
             }
-            Toggle(isOn: $settings.checkInRemindersOn) {
-                Text("Check-in reminders")
-                Text(checkInDetail)
-            }
-            // On an always-present row: a modifier on the Section would run per row.
-            .trackingNotificationsDenied($notificationsDenied)
-            .task {
-                notificationsNotAsked = await CoachNudges.permissionNotYetAsked()
-            }
-            // Asked from another switch (the coach's, below): the row above goes.
-            .onChange(of: router.remindersVersion) { notificationsNotAsked = false }
-            .onChange(of: settings.checkInRemindersOn) { _, on in
-                if on { askForNotifications() }
-            }
-            if settings.checkInRemindersOn {
-                checkInTimeRows
-            }
+            // The check-in has no reminder of its own: the daily messages above carry it.
             workoutRows
             stretchRows
             Toggle(isOn: $measurementReminders) {
                 Text("Measurement reminders")
                 Text("Monthly waist, grip twice a year, blood pressure re-check")
             }
+            // On an always-present row: a modifier on the Section would run per row.
+            .trackingNotificationsDenied($notificationsDenied)
+            .task {
+                notificationsNotAsked = await CoachNudges.permissionNotYetAsked()
+            }
+            // Asked from another switch (a daily message's, above): the row above goes.
+            .onChange(of: router.remindersVersion) { notificationsNotAsked = false }
             .onChange(of: measurementReminders) { _, on in
                 if on { askForNotifications() }
                 Task { await Reminders.measurementRemindersChanged() }
@@ -471,32 +459,6 @@ private struct RemindersSettingsSection: View {
             notificationsNotAsked = false
             notificationsDenied = !allowed
             if allowed { router.remindersVersion += 1 }
-        }
-    }
-
-    /// Which check-in prompts this switch sends, given the coach's messages.
-    private var checkInDetail: String {
-        switch (nudges.morningOn, nudges.eveningOn) {
-        case (false, false): "Morning and evening, skipped once done"
-        case (true, false): "Evening only; the coach's morning message replaces the morning one"
-        case (false, true): "Morning only; the coach's evening message replaces the evening one"
-        case (true, true): "Replaced by the coach's morning and evening messages"
-        }
-    }
-
-    /// The reminder times. A time the coach's message replaces is shown as
-    /// that, not as a picker for a reminder that won't be sent.
-    @ViewBuilder
-    private var checkInTimeRows: some View {
-        if nudges.morningOn {
-            LabeledContent("Morning", value: "Coach message instead")
-        } else {
-            DatePicker("Morning", selection: minutesBinding(\.morningCheckInMinutes), displayedComponents: .hourAndMinute)
-        }
-        if nudges.eveningOn {
-            LabeledContent("Evening", value: "Coach message instead")
-        } else {
-            DatePicker("Evening", selection: minutesBinding(\.eveningCheckInMinutes), displayedComponents: .hourAndMinute)
         }
     }
 

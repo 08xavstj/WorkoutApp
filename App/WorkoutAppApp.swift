@@ -554,29 +554,22 @@ struct RootView: View {
     }
 
     private func scheduleCheckInReminders() {
-        let calendar = Calendar.current
-        let enabled = settings.checkInRemindersOn
+        // One daily message: the plain "Morning check-in" and "Evening check-in" reminders are
+        // gone. The coach's morning and evening messages carry the check-in instead
+        // (`CoachCheckIns.morning`, `.evening`), so the same thing is never sent twice (HIG:
+        // "Avoid sending multiple notifications for the same thing"). Anyone who had the plain
+        // reminders on gets the messages in their place, once.
+        if settings.checkInRemindersOn {
+            settings.checkInRemindersOn = false
+            if !CoachNudges.shared.morningOn { CoachNudges.shared.morningOn = true }
+            if !CoachNudges.shared.eveningOn { CoachNudges.shared.eveningOn = true }
+        }
         let morning = settings.morningCheckInMinutes
         let evening = settings.eveningCheckInMinutes
-        let checkedIn = checkIns.morning() != nil
-        // The form saved, not just a drink logged tonight (`EveningCheckIn.isDone`).
-        let eveningDone = checkIns.eveningDone()
-        // HRV is "in" from Apple Health or a typed reading. If you never type
-        // HRV (none in the last week), the reminder doesn't wait for it.
-        let weekAgo = calendar.date(byAdding: .day, value: -7, to: .now) ?? .now
-        let typesHRV = hrvReadings.contains { $0.date >= weekAgo }
-        let hrvIn = metrics.hrv != nil || hrvReadings.contains { calendar.isDateInToday($0.date) }
-        let hrvMissing = checkedIn && !hrvIn && typesHRV
-        let weighIn = weighInNudgeDue
-        let bedBy = metrics.bedtimeWindow?.windowText
         Task {
-            let nudgeDay = await Reminders.scheduleCheckIns(
-                enabled: enabled, morningMinutes: morning, eveningMinutes: evening,
-                morningDone: checkedIn, eveningDone: eveningDone,
-                hrvMissing: hrvMissing, logsHRV: typesHRV, weighInNudge: weighIn, bedByTonight: bedBy,
-                morningOn: !CoachNudges.shared.morningOn, eveningOn: !CoachNudges.shared.eveningOn
-            )
-            if let nudgeDay, settings.weighInNudgeDay != nudgeDay { settings.weighInNudgeDay = nudgeDay }
+            // Clears any plain check-in reminder still pending from an earlier build.
+            _ = await Reminders.scheduleCheckIns(enabled: false, morningMinutes: morning, eveningMinutes: evening,
+                                                 morningDone: true, eveningDone: true)
             // The Monday review's one-shot reminders (none in rest mode or once it's opened; `Reminders.scheduleWeeklyReview`).
             await Reminders.rescheduleWeeklyReview()
         }
@@ -595,16 +588,6 @@ struct RootView: View {
         Task {
             await Reminders.scheduleStretchReminders(enabled: enabled, minutes: minutes, doneToday: done, slots: slots, areas: areas)
         }
-    }
-
-    /// The weigh-in line goes on a morning reminder at most once a week, and
-    /// only while a lose/gain goal has had no weigh-in for 3+ days
-    /// (`WeighInNudge`). It stays on the reminder that carries it until that
-    /// one has fired, then waits a week (`ReminderRules.weighInLineDue`).
-    private var weighInNudgeDue: Bool {
-        let goals = settings.goalsSet ? settings.goals : nil
-        guard WeighInNudge.isDue(goals: goals, lastWeighIn: metrics.lastWeighIn) else { return false }
-        return ReminderRules.weighInLineDue(lastCarried: settings.weighInNudgeDay, morningMinutes: settings.morningCheckInMinutes, now: .now)
     }
 
     /// Planned slots over the next week from the weekly plan (this week's and,
@@ -831,8 +814,6 @@ private struct ReminderReactions: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: settings.checkInRemindersOn) { scheduleCheckIns() }
-            .onChange(of: settings.morningCheckInMinutes) { scheduleCheckIns() }
-            .onChange(of: settings.eveningCheckInMinutes) { scheduleCheckIns() }
             .onChange(of: settings.workoutRemindersOn) { scheduleWorkouts() }
             .onChange(of: plans) {
                 // A saved plan is a fresh commitment: paused workout reminders come back.

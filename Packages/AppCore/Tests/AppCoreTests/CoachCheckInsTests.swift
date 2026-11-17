@@ -99,6 +99,49 @@ struct CoachCheckInsTests {
         #expect(CoachCheckIns.morning(f) == nil)
     }
 
+    // MARK: One morning message (the check-in rides on it)
+
+    @Test func theMorningMessageAsksForTheCheckInUntilItIsDone() throws {
+        var f = CoachCheckIns.MorningFacts()
+        f.recovery = 60
+        f.checkInDone = false
+        let open = try #require(CoachCheckIns.morning(f))
+        #expect(open.body.hasSuffix("Your one-minute check-in is on Today."))
+        #expect(open.link == CoachCheckIns.todayLink)
+        #expect(open.body.count <= CoachCheckIns.maxBodyCharacters)
+        f.checkInDone = true
+        let done = try #require(CoachCheckIns.morning(f))
+        #expect(!done.body.contains("check-in"))
+    }
+
+    @Test func withNothingElseToSayTheMorningMessageIsTheCheckIn() throws {
+        var f = CoachCheckIns.MorningFacts()
+        f.checkInDone = false
+        let message = try #require(CoachCheckIns.morning(f))
+        #expect(message.title == "Morning check-in")
+        #expect(message.link == CoachCheckIns.morningCheckInLink)
+        // Rest mode pauses the plan, not the check-in.
+        f.restMode = true
+        f.recovery = 20
+        let resting = try #require(CoachCheckIns.morning(f))
+        #expect(resting.title == "Morning check-in")
+        f.checkInDone = true
+        #expect(CoachCheckIns.morning(f) == nil)
+    }
+
+    @Test func aDueWeighInIsTheTipWhenThereIsNoOther() throws {
+        var f = CoachCheckIns.MorningFacts()
+        f.recovery = 70
+        f.weighInDue = true
+        let message = try #require(CoachCheckIns.morning(f))
+        #expect(message.body.contains("Step on the scale"))
+        // A better tip comes first.
+        f.sleepDebtHours = 4
+        f.bedByText = "22:10–22:40"
+        let withDebt = try #require(CoachCheckIns.morning(f))
+        #expect(!withDebt.body.contains("Step on the scale"))
+    }
+
     @Test func restDayDoesNotPushTheSession() throws {
         var f = CoachCheckIns.MorningFacts()
         f.recovery = 70
