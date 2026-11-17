@@ -378,5 +378,11 @@ public enum WorkoutBanterLibrary {
         L("cd01", .restDay, .plain, "Nothing is planned today. Rest is part of the plan."),
         L("cd02", .restDay, .plain, "Rest day. The next session is on your plan when you're ready for it."),
         L("cd03", .restDay, .plain, "No session is planned today. Enjoy the day off."),
+        // Keep plain (`Caution.keepPlain`): the session stands, without a joke and without saying why
+        // (the reason is private and a reminder shows on the Lock Screen). Rest stays an option.
+        L("ck01", .keepPlain, .plain, "{session} starts in {lead} minutes. Any version counts today, and so does a rest."),
+        L("ck02", .keepPlain, .plain, "{session} is planned for today. Go as easy as you like; the short version is fine."),
+        L("ck03", .keepPlain, .plain, "Your planned session is coming up. An easy one is fine, and so is resting."),
+        L("ck04", .keepPlain, .plain, "{session} in {lead} minutes. Take it at whatever pace suits today, or rest."),
     ]
 }

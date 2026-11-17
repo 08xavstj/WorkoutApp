@@ -39,7 +39,9 @@ import Foundation
 ///   So the jokes are about the barbell and the app, never the person.
 /// - **Safety states are plain.** Low recovery, flagged illness, logged pain,
 ///   rest mode and rest days get plain, kind wording and no push to train
-///   (`Caution`); the app's own rules decide those states.
+///   (`Caution`); the app's own rules decide those states. So does a run of
+///   low-mood mornings (`Caution.keepPlain`, `MoodCare`): the session stands,
+///   the jokes stop, and the line never says why.
 public enum WorkoutBanter {
     // MARK: Limits (app choices)
 
@@ -81,6 +83,8 @@ public enum WorkoutBanter {
         case lastCall
         // Plain and kind only (`Caution`).
         case lowRecovery, illness, pain, restMode, restDay
+        /// Plain wording while mood is low (`Facts.keepPlain`); the session still stands.
+        case keepPlain
 
         /// How much of the day's own data the situation carries (app choice):
         /// lines for a specific situation are preferred over general ones.
@@ -100,6 +104,9 @@ public enum WorkoutBanter {
     /// train. Most serious first.
     public enum Caution: String, Codable, Sendable, CaseIterable {
         case restMode, illness, pain, lowRecovery, restDay
+        /// A run of low-mood mornings (`MoodCare.keepPlain`): no jokes, and the
+        /// line never names the reason (it shows on the Lock Screen).
+        case keepPlain
 
         var situation: Situation {
             switch self {
@@ -108,6 +115,7 @@ public enum WorkoutBanter {
             case .pain: .pain
             case .lowRecovery: .lowRecovery
             case .restDay: .restDay
+            case .keepPlain: .keepPlain
             }
         }
     }
@@ -198,6 +206,11 @@ public enum WorkoutBanter {
         public var unit: LoadUnit = .kg
         /// The last reminder went unanswered: this one says reminders go quiet after it.
         public var lastCall = false
+        /// Keep the wording plain and kind: three or more low-mood mornings in
+        /// the last week (`MoodCare.keepPlain`). Humour
+        /// that misses on a low day is a risk with no evidence of benefit
+        /// (Walter et al. 2018 above), so the app's choice is to stop joking.
+        public var keepPlain = false
 
         public init() {}
 
@@ -208,6 +221,7 @@ public enum WorkoutBanter {
             if painArea != nil { return .pain }
             if recovery == .low { return .lowRecovery }
             if isRestDay { return .restDay }
+            if keepPlain { return .keepPlain }
             return nil
         }
 
@@ -238,7 +252,8 @@ public enum WorkoutBanter {
     /// The situations a day fits, for choosing lines. A caution state or the
     /// last call stands alone.
     public static func situations(for facts: Facts) -> Set<Situation> {
-        if let caution = facts.caution { return [caution.situation] }
+        // Keeping plain still lets the last call say that reminders go quiet (in plain words).
+        if let caution = facts.caution, !(caution == .keepPlain && facts.lastCall) { return [caution.situation] }
         if facts.lastCall { return [.lastCall] }
         var result: Set<Situation> = [.planned]
         if facts.shortMinutes != nil { result.insert(.shortOption) }

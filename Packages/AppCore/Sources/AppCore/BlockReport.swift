@@ -76,8 +76,6 @@ public enum BlockReport {
         public var alternatives: [String: [CatalogExercise]]?
         /// Bodyweight and per-hand lifts (`PRHistory.Traits`), for the records.
         public var traits: [String: PRHistory.Traits]
-        /// Optional: how sessions felt (`SessionFeel`), any dates; the block's are picked out.
-        public var feel: [SessionFeelEntry] = []
 
         public init(number: Int, start: Date, end: Date, length: Int, hadDeload: Bool, style: TrainingStyle,
                     weeks: [WeekRecord], sessions: [WorkoutSummary.LoggedSession], previous: DateInterval? = nil,
@@ -186,8 +184,6 @@ public enum BlockReport {
         public var bodyWeight: Trend?
         public var hrv: Trend?
         public var next: [NextChange]
-        /// How the block's sessions felt, with four or more rated (`SessionFeelTrend`); nil otherwise.
-        public var feel: SessionFeelTrend.Summary? = nil
 
         /// Weeks kept ÷ planned weeks, 0 with no plan.
         public var adherence: Double { weeksPlanned > 0 ? Double(weeksKept) / Double(weeksPlanned) : 0 }
@@ -259,8 +255,6 @@ public enum BlockReport {
             hrv: hrv, next: []
         )
         report.next = nextChanges(report, style: input.style, alternatives: input.alternatives)
-        // How the sessions felt: a variety swap and no added sets when they felt bad (SessionFeel.swift).
-        applyFeel(&report, entries: input.feel, alternatives: input.alternatives)
         return report
     }
 

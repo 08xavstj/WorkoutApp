@@ -216,7 +216,7 @@ public enum CoachCheckIns {
         public var lowMood: LowMoodRule.Finding?
         /// The "worth raising with someone" sentence may be said today (`LowMoodRule.raiseDue`).
         public var lowMoodRaiseDue = false
-        /// Symptoms in this morning's check-in, or the illness watch's major signs.
+        /// Symptoms in this morning's check-in: the low-mood offer stays out of it.
         public var illnessFlagged = false
         /// Today's rest follows an unplanned hard day (`TrainingDayPlanner.Kind.recovery`): rest with a physical reason.
         public var restForRecovery = false

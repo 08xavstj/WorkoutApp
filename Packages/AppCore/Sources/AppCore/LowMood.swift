@@ -1,8 +1,7 @@
 import Foundation
 
 /// The low-mood rule for the morning message
-/// (docs/research/healthy-living-2026-11.md item 10; write-up in
-/// docs/research/mind-and-prevention-2026-11.md).
+/// (docs/research/healthy-living-2026-11.md, section 3 item 10).
 ///
 /// What it does: after three low mornings in a week, a morning message that
 /// would have suggested rest offers a 20-minute walk or an easy session
@@ -21,6 +20,11 @@ import Foundation
 ///   is the app's choice. The two-week, more-than-half-the-days window mirrors
 ///   the time frame the PHQ questions use (Kroenke, Spitzer & Williams, Med
 ///   Care 2003;41:1284), but this is not a PHQ and not a screen.
+/// - Exercise as treatment is the trials' finding; whether one 20-minute walk
+///   lifts one low morning is not what they tested. Single bouts of moderate
+///   exercise do improve mood for a while afterwards in many studies, but
+///   that literature is mixed in quality, so the message says "often helps"
+///   and never promises.
 /// - The offer never replaces rest that has a physical reason: low recovery,
 ///   HRV below normal, a rest day that follows an unplanned hard day, reported
 ///   illness or rest mode all leave the message as it was.
@@ -131,18 +135,21 @@ public enum LowMoodRule {
         // A date in the future (a message written ahead, then the clock changed): treat as said.
         return days >= raiseEveryDays
     }
-
-    /// The same finding in one calm line for the Mood page; nil until the
-    /// two-week rule applies.
-    public static func pageNote(_ finding: Finding?) -> String? {
-        guard let finding, finding.fortnightApplies else { return nil }
-        return "Your mood has been low on \(finding.lowInFortnight) of the last \(fortnightDays) days. That long is worth raising with someone you trust or your doctor."
-    }
 }
 
 // MARK: - The morning message
 
 extension CoachCheckIns {
+    /// Every low-mood sentence below starts with this, so the app can spot them.
+    static let lowMoodOpening = "Mood has been low on "
+
+    /// False for a message that carries a low-mood sentence: the on-device
+    /// model may not reword it (`CoachNudges.deliver` asks first), so the
+    /// careful wording here is what arrives.
+    public static func mayReword(_ message: Message) -> Bool {
+        !message.body.contains(lowMoodOpening)
+    }
+
     /// The morning message under the low-mood rule, or nil when the rule
     /// changes nothing (the caller then builds the usual message).
     ///
@@ -151,7 +158,7 @@ extension CoachCheckIns {
     ///   illness is reported. Rest mode never reaches here (`morning` returns earlier).
     /// - The offer is one sentence: what was seen, why moving, what is on
     ///   offer. It stops there (the research's risk: sounding glib). The app
-    ///   does not let the on-device model reword these (`CoachNudges`).
+    ///   does not let the on-device model reword these (`mayReword`).
     static func lowMoodMorning(_ f: MorningFacts, title: String, easy: Bool) -> Message? {
         guard let mood = f.lowMood, mood.weekApplies, !f.illnessFlagged else { return nil }
         let offers = f.restDay && !f.restForRecovery && !easy
@@ -164,7 +171,7 @@ extension CoachCheckIns {
             sentences.append("Mood has been low on \(mood.lowInFortnight) of your last \(LowMoodRule.fortnightDays) days; moving often helps, so \(walk) is there today.")
             sentences.append("That long is worth raising with someone you trust or your doctor.")
         } else if offers {
-            sentences.append("Mood has been low on \(mood.lowInWeek) of your last \(LowMoodRule.weekDays) days; moving often lifts it, so \(walk) is an option today instead of full rest.")
+            sentences.append("Mood has been low on \(mood.lowInWeek) of your last \(LowMoodRule.weekDays) days; moving often helps, so \(walk) is an option today instead of full rest.")
         } else {
             // Not a day the message would suggest rest: keep its first line, add the one sentence.
             let raise = "Mood has been low on \(mood.lowInFortnight) of your last \(LowMoodRule.fortnightDays) days, which is worth raising with someone you trust or your doctor."
@@ -182,5 +189,24 @@ extension CoachCheckIns {
         // Quiet delivery for the offer; the usual priority otherwise.
         let priority: Priority = offers ? .low : (easy ? .high : (session != nil ? .normal : .low))
         return Message(kind: .morning, title: title, body: text, link: todayLink, question: morningQuestion, priority: priority)
+    }
+}
+
+// MARK: - Plain wording elsewhere
+
+/// When other features stop being playful because mornings have run low:
+/// the workout reminders (`WorkoutBanter.Facts.keepPlain`, set in the app's
+/// `WorkoutVoice`). Pure, so it can be tested.
+///
+/// The app's choice, not a finding: no study tests jokes in reminders on low
+/// days, and humour's small persuasive effect (r = .13, mostly on attitudes:
+/// Walter et al., Hum Commun Res 2018) is not worth a joke landing badly.
+/// The reminder learns only "keep it plain", never why.
+public enum MoodCare {
+    /// True while the low-mood rule is in play: three or more low mornings in
+    /// the last seven days (`LowMoodRule.Finding.weekApplies`). It lets go by
+    /// itself as better mornings push the low ones out of the week.
+    public static func keepPlain(lowMood: LowMoodRule.Finding?) -> Bool {
+        lowMood?.weekApplies == true
     }
 }

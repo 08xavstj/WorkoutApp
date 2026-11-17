@@ -105,14 +105,6 @@ struct LowMoodTests {
         #expect(!LowMoodRule.raiseDue(lastRaised: date(15), on: date(14), calendar: calendar))
     }
 
-    @Test func pageNoteOnlyAfterTwoWeeks() {
-        #expect(LowMoodRule.pageNote(nil) == nil)
-        #expect(LowMoodRule.pageNote(.init(lowInWeek: 4, lowInFortnight: 6, answeredInFortnight: 12)) == nil)
-        let note = LowMoodRule.pageNote(.init(lowInWeek: 5, lowInFortnight: 9, answeredInFortnight: 13))
-        #expect(note?.contains("9 of the last 14 days") == true)
-        #expect(note?.contains("someone you trust or your doctor") == true)
-    }
-
     // MARK: The morning message
 
     var week: LowMoodRule.Finding { .init(lowInWeek: 3, lowInFortnight: 4, answeredInFortnight: 10) }
@@ -136,7 +128,7 @@ struct LowMoodTests {
         let message = try #require(CoachCheckIns.morning(restDay(week)))
         checkShape(message)
         #expect(message.title == "Rest day today")
-        #expect(message.body == "Mood has been low on 3 of your last 7 days; moving often lifts it, so a 20-minute walk or an easy session is an option today instead of full rest.")
+        #expect(message.body == "Mood has been low on 3 of your last 7 days; moving often helps, so a 20-minute walk or an easy session is an option today instead of full rest.")
         #expect(CoachCheckIns.sentenceCount(message.body) == 1)
         // Quiet: no sound, Notification Centre only.
         #expect(message.priority == .low)
@@ -235,6 +227,20 @@ struct LowMoodTests {
         #expect(message.body.hasPrefix("Mood has been low on 9 of your last 14 days"))
     }
 
+    @Test func theModelNeverRewordsALowMoodMessage() throws {
+        #expect(CoachCheckIns.mayReword(try #require(CoachCheckIns.morning(restDay(nil)))))
+        #expect(!CoachCheckIns.mayReword(try #require(CoachCheckIns.morning(restDay(week)))))
+        var f = restDay(fortnight)
+        f.lowMoodRaiseDue = true
+        #expect(!CoachCheckIns.mayReword(try #require(CoachCheckIns.morning(f))))
+        var training = CoachCheckIns.MorningFacts()
+        training.recovery = 64
+        training.session = .init(name: "Upper", minutes: 60)
+        training.lowMood = fortnight
+        training.lowMoodRaiseDue = true
+        #expect(!CoachCheckIns.mayReword(try #require(CoachCheckIns.morning(training))))
+    }
+
     // MARK: A realistic month
 
     @Test func aMonthThatSlidesAndRecovers() {
@@ -253,5 +259,92 @@ struct LowMoodTests {
         // Two good mornings later the week still holds four low days; after four it lets go.
         #expect(finding(moods, on: 26)?.lowInWeek == 4)
         #expect(finding(moods, on: 28) == nil)
+    }
+
+    // MARK: Plain workout reminders while mornings run low
+
+    func reminderFacts(lowMood: LowMoodRule.Finding?) -> WorkoutBanter.Facts {
+        var facts = WorkoutBanter.Facts()
+        facts.sessionName = "Upper A"
+        facts.sessionMinutes = 60
+        facts.shortMinutes = 25
+        facts.leadMinutes = 30
+        facts.sessionsDone = 2
+        facts.sessionsPlanned = 4
+        facts.weeksInARow = 5
+        facts.hour = 18
+        facts.weekday = 3
+        facts.recovery = .high
+        facts.keepPlain = MoodCare.keepPlain(lowMood: lowMood)
+        return facts
+    }
+
+    @Test func keepPlainFollowsTheWeekRule() {
+        #expect(!MoodCare.keepPlain(lowMood: nil))
+        #expect(MoodCare.keepPlain(lowMood: week))
+        #expect(MoodCare.keepPlain(lowMood: fortnight))
+        // A finding exists only from three low mornings, but a hand-made two never counts.
+        let two = LowMoodRule.Finding(lowInWeek: 2, lowInFortnight: 8, answeredInFortnight: 14)
+        #expect(MoodCare.keepPlain(lowMood: two) == false)
+    }
+
+    @Test func threeLowMorningsMakeEveryReminderPlainWhateverTheTone() {
+        let playful = reminderFacts(lowMood: nil)
+        #expect(playful.caution == nil)
+        #expect(WorkoutBanter.pick(facts: playful, tone: .playful, history: .init(), seed: 1).register != WorkoutBanter.Register.plain.rawValue)
+
+        let facts = reminderFacts(lowMood: week)
+        #expect(facts.caution == .keepPlain)
+        #expect(WorkoutBanter.situations(for: facts) == [.keepPlain])
+        for tone in WorkoutBanter.Tone.allCases {
+            for seed in 0..<30 {
+                let pick = WorkoutBanter.pick(facts: facts, tone: tone, history: .init(), seed: UInt64(seed))
+                #expect(pick.register == WorkoutBanter.Register.plain.rawValue)
+                #expect(pick.situation == WorkoutBanter.Situation.keepPlain.rawValue)
+                #expect(WorkoutBanterGuard.problems(in: pick.text, facts: facts).isEmpty, "\(pick.text)")
+            }
+        }
+        // The on-device model is never asked for a line then.
+        let assigned = WorkoutBanter.Assigned(dayKey: "2027-02-14", fire: date(14, hour: 17),
+                                              pick: WorkoutBanter.pick(facts: facts, tone: .playful, history: .init(), seed: 3),
+                                              tone: .playful, ahead: false)
+        #expect(!WorkoutBanter.wantsGenerated(assigned, facts: facts))
+    }
+
+    @Test func theReminderNeverSaysWhyItIsPlain() {
+        for line in WorkoutBanterLibrary.all where line.situation == .keepPlain {
+            let text = line.template.lowercased()
+            for word in ["mood", "low", "sad", "down", "feel", "mental", "check-in", "morning"] {
+                #expect(!text.contains(word), "\(line.id) says \(word)")
+            }
+        }
+    }
+
+    @Test func saferStatesStillWinAndTheLastCallIsStillSaid() {
+        var facts = reminderFacts(lowMood: week)
+        facts.recovery = .low
+        #expect(facts.caution == .lowRecovery)
+        facts.recovery = .normal
+        facts.isRestDay = true
+        #expect(facts.caution == .restDay)
+        facts.isRestDay = false
+        facts.lastCall = true
+        // The last call keeps its own (plain) words, so reminders still say they go quiet.
+        #expect(WorkoutBanter.situations(for: facts) == [.lastCall])
+        let pick = WorkoutBanter.pick(facts: facts, tone: .playful, history: .init(), seed: 7)
+        #expect(pick.situation == WorkoutBanter.Situation.lastCall.rawValue)
+        #expect(pick.register == WorkoutBanter.Register.plain.rawValue)
+    }
+
+    @Test func aPendingPlayfulLineIsReplacedOnceMorningsRunLow() {
+        let fire = date(14, hour: 17)
+        let request = { (facts: WorkoutBanter.Facts) in
+            [WorkoutBanter.DayRequest(dayKey: "2027-02-14", fire: fire, facts: facts, isToday: true)]
+        }
+        let before = WorkoutBanter.reconcile(.init(), requests: request(reminderFacts(lowMood: nil)), tone: .playful, now: date(14, hour: 7))
+        #expect(before.pending.first?.pick.register != WorkoutBanter.Register.plain.rawValue)
+        let after = WorkoutBanter.reconcile(before, requests: request(reminderFacts(lowMood: week)), tone: .playful, now: date(14, hour: 8))
+        #expect(after.pending.first?.pick.register == WorkoutBanter.Register.plain.rawValue)
+        #expect(after.pending.first?.pick.situation == WorkoutBanter.Situation.keepPlain.rawValue)
     }
 }
