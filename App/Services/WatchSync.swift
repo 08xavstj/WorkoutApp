@@ -59,6 +59,8 @@ final class WatchSync: NSObject {
     /// The complications' data as last sent, and when.
     @ObservationIgnored private var lastFace: WatchFaceData?
     @ObservationIgnored private var lastFaceSentAt = Date.distantPast
+    /// The heart-rate zones as last sent to the Watch (`updateZones`).
+    @ObservationIgnored private var lastZones: HeartRateZoneScheme?
 
     /// Called once from the root view, so commands can reach the database.
     func configure(context: ModelContext, gym: GymStore, launcher: WorkoutLauncher, health: HealthKitClient?,
@@ -223,6 +225,16 @@ final class WatchSync: NSObject {
                 WatchFaceData.Slot(start: slot.start, title: slot.day.focus.title,
                                    shortTitle: slot.day.focus.shortTitle, symbol: Self.symbol(for: slot.day.focus))
             }
+        // The Watch's cardio zones follow today's resting and maximum heart rate.
+        if let profile = metrics.heartRateProfile {
+            updateZones(profile: profile)
+            // Apple Health's zones move with its own numbers: read them again, then resend.
+            if ZonePreferences.kind == .appleHealth, let health {
+                Task {
+                    if await ZonePreferences.refreshAppleZones(health: health) != nil { self.updateZones(profile: profile) }
+                }
+            }
+        }
         let target = metrics.targetStrain
         updateFace(WatchFaceData(
             recovery: metrics.recoveryIsFromYesterday ? nil : metrics.recovery?.score,
@@ -236,6 +248,20 @@ final class WatchSync: NSObject {
             lastWorkoutEnd: lastWorkoutEnd,
             updated: now
         ))
+    }
+
+    /// Sends the chosen heart-rate zones (Settings › Training › Heart-rate zones)
+    /// to the Watch's cardio mode, when they changed. They wait in the
+    /// application context, so the Watch has them the next time its app runs
+    /// and keeps them for workouts with the phone out of reach.
+    func updateZones(profile: HeartRateProfile) {
+        let scheme = ZonePreferences.resolution(profile: profile).scheme
+        guard scheme != lastZones, let connection, connection.activationState == .activated,
+              connection.isPaired, connection.isWatchAppInstalled,
+              let data = WatchMessage.encode(scheme) else { return }
+        lastZones = scheme
+        deliver(key: WatchMessage.zones, data: data, queued: false)
+        updateContext(key: WatchMessage.zones, data: data)
     }
 
     func updateFace(_ data: WatchFaceData) {

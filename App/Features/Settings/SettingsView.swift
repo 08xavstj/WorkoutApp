@@ -287,6 +287,7 @@ private struct TrainingSettingsSection: View {
                 Text("Count reps on Apple Watch")
                 Text("Experimental · squat and deadlift only")
             }
+            HeartZonesSettingsRow() // Which heart-rate zones workouts and the Watch's cardio mode show.
             // Warm-up before lifting (`WarmUpRoutine.Tier`); the builder can
             // override it per focus. Default: ramp sets only (best evidence:
             // Ribeiro 2020 IJERPH; Ribeiro/Neves 2021 Motricidade).

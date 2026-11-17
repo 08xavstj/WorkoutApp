@@ -5,18 +5,28 @@ enum WatchPage: Hashable {
 }
 
 /// Start screen → the three workout pages (crown scrolls between them) → end screen.
+/// Cardio from the start screen runs its own three pages and end screen.
 struct WatchRootView: View {
     @Environment(WatchWorkoutModel.self) private var model
+    @Environment(WatchCardioModel.self) private var cardio
     @State private var page: WatchPage = .live
 
     var body: some View {
-        switch model.phase {
-        case .idle, .starting:
-            WatchStartView()
-        case .running, .paused:
-            workoutPages
-        case .ended:
-            WatchEndView()
+        // A cardio workout (`WatchCardioModel`) has its own pages and end screen;
+        // only one of the two models records at a time.
+        if cardio.isActive {
+            WatchCardioPagesView()
+        } else if cardio.phase == .ended {
+            WatchCardioEndView()
+        } else {
+            switch model.phase {
+            case .idle, .starting:
+                WatchStartView()
+            case .running, .paused:
+                workoutPages
+            case .ended:
+                WatchEndView()
+            }
         }
     }
 

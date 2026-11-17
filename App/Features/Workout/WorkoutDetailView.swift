@@ -206,6 +206,8 @@ private struct HeartRateSourcesSection: View {
     /// Minutes in zones 1-5 during this workout, from the merged heart rate,
     /// so a past workout keeps its zones whatever today's total says.
     @State private var zoneMinutes: [Double] = []
+    /// The zones those minutes are in (Settings › Training › Heart-rate zones).
+    @State private var zoneScheme: HeartRateZoneScheme?
     @State private var linkedWorkout: ExternalWorkout?
     @State private var loaded = false
     /// Avg and Max columns widen with the text instead of clipping.
@@ -224,7 +226,7 @@ private struct HeartRateSourcesSection: View {
                 if merged.sourceNames.count != 1 || !merged.disagreements.isEmpty || linkedWorkoutSource != nil {
                     MergedHeartRateRow(merged: merged, linkedWorkout: linkedWorkout, linkedSource: linkedWorkoutSource)
                 }
-                WorkoutZonesRow(minutes: zoneMinutes)
+                WorkoutZonesRow(minutes: zoneMinutes, scheme: zoneScheme)
                 ForEach(sources) { source in
                     if let summary = HeartRateComparison.summary(source.samples) {
                         HStack {
@@ -284,10 +286,13 @@ private struct HeartRateSourcesSection: View {
         sources = found.sorted { $0.samples.count > $1.samples.count }
         // The same merge strain uses: ear over wrist during this lift, no averaging (`HeartRateMerge`).
         merged = HeartRateMerge.merge(sources: sources.map(\.mergeSource), liftingWindows: [DateInterval(start: start, end: end)])
-        // The same zones strain uses (`StrainCalculator.dailyStrain`, `HeartRateProfile.zone`),
+        // The zones chosen in Settings (`ZonePreferences`): by default the ones strain uses
+        // (`HeartRateProfile.zone`), counted the same way (`HeartRateZoneScheme.minutes`),
         // with today's profile, or the settings profile before the first refresh.
         let profile = metrics.heartRateProfile ?? settings.heartRateProfile(restingHeartRate: nil)
-        zoneMinutes = StrainCalculator().dailyStrain(heartRate: merged.samples, strengthSessions: [], profile: profile).zoneMinutes
+        let zones = await ZonePreferences.current(profile: profile, health: health).scheme
+        zoneScheme = zones
+        zoneMinutes = zones.minutes(merged.samples)
         if let linkedWorkoutUUID {
             let margin = WorkoutLinker.searchMargin
             let workouts = (try? await health.externalWorkouts(from: start.addingTimeInterval(-margin), to: end.addingTimeInterval(margin))) ?? []
@@ -312,13 +317,25 @@ private struct HeartRateSourcesSection: View {
     }
 }
 
-/// Minutes in each heart-rate zone during this workout (zones 1-5 by
-/// heart-rate reserve, `HeartRateProfile.zone`), as small bars, or one line
-/// when the heart rate stayed below zone 1.
+/// Minutes in each heart-rate zone during this workout (zones 1-5 of the
+/// scheme chosen in Settings; by default heart-rate reserve,
+/// `HeartRateProfile.zone`), as small bars, or one line when the heart rate
+/// stayed below zone 1.
 private struct WorkoutZonesRow: View {
     let minutes: [Double]
+    /// The zones in use; nil counts as Tensile's.
+    var scheme: HeartRateZoneScheme?
 
     private var total: Double { minutes.reduce(0, +) }
+
+    /// "Heart rate stayed below zone 1 (…)", with the limit the scheme uses.
+    private var belowText: String {
+        guard let scheme, scheme.kind != .reserve else {
+            return "Heart rate stayed below zone 1 (50% of your heart-rate reserve), so no zone minutes."
+        }
+        guard let floor = scheme.floor else { return "Too few heart-rate readings for zone minutes." }
+        return "Heart rate stayed below zone 1 (\(whole(floor)) bpm), so no zone minutes."
+    }
 
     var body: some View {
         if total > 0 {
@@ -326,6 +343,12 @@ private struct WorkoutZonesRow: View {
                 Text("\(whole(total)) min in heart-rate zones")
                     .font(.subheadline)
                     .foregroundStyle(Theme.primaryText)
+                // Says so when the zones aren't the ones day strain uses.
+                if let scheme, scheme.kind != .reserve {
+                    Text("\(scheme.kind.title) zones")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
                 HStack(alignment: .bottom, spacing: 8) {
                     ForEach(0..<5, id: \.self) { index in
                         zoneColumn(index)
@@ -336,7 +359,7 @@ private struct WorkoutZonesRow: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(spokenZones)
         } else {
-            Text("Heart rate stayed below zone 1 (50% of your heart-rate reserve), so no zone minutes.")
+            Text(belowText)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -373,7 +396,8 @@ private struct WorkoutZonesRow: View {
             let value = zoneMinutes(index)
             return value >= 0.5 ? "zone \(index + 1) \(whole(value.rounded())) minutes" : nil
         }
-        return "\(whole(total)) minutes in heart-rate zones: " + parts.joined(separator: ", ")
+        let named = scheme.flatMap { $0.kind == .reserve ? nil : " (\($0.kind.title) zones)" } ?? ""
+        return "\(whole(total)) minutes in heart-rate zones\(named): " + parts.joined(separator: ", ")
     }
 }
 

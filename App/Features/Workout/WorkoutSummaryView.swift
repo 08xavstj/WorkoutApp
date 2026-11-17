@@ -254,13 +254,16 @@ struct WorkoutSummaryView: View {
             }
         }
         let result = StrainCalculator().dailyStrain(heartRate: merged.samples, strengthSessions: [strainSession], profile: profile)
+        // Zone minutes in the zones chosen in Settings (`ZonePreferences`); strain above stays on reserve.
+        let zones = await ZonePreferences.current(profile: profile, health: health).scheme
         let stats = HeartRateComparison.summary(merged.samples)
         var activeKcal: Double?
         if let kcal, kcal >= 1 { activeKcal = kcal }
         return SummaryHeart(
             average: stats?.average,
             maximum: stats?.maximum,
-            zoneMinutes: result.zoneMinutes,
+            zoneMinutes: zones.minutes(merged.samples),
+            zoneKind: zones.kind,
             strain: result.strain,
             strainFromHeartRate: !merged.samples.isEmpty,
             activeKcal: activeKcal
@@ -306,6 +309,8 @@ struct SummaryHeart {
     var average: Double?
     var maximum: Double?
     var zoneMinutes: [Double]
+    /// Which zones those minutes are in (`HeartRateZoneScheme.Kind`).
+    var zoneKind: HeartRateZoneScheme.Kind = .reserve
     var strain: Double
     var strainFromHeartRate: Bool
     var activeKcal: Double?
@@ -455,7 +460,7 @@ private struct SummaryContent: View {
         SummaryHero(data: data, heart: heart, unit: unit)
         SummaryStatsGrid(totals: data.totals, rpe: data.rpe, heart: heart)
         if let heart, heart.strainFromHeartRate, heart.zoneMinutes.reduce(0, +) > 0 {
-            SummaryZonesCard(minutes: heart.zoneMinutes)
+            SummaryZonesCard(minutes: heart.zoneMinutes, kind: heart.zoneKind)
         }
         if !data.exercises.isEmpty {
             SummaryExercisesCard(exercises: data.exercises, unit: unit)
@@ -586,16 +591,23 @@ private struct SummaryStatsGrid: View {
     }
 }
 
-/// Minutes in zones 1-5 (by heart-rate reserve, `HeartRateProfile.zone`).
+/// Minutes in zones 1-5 of the scheme chosen in Settings (by default
+/// heart-rate reserve, `HeartRateProfile.zone`).
 private struct SummaryZonesCard: View {
     let minutes: [Double]
+    var kind: HeartRateZoneScheme.Kind = .reserve
 
     private var total: Double { minutes.reduce(0, +) }
+
+    /// "42 min in zones", naming the zones when they aren't the ones day strain uses.
+    private var title: String {
+        kind == .reserve ? "\(whole(total)) min in zones" : "\(whole(total)) min in \(kind.title) zones"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             CardLabel(text: "Heart-rate zones", color: Theme.heartText)
-            Text("\(whole(total)) min in zones")
+            Text(title)
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
             HStack(alignment: .bottom, spacing: 8) {

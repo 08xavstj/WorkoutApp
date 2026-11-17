@@ -101,6 +101,8 @@ final class WatchWorkoutModel: NSObject {
     }
 
     func start(with configuration: HKWorkoutConfiguration, sessionID: String?) async {
+        // One workout at a time: a cardio workout is starting or recording here (`WatchCardioModel`).
+        guard !WatchCardioModel.shared.isBusy else { return }
         guard phase == .idle || phase == .ended else {
             if recordingSessionID == nil, let sessionID { adopt(sessionID) }
             return
@@ -778,6 +780,10 @@ extension WatchWorkoutModel: WCSessionDelegate {
         if let face = WatchMessage.decode(WatchFaceData.self, from: session.receivedApplicationContext, key: WatchMessage.faceData) {
             Task { @MainActor in WatchComplications.store(face) }
         }
+        // And the heart-rate zones chosen on the phone, for cardio (`WatchZoneStore`).
+        if let zones = WatchMessage.decode(HeartRateZoneScheme.self, from: session.receivedApplicationContext, key: WatchMessage.zones) {
+            WatchZoneStore.save(zones)
+        }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
@@ -808,6 +814,10 @@ extension WatchWorkoutModel: WCSessionDelegate {
         // Complication data: by message, context, or `transferCurrentComplicationUserInfo` (arrives as user info).
         if let face = WatchMessage.decode(WatchFaceData.self, from: payload, key: WatchMessage.faceData) {
             Task { @MainActor in WatchComplications.store(face) }
+        }
+        // The heart-rate zones chosen on the phone, kept for cardio (`WatchZoneStore`).
+        if let zones = WatchMessage.decode(HeartRateZoneScheme.self, from: payload, key: WatchMessage.zones) {
+            WatchZoneStore.save(zones)
         }
     }
 }

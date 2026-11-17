@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// Today's session from the phone, if one is running, else an empty workout.
+/// Today's session from the phone, if one is running, else an empty workout;
+/// and Cardio, which opens the short activity list (`WatchCardioStartView`).
 struct WatchStartView: View {
     @Environment(WatchWorkoutModel.self) private var model
+    @Environment(WatchCardioModel.self) private var cardio
+    @State private var showingCardio = false
 
     var body: some View {
         ScrollView {
@@ -21,9 +24,9 @@ struct WatchStartView: View {
                     }
                     .tint(WatchTheme.lifting)
                     .buttonStyle(.borderedProminent)
-                    // Double tap starts it (Series 9 and later).
-                    .handGestureShortcut(.primaryAction)
-                    .disabled(model.phase == .starting)
+                    // Double tap starts it (Series 9 and later); the cardio list has its own while it is open.
+                    .handGestureShortcut(.primaryAction, isEnabled: !showingCardio)
+                    .disabled(model.phase == .starting || cardio.phase == .starting)
                 } else {
                     Text("No workout on your iPhone")
                         .font(.headline)
@@ -38,15 +41,25 @@ struct WatchStartView: View {
                     }
                     .tint(WatchTheme.strain)
                     .buttonStyle(.borderedProminent)
-                    .handGestureShortcut(.primaryAction)
-                    .disabled(model.phase == .starting)
+                    .handGestureShortcut(.primaryAction, isEnabled: !showingCardio)
+                    .disabled(model.phase == .starting || cardio.phase == .starting)
                 }
-                if model.phase == .starting {
+                // A run, a ride, a row: recorded with live heart-rate zones.
+                Button {
+                    showingCardio = true
+                } label: {
+                    Label("Cardio", systemImage: "figure.run")
+                        .frame(maxWidth: .infinity)
+                }
+                .tint(WatchTheme.recovery)
+                .disabled(model.phase == .starting || cardio.phase == .starting)
+                .accessibilityIdentifier("watch-start-cardio")
+                if model.phase == .starting || cardio.phase == .starting {
                     Text("Starting…")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                if let problem = model.problem {
+                if let problem = model.problem ?? cardio.problem {
                     Text(problem)
                         .font(.caption2)
                         .foregroundStyle(WatchTheme.heart)
@@ -55,5 +68,14 @@ struct WatchStartView: View {
             .padding(.horizontal, 4)
         }
         .navigationTitle("Tensile")
+        .sheet(isPresented: $showingCardio) {
+            WatchCardioStartView()
+        }
+        // "Start cardio in Tensile" (`StartCardioIntent`) opens the list.
+        .onChange(of: cardio.pickerRequested, initial: true) {
+            guard cardio.pickerRequested else { return }
+            cardio.pickerRequested = false
+            showingCardio = true
+        }
     }
 }
