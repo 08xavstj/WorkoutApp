@@ -137,7 +137,7 @@ final class DailyMetricsModel {
     /// One line on which HRV measure recovery uses (`DailyVitals.resolvingHRV`).
     var hrvMetricNote: String? {
         switch hrvSelection {
-        case .rmssd: "HRV is overnight RMSSD (your Oura ring, Apple Watch beat-to-beat data or your watch app's value). Nights without it use Apple Health's SDNN, scaled to your own RMSSD."
+        case .rmssd: "HRV is overnight RMSSD, measured while you sleep (your Oura ring, your Apple Watch, or the value you typed in). Nights without it use Apple Health's SDNN, scaled to your own RMSSD."
         case .sdnn: "HRV is Apple Health's SDNN. Once overnight RMSSD covers 14 of the last 30 nights, the app switches to it."
         case .morningRMSSD: "HRV is your morning camera reading. It isn't mixed with overnight HRV, which is measured asleep."
         case nil: nil
@@ -580,7 +580,8 @@ final class DailyMetricsModel {
             )
 
             // One HRV measure for every night (`DailyVitals.resolvingHRV`): overnight
-            // RMSSD (Apple Watch beat-to-beat, typed-in Garmin values; typed wins per
+            // RMSSD (Apple Watch: Health's own RMSSD readings on iOS 27, else beat-to-beat;
+            // typed-in Garmin values; typed wins per
             // night) once it covers 14 of the last 30 nights, else Apple Health's SDNN,
             // with gaps filled from the other via your own ratio. Camera readings are
             // taken awake in the morning, so they only stand in when there's no overnight HRV.

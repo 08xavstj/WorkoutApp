@@ -164,6 +164,8 @@ targets:
       - sdk: WatchConnectivity.framework
       - sdk: SwiftUI.framework
       - sdk: WidgetKit.framework
+      # "Start a workout in Tensile" for Siri and Shortcuts (Watch/WatchShortcuts.swift).
+      - sdk: AppIntents.framework
       # Watch face complications, embedded in the Watch app (PlugIns).
       - target: TensileWatchWidgets
         embed: true

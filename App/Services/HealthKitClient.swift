@@ -10,6 +10,20 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     let store = HKHealthStore()
     /// Beat-to-beat RMSSD for finished nights, so they're read only once (kept on disk).
     private let rmssdCache = NightlyValueCache(fileName: "rmssd-nights.json")
+    /// Apple's own overnight RMSSD ("Recovery HRV") for finished nights.
+    private let recoveryHRVCache = NightlyValueCache(fileName: "recovery-hrv-nights.json")
+
+    /// Apple Health's RMSSD type, new in iOS and watchOS 27
+    /// (developer.apple.com/documentation/healthkit/hkquantitytypeidentifier/heartratevariabilityrmssd).
+    /// Apple Watch Series 12 and Ultra 4 show two HRV numbers, "Recovery HRV"
+    /// and overall HRV (Apple Newsroom, 9 Sep 2026); Apple hasn't said in its
+    /// documentation which type holds which, so nothing here assumes it: the
+    /// type is used on the nights it has readings inside the main sleep and
+    /// ignored otherwise. Looked up by name so the app also builds with the
+    /// iOS 26 SDK; nil on iOS 26.
+    nonisolated static var recoveryHRVType: HKQuantityType? {
+        HKObjectType.quantityType(forIdentifier: HKQuantityTypeIdentifier(rawValue: "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD"))
+    }
     /// Average sleeping heart rate for finished nights (`nightlySleepingHeartRate`).
     let sleepingHeartRateCache = NightlyValueCache(fileName: "sleeping-hr-nights.json")
     /// The running observer queries and what they call (`observeChanges`).
@@ -93,6 +107,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         // hypertension notification (HealthKitClient+Hypertension; empty until its flag is on).
         types.formUnion(Self.symptomReadTypes as [HKObjectType])
         types.formUnion(Self.hypertensionReadTypes)
+        if let recoveryHRV = Self.recoveryHRVType { types.insert(recoveryHRV) }
         return types
     }
 
@@ -317,8 +332,12 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
 
     /// Overnight HRV and daily resting heart rate for each of the last `days` nights.
     ///
-    /// HRV for "night D" averages samples from 6 pm on D-1 to noon on D, so it
-    /// reflects sleep rather than daytime stress. Returned newest first.
+    /// HRV for "night D" is the mean of the readings inside that night's main
+    /// sleep (`OvernightHRV`). A night with no sleep recorded, or no reading
+    /// inside it, averages the readings from 6 pm on D-1 to noon on D instead.
+    /// Sleep only, because an Apple Watch Series 12 reads HRV every five
+    /// minutes all day and the clock window would fill with awake readings.
+    /// Returned newest first.
     @concurrent
     func nightlyVitals(days: Int, endingOn day: Date) async throws -> [DailyVitals] {
         if let demo = DemoHealth.active { return demo.nightlyVitals(days: days, endingOn: day) }
@@ -336,14 +355,19 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         )
         let ms = HKUnit.secondUnit(with: .milli)
         var hrvByNight: [Date: [Double]] = [:]
+        var readings: [HRVReading] = []
         for sample in try await hrvDescriptor.result(for: store) {
+            let value = sample.quantity.doubleValue(for: ms)
+            readings.append(HRVReading(date: sample.startDate, milliseconds: value))
             // Shift by 6 h so 6 pm-midnight counts toward the next morning.
             let shifted = sample.startDate.addingTimeInterval(6 * 3600)
-            // Drop noon-6 pm. Tuned for night sleep: a day sleeper's HRV comes from
-            // beat-to-beat RMSSD inside the main sleep (`nightlyRMSSD`) once it covers 14 nights.
+            // Drop noon-6 pm (the fallback when the night has no reading inside its sleep).
             guard calendar.component(.hour, from: shifted) < 18 else { continue }
-            hrvByNight[calendar.startOfDay(for: shifted), default: []].append(sample.quantity.doubleValue(for: ms))
+            hrvByNight[calendar.startOfDay(for: shifted), default: []].append(value)
         }
+        // One reading inside the sleep is enough here: older watches take only a few a night.
+        let sleep = ((try? await sleepHistory(nights: days + 1)) ?? []).filter { $0.date <= lastNight }
+        let asleep = OvernightHRV.nightly(readings, nights: sleep.map(\.overnight), minimumReadings: 1)
 
         // Resting heart rate, one value per day.
         let rhrDescriptor = HKStatisticsCollectionQueryDescriptor(
@@ -361,10 +385,11 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
 
         let nights = Set(hrvByNight.keys).union(rhrByDay.keys)
-        return nights.sorted(by: >).map { night in
+        let byClock = nights.sorted(by: >).map { night in
             let hrv = hrvByNight[night].map { $0.reduce(0, +) / Double($0.count) }
             return DailyVitals(date: night, hrvMilliseconds: hrv, restingHeartRate: rhrByDay[night])
         }
+        return OvernightHRV.preferringSleep(byClock, asleep: asleep, calendar: calendar)
     }
 
     // MARK: - Sleep
@@ -424,12 +449,60 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return SleepSource.pick(all, prefer: preference, night: night).sorted { $0.start < $1.start }
     }
 
-    /// Overnight HRV as RMSSD (ms) computed from Apple Watch beat-to-beat
-    /// recordings taken during each night's main sleep, keyed by the morning.
-    /// Empty for watches that don't share beat-to-beat data (e.g. Garmin).
+    /// Overnight HRV as RMSSD (ms) from an Apple Watch, keyed by the morning.
+    /// Apple's own RMSSD readings inside the main sleep come first (iOS 27;
+    /// `recoveryHRV`), then the app's estimate from beat-to-beat recordings
+    /// (`beatToBeatRMSSD`). The two are computed differently, so the estimate's
+    /// nights are scaled to Apple's by your own ratio once enough nights have
+    /// both, and until then the one with more recent nights is used alone
+    /// (`DailyVitals.mergingOvernightRMSSD`); a new watch never bends the baseline.
+    /// Empty for watches that share neither (e.g. Garmin).
     @concurrent
     func nightlyRMSSD(nights allNights: [SleepNight]) async -> [Date: Double] {
         if DemoHealth.active != nil { return [:] } // demo mode: SDNN only
+        async let apple = recoveryHRV(nights: allNights)
+        let estimate = await beatToBeatRMSSD(nights: allNights)
+        return DailyVitals.mergingOvernightRMSSD(preferred: await apple, other: estimate, today: Date.now).nights
+    }
+
+    /// Apple Health's RMSSD readings (`recoveryHRVType`) averaged over each
+    /// night's main sleep (`OvernightHRV.nightly`). Empty on iOS 26, without
+    /// permission, or from a watch that doesn't write the type.
+    @concurrent
+    func recoveryHRV(nights allNights: [SleepNight]) async -> [Date: Double] {
+        guard DemoHealth.active == nil, let type = Self.recoveryHRVType else { return [:] }
+        let today = Calendar.current.startOfDay(for: .now)
+        var known = recoveryHRVCache.values(for: allNights)
+        // Only nights not read before (today's is always re-read: the watch syncs late).
+        let nights = allNights.filter { known[$0.date] == nil || $0.date >= today }
+        guard let first = nights.map(\.bedtime).min(), let last = nights.map(\.wake).max() else {
+            return known.compactMapValues { $0 }
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: first, end: last)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: type, predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        guard let samples = try? await descriptor.result(for: store) else { return known.compactMapValues { $0 } }
+        let ms = HKUnit.secondUnit(with: .milli)
+        let readings = samples.map { HRVReading(date: $0.startDate, milliseconds: $0.quantity.doubleValue(for: ms)) }
+        let values = OvernightHRV.nightly(readings, nights: nights.map(\.overnight))
+        var finished: [(night: SleepNight, value: Double?)] = []
+        for night in nights {
+            known[night.date] = .some(values[night.date])
+            if night.date < today { finished.append((night, values[night.date])) }
+        }
+        // "Nothing there" is only remembered once the type has readings at all:
+        // an empty answer can also mean Health access hasn't been granted yet.
+        if !samples.isEmpty { recoveryHRVCache.store(finished) }
+        return known.compactMapValues { $0 }
+    }
+
+    /// RMSSD (ms) computed from Apple Watch beat-to-beat recordings taken
+    /// during each night's main sleep, keyed by the morning.
+    @concurrent
+    func beatToBeatRMSSD(nights allNights: [SleepNight]) async -> [Date: Double] {
+        if DemoHealth.active != nil { return [:] }
         let today = Calendar.current.startOfDay(for: .now)
         var known = rmssdCache.values(for: allNights)
         // Only nights not read before (today's is always re-read: the watch syncs late).
@@ -443,17 +516,21 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             sortDescriptors: [SortDescriptor(\.startDate)]
         )
         guard let samples = try? await descriptor.result(for: store) else { return known.compactMapValues { $0 } }
-        var valuesByNight: [Date: [Double]] = [:]
+        var seriesByNight: [Date: [HKHeartbeatSeriesSample]] = [:]
         for case let series as HKHeartbeatSeriesSample in samples {
             guard let night = nights.first(where: { series.startDate >= $0.bedtime && series.endDate <= $0.wake }) else { continue }
-            guard let beats = try? await heartbeats(series), let value = BeatToBeat.rmssd(beats, minimumSeconds: 50) else { continue }
-            valuesByNight[night.date, default: []].append(value)
+            seriesByNight[night.date, default: []].append(series)
         }
         // Apple records about a minute at a time; RMSSD needs ~3 minutes of
-        // clean beats, so a night needs several recordings.
+        // clean beats, so a night needs several recordings. A Series 12 may
+        // store one every five minutes: a spread of them is read, not all.
         var finished: [(night: SleepNight, value: Double?)] = []
         for night in nights {
-            let values = valuesByNight[night.date] ?? []
+            var values: [Double] = []
+            for series in OvernightHRV.evenlySpaced(seriesByNight[night.date] ?? [], limit: OvernightHRV.maximumRecordingsPerNight) {
+                guard let beats = try? await heartbeats(series), let value = BeatToBeat.rmssd(beats, minimumSeconds: 50) else { continue }
+                values.append(value)
+            }
             let value: Double? = values.count >= 3 ? values.sorted()[values.count / 2] : nil
             known[night.date] = .some(value)
             if night.date < today { finished.append((night, value)) }
@@ -941,6 +1018,8 @@ nonisolated struct SleepNight: Sendable, Identifiable, Equatable {
     /// The main sleep's asleep intervals (for the Sleep Regularity Index).
     var intervals: [DateInterval] = []
     var id: Date { date }
+    /// The night as `OvernightHRV` takes it.
+    var overnight: OvernightHRV.Night { OvernightHRV.Night(date: date, bedtime: bedtime, wake: wake) }
 }
 
 extension Array where Element == SleepNight {

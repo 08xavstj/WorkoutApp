@@ -72,6 +72,10 @@ Watch face complications: long-press the watch face → **Edit** → swipe to **
 
 Installing: the Watch app ships inside the iPhone app, so it installs with it when "Automatic app install" is on in the Watch app on your iPhone; otherwise open the Watch app → **Available Apps** → Tensile. Signing: it uses the same team and the bundle ID `<your app id>.watchkitapp` (set by `scripts/set-signing.sh`; if you set signing before the Watch app existed, run the script again so `COMPANION_APP_BUNDLE_IDENTIFIER` is written). Xcode's automatic signing creates the Watch provisioning profile the first time you run on a device.
 
+Hands-free: double tap (finger and thumb, Series 9 and later) presses **Complete** on the live page and **Start** on the first screen, and "Start a workout in Tensile" works from Siri and the Shortcuts app on the Watch.
+
+Apple Watch Series 12 and Ultra 4: the watch reads HRV every five minutes and heart rate every five seconds. Tensile uses Health's own overnight RMSSD readings (iOS 27) when the watch writes them, and averages HRV over the sleep itself instead of an evening-to-noon window, so the denser readings don't move your baseline. Apple's Readiness score, sleep score and Health Age have no interface for apps; see `docs/research/watch-features.md` §6 for the full list.
+
 ## Connect a Garmin watch
 
 The app reads everything through Apple Health, so it works with Garmin watches (like the Instinct 2) as well as Apple Watch.

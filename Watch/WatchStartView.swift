@@ -21,6 +21,8 @@ struct WatchStartView: View {
                     }
                     .tint(WatchTheme.lifting)
                     .buttonStyle(.borderedProminent)
+                    // Double tap starts it (Series 9 and later).
+                    .handGestureShortcut(.primaryAction)
                     .disabled(model.phase == .starting)
                 } else {
                     Text("No workout on your iPhone")
@@ -36,6 +38,7 @@ struct WatchStartView: View {
                     }
                     .tint(WatchTheme.strain)
                     .buttonStyle(.borderedProminent)
+                    .handGestureShortcut(.primaryAction)
                     .disabled(model.phase == .starting)
                 }
                 if model.phase == .starting {

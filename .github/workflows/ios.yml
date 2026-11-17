@@ -55,3 +55,50 @@ jobs:
             SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG' \
             | tee build.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" build.log
+
+  # The same two builds with Xcode 27 (the iOS 27 and watchOS 27 SDKs), which
+  # an iPhone on iOS 27 or an Apple Watch Series 12 is normally built with.
+  # Runs by hand, or when the commit message contains [xcode27]: the image is
+  # a preview and the job doubles the macOS minutes.
+  build-xcode-27:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[xcode27]')
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode and Swift versions
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build the Watch app for the simulator
+        timeout-minutes: 15
+        run: |
+          xcodebuild build \
+            -project WorkoutApp.xcodeproj \
+            -target TensileWatch \
+            -sdk watchsimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG' \
+            | tee watch-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" watch-build.log
+
+      - name: Build app for the simulator
+        timeout-minutes: 20
+        run: |
+          xcodebuild build \
+            -project WorkoutApp.xcodeproj \
+            -scheme WorkoutApp \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG' \
+            | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log

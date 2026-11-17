@@ -404,7 +404,9 @@ private struct WatchRatingPrompt: View {
     }
 }
 
-/// Complete, pinned under the live page.
+/// Complete, pinned under the live page. Double tap (finger and thumb, on
+/// Apple Watch Series 9 and later) presses it, so a set can be logged with
+/// the other hand still on the bar.
 private struct WatchCompleteButton: View {
     let action: () -> Void
 
@@ -416,6 +418,7 @@ private struct WatchCompleteButton: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(WatchTheme.recovery)
+        .handGestureShortcut(.primaryAction)
         .padding(.horizontal, 4)
     }
 }
