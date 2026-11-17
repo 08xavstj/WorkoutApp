@@ -29,6 +29,8 @@ struct CheckInView: View {
     /// The saved answers are read once: coming back from "Log by type and
     /// amount" (or the camera) must not wipe what was typed since.
     @State private var loaded = false
+    /// The optional morning questions (pain, mood, sickness, night wakings) are open.
+    @AppStorage("checkin.morningMore") private var showMoreMorning = false
     @State private var hrv: Double?
     @State private var hrvSource = "Garmin"
     @State private var showingCameraHRV = false
@@ -117,24 +119,40 @@ struct CheckInView: View {
         } footer: {
             Text("The trainer works around sore muscles.")
         }
-        // Joint pain, not muscle soreness: the trainer avoids or eases the lifts that load it (`PainGuard`).
-        PainQuestions(pains: $morning.pains)
-        MoodQuestions(mood: $morning.mood, feelings: $morning.feelings, associations: $morning.associations)
-        Section {
-            ChipFlow(options: MorningCheckIn.Symptom.allCases, selection: $morning.symptoms, label: \.rawValue, color: Theme.recoveryLow)
-        } header: {
-            Text("Feeling sick?")
-        } footer: {
-            Text("Leave empty if you feel fine.")
-        }
-        Section("Woke up during the night?") {
-            Picker("Wakings", selection: $morning.nightWakings) {
-                Text("–").tag(Int?.none)
-                Text("No").tag(Int?.some(0))
-                Text("Once").tag(Int?.some(1))
-                Text("2+").tag(Int?.some(2))
+        // The two questions above are the whole check-in on an ordinary morning. Pain, mood,
+        // sickness and night wakings are one tap away, and stay open once any is answered
+        // (cleanup-2026-11.md: data-entry burden is the main reason people stop logging).
+        let answeredMore = !(morning.pains ?? []).isEmpty || morning.mood != nil || !morning.symptoms.isEmpty || morning.nightWakings != nil
+        if showMoreMorning || answeredMore {
+            // Joint pain, not muscle soreness: the trainer avoids or eases the lifts that load it (`PainGuard`).
+            PainQuestions(pains: $morning.pains)
+            MoodQuestions(mood: $morning.mood, feelings: $morning.feelings, associations: $morning.associations)
+            Section {
+                ChipFlow(options: MorningCheckIn.Symptom.allCases, selection: $morning.symptoms, label: \.rawValue, color: Theme.recoveryLow)
+            } header: {
+                Text("Feeling sick?")
+            } footer: {
+                Text("Leave empty if you feel fine.")
             }
-            .pickerStyle(.segmented)
+            Section("Woke up during the night?") {
+                Picker("Wakings", selection: $morning.nightWakings) {
+                    Text("–").tag(Int?.none)
+                    Text("No").tag(Int?.some(0))
+                    Text("Once").tag(Int?.some(1))
+                    Text("2+").tag(Int?.some(2))
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+        if !answeredMore {
+            Section {
+                Button(showMoreMorning ? "Fewer questions" : "More questions") {
+                    withAnimation { showMoreMorning.toggle() }
+                }
+                .accessibilityIdentifier("checkin-more") // UI tests (ScreenshotTests)
+            } footer: {
+                Text("Pain, mood, feeling sick and night wakings. All optional.")
+            }
         }
         // Also while sex isn't set: Health often lacks it, and hiding the
         // question would silently treat everyone as male.
