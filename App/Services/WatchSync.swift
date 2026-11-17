@@ -61,6 +61,8 @@ final class WatchSync: NSObject {
     @ObservationIgnored private var lastFaceSentAt = Date.distantPast
     /// The heart-rate zones as last sent to the Watch (`updateZones`).
     @ObservationIgnored private var lastZones: HeartRateZoneScheme?
+    /// When the face data last went as a complication transfer (the kind that wakes the Watch app).
+    @ObservationIgnored private var lastFacePushedAt = Date.distantPast
 
     /// Called once from the root view, so commands can reach the database.
     func configure(context: ModelContext, gym: GymStore, launcher: WorkoutLauncher, health: HealthKitClient?,
@@ -214,7 +216,7 @@ final class WatchSync: NSObject {
         return (try? context.fetch(descriptor)) ?? []
     }
 
-    func updateFace(metrics: DailyMetricsModel, plans: WeeklyPlanStore, lastWorkoutEnd: Date?, now: Date = .now) {
+    func updateFace(metrics: DailyMetricsModel, plans: WeeklyPlanStore, lastWorkoutEnd: Date?, glance: PlanGlance.Plan? = nil, now: Date = .now) {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         let horizon = today.addingTimeInterval(8 * 86_400)
@@ -236,7 +238,7 @@ final class WatchSync: NSObject {
             }
         }
         let target = metrics.targetStrain
-        updateFace(WatchFaceData(
+        var face = WatchFaceData(
             recovery: metrics.recoveryIsFromYesterday ? nil : metrics.recovery?.score,
             band: metrics.recoveryIsFromYesterday ? nil : metrics.recovery?.status.rawValue,
             calibrating: metrics.recovery.map { !$0.isCalibrated } ?? false,
@@ -247,7 +249,10 @@ final class WatchSync: NSObject {
             slots: slots,
             lastWorkoutEnd: lastWorkoutEnd,
             updated: now
-        ))
+        )
+        // The same sessions, bed-by window and week count as the iPhone widgets (`GlanceFeed`).
+        if let glance { face.apply(glance) }
+        updateFace(face)
     }
 
     /// Sends the chosen heart-rate zones (Settings › Training › Heart-rate zones)
@@ -273,9 +278,14 @@ final class WatchSync: NSObject {
         lastFace = data
         lastFaceSentAt = data.updated
         // A change wakes the Watch app in the background while a Tensile
-        // complication is on the face (about 50 of these a day).
-        if changed, connection.isComplicationEnabled, connection.remainingComplicationUserInfoTransfers > 3 {
+        // complication is on the face (about 50 of these a day). An unchanged
+        // face goes that way once an hour too: the complication blanks strain
+        // 3 hours after its timestamp (`GlanceFreshness.strainMaxAge`), so the
+        // timestamp has to reach the wrist while the phone keeps confirming it.
+        let pushDue = data.updated.timeIntervalSince(lastFacePushedAt) >= 3600
+        if changed || pushDue, connection.isComplicationEnabled, connection.remainingComplicationUserInfoTransfers > 3 {
             connection.transferCurrentComplicationUserInfo([WatchMessage.faceData: encoded])
+            lastFacePushedAt = data.updated
         }
         // The latest data also waits in the context for the next time the Watch app runs.
         updateContext(key: WatchMessage.faceData, data: encoded)

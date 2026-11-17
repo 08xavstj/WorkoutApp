@@ -21,6 +21,8 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     var showBloodPressure = false
     /// The guided stretch session (workoutapp://stretch, from its reminder).
     var showStretch = false
+    /// Last night's sleep with tonight's bed-by window (workoutapp://sleep, from the Plan widget).
+    var showSleep = false
     /// Settings, presented once at the root so any tab's profile button
     /// (`TabToolbar`) can open it.
     var showSettings = false
@@ -71,6 +73,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         case "measurements": showMeasurements = true
         case "bp": showBloodPressure = true
         case "stretch": showStretch = true
+        case "sleep": showSleep = true
         case "today": selectedTab = .today
         case "coach":
             // A coach check-in's question ("workoutapp://coach?q=…"), asked in the Coach tab (`CoachInbox`).
@@ -84,7 +87,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     /// screen first and open the check-in once it has gone.
     private func openCheckIn(_ kind: CheckInKind) {
         let otherOpen = showHRVEntry || showMedications || showProgressPhotos || showWeeklyReview || showWeeklyPlan
-            || showMeasurements || showBloodPressure || showStretch || showSettings || (checkIn != nil && checkIn != kind)
+            || showMeasurements || showBloodPressure || showStretch || showSleep || showSettings || (checkIn != nil && checkIn != kind)
         guard otherOpen else {
             checkIn = kind
             return
@@ -97,6 +100,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         showMeasurements = false
         showBloodPressure = false
         showStretch = false
+        showSleep = false
         showSettings = false
         checkIn = nil
         Task { @MainActor in
@@ -710,13 +714,21 @@ nonisolated enum Reminders {
         MedsLiveActivity.noteEndedByApp(day: .now)
     }
 
+    /// An unchanged snapshot is saved again once the saved one is this old:
+    /// the widgets blank strain 3 hours after its timestamp
+    /// (`GlanceFreshness.strainMaxAge`), so the timestamp has to keep moving
+    /// while the app keeps confirming the number. App's choice.
+    static let widgetTimestampAge: TimeInterval = 30 * 60
+
     /// Saves what the widget shows and asks it to redraw: when anything
-    /// changed, and on a new day even if nothing did (the widget shows only a
-    /// snapshot saved today, so an unchanged one from yesterday read as "--").
+    /// changed, on a new day even if nothing did (the widget shows only a
+    /// snapshot saved today, so an unchanged one from yesterday read as "--"),
+    /// and when the saved one is half an hour old (`widgetTimestampAge`).
     static func updateWidget(_ snapshot: WidgetSnapshot) {
         let saved = WidgetSnapshot.load()
         let sameDay = saved.map { Calendar.current.isDate($0.updated, inSameDayAs: snapshot.updated) } ?? false
-        if !sameDay || saved != snapshot.withUpdated(saved?.updated) {
+        let aged = saved.map { snapshot.updated.timeIntervalSince($0.updated) >= widgetTimestampAge } ?? true
+        if !sameDay || aged || saved != snapshot.withUpdated(saved?.updated) {
             snapshot.save()
             WidgetCenter.shared.reloadAllTimelines()
         }
@@ -925,6 +937,7 @@ private extension WidgetSnapshot {
     nonisolated func withUpdated(_ date: Date?) -> WidgetSnapshot {
         var copy = self
         copy.updated = date ?? updated
+        copy.plan?.updated = copy.updated // the plan carries the snapshot's time
         return copy
     }
 }

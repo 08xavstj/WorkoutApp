@@ -4,6 +4,8 @@ import WidgetKit
 @main
 struct WorkoutWidgetBundle: WidgetBundle {
     var body: some Widget {
+        PlanWidget()
+        ScoresWidget()
         HRVWidget()
         MedsLiveActivityWidget()
         WorkoutLiveActivityWidget()
