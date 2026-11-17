@@ -2,7 +2,7 @@ import Foundation
 
 /// One heart-rate-variability reading from a watch (Apple Health's SDNN or
 /// RMSSD), in milliseconds.
-public struct HRVReading: Sendable, Equatable {
+public struct OvernightReading: Sendable, Equatable {
     public var date: Date
     public var milliseconds: Double
 
@@ -56,7 +56,7 @@ public enum OvernightHRV {
     /// The mean of the readings inside each night's main sleep, keyed by the
     /// night's date. Nights with fewer than `minimumReadings` are left out.
     public static func nightly(
-        _ readings: [HRVReading],
+        _ readings: [OvernightReading],
         nights: [Night],
         minimumReadings: Int = OvernightHRV.minimumReadings
     ) -> [Date: Double] {

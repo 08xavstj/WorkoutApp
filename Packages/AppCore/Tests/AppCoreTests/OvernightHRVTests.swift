@@ -22,18 +22,18 @@ import Testing
     }
 
     /// A reading every `step` minutes from `start` to `end`.
-    private func readings(from start: Date, to end: Date, everyMinutes step: Double, ms: Double) -> [HRVReading] {
+    private func readings(from start: Date, to end: Date, everyMinutes step: Double, ms: Double) -> [OvernightReading] {
         stride(from: start.timeIntervalSince1970, through: end.timeIntervalSince1970, by: step * 60).map {
-            HRVReading(date: Date(timeIntervalSince1970: $0), milliseconds: ms)
+            OvernightReading(date: Date(timeIntervalSince1970: $0), milliseconds: ms)
         }
     }
 
     @Test func meanOfTheReadingsInsideSleep() {
         let one = night(morning)
         let values = [
-            HRVReading(date: one.bedtime.addingTimeInterval(1800), milliseconds: 60),
-            HRVReading(date: one.bedtime.addingTimeInterval(7200), milliseconds: 70),
-            HRVReading(date: one.wake.addingTimeInterval(-600), milliseconds: 80),
+            OvernightReading(date: one.bedtime.addingTimeInterval(1800), milliseconds: 60),
+            OvernightReading(date: one.bedtime.addingTimeInterval(7200), milliseconds: 70),
+            OvernightReading(date: one.wake.addingTimeInterval(-600), milliseconds: 80),
         ]
         let result = OvernightHRV.nightly(values, nights: [one])
         #expect(result.count == 1)
@@ -58,13 +58,13 @@ import Testing
         let one = night(morning)
         let windowStart = morning.addingTimeInterval(-6 * 3600)
         let windowEnd = morning.addingTimeInterval(12 * 3600)
-        func samples(everyMinutes step: Double) -> [HRVReading] {
+        func samples(everyMinutes step: Double) -> [OvernightReading] {
             readings(from: windowStart, to: windowEnd, everyMinutes: step, ms: 0).map { reading in
                 let asleep = reading.date >= one.bedtime && reading.date <= one.wake
-                return HRVReading(date: reading.date, milliseconds: asleep ? 70 : 35)
+                return OvernightReading(date: reading.date, milliseconds: asleep ? 70 : 35)
             }
         }
-        func windowMean(_ values: [HRVReading]) -> Double { values.map(\.milliseconds).reduce(0, +) / Double(values.count) }
+        func windowMean(_ values: [OvernightReading]) -> Double { values.map(\.milliseconds).reduce(0, +) / Double(values.count) }
 
         // An older watch reads asleep about every two hours and rarely awake.
         let sparse = samples(everyMinutes: 120).filter { $0.date >= one.bedtime.addingTimeInterval(-2 * 3600) && $0.date <= one.wake }
@@ -81,8 +81,8 @@ import Testing
     @Test func aNightNeedsEnoughReadings() {
         let one = night(morning)
         let two = [
-            HRVReading(date: one.bedtime.addingTimeInterval(600), milliseconds: 50),
-            HRVReading(date: one.bedtime.addingTimeInterval(1200), milliseconds: 60),
+            OvernightReading(date: one.bedtime.addingTimeInterval(600), milliseconds: 50),
+            OvernightReading(date: one.bedtime.addingTimeInterval(1200), milliseconds: 60),
         ]
         #expect(OvernightHRV.nightly(two, nights: [one]).isEmpty)
         #expect(abs((OvernightHRV.nightly(two, nights: [one], minimumReadings: 1)[morning] ?? 0) - 55) < 0.001)
@@ -91,7 +91,7 @@ import Testing
     @Test func eachReadingGoesToItsOwnNight() {
         let days = (0..<5).map { morning.addingTimeInterval(Double($0) * 86_400) }
         let nights = days.map(night)
-        var values: [HRVReading] = []
+        var values: [OvernightReading] = []
         for (index, one) in nights.enumerated() {
             values += readings(from: one.bedtime, to: one.wake, everyMinutes: 30, ms: 40 + Double(index) * 10)
         }
@@ -106,10 +106,10 @@ import Testing
     @Test func badReadingsAndBadNightsAreIgnored() {
         let one = night(morning)
         let values = [
-            HRVReading(date: one.bedtime.addingTimeInterval(600), milliseconds: 0),
-            HRVReading(date: one.bedtime.addingTimeInterval(1200), milliseconds: .nan),
-            HRVReading(date: one.bedtime.addingTimeInterval(1800), milliseconds: -4),
-            HRVReading(date: one.bedtime.addingTimeInterval(2400), milliseconds: 55),
+            OvernightReading(date: one.bedtime.addingTimeInterval(600), milliseconds: 0),
+            OvernightReading(date: one.bedtime.addingTimeInterval(1200), milliseconds: .nan),
+            OvernightReading(date: one.bedtime.addingTimeInterval(1800), milliseconds: -4),
+            OvernightReading(date: one.bedtime.addingTimeInterval(2400), milliseconds: 55),
         ]
         #expect(OvernightHRV.nightly(values, nights: [one], minimumReadings: 1)[morning] == 55)
         let backwards = OvernightHRV.Night(date: morning, bedtime: one.wake, wake: one.bedtime)

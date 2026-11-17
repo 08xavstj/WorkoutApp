@@ -355,10 +355,10 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         )
         let ms = HKUnit.secondUnit(with: .milli)
         var hrvByNight: [Date: [Double]] = [:]
-        var readings: [HRVReading] = []
+        var readings: [OvernightReading] = []
         for sample in try await hrvDescriptor.result(for: store) {
             let value = sample.quantity.doubleValue(for: ms)
-            readings.append(HRVReading(date: sample.startDate, milliseconds: value))
+            readings.append(OvernightReading(date: sample.startDate, milliseconds: value))
             // Shift by 6 h so 6 pm-midnight counts toward the next morning.
             let shifted = sample.startDate.addingTimeInterval(6 * 3600)
             // Drop noon-6 pm (the fallback when the night has no reading inside its sleep).
@@ -485,7 +485,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         )
         guard let samples = try? await descriptor.result(for: store) else { return known.compactMapValues { $0 } }
         let ms = HKUnit.secondUnit(with: .milli)
-        let readings = samples.map { HRVReading(date: $0.startDate, milliseconds: $0.quantity.doubleValue(for: ms)) }
+        let readings = samples.map { OvernightReading(date: $0.startDate, milliseconds: $0.quantity.doubleValue(for: ms)) }
         let values = OvernightHRV.nightly(readings, nights: nights.map(\.overnight))
         var finished: [(night: SleepNight, value: Double?)] = []
         for night in nights {
