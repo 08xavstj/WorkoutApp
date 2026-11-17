@@ -451,6 +451,9 @@ struct RootView: View {
         // Changes applied from a block report end with the block they were for (`NextBlockStore`).
         NextBlockStore.shared.observe(blockStart: weeklyPlans.block?.start)
         checkIns.recordSleepScore(metrics.sleep?.score)
+        // Tensile's scores go beside Apple's for the same day, when the owner added those (`AppleScoresStore`).
+        AppleScoresStore.shared.keepAppValues(recovery: metrics.recovery?.score, recoveryIsFromYesterday: metrics.recoveryIsFromYesterday,
+                                              bodyAge: vitals.bodyAge?.years)
         // Mood patterns (builder A): each day's strain, your usual training strain and sleep need.
         checkIns.recordContext(dayStrains: metrics.weekStrain.map { (date: $0.date, strain: $0.strain) },
                                usualTrainingStrain: metrics.usualTrainingStrain, sleepNeedHours: settings.sleepNeedHours)
