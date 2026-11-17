@@ -516,9 +516,13 @@ private struct RemindersSettingsSection: View {
             if on { askForNotifications() }
         }
         if settings.workoutRemindersOn, Reminders.workoutRemindersPaused {
-            Text("Paused after two went unanswered. Confirm next week's plan to resume.")
+            Text("Quiet for a few days: the last ones went unanswered. They come back sooner when you train or confirm a plan.")
                 .font(.footnote)
                 .foregroundStyle(Theme.secondaryText)
+        }
+        if settings.workoutRemindersOn {
+            // Tone (Playful or Plain) and "Show me one".
+            WorkoutVoiceSettingsRows()
         }
         // The same setting as This week › Weekly review.
         Toggle(isOn: $settings.weeklyReviewOn) {

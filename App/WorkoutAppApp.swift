@@ -609,7 +609,13 @@ struct RootView: View {
         if sessions.contains(where: { $0.isActive && Calendar.current.isDateInToday($0.startedAt) }) {
             trained.insert(Calendar.current.startOfDay(for: .now))
         }
-        Task { await Reminders.scheduleWorkoutReminders(slots: slots, enabled: enabled, trainedDays: trained, restMode: restMode) }
+        // The tone and each slot's facts, for the reminder's line (`WorkoutVoice`, `WorkoutBanter`).
+        let voice = WorkoutVoice.context(slots: slots, from: WorkoutVoice.Sources(
+            settings: settings, metrics: metrics, vitals: vitals, checkIns: checkIns, plans: weeklyPlans, muscles: muscles,
+            gym: gym, library: library, sessions: sessions))
+        Task {
+            await Reminders.scheduleWorkoutReminders(slots: slots, enabled: enabled, trainedDays: trained, restMode: restMode, voice: voice)
+        }
     }
 }
 
@@ -818,6 +824,9 @@ private struct ReminderReactions: ViewModifier {
         content
             .onChange(of: settings.checkInRemindersOn) { scheduleCheckIns() }
             .onChange(of: settings.workoutRemindersOn) { scheduleWorkouts() }
+            // The reminder's tone or who writes it changed: pending reminders get new lines.
+            .onChange(of: settings.workoutReminderTone) { scheduleWorkouts() }
+            .onChange(of: settings.workoutReminderFreshLines) { scheduleWorkouts() }
             .onChange(of: plans) {
                 // A saved plan is a fresh commitment: paused workout reminders come back.
                 Reminders.resumeWorkoutReminders()

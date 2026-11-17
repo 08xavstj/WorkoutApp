@@ -379,11 +379,19 @@ nonisolated enum Reminders {
         var name: String
         /// The if-then line the user wrote ("If I'm late, I do the 15-minute version.").
         var ifThen: String?
+        /// The session's focus and lengths, for the reminder's line (`WorkoutVoice`).
+        var focus: WorkoutFocus?
+        var minutes: Int?
+        var shortMinutes: Int?
 
-        init(start: Date, name: String, ifThen: String? = nil) {
+        init(start: Date, name: String, ifThen: String? = nil, focus: WorkoutFocus? = nil, minutes: Int? = nil,
+             shortMinutes: Int? = nil) {
             self.start = start
             self.name = name
             self.ifThen = ifThen
+            self.focus = focus
+            self.minutes = minutes
+            self.shortMinutes = shortMinutes
         }
     }
 
@@ -407,26 +415,30 @@ nonisolated enum Reminders {
         return String(identifier.dropFirst(prefix.count))
     }
 
-    /// Workout reminders are paused after `ignoredBeforePause` went unanswered in a
-    /// row (no tap, no session that day). Settings says so; confirming the next
-    /// weekly plan resumes them.
+    /// Workout reminders are quiet after `ignoredBeforePause` went unanswered in a
+    /// row (no tap, no session that day). Settings says so; training or
+    /// confirming a weekly plan brings them back, and so does opening the app
+    /// once the quiet has lasted long enough (`WorkoutReminderCadence`).
     static var workoutRemindersPaused: Bool { WorkoutReminderLog.isPaused }
 
     /// Clears the pause and the ignored count. Call when the user confirms a weekly plan.
     static func resumeWorkoutReminders() { WorkoutReminderLog.resume() }
 
     /// One reminder per planned slot over the next week, `workoutLeadMinutes`
-    /// before it, with the user's if-then line in the body. None for a day
-    /// already trained on (a session started or finished early, or a watch
-    /// workout): the reminder would be for something already done.
+    /// before it. Its body is a line written from the day's own data, playful
+    /// or plain (`WorkoutBanter`, `WorkoutVoiceWriter`), with the user's
+    /// if-then line under the title. None for a day already trained on (a
+    /// session started or finished early, or a watch workout): the reminder
+    /// would be for something already done.
     /// - Parameters:
     ///   - slots: planned slots (from `WeeklyPlanStore`); none means no reminders.
     ///   - trainedDays: start-of-day dates with a logged, running or watch workout.
     ///     They get no reminder, and a reminder answered that way (trained
     ///     without tapping) doesn't count as ignored.
     ///   - restMode: rest mode is on. Today then never counts as an ignored reminder.
+    ///   - voice: the tone and each slot's facts (`WorkoutVoice.context`); nil keeps the plain wording.
     static func scheduleWorkoutReminders(slots: [PlannedSlot], enabled: Bool, trainedDays: Set<Date>, restMode: Bool = false,
-                                         now: Date = .now) async {
+                                         voice: WorkoutVoiceContext? = nil, now: Date = .now) async {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix("workout|") }
         center.removePendingNotificationRequests(withIdentifiers: pending)
@@ -434,28 +446,38 @@ nonisolated enum Reminders {
         let today = calendar.startOfDay(for: now)
         let trainedKeys = Set(trainedDays.map { dayKey($0, calendar: calendar) })
         if restMode { WorkoutReminderLog.noteTapped(dayKey: dayKey(today, calendar: calendar)) }
-        WorkoutReminderLog.updatePause(trainedKeys: trainedKeys, today: today, calendar: calendar, now: now)
+        // Normal, the last call, one at a time, or quiet (`WorkoutReminderCadence`).
+        let stage = WorkoutReminderLog.updatePause(trainedKeys: trainedKeys, today: today, calendar: calendar, now: now)
         var scheduled: [String: Date] = [:]
+        var planned: [WorkoutVoiceWriter.Planned] = []
         // Whatever happens below, the log ends up holding what fired and what is pending now:
         // a reminder removed above (switched off, rest mode, paused, plan changed) never went out.
         defer { WorkoutReminderLog.noteScheduled(scheduled, now: now) }
-        guard enabled, !WorkoutReminderLog.isPaused else { return }
         let upcoming = slots.filter { $0.start > now }.sorted { $0.start < $1.start }
-        guard !upcoming.isEmpty, await notificationsAllowed() else { return }
-        for slot in upcoming where scheduled.count < 7 {
-            let fire = slot.start.addingTimeInterval(-TimeInterval(workoutLeadMinutes * 60))
-            guard fire > now else { continue }
-            let key = dayKey(calendar.startOfDay(for: slot.start), calendar: calendar)
-            // One a day: a second slot the same day rides on the first. None once the day is trained.
-            guard scheduled[key] == nil, !trainedKeys.contains(key) else { continue }
-            scheduled[key] = fire
-            let content = UNMutableNotificationContent()
-            content.title = "\(slot.name) at \(slot.start.formatted(date: .omitted, time: .shortened))"
-            content.body = slot.ifThen ?? "Your planned session in \(workoutLeadMinutes) minutes. The short version counts too."
-            content.sound = .default
-            content.userInfo = ["link": "workoutapp://plan"]
-            await add(content, identifier: workoutIdentifier(forDayKey: key), at: fire, center: center, calendar: calendar)
+        if enabled, stage != .quiet, !upcoming.isEmpty, await notificationsAllowed() {
+            for slot in upcoming where scheduled.count < stage.maxPending {
+                let fire = slot.start.addingTimeInterval(-TimeInterval(workoutLeadMinutes * 60))
+                guard fire > now else { continue }
+                let key = dayKey(calendar.startOfDay(for: slot.start), calendar: calendar)
+                // One a day: a second slot the same day rides on the first. None once the day is trained.
+                guard scheduled[key] == nil, !trainedKeys.contains(key) else { continue }
+                scheduled[key] = fire
+                var facts = voice?.facts[slot.start]
+                // The reminder after an unanswered one says, once, that reminders go quiet after it.
+                if stage == .lastCall { facts?.lastCall = true }
+                planned.append(WorkoutVoiceWriter.Planned(key: key, fire: fire, slot: slot, facts: facts,
+                                                          isToday: calendar.isDate(slot.start, inSameDayAs: now)))
+            }
         }
+        // Each reminder's line. A pending one keeps its line while it is still true, so
+        // rescheduling uses none up; with nothing planned, lines that never went out are forgotten.
+        let lines = WorkoutVoiceWriter.lines(for: planned, voice: voice, now: now)
+        for item in planned {
+            let content = WorkoutVoiceWriter.content(for: item, line: lines[item.key])
+            await add(content, identifier: workoutIdentifier(forDayKey: item.key), at: item.fire, center: center, calendar: calendar)
+        }
+        // Later, off the launch path: a fresh line from the on-device model for the next reminder, when that is on.
+        WorkoutVoiceWriter.freshen(planned, lines: lines, voice: voice, now: now)
     }
 
     /// Which workout reminders went out, which were tapped, and whether they're
@@ -506,18 +528,34 @@ nonisolated enum Reminders {
             save(WorkoutReminderRules.logAfterReschedule(log(), scheduled: scheduled, now: now))
         }
 
-        /// Pauses when the last `ignoredBeforePause` delivered reminders were neither tapped nor followed by training.
-        static func updatePause(trainedKeys: Set<String>, today: Date, calendar: Calendar, now: Date) {
-            guard !isPaused else { return }
-            let tapped = Set(UserDefaults.standard.stringArray(forKey: tappedKey) ?? [])
-            let ignored = WorkoutReminderRules.ignoredInARow(log: log(), answered: tapped.union(trainedKeys),
-                                                             todayKey: Reminders.dayKey(today, calendar: calendar), now: now)
-            if ignored >= ignoredBeforePause {
-                UserDefaults.standard.set(true, forKey: pausedKey)
+        /// Where the "going quiet" rules stand (`WorkoutReminderCadence.State`, as JSON).
+        static let cadenceKey = "workoutReminderCadence"
+
+        /// Works out the stage from what went out and what was answered
+        /// (`WorkoutReminderCadence`): the last call after one unanswered
+        /// reminder, quiet after two, back when you train, or one at a time
+        /// when the app is opened after the quiet has lasted long enough.
+        static func updatePause(trainedKeys: Set<String>, today: Date, calendar: Calendar, now: Date) -> WorkoutReminderCadence.Stage {
+            let defaults = UserDefaults.standard
+            let saved = defaults.data(forKey: cadenceKey).flatMap { try? JSONDecoder().decode(WorkoutReminderCadence.State.self, from: $0) }
+            var state = saved ?? WorkoutReminderCadence.State()
+            // Paused by an older build, which kept no date: quiet since today.
+            if saved == nil, isPaused { state.quietSince = today; state.quietSpells = 1 }
+            let tapped = Set(defaults.stringArray(forKey: tappedKey) ?? [])
+            let decision = WorkoutReminderCadence.evaluate(state, log: log(), tapped: tapped, trained: trainedKeys, now: now,
+                                                           calendar: calendar) { Reminders.dayKey($0, calendar: calendar) }
+            if decision.clearLog {
+                defaults.removeObject(forKey: scheduledKey)
+                defaults.removeObject(forKey: fireTimesKey)
+                defaults.removeObject(forKey: tappedKey)
             }
+            if let data = try? JSONEncoder().encode(decision.state) { defaults.set(data, forKey: cadenceKey) }
+            defaults.set(decision.stage == .quiet, forKey: pausedKey)
+            return decision.stage
         }
 
         static func resume() {
+            UserDefaults.standard.removeObject(forKey: cadenceKey)
             UserDefaults.standard.set(false, forKey: pausedKey)
             UserDefaults.standard.removeObject(forKey: scheduledKey)
             UserDefaults.standard.removeObject(forKey: fireTimesKey)

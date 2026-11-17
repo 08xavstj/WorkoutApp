@@ -196,7 +196,8 @@ final class WeeklyPlanStore {
                 }
                 guard let planned,
                       let start = Reminders.fireDate(day: day, minutes: planned.time, calendar: calendar) else { return nil }
-                return Reminders.PlannedSlot(start: start, name: planned.focus.shortTitle, ifThen: planned.ifThen)
+                return Reminders.PlannedSlot(start: start, name: planned.focus.shortTitle, ifThen: planned.ifThen, focus: planned.focus,
+                                             minutes: planned.minutes, shortMinutes: planned.shortVersionMinutes)
             }
         }
         let progress = plan.progress(trainingDays: trainingDays, now: now)
@@ -208,7 +209,8 @@ final class WeeklyPlanStore {
             guard daysLeftThen <= remainingThen, !(offset == 0 && progress.trainedToday),
                   let day = calendar.date(byAdding: .day, value: offset, to: today),
                   let start = Reminders.fireDate(day: day, minutes: session.time, calendar: calendar) else { return nil }
-            return Reminders.PlannedSlot(start: start, name: "\(session.focus.shortTitle) (\(remainingThen) to go)", ifThen: session.ifThen)
+            return Reminders.PlannedSlot(start: start, name: "\(session.focus.shortTitle) (\(remainingThen) to go)", ifThen: session.ifThen,
+                                         focus: session.focus, minutes: session.minutes, shortMinutes: session.shortVersionMinutes)
         }
     }
 
