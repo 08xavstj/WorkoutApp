@@ -102,6 +102,37 @@ public struct EasyCardio: Codable, Sendable, Equatable {
 
     /// "Easy ride · 30 min".
     public var title: String { "\(kind.title) · \(minutes) min" }
+
+    /// Easy sessions a new plan starts with, for every goal (evidence audit
+    /// M2): cardiorespiratory fitness is the strongest fitness predictor of
+    /// mortality (Lang et al., Br J Sports Med 2024, overview of meta-analyses:
+    /// high vs low HR 0.47; observational), and cardio alongside lifting
+    /// didn't cost muscle growth or maximal strength (Schumann 2022). Two
+    /// sessions of 30 minutes give 60 of WHO's 150 aerobic minutes. The owner
+    /// can set 0.
+    public static let defaultSessionsPerWeek = 2
+
+    /// The count the plan editor starts from. A plan already saved for the
+    /// week keeps its count (0 when it has no cardio). A new week carries the
+    /// last plan's sessions over; when that plan had none, it was a choice
+    /// only if it was saved after this default existed (`choiceSaved`),
+    /// otherwise it was the old default of 0 and the new default applies.
+    public static func startingSessions(thisWeek: WeeklyPlan?, lastPlan: WeeklyPlan?, choiceSaved: Bool) -> Int {
+        if let thisWeek { return thisWeek.cardio?.sessionsPerWeek ?? 0 }
+        if let carried = lastPlan?.cardio?.sessionsPerWeek, carried > 0 { return carried }
+        if lastPlan != nil, choiceSaved { return 0 }
+        return defaultSessionsPerWeek
+    }
+
+    /// Last week's cardio for a new week made from it ("Same as last week",
+    /// the weekly review), by the same rule as `startingSessions`: kept when it
+    /// had easy sessions or was saved as a choice, otherwise the default two
+    /// sessions of `kind` (keeping an interval session already taken).
+    public static func carriedOver(_ last: EasyCardio?, choiceSaved: Bool, kind: Kind) -> EasyCardio? {
+        if let last, last.sessionsPerWeek > 0 { return last }
+        if choiceSaved { return last }
+        return EasyCardio(sessionsPerWeek: defaultSessionsPerWeek, kind: last?.kind ?? kind, hard: last?.hard)
+    }
 }
 
 public enum CardioPlanner {

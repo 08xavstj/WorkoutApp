@@ -125,7 +125,10 @@ struct ThisWeekCard: View {
                     PlanButton(title: last.isFlexible ? "Same as last week" : "Same days as last week", filled: false) {
                         store.save(WeeklyPlan(weekStart: thisWeek,
                                               plannedDays: store.newWeekDays(from: last.plannedDays, weekStart: thisWeek, sessions: sessions),
-                                              mode: last.mode, sessionsPerWeek: last.sessionsPerWeek, cardio: last.cardio))
+                                              mode: last.mode, sessionsPerWeek: last.sessionsPerWeek,
+                                              // Two easy sessions unless none was chosen (evidence audit M2).
+                                              cardio: EasyCardio.carriedOver(last.cardio, choiceSaved: UserDefaults.standard.bool(forKey: WeeklyPlanView.cardioChoiceSavedKey),
+                                                                             kind: CardioPlanner.recommendedKind(goals: settings.goalsSet ? settings.goals : nil))))
                     }
                 }
                 PlanButton(title: "Plan your week", filled: true) { router.showWeeklyPlan = true }

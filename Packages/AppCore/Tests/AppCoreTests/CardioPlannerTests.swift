@@ -36,6 +36,36 @@ struct CardioPlannerTests {
         #expect(EasyCardio(sessionsPerWeek: -1).sessionsPerWeek == 0)
     }
 
+    /// Evidence audit M2: new plans start with two easy sessions for every
+    /// goal (was 0); saved plans and a choice of 0 made since are kept.
+    @Test func newPlansStartWithTwoEasySessions() {
+        #expect(EasyCardio.defaultSessionsPerWeek == 2)
+        #expect(EasyCardio.defaultSessionsPerWeek * EasyCardio.standardMinutes == 60)
+        // First plan ever.
+        #expect(EasyCardio.startingSessions(thisWeek: nil, lastPlan: nil, choiceSaved: false) == 2)
+        #expect(EasyCardio.startingSessions(thisWeek: nil, lastPlan: nil, choiceSaved: true) == 2)
+        // This week's saved plan is never changed, with or without cardio.
+        var saved = plan([(2, .upper)], cardio: 1)
+        #expect(EasyCardio.startingSessions(thisWeek: saved, lastPlan: nil, choiceSaved: false) == 1)
+        saved.cardio = nil
+        #expect(EasyCardio.startingSessions(thisWeek: saved, lastPlan: nil, choiceSaved: false) == 0)
+        // A new week carries last week's sessions over.
+        #expect(EasyCardio.startingSessions(thisWeek: nil, lastPlan: plan([(2, .upper)], cardio: 1), choiceSaved: false) == 1)
+        // Last week had none: the old default unless chosen since the new one.
+        #expect(EasyCardio.startingSessions(thisWeek: nil, lastPlan: saved, choiceSaved: false) == 2)
+        #expect(EasyCardio.startingSessions(thisWeek: nil, lastPlan: saved, choiceSaved: true) == 0)
+    }
+
+    @Test func aWeekCopiedFromLastWeekGetsTheDefaultOnlyWhenNoneWasChosen() {
+        let one = EasyCardio(sessionsPerWeek: 1, kind: .row)
+        #expect(EasyCardio.carriedOver(one, choiceSaved: false, kind: .bike) == one)
+        #expect(EasyCardio.carriedOver(nil, choiceSaved: true, kind: .bike) == nil)
+        #expect(EasyCardio.carriedOver(nil, choiceSaved: false, kind: .bike) == EasyCardio(sessionsPerWeek: 2, kind: .bike))
+        let none = EasyCardio(sessionsPerWeek: 0, kind: .inclineWalk)
+        #expect(EasyCardio.carriedOver(none, choiceSaved: true, kind: .bike) == none)
+        #expect(EasyCardio.carriedOver(none, choiceSaved: false, kind: .bike) == EasyCardio(sessionsPerWeek: 2, kind: .inclineWalk))
+    }
+
     @Test func restDaysFirstAndNotTheDayBeforeLegs() {
         // Mon upper, Tue lower, Thu upper, Fri lower: Wed, Sat and Sun are rest days, none before a lower day.
         let week = plan([(2, .upper), (3, .lower), (5, .upper), (6, .lower)], cardio: 2)

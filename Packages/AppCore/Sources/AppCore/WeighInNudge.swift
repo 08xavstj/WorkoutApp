@@ -14,7 +14,11 @@ public enum WeighInNudge {
     /// Days without a weigh-in before the nudge shows.
     public static let daysWithoutWeighIn = 3
 
-    public static let title = "Weigh in most mornings"
+    /// A few mornings, not daily: daily and weekly weighing worked about the
+    /// same in the meta-analysis (Madigan 2015, verified on PubMed November
+    /// 2026), and frequent weighing goes with disordered-eating symptoms in
+    /// cross-sectional studies (healthy-living-2026-11.md).
+    public static let title = "Weigh in a few mornings a week"
 
     /// True for a lose/gain goal with no weigh-in for `daysWithoutWeighIn` days or more.
     public static func isDue(goals: Goals?, lastWeighIn: Date?, now: Date = .now, calendar: Calendar = .current) -> Bool {
@@ -31,6 +35,6 @@ public enum WeighInNudge {
             let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: lastWeighIn), to: calendar.startOfDay(for: now)).day ?? 0
             opening = "Last weigh-in \(days) day\(days == 1 ? "" : "s") ago."
         }
-        return opening + " People who weigh themselves regularly tend to manage their weight better, and daily beat weekly by little (Zheng 2015; Madigan 2015). Three or four mornings a week keep your trend line honest; read the trend, not the number."
+        return opening + " Weighing regularly helps inside a plan like this one; daily and weekly weighing worked about the same (Madigan 2015). Three or four mornings a week keep the trend line honest; read the trend, not the number."
     }
 }

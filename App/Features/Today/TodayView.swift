@@ -511,8 +511,7 @@ private struct HydrationNumbers {
 
     var color: Color {
         switch assessment.status {
-        case .low: Theme.recoveryModerate
-        case .onTrack: Theme.oxygen
+        case .logged: Theme.oxygen
         case .high: Theme.recoveryModerate
         }
     }
@@ -583,7 +582,10 @@ private struct WaterDetailsCard: View {
             HStack {
                 CardLabel(text: "Water today")
                 Spacer()
-                Chip(text: water.assessment.status.rawValue, color: water.color)
+                // Litres with no status; only "Very high" is flagged (evidence audit, should-change 3).
+                if water.assessment.status == .high {
+                    Chip(text: water.assessment.status.rawValue, color: water.color)
+                }
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(water.drank.formatted(.number.precision(.fractionLength(1))))
@@ -594,14 +596,14 @@ private struct WaterDetailsCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             .accessibilityElement(children: .combine)
-            WaterPaceBar(drank: water.drank, target: target.liters, expectedByNow: water.assessment.expectedByNow)
+            WaterPaceBar(drank: water.drank, target: target.liters)
             ForEach(water.assessment.effects, id: \.self) { effect in
                 Text(effect)
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Target \(target.base.formatted()) L\(target.exercise > 0 ? " + \(target.exercise.formatted(.number.precision(.fractionLength(1)))) L training" : "")\(target.heat > 0 ? " + \(target.heat.formatted()) L heat" : ""). The line shows an even pace for now.")
+            Text("Target \(target.base.formatted()) L\(target.exercise > 0 ? " + \(target.exercise.formatted(.number.precision(.fractionLength(1)))) L training" : "")\(target.heat > 0 ? " + \(target.heat.formatted()) L heat" : ""). A typical intake, not a requirement.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -610,11 +612,11 @@ private struct WaterDetailsCard: View {
     }
 }
 
-/// The water bar with a mark where an even pace would be by now.
+/// The water bar against the day's typical intake. No pace mark: a gap to
+/// it mostly measured logging (evidence audit, should-change 3).
 private struct WaterPaceBar: View {
     let drank: Double
     let target: Double
-    let expectedByNow: Double
 
     var body: some View {
         GeometryReader { geo in
@@ -623,11 +625,6 @@ private struct WaterPaceBar: View {
                 Capsule()
                     .fill(LinearGradient(colors: Theme.oxygenColors, startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(10, geo.size.width * min(1, drank / max(target, 0.1))))
-                // Where you'd be by now on an even pace.
-                Rectangle()
-                    .fill(Theme.primaryText.opacity(0.35))
-                    .frame(width: 2, height: 16)
-                    .offset(x: geo.size.width * min(1, expectedByNow / max(target, 0.1)) - 1)
             }
         }
         .frame(height: 12)

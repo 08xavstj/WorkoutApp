@@ -18,7 +18,65 @@ struct HeartHealthTests {
         #expect(result.peak == 165)
         #expect(result.oneMinuteDrop == 25)
         #expect(result.twoMinuteDrop == 40)
-        #expect(HeartRateRecovery.label(oneMinuteDrop: 25) == "Good")
+        // No "Low / Fair / Good" label any more (evidence audit M3): Cole 1999's
+        // 12 bpm cut-off comes from symptom-limited clinical tests.
+    }
+
+    /// Profile reserve is 130 bpm (60 to 190): 80% of reserve = 164 bpm.
+    @Test func onlySustainedHardEffortsAreMeasured() {
+        let workoutStart = start
+        let workout = DateInterval(start: workoutStart, duration: 20 * 60)
+        // 15 easy minutes, 4 hard minutes (170), then the end at minute 20 and recovery.
+        let hard = perMinute(Array(repeating: 130, count: 16) + [170, 172, 171, 170, 168, 140, 128], from: workoutStart)
+        #expect(HeartRateRecovery.isSustainedHardEffort(hard, during: workout, profile: profile))
+        let measured = HeartRateRecovery.measureHardEfforts(hard, workouts: [workout], lifting: [], profile: profile)
+        #expect(measured.count == 1)
+        #expect(measured.first?.result.oneMinuteDrop == 32)
+
+        // Two hard minutes are not enough (3 needed).
+        let brief = perMinute(Array(repeating: 130, count: 18) + [170, 168, 140, 128], from: workoutStart)
+        #expect(!HeartRateRecovery.isSustainedHardEffort(brief, during: workout, profile: profile))
+        #expect(HeartRateRecovery.measureHardEfforts(brief, workouts: [workout], lifting: [], profile: profile).isEmpty)
+    }
+
+    @Test func liftingIsNeverMeasuredEvenWhenHeartRateRunsHigh() {
+        let workout = DateInterval(start: start, duration: 50 * 60)
+        // A hard leg day: long stretches above 80% of reserve between sets.
+        let samples = perMinute(Array(repeating: 168, count: 50) + [150, 140], from: start)
+        let lifting = [DateInterval(start: start.addingTimeInterval(-60), duration: 52 * 60)]
+        #expect(HeartRateRecovery.measureHardEfforts(samples, workouts: [workout], lifting: lifting, profile: profile).isEmpty)
+        // The same heart rate on a run (no lifting window) counts.
+        #expect(HeartRateRecovery.measureHardEfforts(samples, workouts: [workout], lifting: [], profile: profile).count == 1)
+    }
+
+    @Test func shortWorkoutsAreSkipped() {
+        let workout = DateInterval(start: start, duration: 8 * 60)
+        let samples = perMinute([170, 170, 170, 170, 170, 170, 170, 170, 172, 140, 130], from: start)
+        #expect(HeartRateRecovery.measureHardEfforts(samples, workouts: [workout], lifting: [], profile: profile).isEmpty)
+    }
+
+    @Test func usualRangeIsTheMiddleHalfOfYourOwnValues() {
+        #expect(HeartRateRecovery.usualRange([20, 22]) == nil)
+        #expect(HeartRateRecovery.usualText([20, 22]) == "Your usual range shows after 1 more hard session")
+        #expect(HeartRateRecovery.usualText([]) == "Your usual range shows after 3 more hard sessions")
+        // 17, 18, 21, 24, 25: 25th percentile 18, 75th 24.
+        #expect(HeartRateRecovery.usualRange([24, 17, 21, 25, 18]) == 18...24)
+        #expect(HeartRateRecovery.usualText([24, 17, 21, 25, 18]) == "Your usual 18-24")
+        #expect(HeartRateRecovery.usualText([20, 20, 20]) == "Your usual 20")
+        #expect(HeartRateRecovery.clinicalNote.contains("maximal treadmill tests"))
+    }
+
+    /// Evidence audit M1: heart rate inside lifting windows isn't aerobic activity.
+    @Test func intensityMinutesLeaveOutLifting() {
+        // An hour at 120 bpm (moderate, 46% of reserve), the middle 50 minutes in a gym session.
+        let samples = perMinute(Array(repeating: 120, count: 60), from: start)
+        let lifting = [DateInterval(start: start.addingTimeInterval(5 * 60), duration: 50 * 60)]
+        let all = IntensityMinutes.count(samples, profile: profile)
+        let outside = IntensityMinutes.count(IntensityMinutes.outsideLifting(samples, lifting: lifting), profile: profile)
+        #expect(all.moderate == 60)
+        #expect(outside.moderate < 15)
+        #expect(IntensityMinutes.outsideLifting(samples, lifting: []).count == 60)
+        #expect(IntensityMinutes.title == "Cardio minutes (outside lifting)")
     }
 
     @Test func recoveryNeedsDataAfterTheWorkout() {

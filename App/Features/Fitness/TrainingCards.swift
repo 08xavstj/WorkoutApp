@@ -250,17 +250,21 @@ struct StrengthDaysCard: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// For muscle and strength goals the 150-minute WHO floor is enough, so
-    /// cardio minutes sit here as a line instead of their own card (`WeeklyActivityBand`).
+    /// For muscle and strength goals cardio minutes sit here as a line instead
+    /// of their own card (`WeeklyActivityBand`). Counted outside lifting (evidence audit M1).
     private var cardioLine: some View {
         let total = vitals.intensityMinutes?.total ?? 0
         return VStack(alignment: .leading, spacing: 4) {
             Divider().overlay(Theme.separator)
-            Text("Cardio minutes, last 7 days: \(WeeklyActivityBand.line(total: total, goals: metrics.goals))")
+            Text("Cardio minutes outside lifting, last 7 days: \(WeeklyActivityBand.line(total: total, goals: metrics.goals))")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Text(IntensityMinutes.vigorousLine(vitals.intensityMinutes?.vigorous ?? 0))
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(IntensityMinutes.liftingNote)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -270,9 +274,9 @@ struct StrengthDaysCard: View {
 
 // MARK: - Weekly active minutes
 
-/// This week's moderate and vigorous minutes against the 150-floor / 300-best
-/// band (WHO 2020, Bull et al.; Lee et al., Circulation 2022). Vigorous minutes
-/// count double, as `IntensityMinutes` already does. Shown as its own card for
+/// This week's moderate and vigorous minutes outside lifting against the
+/// 150-floor / 300-best band (WHO 2020, Bull et al.; Lee et al., Circulation
+/// 2022). Vigorous minutes count double, as `IntensityMinutes` already does. Shown as its own card for
 /// health, stamina and weight-loss goals (`WeeklyActivityBand.emphasis`).
 struct WeeklyMinutesCard: View {
     @Environment(VitalsModel.self) private var vitals
@@ -283,7 +287,7 @@ struct WeeklyMinutesCard: View {
         let status = WeeklyActivityBand.status(total: minutes.total)
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                CardLabel(text: "Weekly active minutes", color: Theme.oxygen)
+                CardLabel(text: IntensityMinutes.title, color: Theme.oxygen)
                 Spacer()
                 Chip(text: status.rawValue, color: status == .belowFloor ? Theme.oxygen : Theme.recoveryHigh)
             }
@@ -298,7 +302,7 @@ struct WeeklyMinutesCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             MinutesBandBar(total: minutes.total)
-            Text("\(minutes.moderate) moderate + \(minutes.vigorous) vigorous ×2, from heart rate over the last 7 days.")
+            Text("\(minutes.moderate) moderate + \(minutes.vigorous) vigorous ×2, from heart rate outside lifting over the last 7 days. " + IntensityMinutes.liftingNote)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
             // Vigorous minutes on their own line, against one cohort's reference (Ahmadi 2022).
@@ -364,7 +368,7 @@ struct MinutesBandBar: View {
             .frame(height: 14)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(total) active minutes in the last 7 days; floor \(floorMinutes), best \(bestMinutes)")
+        .accessibilityLabel("\(total) cardio minutes outside lifting in the last 7 days; floor \(floorMinutes), best \(bestMinutes)")
     }
 }
 

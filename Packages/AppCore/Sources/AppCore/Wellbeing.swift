@@ -13,7 +13,12 @@ import Foundation
 ///   a caller that knows its log includes food moisture can still ask for it
 ///   with `includesWaterInFood`.) An adequate intake is the median intake of
 ///   healthy people, not a requirement, and it isn't scaled to body size, so
-///   the target is a guide and "Behind" is deliberately lenient.
+///   the target is a guide only.
+/// - No "Behind" or "On track" (evidence audit, should-change 3): the target
+///   isn't a requirement, and the water a food app logs leaves out coffee, tea
+///   and other drinks unless they're logged as water, so a shortfall mostly
+///   measured logging. The litres show with no status; only "Very high" is
+///   flagged, for the hyponatraemia risk.
 /// - Exercise: sweat losses are typically 0.5-1 L an hour; ACSM advises
 ///   replacing them (Sawka et al., ACSM position stand, 2007).
 /// - Heat adds roughly another 0.5-1 L.
@@ -32,8 +37,8 @@ public enum Hydration {
     }
 
     public enum Status: String, Sendable {
-        case low = "Behind"
-        case onTrack = "On track"
+        /// Litres logged, not judged.
+        case logged = "Logged"
         case high = "Very high"
     }
 
@@ -50,15 +55,6 @@ public enum Hydration {
     public static func beverageBaseLiters(sex: BiologicalSex) -> Double { sex == .male ? 3.0 : 2.2 }
     /// Adequate intake of total water, food included, litres a day (National Academies 2005).
     public static func totalWaterBaseLiters(sex: BiologicalSex) -> Double { sex == .male ? 3.7 : 2.7 }
-    /// "Behind" means under this share of the amount expected by now (app choice).
-    public static let behindShareOfExpected = 0.7
-    /// ...but never more than this share of the day's target, so from early
-    /// evening the bar stops rising (app choice: the target is a median
-    /// intake, not a floor, and a lot of water late in the evening costs
-    /// sleep). With it, 3.2 L by 21:00 on a lifting day is on track; before,
-    /// it read "Behind" against a 4.6 L target.
-    public static let behindCapShareOfTarget = 0.6
-
     public static func target(sex: BiologicalSex, exerciseMinutes: Double, feelsLikeC: Double?) -> Target {
         target(sex: sex, exerciseMinutes: exerciseMinutes, feelsLikeC: feelsLikeC, includesWaterInFood: false)
     }
@@ -88,17 +84,10 @@ public enum Hydration {
         if drank > max(5.5, target.liters * 1.6) {
             status = .high
             effects.append("That's a lot of water. Spread it out and add salt or electrolytes; more than about 1 L an hour for hours can dilute blood sodium.")
-        } else if drank < min(expected * behindShareOfExpected, target.liters * behindCapShareOfTarget), hour >= 11 {
-            status = .low
-            effects.append("Running low raises your heart rate and makes training feel harder; losing 2% of body weight as water cuts endurance.")
-            effects.append("Even mild dehydration can dip mood and focus, and can make your resting heart rate read higher tonight.")
-            if target.exercise > 0 { effects.append("You trained today: drink about 0.5-0.75 L for each hour of exercise.") }
         } else {
-            status = .onTrack
-            effects.append("Well hydrated: heart rate stays lower at the same effort and recovery reads cleaner.")
-        }
-        if hour >= 20 && drank < target.liters * 0.6 {
-            effects.append("Catch up gradually; a lot right before bed can wake you up to use the bathroom.")
+            status = .logged
+            effects.append("Only what's logged as water counts here. Coffee, tea, milk and food add to what you drink.")
+            if target.exercise > 0 { effects.append("You trained today: about 0.5-0.75 L for each hour of exercise replaces typical sweat losses.") }
         }
         return Assessment(target: target, drank: drank, expectedByNow: expected, status: status, effects: effects)
     }

@@ -102,7 +102,7 @@ struct ScoreRing: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
                 if let subtitle {
-                    // Centred when it wraps under a narrow ring ("Rest day · up to 25%").
+                    // Centred when it wraps under a narrow ring ("Rest day · keep it easy").
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)

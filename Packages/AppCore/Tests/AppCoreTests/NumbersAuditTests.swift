@@ -776,17 +776,14 @@ struct AuditHydrationTests {
         #expect(target.base == 3.0)
         #expect(abs(target.liters - 3.875) < 0.001)
         #expect(Hydration.target(sex: .female, exerciseMinutes: 0, feelsLikeC: nil).liters == 2.2)
-        #expect(Hydration.assess(drank: 3.2, target: target, hour: 21).status == .onTrack)
-        // Even against the old total-water target, 3.2 L at 21:00 is no longer "Behind".
         let total = Hydration.target(sex: .male, exerciseMinutes: 70, feelsLikeC: 18, includesWaterInFood: true)
         #expect(abs(total.liters - 4.575) < 0.001)
-        #expect(Hydration.assess(drank: 3.2, target: total, hour: 21).status == .onTrack)
-        // The evening bar is 60% of the target: 2.3 L here.
-        #expect(Hydration.assess(drank: 2.4, target: target, hour: 21).status == .onTrack)
-        #expect(Hydration.assess(drank: 2.2, target: target, hour: 21).status == .low)
-        // Earlier in the day the pace rule is unchanged: 70% of what's expected by now.
-        #expect(Hydration.assess(drank: 0.6, target: target, hour: 15).status == .low)
-        #expect(Hydration.assess(drank: 1.7, target: target, hour: 15).status == .onTrack)
+        // The evidence audit (should-change 3) went further than N15: there is no
+        // "Behind" at all now, since a low log mostly measures logging. Only very high is flagged.
+        for (drank, hour) in [(3.2, 21), (2.2, 21), (0.6, 15), (1.7, 15)] {
+            #expect(Hydration.assess(drank: drank, target: target, hour: hour).status == .logged)
+        }
+        #expect(Hydration.assess(drank: 6.5, target: target, hour: 21).status == .high)
     }
 }
 

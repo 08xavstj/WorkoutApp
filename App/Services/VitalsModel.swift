@@ -219,7 +219,6 @@ final class VitalsModel {
 
         async let rhr = health.dailySeries(.restingHeartRate, unit: bpm, days: 90, cumulative: false)
         async let walkingHR = health.dailySeries(.walkingHeartRateAverage, unit: bpm, days: 90, cumulative: false)
-        async let appleHRR = health.dailySeries(.heartRateRecoveryOneMinute, unit: bpm, days: 60, cumulative: false)
         async let spo2 = health.dailySeries(.oxygenSaturation, unit: .percent(), days: 90, cumulative: false)
         async let respiration = health.dailySeries(.respiratoryRate, unit: bpm, days: 90, cumulative: false)
         async let wristTemp = health.dailySeries(.appleSleepingWristTemperature, unit: .degreeCelsius(), days: 90, cumulative: false)
@@ -238,6 +237,8 @@ final class VitalsModel {
         async let diastolic = health.dailySeries(.bloodPressureDiastolic, unit: .millimeterOfMercury(), days: 90, cumulative: false)
         async let water = health.dailySeries(.dietaryWater, unit: .liter(), days: 90, cumulative: true)
         async let workouts = health.workoutIntervals(from: twoWeeksAgo, to: now)
+        // Strength workouts from the watch or other apps: lifting, like logged sessions (evidence audit M1).
+        async let otherWorkouts = health.externalWorkouts(from: twoWeeksAgo, to: now)
         let fullHeartRateRead = heartRateCacheEdge == nil
             || lastFullHeartRateRead.map { now.timeIntervalSince($0) >= 3600 } ?? true
         let heartRateFrom = fullHeartRateRead ? twoWeeksAgo : max(twoWeeksAgo, heartRateCacheEdge ?? twoWeeksAgo)
@@ -286,7 +287,8 @@ final class VitalsModel {
         let derived = await Self.derive(
             heartRate: heartRateMinutes,
             workouts: workoutWindows,
-            lifting: sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) },
+            lifting: sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+                + ((try? await otherWorkouts) ?? []).filter(\.isStrength).map { DateInterval(start: $0.start, end: max($0.start, $0.end)) },
             sleep: (try? await lastNight) ?? [],
             nights: nights,
             profile: resolvedProfile,
@@ -333,32 +335,37 @@ final class VitalsModel {
         }
         result.append(makeStat("walkingHR", .heart, "Walking heart rate", "figure.walk", series: get(try? await walkingHR), unit: "bpm", digits: 0))
 
-        // Heart-rate recovery: Apple's value if any device wrote one, else measured from workouts.
-        let appleHRRSeries = get(try? await appleHRR)
+        // Heart-rate recovery, measured only after a sustained hard effort and never
+        // after lifting, and compared only with your own earlier values: Cole 1999's
+        // 12 bpm cut-off comes from maximal clinical tests (evidence audit M3).
+        // Apple's own value isn't used: it can't be tied to a hard effort.
         let measured = derived.recoveries
         heartRateRecovery = measured.last?.result
-        if let last = appleHRRSeries.last {
-            result.append(Stat(
+        let recoveryHistory = HeartRateRecoveryLog.merge(measured.map { (date: $0.date, drop: $0.result.oneMinuteDrop) })
+        if let last = recoveryHistory.last {
+            let earlier = recoveryHistory.dropLast().map(\.drop)
+            let twoMinutes = measured.last
+                .flatMap { abs($0.date.timeIntervalSince(last.date)) < 60 ? $0.result.twoMinuteDrop : nil }
+                .map { " −\(fmt($0)) bpm after 2 min." } ?? ""
+            var hrr = Stat(
                 id: "hrr", category: .heart, title: "Heart rate recovery", icon: "arrow.down.heart.fill",
-                value: fmt(last.value), unit: "bpm", status: HeartRateRecovery.label(oneMinuteDrop: last.value),
-                tone: last.value >= 20 ? .good : (last.value >= 12 ? .neutral : .caution),
-                gauge: min(1, last.value / 40), series: appleHRRSeries, footnote: "Drop in the first minute after exercise"
-            ))
-        } else if let latest = measured.last {
-            let drop = latest.result.oneMinuteDrop
-            result.append(Stat(
-                id: "hrr", category: .heart, title: "Heart rate recovery", icon: "arrow.down.heart.fill",
-                value: fmt(drop), unit: "bpm", status: HeartRateRecovery.label(oneMinuteDrop: drop),
-                tone: drop >= 20 ? .good : (drop >= 12 ? .neutral : .caution),
-                gauge: min(1, drop / 40),
-                series: measured.map { DatedValue(date: $0.date, value: $0.result.oneMinuteDrop) },
-                footnote: latest.result.twoMinuteDrop.map { "−\(fmt($0)) bpm after 2 min. From your last workout's heart rate." }
-                    ?? "From your last workout's heart rate."
-            ))
+                value: fmt(last.drop), unit: "bpm", status: HeartRateRecovery.usualText(Array(earlier)), tone: .neutral,
+                series: recoveryHistory.map { DatedValue(date: $0.date, value: $0.drop) },
+                footnote: "Drop in the first minute after your last hard effort.\(twoMinutes) " + HeartRateRecovery.clinicalNote
+            )
+            if let usual = HeartRateRecovery.usualRange(Array(earlier)) {
+                hrr.normalRange = usual
+                // Centre of the pill = the middle of your usual range.
+                let span = max(1, usual.upperBound - usual.lowerBound)
+                hrr.gauge = min(1, max(0, 0.5 + (last.drop - (usual.lowerBound + usual.upperBound) / 2) / (2 * span)))
+            }
+            result.append(hrr)
         } else {
             result.append(Stat(
                 id: "hrr", category: .heart, title: "Heart rate recovery", icon: "arrow.down.heart.fill", unit: "bpm",
-                footnote: "Appears after a workout once your watch records heart rate for a couple of minutes afterwards."
+                series: recoveryHistory.map { DatedValue(date: $0.date, value: $0.drop) },
+                footnote: "Appears after a hard cardio effort (3+ minutes near your top heart rate, such as intervals or a hard run), not after lifting. "
+                    + HeartRateRecovery.clinicalNote
             ))
         }
 
@@ -447,12 +454,19 @@ final class VitalsModel {
         // The goal grows (or eases) with your usual day; see StepGoal.
         let stepGoal = StepGoal.personal(dailySteps: stepSeries.filter { !calendar.isDateInToday($0.date) }.suffix(28).map(\.value), age: settings.age)
         stepStat.goal = stepGoal
-        if let today = latestToday(stepSeries) {
-            stepStat.gauge = min(1, today.value / stepGoal)
-            stepStat.status = today.value >= stepGoal ? "Goal reached" : "\(fmt(stepGoal - today.value)) to go"
-            stepStat.tone = today.value >= stepGoal ? .good : .neutral
-        } else {
+        if latestToday(stepSeries) == nil {
             stepStat.value = stepSeries.isEmpty ? nil : "0"
+        }
+        // The week's average against the goal, not today: the step studies use average
+        // daily steps (Paluch 2022; Ding 2025; evidence audit should-change 1).
+        let fullDays = stepSeries.filter { !calendar.isDateInToday($0.date) && $0.date >= calendar.date(byAdding: .day, value: -7, to: today) ?? today }
+        if let week = StepGoal.weekStatus(lastSevenFullDays: fullDays.map(\.value), goal: stepGoal) {
+            stepStat.gauge = min(1, week.average / stepGoal)
+            stepStat.status = week.text
+            stepStat.tone = week.met ? .good : .neutral
+        } else {
+            stepStat.gauge = nil
+            stepStat.status = nil
         }
         result.append(stepStat)
         // Miles alongside pounds, kilometres alongside kilograms (Health stores km).
@@ -465,15 +479,15 @@ final class VitalsModel {
         result.append(floorsStat)
         let intensity = derived.intensityWeek
         result.append(Stat(
-            id: "intensity", category: .activity, title: "Intensity minutes", icon: "bolt.heart.fill",
+            id: "intensity", category: .activity, title: IntensityMinutes.title, icon: "bolt.heart.fill",
             value: "\(intensity.total)", unit: "last 7 days",
             status: intensity.total >= IntensityMinutes.weeklyGoal ? "Goal reached" : "\(IntensityMinutes.weeklyGoal - intensity.total) to go",
             tone: intensity.total >= IntensityMinutes.weeklyGoal ? .good : .neutral,
             gauge: min(1, Double(intensity.total) / Double(IntensityMinutes.weeklyGoal)),
             series: derived.intensityByDay,
             // The vigorous count on its own line, against the cohort reference (Ahmadi 2022; `IntensityMinutes.vigorousLine`).
-            footnote: "\(intensity.moderate) moderate + \(intensity.vigorous) vigorous ×2, from heart rate. Goal 150 a week.\n"
-                + IntensityMinutes.vigorousLine(intensity.vigorous)
+            footnote: "\(intensity.moderate) moderate + \(intensity.vigorous) vigorous ×2, from heart rate outside lifting. Goal 150 a week.\n"
+                + IntensityMinutes.vigorousLine(intensity.vigorous) + "\n" + IntensityMinutes.liftingNote
         ))
         result.append(Self.strengthDaysStat(sessions: sessions, now: now))
         result.append(todayStat("active", "Active energy", "flame.fill", series: get(try? await active), unit: "kcal", digits: 0, today: latestToday))
@@ -786,7 +800,7 @@ final class VitalsModel {
             stat.about = "Average heart rate while walking. It falls as your aerobic fitness improves."
         case "hrr":
             stat.chart = .bars
-            stat.about = "How many beats your heart rate drops in the first minute after exercise. Bigger drops mean better fitness; a drop of 12 bpm or less was linked with higher mortality (Cole et al., N Engl J Med 1999)."
+            stat.about = "How many beats your heart rate drops in the first minute after a hard effort, compared with your own earlier values. It's measured only after 3+ minutes near your top heart rate, never after lifting, where the last minutes are often a rest. A slow fall after a maximal exercise test predicted mortality in patients referred for testing (Cole et al., N Engl J Med 1999); there's no validated cut-off for everyday workouts, so the app doesn't grade it."
         case "vo2":
             stat.about = "How much oxygen your body can use at full effort: the best single measure of aerobic fitness. Higher fitness is strongly linked with longer life (Mandsager et al., JAMA Netw Open 2018). Watches estimate it from runs and walks with heart rate."
             stat.defaultDays = 90
@@ -799,7 +813,7 @@ final class VitalsModel {
         case "temperature":
             stat.about = "Your temperature while asleep. Compare it with your own normal: a rise of about 0.5 °C (0.9 °F) over a night or two can come before illness, and it also shifts across a menstrual cycle."
         case "steps":
-            stat.about = "Steps each day. 7,000 a day was linked with about half the risk of death of 2,000, with smaller gains beyond (Ding et al., Lancet Public Health 2025); risk kept falling to about 8,000-10,000 for adults under 60 (Paluch et al., 2022). Your goal starts at 8,000 (7,000 from age 60) and then follows your usual day, never below 7,000."
+            stat.about = "Steps each day. 7,000 a day was linked with about half the risk of death of 2,000, with smaller gains beyond (Ding et al., Lancet Public Health 2025); risk kept falling to about 8,000-10,000 for adults under 60 (Paluch et al., 2022). Your goal starts at 8,000 (7,000 from age 60) and then follows your usual day, never below 7,000 and never above 10,000 (8,000 from 60), where the risk curves flatten. It is judged on your 7-day average, as in the studies, not on one day."
         case "distance":
             stat.about = "Walking and running distance each day."
         case "floors":
@@ -807,7 +821,7 @@ final class VitalsModel {
         case "intensity":
             stat.chart = .bars
             stat.historyUnit = "min"
-            stat.about = "Minutes at moderate (40-59% of heart-rate reserve) or vigorous intensity (60%+, counted double). Guidelines recommend 150 a week (WHO 2020). Bars show each day; the number is the last 7 days."
+            stat.about = "Minutes at moderate (40-59% of heart-rate reserve) or vigorous intensity (60%+, counted double), outside lifting: logged gym sessions and watch strength workouts are left out. Guidelines recommend 150 minutes of aerobic activity a week and, separately, muscle-strengthening on 2 or more days (WHO 2020). Bars show each day; the number is the last 7 days."
         case "active":
             stat.about = "Calories burned by movement and exercise each day, as reported by your watch."
         case "resting":
@@ -952,22 +966,18 @@ final class VitalsModel {
         var derived = Derived()
         let sorted = heartRate.sorted { $0.date < $1.date }
 
-        // Recovery after each workout (needs heart rate in the minutes after it ends).
-        for workout in workouts.sorted(by: { $0.end < $1.end }) where workout.duration >= 10 * 60 {
-            // A logged session and the watch's own workout often end together: measure once.
-            if let last = derived.recoveries.last, abs(last.date.timeIntervalSince(workout.end)) < 5 * 60 { continue }
-            let nearby = sorted.filter { $0.date >= workout.end.addingTimeInterval(-180) && $0.date <= workout.end.addingTimeInterval(150) }
-            if let result = HeartRateRecovery.measure(nearby, workoutEnd: workout.end) {
-                derived.recoveries.append(.init(date: workout.end, result: result))
-            }
-        }
+        // Recovery after each sustained hard effort, never after lifting (evidence audit M3).
+        derived.recoveries = HeartRateRecovery.measureHardEfforts(sorted, workouts: workouts, lifting: lifting, profile: profile)
+            .map { Derived.Recovery(date: $0.date, result: $0.result) }
 
-        derived.intensityWeek = IntensityMinutes.count(sorted.filter { $0.date >= weekStart }, profile: profile)
+        // Cardio minutes leave lifting out: the 150-minute guideline is for aerobic
+        // activity, and lifting has its own (`IntensityMinutes.outsideLifting`, evidence audit M1).
+        let outsideLifting = IntensityMinutes.outsideLifting(sorted, lifting: lifting)
+        derived.intensityWeek = IntensityMinutes.count(outsideLifting.filter { $0.date >= weekStart }, profile: profile)
         // Jackson's activity scale is about aerobic exercise over the last month and puts
         // weight lifting at levels 2-3 (`VO2MaxEstimate.activityRating`), so heart rate inside
         // lifting sessions is left out, and the whole span on hand is used, not one week.
         if let first = sorted.first, let last = sorted.last {
-            let outsideLifting = sorted.filter { sample in !lifting.contains { $0.contains(sample.date) } }
             derived.aerobic = IntensityMinutes.count(outsideLifting, profile: profile)
             derived.aerobicDays = max(7, (calendar.dateComponents([.day], from: first.date, to: last.date).day ?? 0) + 1)
         }
@@ -979,7 +989,7 @@ final class VitalsModel {
                 let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
                 let samples = sorted.filter { $0.date >= day && $0.date < next }
                 if !samples.isEmpty {
-                    let minutes = IntensityMinutes.count(samples, profile: profile)
+                    let minutes = IntensityMinutes.count(IntensityMinutes.outsideLifting(samples, lifting: lifting), profile: profile)
                     derived.intensityByDay.append(DatedValue(date: day, value: Double(minutes.total)))
                     derived.intensitySplitByDay[day] = minutes
                     let started = workouts.filter { $0.start >= day && $0.start < next }
