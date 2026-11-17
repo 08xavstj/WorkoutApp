@@ -332,8 +332,8 @@ nonisolated public enum PlanGlance {
 
     /// When the Smart Stack should offer the plan: the hour before each
     /// session still to do, and from an hour before tonight's bed-by window to
-    /// its end. Only while the plan can be trusted (`carryDays`), and nothing
-    /// while it reads "--".
+    /// its end when the glance then shows that window. Only while the plan can
+    /// be trusted (`carryDays`), and nothing while it reads "--".
     public static func relevantWindows(of plan: Plan?, after now: Date, alsoDoneAt: Date? = nil,
                                        calendar: Calendar = .current) -> [Window] {
         guard let plan, let age = age(of: plan, at: now, calendar: calendar) else { return [] }
@@ -351,8 +351,16 @@ nonisolated public enum PlanGlance {
                                   reason: .session))
         }
         if let start = plan.bedByStart, let end = plan.bedByEnd, end > start, end > now, start < trustedUntil {
-            windows.append(Window(interval: DateInterval(start: start.addingTimeInterval(-bedRelevanceLead), end: end),
-                                  reason: .bedtime))
+            let windowStart = start.addingTimeInterval(-bedRelevanceLead)
+            // Only when the glance itself reads "In bed by" then (as the window opens, or by bedtime),
+            // never over "No plan yet".
+            let showsBedBy = [max(now, windowStart), max(now, start)].contains { moment in
+                if case .bedBy = state(of: plan, at: moment, alsoDoneAt: alsoDoneAt, calendar: calendar) { return true }
+                return false
+            }
+            if showsBedBy {
+                windows.append(Window(interval: DateInterval(start: windowStart, end: end), reason: .bedtime))
+            }
         }
         return Array(windows.sorted { $0.interval.start < $1.interval.start }.prefix(maximumRelevantIntervals))
     }

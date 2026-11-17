@@ -26,7 +26,9 @@ nonisolated enum WorkoutVoiceWriter {
         let requests = planned.compactMap { item in
             item.facts.map { WorkoutBanter.DayRequest(dayKey: item.key, fire: item.fire, facts: $0, isToday: item.isToday) }
         }
-        return WorkoutVoiceStore.shared.reconcile(requests, tone: voice.tone, now: now)
+        // A model's line stays pending only while fresh lines are on and the model is there.
+        let freshLines = voice.freshLines && WorkoutVoiceModel.isAvailable
+        return WorkoutVoiceStore.shared.reconcile(requests, tone: voice.tone, freshLines: freshLines, now: now)
     }
 
     /// The notification: what and when in the title, the line in the body,
@@ -37,14 +39,15 @@ nonisolated enum WorkoutVoiceWriter {
         let ifThen = item.slot.ifThen?.trimmingCharacters(in: .whitespacesAndNewlines)
         let plan = ifThen?.isEmpty == false ? ifThen : nil
         if let line, let facts = item.facts {
-            let mustBeSaid = facts.caution != nil || facts.lastCall
+            // Keeping plain (`Caution.keepPlain`) isn't a no-push day: the session and your if-then line stand.
+            let mustBeSaid = facts.noPush || facts.lastCall
             if line.tone == .plain, !mustBeSaid, let plan {
                 // Plain, with a plan of your own: your words are the reminder, as before.
                 content.body = plan
             } else {
                 content.body = line.pick.text
                 // Your if-then line stays in view, except on a day when the reminder must not push.
-                if let plan, facts.caution == nil { content.subtitle = plan }
+                if let plan, !facts.noPush { content.subtitle = plan }
             }
         } else {
             content.body = plan ?? "Your planned session in \(Reminders.workoutLeadMinutes) minutes. The short version counts too."
@@ -69,7 +72,7 @@ nonisolated enum WorkoutVoiceWriter {
             guard let facts = item.facts, let line = lines[item.key] else { return false }
             return item.fire.timeIntervalSince(now) > minimumLeadSeconds && WorkoutBanter.wantsGenerated(line, facts: facts)
         }
-        guard let item = candidates.first, let facts = item.facts, WorkoutVoiceModel.isAvailable else { return }
+        guard let item = candidates.first, let facts = item.facts, let askedFor = lines[item.key], WorkoutVoiceModel.isAvailable else { return }
         guard WorkoutVoiceStore.shared.startAsking() else { return }
         Task.detached(priority: .utility) {
             let history = WorkoutVoiceStore.shared.history()
@@ -79,17 +82,25 @@ nonisolated enum WorkoutVoiceWriter {
             // Not a near-copy of the examples it was shown or of anything sent lately.
             let recent = examples + history.recentTexts(WorkoutBanter.recentWindow)
             let accepted = candidate.flatMap { WorkoutBanterGuard.acceptGenerated($0, facts: facts, recent: recent) }
-            let stored = WorkoutVoiceStore.shared.finishAsking(dayKey: item.key, facts: facts, accepted: accepted)
+            // Only onto the line it was written for, and only while still true for today's facts.
+            let stored = WorkoutVoiceStore.shared.finishAsking(dayKey: item.key, facts: facts, accepted: accepted, askedFor: askedFor)
             log.notice("fresh line for \(item.key, privacy: .public): \(accepted == nil ? "kept the library line" : "accepted", privacy: .public)")
-            guard accepted != nil, let stored, stored.isGenerated else { return }
+            guard accepted != nil, let stored, stored.isGenerated, stored.pick.text == accepted else { return }
             await replacePending(item, line: stored)
         }
     }
 
-    /// Puts the new line on the reminder if it is still waiting to go out.
+    /// Puts the new line on the reminder if it is still waiting to go out, at
+    /// the time the stored pending reminder has now (a reschedule while the
+    /// model was writing may have moved it).
     private static func replacePending(_ item: Planned, line: WorkoutBanter.Assigned) async {
         let center = UNUserNotificationCenter.current()
         let identifier = Reminders.workoutIdentifier(forDayKey: item.key)
+        var item = item
+        if line.fire != item.fire {
+            item.fire = line.fire
+            item.slot.start = line.fire.addingTimeInterval(TimeInterval(Reminders.workoutLeadMinutes * 60))
+        }
         guard item.fire > .now, await center.pendingNotificationRequests().map(\.identifier).contains(identifier) else { return }
         let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: item.fire)
         // The same identifier: iOS replaces the pending request.

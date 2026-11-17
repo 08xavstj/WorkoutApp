@@ -42,16 +42,25 @@ enum WorkoutVoice {
         var context = WorkoutVoiceContext(tone: sources.settings.workoutReminderTone,
                                           freshLines: sources.settings.workoutReminderFreshLines)
         guard sources.settings.workoutRemindersOn, !slots.isEmpty else { return context }
-        let day = dayFacts(sources, now: now)
+        let day = dayFacts(sources, focuses: Set(slots.compactMap(\.focus)), now: now)
         let calendar = Calendar.current
         for slot in slots {
-            context.facts[slot.start] = facts(for: slot, today: day.today, ahead: day.ahead, plans: sources.plans, now: now, calendar: calendar)
+            context.facts[slot.start] = facts(for: slot, today: day.today, ahead: day.ahead, lifts: day.lifts, plans: sources.plans,
+                                              now: now, calendar: calendar)
         }
         return context
     }
 
-    /// What is known today (`today`) and the part of it that holds for later days (`ahead`).
-    static func dayFacts(_ sources: Sources, now: Date) -> (today: WorkoutBanter.Facts, ahead: WorkoutBanter.Facts) {
+    /// What is known today (`today`), the part of it that holds for later days
+    /// (`ahead`), and per session focus the lift worth a line (`lifts`).
+    struct Day {
+        var today: WorkoutBanter.Facts
+        var ahead: WorkoutBanter.Facts
+        var lifts: [WorkoutFocus: WorkoutBanter.Lift] = [:]
+    }
+
+    /// - Parameter focuses: the sessions' focuses, for `Day.lifts`.
+    static func dayFacts(_ sources: Sources, focuses: Set<WorkoutFocus>, now: Date) -> Day {
         let finished = LiftRecordInputs.sessions(sources.sessions)
         let traits = LiftRecordInputs.traits(finished, library: sources.library)
         let profile = sources.gym.profile
@@ -61,11 +70,20 @@ enum WorkoutVoice {
         var ahead = WorkoutBanter.Facts()
         ahead.unit = unit
         ahead.leadMinutes = Reminders.workoutLeadMinutes
-        // The next step is the next weight this gym can load (`GymProfile.nextLoad`), never a made-up jump.
-        ahead.lift = WorkoutBanterFacts.lift(sessions: finished, traits: traits, now: now) { id, kilograms in
-            let kind = ExerciseCatalog.exercise(id: id)?.load ?? EquipmentKind.fromLibrary(library.exercise(id: id)?.equipment)
-            guard let kind, let next = profile.nextLoad(above: unit.fromKilograms(kilograms), on: kind) else { return nil }
-            return unit.toKilograms(next)
+        // A lift the day's session trains (its primary muscles, from the library or the catalog);
+        // a line about the bench on leg day would be about the wrong session.
+        var lifts: [WorkoutFocus: WorkoutBanter.Lift] = [:]
+        for focus in focuses {
+            let lift = WorkoutBanterFacts.lift(sessions: finished, traits: traits, now: now, nextWeightKg: { id, kilograms in
+                // The next step is the next weight this gym can load (`GymProfile.nextLoad`), never a made-up jump.
+                let kind = ExerciseCatalog.exercise(id: id)?.load ?? EquipmentKind.fromLibrary(library.exercise(id: id)?.equipment)
+                guard let kind, let next = profile.nextLoad(above: unit.fromKilograms(kilograms), on: kind) else { return nil }
+                return unit.toKilograms(next)
+            }, inSession: { id in
+                let listed = library.exercise(id: id)?.primaryMuscles.compactMap { Muscle(rawValue: $0.lowercased()) } ?? []
+                return WorkoutBanterFacts.trains(focus, primary: listed.isEmpty ? WorkoutBanterFacts.catalogPrimary(id) : listed)
+            })
+            if let lift { lifts[focus] = lift }
         }
         let extra = sources.metrics.recentLiftingDays
         let weeks = WorkoutBanterFacts.weeksInARow(records: sources.plans.records(sessions: sources.sessions, extra: extra), now: now)
@@ -75,7 +93,10 @@ enum WorkoutVoice {
         ahead.keepPlain = MoodCare.keepPlain(lowMood: CoachNudges.lowMoodFinding(checkIns: sources.checkIns, now: now))
 
         var today = ahead
-        today.daysSinceLastSession = sources.plans.daysOff(sessions: sources.sessions, extra: extra, now: now)
+        // Days since real training. Not `WeeklyPlanStore.daysOff`: that counts a planned busy
+        // week as seen (`BusyWeek.lastSeen`), and "5 days since your last session" must be a fact.
+        let lastTrained = WeeklyPlanStore.trainingDays(sessions: sources.sessions, extra: extra).last
+        today.daysSinceLastSession = RestartPlan.daysOff(lastTrained: lastTrained, now: now)
         if let progress = sources.plans.progress(sessions: sources.sessions, extra: extra, now: now) {
             today.sessionsDone = progress.done
             today.sessionsPlanned = progress.target
@@ -91,13 +112,20 @@ enum WorkoutVoice {
         let pains = PainGuard.active(PainLogStore.shared.allReports(checkIns: sources.checkIns, health: []), today: now)
         today.painArea = pains.max { $0.level < $1.level }?.area.title.lowercased()
         today.restMode = sources.settings.isRestMode
-        return (today, ahead)
+        return Day(today: today, ahead: ahead, lifts: lifts)
     }
 
     /// One slot's facts: the day's (or the week's) plus the session itself.
     static func facts(for slot: Reminders.PlannedSlot, today: WorkoutBanter.Facts, ahead: WorkoutBanter.Facts,
-                      plans: WeeklyPlanStore, now: Date, calendar: Calendar) -> WorkoutBanter.Facts {
+                      lifts: [WorkoutFocus: WorkoutBanter.Lift], plans: WeeklyPlanStore, now: Date, calendar: Calendar) -> WorkoutBanter.Facts {
         var facts = calendar.isDate(slot.start, inSameDayAs: now) ? today : ahead
+        // Only a lift this session trains; none when the session's focus isn't known.
+        facts.lift = slot.focus.flatMap { lifts[$0] }
+        // Days left in the plan's week, this one included: a week-start line needs room for every session.
+        let sessionDay = calendar.startOfDay(for: slot.start)
+        if let weekEnd = calendar.date(byAdding: .day, value: 7, to: WeeklyPlan.weekStart(containing: slot.start)) {
+            facts.daysLeftInWeek = calendar.dateComponents([.day], from: sessionDay, to: weekEnd).day
+        }
         facts.sessionName = slot.focus.map { WorkoutBanterFacts.dayName(for: $0) } ?? slot.name
         facts.sessionMinutes = slot.minutes
         if let short = slot.shortMinutes, let minutes = slot.minutes, short < minutes { facts.shortMinutes = short }
@@ -125,15 +153,17 @@ enum WorkoutVoice {
         let calendar = Calendar.current
         let trainingDays = WeeklyPlanStore.trainingDays(sessions: sources.sessions, extra: sources.metrics.recentLiftingDays)
         let slots = sources.plans.reminderSlots(trainingDays: trainingDays, now: now).sorted { $0.start < $1.start }
-        let day = dayFacts(sources, now: now)
+        let day = dayFacts(sources, focuses: Set(slots.compactMap(\.focus)), now: now)
         var facts = day.today
         var note = "Nothing is planned this week yet."
         if let slot = slots.first(where: { calendar.isDate($0.start, inSameDayAs: now) }) {
-            facts = Self.facts(for: slot, today: day.today, ahead: day.ahead, plans: sources.plans, now: now, calendar: calendar)
+            facts = Self.facts(for: slot, today: day.today, ahead: day.ahead, lifts: day.lifts, plans: sources.plans, now: now,
+                               calendar: calendar)
             note = "Written for today's session."
         } else if let next = slots.first(where: { $0.start > now }) {
             // Nothing planned today: the next session, with today's numbers.
-            facts = Self.facts(for: next, today: day.today, ahead: day.today, plans: sources.plans, now: now, calendar: calendar)
+            facts = Self.facts(for: next, today: day.today, ahead: day.today, lifts: day.lifts, plans: sources.plans, now: now,
+                               calendar: calendar)
             note = "Written for \(next.start.formatted(.dateTime.weekday(.wide)))'s session, with today's numbers."
         } else {
             facts.isRestDay = true
@@ -142,7 +172,7 @@ enum WorkoutVoice {
         case .restMode: note = "Rest mode is on, so no workout reminders are sent."
         case .illness: note = "Illness is flagged today, so the reminder stays plain."
         case .pain: note = "Pain is logged, so the reminder stays plain."
-        case .lowRecovery: note = "Recovery is low today, so the reminder stays plain."
+        case .lowRecovery: note = "Today's numbers point to an easy day (recovery, or the 7-day HRV), so the reminder stays plain."
         case .keepPlain: note = "Several low-mood mornings this week, so reminders stay plain for now. The reminder itself never says why."
         case .restDay, nil: break
         }

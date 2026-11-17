@@ -359,10 +359,13 @@ public enum WorkoutBanterLibrary {
 
     static let caution: [L] = [
         // Low recovery: an easy day, not a lost one (HRV-guided training: Javaloyes et al., IJSPP 2019, as in `CoachCheckIns`).
-        L("cr01", .lowRecovery, .plain, "Recovery is low today. {session} can be the easy version, the {short}-minute version, or moved. Each one follows the plan."),
-        L("cr02", .lowRecovery, .plain, "Recovery is low today. An easy version of {session}, or another day, are both good calls."),
-        L("cr03", .lowRecovery, .plain, "Low recovery today. If you train, keep {session} easy. Resting is fine too."),
-        L("cr04", .lowRecovery, .plain, "Recovery is low today. Going easy or resting are both fine choices."),
+        // The state covers a low recovery score and a 7-day HRV below normal with an ordinary
+        // score (`DailyMetricsModel.trainEasyToday`), so the lines don't say which: "recovery is
+        // low" would be untrue on the second.
+        L("cr01", .lowRecovery, .plain, "Today's numbers point to an easy day. {session} can be the easy version, the {short}-minute version, or moved. Each one follows the plan."),
+        L("cr02", .lowRecovery, .plain, "Today's numbers point to an easy day. An easy version of {session}, or another day, are both good calls."),
+        L("cr03", .lowRecovery, .plain, "Today's numbers say go easy. If you train, keep {session} light. Resting is fine too."),
+        L("cr04", .lowRecovery, .plain, "Today's numbers point to an easy day. Going easy or resting are both fine choices."),
         L("ci01", .illness, .plain, "Illness signs are flagged today. Rest is the right call; {session} can wait."),
         L("ci02", .illness, .plain, "Illness is flagged today. No training is needed; {session} will keep until you're well."),
         L("ci03", .illness, .plain, "Signs of illness today. Rest and sleep come first. {session} can wait until you're well."),

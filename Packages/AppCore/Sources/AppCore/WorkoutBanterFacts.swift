@@ -22,15 +22,20 @@ public enum WorkoutBanterFacts {
     /// haven't gone up either) for the longest, else the most-trained lift
     /// whose last top set is close to its best. Bodyweight lifts and timed
     /// holds are left out (no weight to step up).
-    /// - Parameter nextWeightKg: the next weight the gym can load above a
-    ///   weight for an exercise id (`GymProfile.nextLoad`), in kilograms.
+    /// - Parameters:
+    ///   - nextWeightKg: the next weight the gym can load above a weight for
+    ///     an exercise id (`GymProfile.nextLoad`), in kilograms.
+    ///   - inSession: whether today's session trains the exercise
+    ///     (`trains(_:primary:)`): a line about a lift the session doesn't have
+    ///     would be about the wrong day.
     public static func lift(sessions: [WorkoutSummary.LoggedSession], traits: [String: PRHistory.Traits] = [:], now: Date,
-                            nextWeightKg: (_ exerciseID: String, _ aboveKg: Double) -> Double? = { _, _ in nil }) -> WorkoutBanter.Lift? {
+                            nextWeightKg: (_ exerciseID: String, _ aboveKg: Double) -> Double? = { _, _ in nil },
+                            inSession: (_ exerciseID: String) -> Bool = { _ in true }) -> WorkoutBanter.Lift? {
         let holds = Set(sessions.flatMap(\.exercises).filter(\.isHold).map(\.exerciseID))
         var stuck: [(lift: WorkoutBanter.Lift, weeks: Int)] = []
         var near: [(lift: WorkoutBanter.Lift, sessions: Int)] = []
         for (id, entry) in PRHistory.history(sessions) {
-            guard !holds.contains(id), traits[id]?.isBodyweight != true,
+            guard !holds.contains(id), traits[id]?.isBodyweight != true, inSession(id),
                   let name = WorkoutBanter.clean(entry.name), name.count <= maxNameCharacters else { continue }
             let points = LiftProgress.points(entry.sessions)
             guard points.count >= minimumSessions, let last = points.last, last.bestWeight > 0,
@@ -56,6 +61,29 @@ public enum WorkoutBanterFacts {
             return longest.lift
         }
         return near.max { $0.sessions != $1.sessions ? $0.sessions < $1.sessions : $0.lift.name > $1.lift.name }?.lift
+    }
+
+    /// The muscles a session of `focus` trains first: the main muscle of each
+    /// of its movements, in every version of the focus (`WorkoutFocus.slots(variant:)`,
+    /// `MuscleCoverage.muscles(for:)`).
+    public static func primaryMuscles(of focus: WorkoutFocus) -> Set<Muscle> {
+        var result: Set<Muscle> = []
+        for variant in 0..<max(1, focus.variantCount) {
+            for slot in focus.slots(variant: variant) { result.insert(MuscleCoverage.muscles(for: slot).primary) }
+        }
+        return result
+    }
+
+    /// Whether a session of `focus` trains a lift whose primary muscles are
+    /// `primary` (from the exercise library, else `catalogPrimary`). Unknown
+    /// muscles: no, so the line leaves the lift out rather than guess.
+    public static func trains(_ focus: WorkoutFocus, primary: [Muscle]) -> Bool {
+        !primary.isEmpty && !primaryMuscles(of: focus).isDisjoint(with: primary)
+    }
+
+    /// A catalog exercise's main muscle (`ExerciseCatalog.slot(for:)`); empty when the catalog doesn't have it.
+    public static func catalogPrimary(_ exerciseID: String) -> [Muscle] {
+        ExerciseCatalog.slot(for: exerciseID).map { [MuscleCoverage.muscles(for: $0).primary] } ?? []
     }
 
     /// What stood out in the most recent session: a record on a lift (the

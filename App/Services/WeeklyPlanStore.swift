@@ -45,6 +45,10 @@ final class WeeklyPlanStore {
         reload()
     }
 
+    /// The plans file has been read (false after a background launch while the
+    /// phone was locked): until then there are no plans, not an empty week.
+    var isLoaded: Bool { canSave }
+
     /// Reads the file again if the last read failed (call when the phone unlocks).
     /// Every method that writes calls it first.
     func reloadIfUnavailable() {

@@ -338,6 +338,7 @@ struct RootView: View {
             reloadMedications: { medications.reload() },
             openWorkout: { if let active = sessions.first(where: \.isActive) { launcher.activeSession = active } },
             refresh: { Task { await refresher.refresh() } },
+            refreshThenSchedule: { Task { await refresher.refresh(); scheduleCheckInReminders() } },
             hasActiveSession: sessions.contains(where: \.isActive),
             scheduleCheckIns: scheduleCheckInReminders,
             scheduleWorkouts: scheduleWorkoutReminders,
@@ -457,12 +458,18 @@ struct RootView: View {
         // Mood patterns (builder A): each day's strain, your usual training strain and sleep need.
         checkIns.recordContext(dayStrains: metrics.weekStrain.map { (date: $0.date, strain: $0.strain) },
                                usualTrainingStrain: metrics.usualTrainingStrain, sleepNeedHours: settings.sleepNeedHours)
+        // The week's queue before the widget, so its rest-day call and its sessions come from the same queue.
+        refreshAdaptiveWeek()
         // The widget straight after the scores, never waiting on the weather or the muscles.
         updateWidget()
         // A background wake (new Health data while the app is closed) stops here:
         // today's scores, the widget and the watch face. The rest waits for the app.
         guard UIApplication.shared.applicationState != .background else {
             updateWatchFace()
+            // New recovery can change the workout reminder's words (plain on an easy day). Only once
+            // the plans are read (no slots would remove every pending reminder), and not while they're
+            // quiet: a background wake isn't opening the app (`WorkoutReminderCadence`).
+            if weeklyPlans.isLoaded, !Reminders.workoutRemindersPaused { await rescheduleWorkoutReminders() }
             // Rewrite the coach's morning message with last night's recovery (`CoachNudges`).
             await CoachNudges.shared.refresh()
             // The Lock Screen doses card: yesterday's comes down, and a dose whose time is near joins.
@@ -486,6 +493,10 @@ struct RootView: View {
         BlockHistoryStore.shared.observe(block: weeklyPlans.block,
                                          records: weeklyPlans.records(sessions: sessions, extra: metrics.recentLiftingDays),
                                          targets: weeklyPlans.volumeTargets(muscles: muscles))
+        // Workout reminders with today's recovery, illness and pain (and the queue with the muscles'
+        // soreness), so a plain easy-day line or a joke never waits for the next launch.
+        refreshAdaptiveWeek()
+        await rescheduleWorkoutReminders()
         // The weather last (it can be slow or offline; 10 s at most, `WeatherClient`).
         await conditions.refresh(settings: settings)
         // Hot days (by estimated WBGT) lower the strain target (less once you're heat-acclimatised).
@@ -528,6 +539,15 @@ struct RootView: View {
         )
         // [Widgets] Today's plan, sleep and the strain target for the Plan and Scores widgets (`GlanceFeed`).
         Reminders.updateWidget(GlanceFeed.completed(snapshot, metrics: metrics, plan: glancePlan()))
+    }
+
+    /// This week's queue (`WeeklyPlanStore.refreshAdaptive`), worked out the way Today's Scores
+    /// card does, so the day's guidance, the widgets and the reminders agree before Today is on screen.
+    private func refreshAdaptiveWeek() {
+        weeklyPlans.reloadIfUnavailable()
+        guard weeklyPlans.isLoaded else { return }
+        let week = weeklyPlans.refreshAdaptive(sessions: sessions, extra: metrics.recentLiftingDays, checkIns: checkIns, muscles: muscles)
+        if metrics.adaptiveWeek != week { metrics.adaptiveWeek = week }
     }
 
     /// [Watch complications] Recovery, strain and the next planned session for the watch face (`WatchFaceData`).
@@ -616,6 +636,11 @@ struct RootView: View {
     }
 
     private func scheduleWorkoutReminders() {
+        Task { await rescheduleWorkoutReminders() }
+    }
+
+    /// `scheduleWorkoutReminders`, awaited (a background wake may be suspended right after).
+    private func rescheduleWorkoutReminders() async {
         let slots = plannedSlots()
         let restMode = settings.isRestMode
         let enabled = settings.workoutRemindersOn && !restMode
@@ -628,9 +653,7 @@ struct RootView: View {
         let voice = WorkoutVoice.context(slots: slots, from: WorkoutVoice.Sources(
             settings: settings, metrics: metrics, vitals: vitals, checkIns: checkIns, plans: weeklyPlans, muscles: muscles,
             gym: gym, library: library, sessions: sessions))
-        Task {
-            await Reminders.scheduleWorkoutReminders(slots: slots, enabled: enabled, trainedDays: trained, restMode: restMode, voice: voice)
-        }
+        await Reminders.scheduleWorkoutReminders(slots: slots, enabled: enabled, trainedDays: trained, restMode: restMode, voice: voice)
     }
 }
 
@@ -777,6 +800,8 @@ private struct SettingsReactions: ViewModifier {
     let reloadMedications: () -> Void
     let openWorkout: () -> Void
     let refresh: () -> Void
+    /// Refreshes, then reschedules the reminders once the new scores are in.
+    let refreshThenSchedule: () -> Void
     /// A workout is running: its day gets no "planned session in 30 minutes".
     let hasActiveSession: Bool
     let scheduleCheckIns: () -> Void
@@ -811,8 +836,8 @@ private struct SettingsReactions: ViewModifier {
             .onChange(of: vo2Source) { markBiologyStale(); refresh() }
             .onChange(of: oura.syncedAt) { markBiologyStale(); refresh() }
             .onChange(of: hrvValues) {
-                scheduleCheckIns() // a typed HRV can complete the morning check-in
-                refresh()
+                // A typed HRV can change today's recovery: the scores first, then the reminders that read them.
+                refreshThenSchedule()
             }
     }
 }
@@ -838,7 +863,11 @@ private struct ReminderReactions: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: settings.checkInRemindersOn) { scheduleCheckIns() }
-            .onChange(of: settings.workoutRemindersOn) { scheduleWorkouts() }
+            .onChange(of: settings.workoutRemindersOn) { _, on in
+                // Switched back on: a fresh start, not the quiet left over from before.
+                if on { Reminders.resumeWorkoutReminders() }
+                scheduleWorkouts()
+            }
             // The reminder's tone or who writes it changed: pending reminders get new lines.
             .onChange(of: settings.workoutReminderTone) { scheduleWorkouts() }
             .onChange(of: settings.workoutReminderFreshLines) { scheduleWorkouts() }
@@ -870,6 +899,8 @@ private struct ReminderStateReactions: ViewModifier {
             // Rest mode: pending workout and stretch reminders, the Monday review and
             // tomorrow's coach morning message change now, not at the next foreground.
             .onChange(of: settings.restModeUntil) {
+                // Rest mode on answers the reminders: they start afresh, not quiet, when it ends.
+                if settings.isRestMode { Reminders.resumeWorkoutReminders() }
                 scheduleCheckIns()
                 Task { await CoachNudges.shared.refresh() }
             }
