@@ -1087,7 +1087,7 @@ extension VitalsModel {
             stat.status = "2-hour anchor reached"
             stat.tone = .good
         } else {
-            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to go (2\u{00A0}h target)"
+            stat.status = "\(Int((daylightAnchorMinutes - todayMinutes).rounded())) min to go"
             stat.tone = .neutral
         }
         stat.footnote = "About 2 hours a day is the anchor (Burns 2023; evidence is observational)."

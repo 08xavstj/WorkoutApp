@@ -414,17 +414,16 @@ private struct CaloriesToday: View {
                 }
                 .frame(width: 124, height: 124)
                 .accessibilityElement(children: .combine)
-                VStack(alignment: .leading, spacing: 12) {
+                // One target and its range in a line; the reasoning lives in the details sheet (ⓘ).
+                VStack(alignment: .leading, spacing: 6) {
                     CalorieLine(icon: "target", color: Theme.nutrition, label: metrics.goals == nil ? "Maintenance" : "Daily target",
                                 text: "\(whole(target).formatted()) kcal")
-                    CalorieLine(icon: "arrow.left.and.right", color: Theme.nutrition, label: "Flexible band (±10%)",
-                                text: "\(whole(band.lowerBound).formatted())–\(whole(band.upperBound).formatted()) kcal")
+                    Text("On target from \(whole(band.lowerBound).formatted()) to \(whole(band.upperBound).formatted()); the weekly average is what counts.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Text("One day over or under the band is fine; the weekly average is what moves weight.")
-                .font(Theme.Typography.context)
-                .foregroundStyle(Theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text("Add your weight in Apple Health (or Settings) to see calories burned.")
                 .font(.subheadline)

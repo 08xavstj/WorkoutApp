@@ -89,7 +89,9 @@ private struct ContributorRow: View {
                 Text(item.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
-                Text(item.explanation)
+                // A reading inside your normal range shows the numbers only; the
+                // sentence saying so was repeated on every row.
+                Text(item.effect == .neutral ? item.detail : item.explanation)
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -103,7 +105,7 @@ private struct ContributorRow: View {
         switch item.effect {
         case .raises: "arrow.up.circle.fill"
         case .lowers: "arrow.down.circle.fill"
-        case .neutral: "minus.circle.fill"
+        case .neutral: "equal.circle"
         }
     }
 
@@ -121,7 +123,7 @@ private struct ContributorRow: View {
         switch item.effect {
         case .raises: "raised recovery"
         case .lowers: "lowered recovery"
-        case .neutral: "no real effect"
+        case .neutral: "within your normal range"
         }
     }
 }

@@ -683,7 +683,10 @@ struct MetricTile: View {
                 .font(.subheadline.weight(.semibold))
                 .buttonStyle(.bordered)
                 .frame(minHeight: 44)
-        } else if let status {
+        } else if let status, !isNormal {
+            // A normal reading is shown by the green gauge alone; a pill appears only when
+            // something is off, so eight tiles don't repeat "Normal" eight times
+            // (cleanup-2026-11.md rule 6: only outliers call for attention).
             StatusPill(status: status)
         }
     }
