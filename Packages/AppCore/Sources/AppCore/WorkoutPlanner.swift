@@ -984,7 +984,7 @@ public struct WorkoutPlanner: Sendable {
             : "\(planned.targetReps ?? target) reps for today's effort"
     }
 
-    /// "+5 lb from last time: you hit 8 reps at RPE 7", "Same weight, aim
+    /// "+5 lb from last time: you hit 8 reps with 3 left", "Same weight, aim
     /// for 7 reps; the weight goes up once you hit 8", or "−10 lb from last time for today's
     /// effort". Makes the double progression visible. With rep or set
     /// progression (`ProgressionMode`) the held weight says what to add
@@ -995,7 +995,8 @@ public struct WorkoutPlanner: Sendable {
         let unit = gym.unit.rawValue
         func fmt(_ v: Double) -> String { v.formatted(.number.precision(.fractionLength(0...2))) }
         let delta = load - history.lastWeight
-        let effort = history.lastRPE.map { " at RPE \($0.formatted())" } ?? ""
+        // Effort in the words the lifter rates sets with ("2 left"), not an RPE number (`ReserveText`).
+        let effort = history.lastRPE.map { " with \(ReserveText.short(rpe: $0))" } ?? ""
         // Back up after one easier session (low recovery, deload, a pain cap):
         // not a new step, so don't credit last time's reps for it.
         if delta > 0.001, history.lastWasLighter, load <= history.recentHeaviestWeight + 0.001 {
@@ -1005,7 +1006,7 @@ public struct WorkoutPlanner: Sendable {
             // After a step, the reps the new weight allows (`progression`).
             let aim = target.map { ". Aim for \($0) reps" } ?? ""
             if let last = history.lastRPE, let rpe, last <= rpe - Self.catchUpGap + 0.001, history.lastReps >= reps.lowerBound {
-                return "+\(fmt(delta)) \(unit): last time was easier than planned (\(history.lastReps) reps at RPE \(last.formatted()))\(aim)"
+                return "+\(fmt(delta)) \(unit): last time was easier than planned (\(history.lastReps) reps with \(ReserveText.short(rpe: last)))\(aim)"
             }
             return "+\(fmt(delta)) \(unit) from last time: you hit \(history.lastReps) reps\(effort)\(aim)"
         }
@@ -1031,7 +1032,7 @@ public struct WorkoutPlanner: Sendable {
         // Reps past the range while the next weight is a jump out of reach (`extendedReps`).
         if let target, target > history.lastReps + 1 || target > goal,
            let last = history.lastRPE, last <= today - Self.catchUpGap + 0.001 {
-            return "Same weight, aim for \(target) reps: last time was easy (\(history.lastReps) reps at RPE \(last.formatted())) and the next weight up is a big jump"
+            return "Same weight, aim for \(target) reps: last time was easy (\(history.lastReps) reps with \(ReserveText.short(rpe: last))) and the next weight up is a big jump"
         }
         switch mode {
         case .load:

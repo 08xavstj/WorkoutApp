@@ -31,6 +31,10 @@ final class WatchSync: NSObject {
     /// Sessions finished on the phone whose Watch recording hasn't confirmed it
     /// stopped yet: the stop is sent again whenever the Watch reconnects.
     private var pendingStops: Set<String> = []
+    /// Sessions discarded on the phone. The Watch may already have finished one
+    /// and sent its summary late: that summary then makes no session (it would be
+    /// an ended session with no sets), and the workout it saved leaves Apple Health too.
+    @ObservationIgnored private var discardedSessionIDs: Set<String> = []
     private(set) var isPaired = false
     private(set) var isWatchAppInstalled = false
     private(set) var isReachable = false
@@ -112,6 +116,7 @@ final class WatchSync: NSObject {
     func sessionDiscarded(_ session: WorkoutSession) {
         let id = WatchSession.id(for: session.startedAt)
         sendRequest(WatchRequest(kind: .discardRecording, sessionID: id, sentAt: .now))
+        discardedSessionIDs.insert(id)
         if recordingSessionID == id { recordingSessionID = nil }
         send(makeSnapshot(session, finished: true))
     }
@@ -389,6 +394,10 @@ final class WatchSync: NSObject {
         case .recordingStopped:
             if recordingSessionID == message.sessionID || message.sessionID == nil { recordingSessionID = nil }
             if let id = message.sessionID { pendingStops.remove(id) } else { pendingStops.removeAll() }
+            // The recording is gone, and any pause of it with it: the phone's clock runs again.
+            if let session = activeSession(matching: message.sessionID) {
+                LiveSessionStore.resume(at: min(.now, message.sentAt), for: session.startedAt)
+            }
             return
         default:
             break
@@ -408,18 +417,22 @@ final class WatchSync: NSObject {
             // set-by-set change an earlier queued tick made, which the wrist never showed: then
             // what was lifted is the Watch's (`LiveWorkoutRules.tickedValue`). Older Watches
             // send no flags: as before, anything above zero. An explicit 0 reps (a failed set) is kept.
+            // Every value the set held before a set-by-set change counts (two queued ratings can
+            // each have moved its rep goal): the wrist showed one of them.
             let changed = AutoregulationLog.entry(for: session.startedAt, order: exercise.order)?
-                .restore?.first { $0.setOrder == set.order }
+                .valuesBeforeChanges(setOrder: set.order) ?? []
             set.reps = Int(LiveWorkoutRules.tickedValue(
                 phone: Double(set.reps), watch: Double(reps), watchBase: baseReps.map { Double($0) },
-                edited: repsEdited, autoregulatedFrom: changed.map { Double($0.reps) }).rounded())
+                edited: repsEdited, autoregulatedFromAny: changed.map { Double($0.reps) }).rounded())
             set.weightKg = LiveWorkoutRules.tickedValue(
                 phone: set.weightKg, watch: weightKg, watchBase: baseWeightKg,
-                edited: weightEdited, autoregulatedFrom: changed?.weightKg)
+                edited: weightEdited, autoregulatedFromAny: changed.map(\.weightKg))
             if let rpe { set.rpe = rpe }
             // When it was done on the wrist, not when the phone heard (a queued tick can be minutes late).
             set.completedAt = LiveWorkoutRules.completedAt(sentAt: message.sentAt, sessionStart: session.startedAt, now: .now)
             try? context.save()
+            // A set is logged: the movement warm-up is over, as when one is ticked on the phone.
+            WarmUpStore.shared.finish(for: session.startedAt)
             if !set.isWarmup, let profile = gym?.profile {
                 LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: session.startedAt, gym: profile,
                                           blockRIR: plans?.blockWeek?.targetRIR)
@@ -463,9 +476,13 @@ final class WatchSync: NSObject {
             // exercise's sets, which wasn't always the one on the wrist. The Watch
             // moves on by itself, and the finish sheet drops unticked sets.
             break
-        case .pause, .resume:
-            // The Watch pauses its own HKWorkoutSession; the phone's log has no pause.
-            break
+        case .pause:
+            // The Watch paused its HKWorkoutSession: the phone's workout clock stands still
+            // from when the wrist said so (`LiveSessionStore.clock`). The saved session's
+            // length is still start to end; `WorkoutSession` has no field for paused time.
+            LiveSessionStore.pause(at: min(.now, message.sentAt), for: session.startedAt)
+        case .resume:
+            LiveSessionStore.resume(at: min(.now, message.sentAt), for: session.startedAt)
         case let .warmUpNext(fromStep):
             WarmUpStore.shared.advance(for: session.startedAt, fromStep: fromStep)
         case .warmUpBack:
@@ -476,6 +493,8 @@ final class WatchSync: NSObject {
             if let sessionRPE { session.sessionRPE = max(1, min(10, sessionRPE)) }
             // The workout ended when the wrist said so, even if the phone hears much later.
             LiveSessionStore.update(for: session.startedAt) { $0.watchFinishedAt = message.sentAt }
+            // Finished while paused: the pause ends with the recording.
+            LiveSessionStore.resume(at: min(.now, message.sentAt), for: session.startedAt)
             try? context.save()
             if let launcher {
                 if launcher.activeSession?.persistentModelID != session.persistentModelID {
@@ -585,6 +604,16 @@ final class WatchSync: NSObject {
         guard let context else { return }
         if recordingSessionID == summary.sessionID || summary.sessionID == nil { recordingSessionID = nil }
         if let id = summary.sessionID { pendingStops.remove(id) } else { pendingStops.removeAll() }
+        // For a workout discarded on the phone before this arrived: nothing to record, and
+        // the Health workout the Watch saved goes, as Discard promises (`ActiveWorkoutView`).
+        if let id = summary.sessionID, discardedSessionIDs.contains(id) {
+            if let workoutID = summary.workoutUUID, let health {
+                let start = summary.start
+                let end = summary.end
+                Task { _ = await health.deleteOwnWorkouts(start: start, end: end, watchWorkoutUUID: workoutID, includePhone: false) }
+            }
+            return
+        }
         let session: WorkoutSession
         if let found = matchingSession(for: summary) {
             session = found
@@ -606,6 +635,8 @@ final class WatchSync: NSObject {
         if session.isActive, LiveSessionStore.entry(for: session.startedAt).watchFinishedAt == nil {
             LiveSessionStore.update(for: session.startedAt) { $0.watchFinishedAt = summary.end }
         }
+        // The recording has ended, and any pause of it with it.
+        if session.isActive { LiveSessionStore.resume(at: min(.now, summary.end), for: session.startedAt) }
         try? context.save()
         // A session already finished on the phone skipped its effort score while the Watch
         // was still recording; write it now, over the session's time (`HealthKitClient+Writes`).

@@ -107,19 +107,44 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
     /// Easy cardio sessions this week (`EasyCardio`, placed by `CardioPlanner`).
     /// They never count toward the lifting quota: `sessionTarget` is lifting only.
     public var cardio: EasyCardio?
+    /// Set when this week was made from last week's with the session last
+    /// week didn't get to moved first (`AdaptiveWeek.rotatedWeek`). It says
+    /// why that session leads this week, and lets the week after start again
+    /// from the standing order (`standingDays`), so one missed session doesn't
+    /// change the split for good. Nil for a week in its standing order and for
+    /// plans saved before this existed.
+    public var rotation: Rotation?
+
+    /// How a week's sessions were moved round from the standing order.
+    public struct Rotation: Codable, Sendable, Equatable {
+        /// Places moved: the first day trains what the standing order has at
+        /// this position, and the rest follow in turn.
+        public var by: Int
+        /// What the days trained once moved, Monday first. When the days no
+        /// longer match (the week was planned again by hand), the rotation
+        /// has lapsed and the days as they are become the standing order.
+        public var focuses: [WorkoutFocus]
+
+        public init(by: Int, focuses: [WorkoutFocus]) {
+            self.by = by
+            self.focuses = focuses
+        }
+    }
 
     public init(weekStart: Date, plannedDays: [PlannedDay] = [], changes: [String] = [],
-                mode: Mode = .fixedDays, sessionsPerWeek: Int? = nil, cardio: EasyCardio? = nil) {
+                mode: Mode = .fixedDays, sessionsPerWeek: Int? = nil, cardio: EasyCardio? = nil,
+                rotation: Rotation? = nil) {
         self.weekStart = weekStart
         self.plannedDays = plannedDays
         self.changes = changes
         self.mode = mode
         self.sessionsPerWeek = sessionsPerWeek
         self.cardio = cardio
+        self.rotation = rotation
     }
 
     private enum CodingKeys: String, CodingKey {
-        case weekStart, plannedDays, changes, mode, sessionsPerWeek, cardio
+        case weekStart, plannedDays, changes, mode, sessionsPerWeek, cardio, rotation
     }
 
     /// Plans saved before `mode` existed are fixed-day plans.
@@ -132,6 +157,8 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
         sessionsPerWeek = try container.decodeIfPresent(Int.self, forKey: .sessionsPerWeek)
         // Plans saved before easy cardio existed have none.
         cardio = try container.decodeIfPresent(EasyCardio.self, forKey: .cardio)
+        // Plans saved before rotations were recorded are in their standing order.
+        rotation = try container.decodeIfPresent(Rotation.self, forKey: .rotation)
     }
 
     public var isFlexible: Bool { mode == .flexible }
@@ -205,6 +232,28 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
     /// Planned days, Monday first.
     public var sortedDays: [PlannedDay] {
         plannedDays.sorted { Self.order($0.weekday) < Self.order($1.weekday) }
+    }
+
+    /// The rotation still in force: recorded, and the days still train what
+    /// it left them with.
+    public var activeRotation: Rotation? {
+        guard let rotation, rotation.by > 0, rotation.by < plannedDays.count,
+              rotation.focuses == sortedDays.map(\.focus) else { return nil }
+        return rotation
+    }
+
+    /// The days in the standing order, Monday first: what each day trains
+    /// when nothing was left over the week before. `sortedDays` unless this
+    /// week was rotated (`rotation`). The next week is built from this.
+    public var standingDays: [PlannedDay] {
+        let sorted = sortedDays
+        guard let rotation = activeRotation else { return sorted }
+        let count = sorted.count
+        return sorted.indices.map { index in
+            var day = sorted[index]
+            day.focus = sorted[(index - rotation.by + count) % count].focus
+            return day
+        }
     }
 
     public func day(for weekday: Int) -> PlannedDay? {

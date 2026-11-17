@@ -312,11 +312,12 @@ struct WeeklyReviewView: View {
 
     private func confirm() {
         let last = store.lastPlan(before: thisWeek)
-        // Keep last week's mode: a flexible week stays "any days, N a week".
+        // Keep last week's mode (a flexible week stays "any days, N a week") and its
+        // easy cardio, as "Same days as last week" does (`ThisWeekCard`).
         var plan = store.plan(for: thisWeek)
             ?? WeeklyPlan(weekStart: thisWeek,
                           plannedDays: store.newWeekDays(from: last?.plannedDays ?? [], weekStart: thisWeek, sessions: sessions),
-                          mode: last?.mode ?? .fixedDays, sessionsPerWeek: last?.sessionsPerWeek)
+                          mode: last?.mode ?? .fixedDays, sessionsPerWeek: last?.sessionsPerWeek, cardio: last?.cardio)
         plan.changes = changes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         store.save(plan)
         dismiss()

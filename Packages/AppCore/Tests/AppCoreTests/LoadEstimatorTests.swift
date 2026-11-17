@@ -125,7 +125,7 @@ struct LoadEstimatorTests {
         let plan = planner.plan(focus: .push, minutes: 45, recovery: 80, history: [benchID: bench])
         #expect(plan.exercises.first?.load == 190)
         // 185 × 8 at RPE 7 (3 in reserve) → about 9 reps left at 190 with 2 in reserve: aim for 7, not the bottom (6).
-        #expect(plan.exercises.first?.progressionNote == "+5 lb from last time: you hit 8 reps at RPE 7. Aim for 7 reps")
+        #expect(plan.exercises.first?.progressionNote == "+5 lb from last time: you hit 8 reps with 3 left. Aim for 7 reps")
         #expect(plan.exercises.first?.targetReps == 7)
         // Held at the same weight until the reps are there.
         let held = ExerciseHistory(bestEstimatedOneRepMax: 32, lastWeight: 20, lastReps: 12, lastRPE: 9, lastDate: .now)

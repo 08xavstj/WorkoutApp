@@ -113,4 +113,41 @@ struct RepGoalTests {
         #expect(RepGoal.note(goal: 7, previous: 8, repsLeft: 1) == "Next set goal 7 reps: that set was harder than planned")
         #expect(RepGoal.note(goal: 8, previous: 8, repsLeft: 2) == nil)
     }
+
+    @Test func stepIsTheWholeRepsOffThePlan() {
+        #expect(RepGoal.step(repsLeft: 2, targetRIR: 2) == 0)
+        #expect(RepGoal.step(repsLeft: 1, targetRIR: 2) == -1)
+        #expect(RepGoal.step(repsLeft: 3, targetRIR: 2) == 1)
+        #expect(RepGoal.step(repsLeft: 3, targetRIR: 2.5) == 0)
+        #expect(RepGoal.step(repsLeft: 4, targetRIR: 0) == RepGoal.maxStepUp)
+    }
+
+    /// Plan 3 × 8. Set 1: 8 reps, 1 left → goal 7 from set 2. Set 2: 7 reps,
+    /// 1 left → goal 6 from set 3. Set 2 was done on its goal of 7 and stays
+    /// judged against 7, not against the plan's 8.
+    @Test func eachSetKeepsTheGoalItHad() {
+        var goals = RepGoal.carriedGoals(nil, changed: nil, setOrders: [0, 1, 2])
+        #expect(goals.isEmpty)
+        goals[1] = 7
+        goals[2] = 7
+        goals = RepGoal.carriedGoals(goals, changed: (fromOrder: 1, reps: 7), setOrders: [0, 1, 2])
+        goals[2] = 6
+        #expect(RepGoal.goal(setOrder: 0, goals: goals, changed: (fromOrder: 2, reps: 6), planned: 8) == 8)
+        #expect(RepGoal.goal(setOrder: 1, goals: goals, changed: (fromOrder: 2, reps: 6), planned: 8) == 7)
+        #expect(RepGoal.goal(setOrder: 2, goals: goals, changed: (fromOrder: 2, reps: 6), planned: 8) == 6)
+        // A set added afterwards (a copy of set 3) works to set 3's goal, not the plan's 8.
+        #expect(RepGoal.goal(setOrder: 3, goals: goals, changed: (fromOrder: 2, reps: 6), planned: 8) == 6)
+        // A weight change recorded no goals of its own: every set keeps the plan's.
+        #expect(RepGoal.goal(setOrder: 2, goals: [:], changed: nil, planned: 8) == 8)
+    }
+
+    @Test func aChangeSavedWithoutGoalsStillReads() {
+        // Before goals were kept per set: the change's reps from its first set on.
+        #expect(RepGoal.goal(setOrder: 0, goals: nil, changed: (fromOrder: 1, reps: 7), planned: 8) == 8)
+        #expect(RepGoal.goal(setOrder: 1, goals: nil, changed: (fromOrder: 1, reps: 7), planned: 8) == 7)
+        #expect(RepGoal.goal(setOrder: 2, goals: nil, changed: nil, planned: 8) == 8)
+        #expect(RepGoal.goal(setOrder: 2, goals: nil, changed: nil, planned: nil) == nil)
+        // The next change carries it over, so the earlier sets keep that goal.
+        #expect(RepGoal.carriedGoals(nil, changed: (fromOrder: 1, reps: 7), setOrders: [0, 1, 2]) == [1: 7, 2: 7])
+    }
 }

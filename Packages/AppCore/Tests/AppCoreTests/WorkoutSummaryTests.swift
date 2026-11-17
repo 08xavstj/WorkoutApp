@@ -38,6 +38,33 @@ struct WorkoutSummaryTests {
         #expect(totals.duration == 3600)
     }
 
+    @Test func holdsAreSecondsNotReps() {
+        let plank = WorkoutSummary.LoggedExercise(exerciseID: "Plank", name: "Plank",
+                                                  sets: [set(0, 30), set(0, 30), set(0, 45)], isHold: true)
+        let today = session("Core", [exercise("crunch", [set(0, 15), set(0, 12)]), plank])
+        // 27 reps of crunches; the plank's 105 seconds aren't reps.
+        let totals = WorkoutSummary.totals(today)
+        #expect(totals.reps == 27)
+        #expect(totals.workingSets == 5)
+        let results = WorkoutSummary.exerciseResults(today)
+        #expect(results[0].reps == 27)
+        #expect(!results[0].isHold)
+        #expect(results[1].isHold)
+        #expect(results[1].reps == 0)
+        #expect(results[1].holdSeconds == 105)
+        #expect(results[1].bestSet?.reps == 45)
+        #expect(results[1].estimatedOneRepMaxKg == 0)
+        #expect(results[1].groups.map(\.count) == [2, 1])
+        // Last time's plank is found as a hold too, and compares in seconds.
+        let earlier = session("Core", daysAgo: 3, [WorkoutSummary.LoggedExercise(exerciseID: "Plank", name: "Plank",
+                                                                               sets: [set(0, 30), set(0, 30), set(0, 30)], isHold: true)])
+        let last = WorkoutSummary.previous(exerciseID: "Plank", before: today.start, in: [earlier])
+        #expect(last?.exercise.isHold == true)
+        let change = last.flatMap { WorkoutSummary.change(today: plank, last: $0.exercise, lastDate: $0.date) }
+        #expect(change?.progression == .moreReps(15))
+        #expect(change?.estimatedOneRepMaxKg == nil)
+    }
+
     @Test func typicalRestIsTheMedianGap() {
         let today = session("Push", [
             exercise("bench", [set(60, 8, at: 0), set(60, 8, at: 2), set(60, 8, at: 5), set(60, 8, at: 7)]),

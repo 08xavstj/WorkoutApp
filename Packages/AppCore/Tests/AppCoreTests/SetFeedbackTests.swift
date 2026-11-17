@@ -44,6 +44,17 @@ struct SetFeedbackTests {
         let unrated = SetFeedback.verdict(logged: set(60, 8), last: set(60, 8), targetReps: 8, targetRPE: 8)
         #expect(unrated == .hitTarget(reps: 8))
         #expect(unrated?.message(unit: "kg") == "8 reps ✓")
+        // A rep harder or easier than planned moves the next set's goal (`RepGoal`),
+        // so the row doesn't say "Matched the plan" beside that note; the reps were hit.
+        let harder = SetFeedback.verdict(logged: set(60, 8, 9), last: set(60, 8, 8), targetReps: 8, targetRPE: 8)
+        #expect(harder == .hitTarget(reps: 8))
+        #expect(harder?.isCaution == false)
+        #expect(SetFeedback.verdict(logged: set(60, 8, 7), last: set(60, 8, 8), targetReps: 8, targetRPE: 8) == .hitTarget(reps: 8))
+        // "2½ left" on a plan of 2 leaves the goal where it is: still on plan.
+        #expect(SetFeedback.verdict(logged: set(60, 8, 7.5), last: set(60, 8, 8), targetReps: 8, targetRPE: 8) == .matchedPlan)
+        #expect(RepGoal.step(repsLeft: ReserveText.choice(rpe: 7.5), targetRIR: 2) == 0)
+        // A set to failure has no planned effort to match (the app passes none).
+        #expect(SetFeedback.verdict(logged: set(60, 8, 10), last: set(60, 8, 10), targetReps: 8, targetRPE: nil) == .matchedPlan)
         // Nothing to compare with, or nothing logged.
         #expect(SetFeedback.verdict(logged: set(60, 8), last: nil, targetReps: nil, targetRPE: nil) == nil)
         #expect(SetFeedback.verdict(logged: set(55, 10), last: set(60, 8), targetReps: nil, targetRPE: nil) == nil)

@@ -150,6 +150,15 @@ enum AutoregulationLog {
         /// The weight already changed this session (kept when a rep-goal
         /// note replaces the weight change's note), so it changes only once.
         var loadChanged: Bool? = nil
+        /// The rep goal each set was given this session, by `SetLog.order`,
+        /// carried from change to change (`RepGoal.goal`): a set done on its
+        /// goal is never judged later against the next set's goal or the
+        /// plan's first number. Nil on entries saved before goals were kept.
+        var goals: [Int: Int]? = nil
+        /// What sets held before the changes this one replaced (`restore` has
+        /// this change's), so a Watch tick queued across several changes can
+        /// still be told from an edit (`LiveWorkoutRules.tickedValue`).
+        var earlier: [Restore]? = nil
 
         /// This exercise's weight (or reps, by `Autoregulation`) already moved this session.
         var blocksLoadChange: Bool { loadChanged == true || isRepGoal != true }
@@ -162,6 +171,24 @@ enum AutoregulationLog {
 
         /// Shown on the phone and the Watch while its set is still to do.
         var isShown: Bool { undone != true }
+
+        /// For an entry saved without `goals`: the first set it moved and the
+        /// reps it set from there on (`RepGoal.goal`).
+        var changedReps: (fromOrder: Int, reps: Int)? {
+            guard isShown, let reps else { return nil }
+            return (setOrder, reps)
+        }
+
+        /// Every value a set held before a set-by-set change this session, newest first.
+        func valuesBeforeChanges(setOrder: Int) -> [Restore] {
+            ((restore ?? []) + (earlier ?? [])).filter { $0.setOrder == setOrder }
+        }
+
+        /// The goals and earlier values a change that replaces `existing` starts from.
+        mutating func carry(from existing: Entry?, setOrders: [Int]) {
+            goals = RepGoal.carriedGoals(existing?.goals, changed: existing?.changedReps, setOrders: setOrders)
+            earlier = existing.map { ($0.restore ?? []) + ($0.earlier ?? []) }
+        }
     }
 
     private static let key = "autoregulationLog"
@@ -224,13 +251,15 @@ enum LiveSetCoach {
         return blockRIR.map { Double($0) }
     }
 
-    /// Target reps for a set: today's planned reps (`Target.repsToday`), or
-    /// the reps an autoregulation change set from this set on.
+    /// Target reps for a set: the goal it was given this session
+    /// (`AutoregulationLog.Entry.goals`, kept per set so a later change to the
+    /// next set's goal doesn't re-judge it), else today's planned reps
+    /// (`Target.repsToday`).
     static func targetReps(for set: SetLog, target: SessionTargets.Target?, entry: AutoregulationLog.Entry?) -> Int? {
         // A drop stage or mini-set is "as many good reps as you can", not a target (`SetKind`).
         if set.kind.isStage { return nil }
-        if let entry, entry.isShown, let reps = entry.reps, set.order >= entry.setOrder { return reps }
-        return target?.repsToday
+        return RepGoal.goal(setOrder: set.order, goals: entry?.goals, changed: entry?.changedReps,
+                            planned: target?.repsToday)
     }
 
     /// After a working set is ticked: compares its RPE with the target and,
@@ -288,6 +317,9 @@ enum LiveSetCoach {
         }
         guard !restore.isEmpty else { return nil }
         var entry = AutoregulationLog.Entry(setOrder: next.order, message: message, reps: goal, restore: restore)
+        // Earlier sets keep the goal they were done to; the moved ones get the new one.
+        entry.carry(from: existing, setOrders: exercise.sets.map(\.order))
+        for item in restore { entry.goals?[item.setOrder] = goal }
         entry.isRepGoal = true
         entry.loadChanged = existing.map { $0.loadChanged == true || $0.isRepGoal != true }
         AutoregulationLog.save(entry, for: sessionStart, order: exercise.order)
@@ -298,8 +330,9 @@ enum LiveSetCoach {
     private static func adjustLoad(after set: SetLog, in exercise: ExerciseLog, sessionStart: Date,
                                    gym: GymProfile, blockRIR: Int? = nil) -> AutoregulationLog.Entry? {
         // A hold's "reps" are seconds (`CoreMove.isHold`): no reps-in-reserve change for it.
+        let existing = AutoregulationLog.entry(for: sessionStart, order: exercise.order)
         guard set.isCompleted, !set.isWarmup, set.kind.allowsAutoregulation, !isHold(exercise.exerciseID),
-              AutoregulationLog.entry(for: sessionStart, order: exercise.order)?.blocksLoadChange != true,
+              existing?.blocksLoadChange != true,
               let rir = targetRIR(sessionStart: sessionStart, order: exercise.order, blockRIR: blockRIR) else { return nil }
         let working = exercise.orderedSets.filter { !$0.isWarmup && !$0.kind.isStage }
         guard let index = working.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) else { return nil }
@@ -322,7 +355,8 @@ enum LiveSetCoach {
             case .hold, .loadDown, .trimReps: false
             }
             if past {
-                let held = AutoregulationLog.Entry(setOrder: next.order, message: painHoldMessage(for: exercise.exerciseID), reps: nil)
+                var held = AutoregulationLog.Entry(setOrder: next.order, message: painHoldMessage(for: exercise.exerciseID), reps: nil)
+                held.carry(from: existing, setOrders: exercise.sets.map(\.order))
                 AutoregulationLog.save(held, for: sessionStart, order: exercise.order)
                 return held
             }
@@ -349,8 +383,13 @@ enum LiveSetCoach {
             restore.append(before)
         }
         guard let first = restore.first else { return nil }
-        let entry = AutoregulationLog.Entry(setOrder: first.setOrder, message: message,
+        var entry = AutoregulationLog.Entry(setOrder: first.setOrder, message: message,
                                             reps: changesReps ? suggestion.reps : nil, restore: restore)
+        // A weight change keeps each set's rep goal (a rep-goal change may have come before it).
+        entry.carry(from: existing, setOrders: exercise.sets.map(\.order))
+        if changesReps {
+            for item in restore { entry.goals?[item.setOrder] = suggestion.reps }
+        }
         AutoregulationLog.save(entry, for: sessionStart, order: exercise.order)
         return entry
     }
@@ -394,12 +433,14 @@ enum LiveSetCoach {
     /// Undo for the set-by-set change: puts the sets it changed back and
     /// marks the change undone (so no second one is made this session).
     static func undo(_ entry: AutoregulationLog.Entry, in exercise: ExerciseLog, sessionStart: Date) {
+        var undone = entry
         for item in entry.restore ?? [] {
             guard let set = exercise.sets.first(where: { $0.order == item.setOrder }), !set.isCompleted else { continue }
             set.weightKg = item.weightKg
             set.reps = item.reps
+            // Its goal goes back with it.
+            if undone.goals?[item.setOrder] != nil { undone.goals?[item.setOrder] = item.reps }
         }
-        var undone = entry
         undone.undone = true
         AutoregulationLog.save(undone, for: sessionStart, order: exercise.order)
     }
@@ -460,6 +501,8 @@ enum LiveSetCoach {
                     snapshot.lastReps = ghost.reps
                     snapshot.lastRPE = ghost.rpe
                 }
+                // The set's own goal (`Entry.goals`), so the wrist's "Goal 7 reps" stays
+                // right after a weight change follows a rep-goal change.
                 snapshot.targetReps = targetReps(for: set, target: target, entry: entry)
                 // A hold has no reps in reserve to aim for (`isHold`).
                 snapshot.targetRIR = isHold(exercise.exerciseID) ? nil : target?.targetRIR
@@ -503,18 +546,20 @@ enum LiveSetCoach {
     // MARK: Next set
 
     /// The set to do next after a tick in `ticked`: its superset partner's set
-    /// while the partner has one left (A1 → A2 → A1), else `ticked`'s own next
-    /// set (an exercise done out of order isn't left for an earlier one), else
-    /// the first open set in the workout. Nil when every set is done.
+    /// when the partner is the half that's behind (A1 → A2 → A1; a ticked
+    /// warm-up ramp set stays on its own lift, and a drop stage or mini-set of
+    /// the set just done comes first: `LiveWorkoutRules.partnerIsNext`, the
+    /// rule the Watch follows), else `ticked`'s own next set (an exercise done
+    /// out of order isn't left for an earlier one), else the first open set in
+    /// the workout. Nil when every set is done.
     static func nextOpenSet(in session: WorkoutSession, after ticked: ExerciseLog?,
                             groups: [Int: Int]) -> (exercise: ExerciseLog, set: SetLog)? {
         if let ticked {
             let own = ticked.orderedSets.first { !$0.isCompleted }
-            // A drop stage or mini-set of this set comes before the partner.
-            let stageNext = own.map { $0.kind.isStage } ?? false
-            if !stageNext, let mateOrder = SupersetRegistry.partner(of: ticked.order, groups: groups),
+            if let mateOrder = SupersetRegistry.partner(of: ticked.order, groups: groups),
                let mate = session.exercises.first(where: { $0.order == mateOrder }),
-               let set = mate.orderedSets.first(where: { !$0.isCompleted }) {
+               let set = mate.orderedSets.first(where: { !$0.isCompleted }),
+               LiveWorkoutRules.partnerIsNext(ticked: supersetHalf(ticked), partner: supersetHalf(mate)) {
                 return (mate, set)
             }
             if let own { return (ticked, own) }
@@ -525,7 +570,23 @@ enum LiveSetCoach {
         return nil
     }
 
-    /// "Set 3 of 4 · 60 kg × 8", "Set 2 of 3 · 20 kg per hand × 10", "Set 1 of 3 · 30 s":
+    /// One half of a superset as `LiveWorkoutRules.partnerIsNext` reads it:
+    /// working sets ticked (warm-ups, drop stages and mini-sets don't count)
+    /// and whether its next open set is a stage.
+    private static func supersetHalf(_ exercise: ExerciseLog) -> LiveWorkoutRules.SupersetHalf {
+        let sets = exercise.orderedSets
+        let positions = SetStructure.positions(structureItems(sets))
+        var rounds = 0
+        for (index, set) in sets.enumerated() where set.isCompleted && !set.isWarmup && !positions[index].isStage {
+            rounds += 1
+        }
+        let open = sets.firstIndex { !$0.isCompleted }
+        return LiveWorkoutRules.SupersetHalf(order: exercise.order, roundsDone: rounds, hasOpenSet: open != nil,
+                                             nextIsStage: open.map { positions[$0].isStage } ?? false)
+    }
+
+    /// "Set 3 of 4 · 60 kg × 8", "Set 2 of 3 · 20 kg per hand × 10", "Set 1 of 3 · 30 s",
+    /// "Set 1 of 3 · Bodyweight × 8" (never "0 kg × 8": `LiveWorkoutRules.setText`):
     /// the Live Activity's and the rest bar's "Next" line.
     static func nextSetDetail(_ set: SetLog, in exercise: ExerciseLog, unit: WeightUnit) -> String {
         // "Set 3 of 4", "Warm-up 2 of 3", "Drop 1 of 2" (`SetStructure`).
@@ -535,10 +596,17 @@ enum LiveSetCoach {
             return detail
         }
         if set.weightKg > 0 || set.reps > 0 {
-            let perHand = Prescription.isPerHand(ExerciseCatalog.exercise(id: exercise.exerciseID)?.load) ? " per hand" : ""
-            detail += " · \(unit.format(set.weightKg)) \(unit.rawValue)\(perHand) × \(set.reps)"
+            detail += " · " + setText(weightKg: set.weightKg, reps: set.reps, exerciseID: exercise.exerciseID, unit: unit)
         }
         return detail
+    }
+
+    /// "60 kg × 8", "20 kg per hand × 10"; with no weight, "Bodyweight × 8" for
+    /// a lift with no load, else "8 reps" (`LiveWorkoutRules.setText`).
+    static func setText(weightKg: Double, reps: Int, exerciseID: String, unit: WeightUnit) -> String {
+        let perHand = Prescription.isPerHand(ExerciseCatalog.exercise(id: exerciseID)?.load) ? " per hand" : ""
+        let weight = weightKg > 0 ? "\(unit.format(weightKg)) \(unit.rawValue)\(perHand)" : nil
+        return LiveWorkoutRules.setText(weight: weight, reps: reps, isBodyweight: LiveWorkoutRules.isBodyweight(exerciseID: exerciseID))
     }
 
     // MARK: Set types
@@ -591,6 +659,10 @@ enum LiveSessionStore {
         var watchFinishedAt: Date? = nil
         /// When "Still training?" was last answered "Keep going".
         var keptGoingAt: Date? = nil
+        /// When the Apple Watch paused the workout, while it is paused.
+        var pausedSince: Date? = nil
+        /// Seconds of pauses already ended (`LiveWorkoutRules.pausedSeconds`).
+        var pausedSeconds: Double? = nil
     }
 
     private static let key = "liveSessionStore"
@@ -684,6 +756,34 @@ enum LiveSessionStore {
             if on { keys.append(key) }
             entry.autoFilledRPE = keys
         }
+    }
+
+    // MARK: Pauses
+
+    /// Pause on the Apple Watch, at the time the wrist sent it (a queued
+    /// command arrives late): the workout clock stands still from then.
+    static func pause(at date: Date, for sessionStart: Date) {
+        update(for: sessionStart) { entry in
+            if entry.pausedSince == nil { entry.pausedSince = max(sessionStart, date) }
+        }
+    }
+
+    /// Resume on the Apple Watch: the pause's length joins the paused total.
+    static func resume(at date: Date, for sessionStart: Date) {
+        update(for: sessionStart) { entry in
+            guard let since = entry.pausedSince else { return }
+            entry.pausedSeconds = (entry.pausedSeconds ?? 0) + max(0, date.timeIntervalSince(since))
+            entry.pausedSince = nil
+        }
+    }
+
+    /// The session's clock at `now`, pauses left out (`LiveWorkoutRules.elapsed`),
+    /// and whether it is paused.
+    static func clock(for sessionStart: Date, now: Date) -> (elapsed: TimeInterval, isPaused: Bool) {
+        let saved = entry(for: sessionStart)
+        let elapsed = LiveWorkoutRules.elapsed(start: sessionStart, now: now, pausedFinished: saved.pausedSeconds ?? 0,
+                                               pausedSince: saved.pausedSince)
+        return (elapsed, saved.pausedSince != nil)
     }
 
     // MARK: Reorder, removal, swap

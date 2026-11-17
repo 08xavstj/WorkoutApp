@@ -325,7 +325,9 @@ extension WorkoutSession {
                     sets: exercise.orderedSets.map { set in
                         WorkoutSummary.LoggedSet(weightKg: set.weightKg, reps: set.reps, rpe: set.rpe, isWarmup: set.isWarmup,
                                                  isStage: set.kind.isStage, completedAt: set.completedAt)
-                    }
+                    },
+                    // A plank's "reps" are seconds: shown as "3 × 30 s" and left out of rep totals.
+                    isHold: LiveSetCoach.isHold(exercise.exerciseID)
                 )
             }
         )
@@ -372,9 +374,11 @@ private enum SummaryFormat {
         return "\(arrow) \(abs(minutes)) min"
     }
 
-    /// "3 × 8 · 60 kg, 1 × 6 · 60 kg"; bodyweight sets show reps only.
+    /// "3 × 8 · 60 kg, 1 × 6 · 60 kg"; bodyweight sets show reps only, and a
+    /// hold its seconds ("3 × 30 s").
     static func sets(_ result: WorkoutSummary.ExerciseResult, _ unit: WeightUnit) -> String {
         var parts = result.groups.map { group -> String in
+            if result.isHold { return "\(group.count) × \(group.reps) s" }
             let reps = "\(group.count) × \(group.reps)"
             return group.weightKg > 0 ? "\(reps) · \(weight(group.weightKg, unit))" : reps
         }
@@ -384,9 +388,10 @@ private enum SummaryFormat {
         return parts.joined(separator: ", ")
     }
 
-    /// "Best 65 kg × 5 · est. 1RM 80 kg", or "Best 12 reps".
+    /// "Best 65 kg × 5 · est. 1RM 80 kg", "Best 12 reps", or "Best 30 s" for a hold.
     static func best(_ result: WorkoutSummary.ExerciseResult, _ unit: WeightUnit) -> String? {
         guard let best = result.bestSet else { return nil }
+        if result.isHold { return "Best \(best.reps) s" }
         guard best.weightKg > 0 else { return "Best \(best.reps) reps" }
         let set = "\(weight(best.weightKg, unit)) × \(best.reps)"
         guard result.estimatedOneRepMaxKg > 0 else { return "Best \(set)" }
@@ -406,11 +411,11 @@ private enum SummaryFormat {
         return text
     }
 
-    /// "+2.5 kg", "+1 rep", "+1 set".
-    static func progression(_ progression: WorkoutSummary.Progression, _ unit: WeightUnit) -> String {
+    /// "+2.5 kg", "+1 rep", "+1 set"; "+15 s" for a hold, whose reps are seconds.
+    static func progression(_ progression: WorkoutSummary.Progression, _ unit: WeightUnit, isHold: Bool = false) -> String {
         switch progression {
         case let .heavier(kilograms): "+\(weight(kilograms, unit))"
-        case let .moreReps(reps): reps == 1 ? "+1 rep" : "+\(reps) reps"
+        case let .moreReps(reps): isHold ? "+\(reps) s" : (reps == 1 ? "+1 rep" : "+\(reps) reps")
         case let .moreSets(sets): sets == 1 ? "+1 set" : "+\(sets) sets"
         }
     }
@@ -670,7 +675,7 @@ private struct SummaryExerciseRow: View {
                     .foregroundStyle(Theme.primaryText)
                 Spacer(minLength: 8)
                 if let progression = item.change?.progression {
-                    Chip(text: SummaryFormat.progression(progression, unit), color: Theme.recoveryHigh)
+                    Chip(text: SummaryFormat.progression(progression, unit, isHold: item.result.isHold), color: Theme.recoveryHigh)
                 }
                 if !item.records.isEmpty {
                     Chip(text: "PR", color: Theme.lifting, filled: true)
@@ -685,7 +690,8 @@ private struct SummaryExerciseRow: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.secondaryText)
             }
-            if let change = item.change {
+            // A hold lifts no weight: no volume or 1RM line to compare (the chip says "+15 s").
+            if let change = item.change, !item.result.isHold {
                 Text(SummaryFormat.change(change, unit))
                     .font(.footnote)
                     .foregroundStyle(Theme.secondaryText)

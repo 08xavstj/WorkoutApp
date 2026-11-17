@@ -57,11 +57,15 @@ public enum WorkoutSummary {
         public var name: String
         /// The sets in logged order.
         public var sets: [LoggedSet]
+        /// A plank or side plank (`CoreMove.isHold`): each set's `reps` are
+        /// the seconds held, so they stay out of rep totals and read "30 s".
+        public var isHold: Bool
 
-        public init(exerciseID: String, name: String, sets: [LoggedSet]) {
+        public init(exerciseID: String, name: String, sets: [LoggedSet], isHold: Bool = false) {
             self.exerciseID = exerciseID
             self.name = name
             self.sets = sets
+            self.isHold = isHold
         }
 
         var working: [LoggedSet] { sets.filter(\.isWorking) }
@@ -96,6 +100,7 @@ public enum WorkoutSummary {
         public var volumeKg: Double
         /// Working sets, a drop or myo-rep set counted once.
         public var workingSets: Int
+        /// Reps over working sets. A hold's seconds aren't reps and are left out.
         public var reps: Int
         /// Exercises with at least one working set.
         public var exercises: Int
@@ -106,10 +111,11 @@ public enum WorkoutSummary {
 
     public static func totals(_ session: LoggedSession) -> Totals {
         let working = session.exercises.flatMap(\.working)
+        let counted = session.exercises.filter { !$0.isHold }.flatMap(\.working)
         return Totals(
             volumeKg: volume(working),
             workingSets: working.filter { !$0.isStage }.count,
-            reps: working.reduce(0) { $0 + max(0, $1.reps) },
+            reps: counted.reduce(0) { $0 + max(0, $1.reps) },
             exercises: session.exercises.filter { !$0.working.isEmpty }.count,
             duration: session.duration,
             typicalRest: typicalRest(session)
@@ -163,7 +169,12 @@ public enum WorkoutSummary {
         public var workingSets: Int
         /// Drop stages and mini-sets done after the working sets they belong to.
         public var stages: Int
+        /// Reps over the working sets; 0 for a hold (`holdSeconds`).
         public var reps: Int
+        /// A plank or side plank: the groups' and best set's `reps` are seconds.
+        public var isHold: Bool = false
+        /// Seconds held over the working sets; 0 unless `isHold`.
+        public var holdSeconds: Int = 0
         public var volumeKg: Double
         public var groups: [SetGroup]
         /// Highest estimated 1RM (for a bodyweight lift, the most reps).
@@ -185,17 +196,21 @@ public enum WorkoutSummary {
         guard !working.isEmpty else { return nil }
         let effort = exercise.effort
         let best = bestSet(effort.isEmpty ? working : effort)
+        let counted = working.reduce(0) { $0 + max(0, $1.reps) }
         return ExerciseResult(
             index: index,
             exerciseID: exercise.exerciseID,
             name: exercise.name,
             workingSets: effort.count,
             stages: working.count - effort.count,
-            reps: working.reduce(0) { $0 + max(0, $1.reps) },
+            reps: exercise.isHold ? 0 : counted,
+            isHold: exercise.isHold,
+            holdSeconds: exercise.isHold ? counted : 0,
             volumeKg: volume(working),
             groups: groups(effort),
             bestSet: best,
-            estimatedOneRepMaxKg: best?.estimatedOneRepMaxKg ?? 0
+            // A hold has no 1RM to estimate, whatever weight was typed for it.
+            estimatedOneRepMaxKg: exercise.isHold ? 0 : best?.estimatedOneRepMaxKg ?? 0
         )
     }
 
@@ -228,7 +243,8 @@ public enum WorkoutSummary {
     public enum Progression: Sendable, Equatable {
         /// The heaviest working weight went up by this much (kg).
         case heavier(kg: Double)
-        /// Same top weight, this many more reps at it (all sets added).
+        /// Same top weight, this many more reps at it (all sets added); for a
+        /// hold, this many more seconds.
         case moreReps(Int)
         /// Same weight and reps, more working sets.
         case moreSets(Int)
@@ -253,7 +269,7 @@ public enum WorkoutSummary {
             let logs = session.exercises.filter { $0.exerciseID == exerciseID }
             let sets = logs.flatMap(\.sets)
             guard let first = logs.first, sets.contains(where: \.isWorking) else { continue }
-            return (session.start, LoggedExercise(exerciseID: exerciseID, name: first.name, sets: sets))
+            return (session.start, LoggedExercise(exerciseID: exerciseID, name: first.name, sets: sets, isHold: first.isHold))
         }
         return nil
     }
@@ -267,7 +283,7 @@ public enum WorkoutSummary {
         return Change(
             lastDate: lastDate,
             volumeKg: volume(todayWorking) - volume(lastWorking),
-            estimatedOneRepMaxKg: todayBest > 0 && lastBest > 0 ? todayBest - lastBest : nil,
+            estimatedOneRepMaxKg: todayBest > 0 && lastBest > 0 && !today.isHold ? todayBest - lastBest : nil,
             progression: progression(today: today.effort, last: last.effort)
         )
     }

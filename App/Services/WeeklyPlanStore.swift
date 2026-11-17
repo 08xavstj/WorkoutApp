@@ -222,6 +222,10 @@ final class WeeklyPlanStore {
     /// training block (`startBlockIfNeeded`).
     func save(_ plan: WeeklyPlan) {
         reloadIfUnavailable()
+        // A week made with last week's left-over session first keeps a note of it (`newWeekDays`).
+        var plan = plan
+        plan.rotation = rotation(for: plan)
+        if let handedOut, Calendar.current.isDate(handedOut.weekStart, inSameDayAs: plan.weekStart) { self.handedOut = nil }
         saved.plans.removeAll { Calendar.current.isDate($0.weekStart, inSameDayAs: plan.weekStart) }
         saved.plans.append(plan)
         let cutoff = Calendar.current.date(byAdding: .day, value: -7 * Self.keptWeeks, to: WeeklyPlan.weekStart(containing: .now)) ?? .distantPast
@@ -557,9 +561,46 @@ final class WeeklyPlanStore {
     }
 
     /// A new week's days copied from `template`, with last week's left-over
-    /// session moved to the first day (`AdaptiveWeek.rotated`).
+    /// session moved to the first day (`AdaptiveWeek.rotatedWeek`). When
+    /// `template` is the last plan and that week was itself moved round, the
+    /// new week starts from its standing order (`WeeklyPlan.standingDays`), so
+    /// one missed session doesn't change the split for good. The move is
+    /// remembered until the plan is saved (`save` records it on the plan, for
+    /// this week's "X first: it didn't fit last week." and next week's order).
     func newWeekDays(from template: [PlannedDay], weekStart: Date, sessions: [WorkoutSession]) -> [PlannedDay] {
-        AdaptiveWeek.rotated(template, startingWith: leftOver(before: weekStart, sessions: sessions).first?.focus)
+        var standing = template
+        if let last = lastPlan(before: weekStart), last.activeRotation != nil,
+           last.sortedDays == template.sorted(by: { WeeklyPlan.order($0.weekday) < WeeklyPlan.order($1.weekday) }) {
+            standing = last.standingDays
+        }
+        let week = AdaptiveWeek.rotatedWeek(standing, startingWith: leftOver(before: weekStart, sessions: sessions).first?.focus)
+        if let rotation = week.rotation {
+            handedOut = (weekStart: weekStart, rotation: rotation)
+        } else {
+            handedOut = nil
+        }
+        return week.days
+    }
+
+    /// The rotation `newWeekDays` last made and the week it was for, until
+    /// that week's plan is saved. Not observed: only `save` reads it.
+    @ObservationIgnored private var handedOut: (weekStart: Date, rotation: WeeklyPlan.Rotation)?
+
+    /// The rotation to record on a plan being saved without one: the one
+    /// `newWeekDays` just made for that week, or the one on the plan it
+    /// replaces, as long as the days still train what the rotation left them
+    /// with (a week planned again by hand is its own standing order).
+    private func rotation(for plan: WeeklyPlan) -> WeeklyPlan.Rotation? {
+        if let active = plan.activeRotation { return active }
+        let focuses = plan.sortedDays.map(\.focus)
+        if let handedOut, Calendar.current.isDate(handedOut.weekStart, inSameDayAs: plan.weekStart),
+           handedOut.rotation.focuses == focuses {
+            return handedOut.rotation
+        }
+        if let replaced = self.plan(for: plan.weekStart)?.activeRotation, replaced.focuses == focuses {
+            return replaced
+        }
+        return nil
     }
 
     /// This week as a queue: the next session not done yet, wherever the

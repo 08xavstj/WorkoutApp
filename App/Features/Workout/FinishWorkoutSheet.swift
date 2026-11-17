@@ -2,13 +2,19 @@ import SwiftUI
 import SwiftData
 import AppCore
 
-/// Asks how hard the session felt (this feeds strain), then saves it.
+/// Asks how hard the session felt (this feeds strain), then saves it. With
+/// no working set ticked there is nothing to save (the screen's own Finish is
+/// off then, but Finish on the Apple Watch or "End at…" still opens this):
+/// it offers Discard instead, so an ended session with no sets never counts
+/// as one of the week's sessions.
 struct FinishWorkoutSheet: View {
     @Bindable var session: WorkoutSession
     /// Personal records not shown during the workout (`SetFeedback.records`).
     var records: [RecordBanner] = []
     /// The end to use instead of now: "End at 6:42 PM" from "Still training?".
     var endOverride: Date? = nil
+    /// Discards the workout, as the workout screen's own Discard does (asked for when nothing was logged).
+    var onDiscard: () -> Void = {}
     let onFinished: () -> Void
 
     @Environment(\.modelContext) private var modelContext
@@ -29,33 +35,10 @@ struct FinishWorkoutSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                if !records.isEmpty {
-                    recordsSection
-                }
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        effortHeader
-                        Slider(value: $rpe, in: 1...10, step: 1)
-                            .tint(Theme.lifting)
-                            .accessibilityLabel("Workout effort")
-                            .accessibilityValue("\(Int(rpe)) of 10, \(RPEScale.sessionLabel(Int(rpe)))")
-                    }
-                } footer: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Rate the whole workout, not your last set. Lifting doesn't raise your heart rate much, so this rating is how your gym work counts toward strain.")
-                        Button("What do the numbers mean?") { showingRPEGuide = true }
-                            .font(.footnote.weight(.semibold))
-                            .frame(minHeight: 44)
-                            .contentShape(.rect)
-                    }
-                }
-                Section {
-                    Toggle("Save to Apple Health", isOn: $saveToHealth)
-                    Toggle("Add to saved workouts", isOn: $saveAsTemplate)
-                } footer: {
-                    if saveAsTemplate {
-                        Text("You can start it again from Log › Saved workouts, with weights suggested from today.")
-                    }
+                if nothingToSave {
+                    nothingToSaveSection
+                } else {
+                    saveSections
                 }
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(Theme.recoveryLowText)
@@ -78,20 +61,28 @@ struct FinishWorkoutSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        if untickedWithData.isEmpty {
-                            Task { await finish() }
-                        } else {
-                            confirmingUnticked = true
+                    // Nothing logged: no Save (Discard is in the form, Cancel goes back to the workout).
+                    if !nothingToSave {
+                        Button("Save") {
+                            if untickedWithData.isEmpty {
+                                Task { await finish() }
+                            } else {
+                                confirmingUnticked = true
+                            }
                         }
+                        .disabled(isSaving)
                     }
-                    .disabled(isSaving)
                 }
             }
             .confirmationDialog(uncheckedTitle, isPresented: $confirmingUnticked, titleVisibility: .visible) {
                 // Leaving them out comes first: a set you changed but didn't tick usually wasn't done.
-                Button(untickedWithData.count == 1 ? "Leave it out" : "Leave them out") {
-                    Task { await finish() }
+                // When they are all there is, leaving them out would save an empty session: discard instead.
+                if hasLoggedSets {
+                    Button(untickedWithData.count == 1 ? "Leave it out" : "Leave them out") {
+                        Task { await finish() }
+                    }
+                } else {
+                    Button("Discard workout", role: .destructive) { discardWorkout() }
                 }
                 Button(untickedWithData.count == 1 ? "Log it as done" : "Log them as done") {
                     let sets = untickedWithData
@@ -101,6 +92,66 @@ struct FinishWorkoutSheet: View {
             }
         }
         .presentationBackground(Theme.background)
+    }
+
+    /// The usual finish form: records, the session's effort, and where it's saved.
+    @ViewBuilder
+    private var saveSections: some View {
+        if !records.isEmpty {
+            recordsSection
+        }
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                effortHeader
+                Slider(value: $rpe, in: 1...10, step: 1)
+                    .tint(Theme.lifting)
+                    .accessibilityLabel("Workout effort")
+                    .accessibilityValue("\(Int(rpe)) of 10, \(RPEScale.sessionLabel(Int(rpe)))")
+            }
+        } footer: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Rate the whole workout, not your last set. Lifting doesn't raise your heart rate much, so this rating is how your gym work counts toward strain.")
+                Button("What do the numbers mean?") { showingRPEGuide = true }
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .contentShape(.rect)
+            }
+        }
+        Section {
+            Toggle("Save to Apple Health", isOn: $saveToHealth)
+            Toggle("Add to saved workouts", isOn: $saveAsTemplate)
+        } footer: {
+            if saveAsTemplate {
+                Text("You can start it again from Log › Saved workouts, with weights suggested from today.")
+            }
+        }
+    }
+
+    // MARK: Nothing logged
+
+    /// A working set was ticked off (drop stages and mini-sets count: they were done).
+    private var hasLoggedSets: Bool { !session.workingSets.isEmpty }
+
+    /// No working set ticked, and none changed by hand that could still be
+    /// logged as done (`untickedWithData`): saving would store an ended
+    /// session with no sets.
+    private var nothingToSave: Bool { !hasLoggedSets && untickedWithData.isEmpty }
+
+    private var nothingToSaveSection: some View {
+        Section {
+            Text("No working sets were ticked off, so there's nothing to save.")
+                .foregroundStyle(Theme.primaryText)
+            Button("Discard workout", role: .destructive) { discardWorkout() }
+        } footer: {
+            Text(session.watchWorkoutUUID != nil
+                 ? "To keep it, tap Cancel and tick the sets you did. Discarding also removes the workout your Apple Watch saved from Apple Health."
+                 : "To keep it, tap Cancel and tick the sets you did.")
+        }
+    }
+
+    private func discardWorkout() {
+        dismiss()
+        onDiscard()
     }
 
     /// "Workout effort (1–10)" and the rating; stacked at accessibility text

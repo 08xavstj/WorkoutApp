@@ -320,6 +320,9 @@ enum LiftHistory {
     /// The live workout asks for every open card's history on each render;
     /// sorting all sessions each time is wasted work, so answers are kept per
     /// session start and session count (a finished or deleted session resets it).
+    /// The cached sets are live models, so each answer is checked before it's
+    /// handed out: a set deleted from an earlier session meanwhile (History ›
+    /// Edit during a workout) must never be read (`isLive`).
     private static var cacheKey = ""
     private static var previousCache: [String: [SetLog]] = [:]
     private static var bestCache: [String: Double] = [:]
@@ -335,10 +338,19 @@ enum LiftHistory {
     /// `previousSets`, cached for the live workout.
     static func cachedPreviousSets(for exerciseID: String, before date: Date, in sessions: [WorkoutSession]) -> [SetLog] {
         resetCache(before: date, sessions: sessions)
-        if let cached = previousCache[exerciseID] { return cached }
+        if let cached = previousCache[exerciseID], cached.allSatisfy({ isLive($0) }) { return cached }
         let sets = previousSets(for: exerciseID, before: date, in: sessions)
         previousCache[exerciseID] = sets
         return sets
+    }
+
+    /// Still in the store: not deleted, and its exercise and session neither.
+    /// Reading a deleted model's properties crashes, so a cached set is only
+    /// returned while this holds.
+    private static func isLive(_ set: SetLog) -> Bool {
+        guard !set.isDeleted, set.modelContext != nil,
+              let exercise = set.exercise, !exercise.isDeleted, exercise.modelContext != nil else { return false }
+        return true
     }
 
     /// `bestOneRepMax`, cached for the live workout.

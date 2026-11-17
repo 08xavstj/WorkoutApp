@@ -19,10 +19,21 @@ public enum LiveWorkoutRules {
     /// `autoregulatedFrom` is this set's value before that change, if it made one.
     public static func tickedValue(phone: Double, watch: Double, watchBase: Double?, edited: Bool?,
                                    autoregulatedFrom: Double?) -> Double {
+        tickedValue(phone: phone, watch: watch, watchBase: watchBase, edited: edited,
+                    autoregulatedFromAny: autoregulatedFrom.map { [$0] } ?? [])
+    }
+
+    /// `tickedValue` when more than one set-by-set change moved the set since
+    /// the Watch's snapshot (two queued ratings, each moving the rep goal):
+    /// `autoregulatedFromAny` holds the value the set had before each of
+    /// them. The Watch showed one of those, so matching any of them means the
+    /// phone's value moved only by changes the wrist never saw.
+    public static func tickedValue(phone: Double, watch: Double, watchBase: Double?, edited: Bool?,
+                                   autoregulatedFromAny earlier: [Double]) -> Double {
         guard let edited else { return watch > 0 ? watch : phone }
         if edited { return max(0, watch) }
-        if let watchBase, let autoregulatedFrom,
-           abs(autoregulatedFrom - watchBase) < 0.01, abs(phone - watchBase) >= 0.01 {
+        if let watchBase, abs(phone - watchBase) >= 0.01,
+           earlier.contains(where: { abs($0 - watchBase) < 0.01 }) {
             return max(0, watch)
         }
         return phone
@@ -63,6 +74,107 @@ public enum LiveWorkoutRules {
         guard let watchFinishedAt else { return now }
         let end = max(watchFinishedAt, lastTick ?? watchFinishedAt)
         return min(now, max(start, end))
+    }
+
+    // MARK: Pauses
+
+    /// Seconds a workout has spent paused (Pause on the Apple Watch):
+    /// finished pauses plus the one still running, which ends at `now`.
+    public static func pausedSeconds(finished: TimeInterval, pausedSince: Date?, now: Date) -> TimeInterval {
+        max(0, finished) + (pausedSince.map { max(0, now.timeIntervalSince($0)) } ?? 0)
+    }
+
+    /// The workout clock: time since the start without the pauses, so it
+    /// stands still while paused and matches the Health workout the Watch
+    /// records (HealthKit leaves paused time out of a workout's duration).
+    public static func elapsed(start: Date, now: Date, pausedFinished: TimeInterval, pausedSince: Date?) -> TimeInterval {
+        max(0, now.timeIntervalSince(start) - pausedSeconds(finished: pausedFinished, pausedSince: pausedSince, now: now))
+    }
+
+    // MARK: Supersets
+
+    /// One half of a superset pair, for `partnerIsNext`.
+    public struct SupersetHalf: Sendable, Equatable {
+        /// Position in the workout: the lower one is the pair's first half (A1).
+        public var order: Int
+        /// Working sets ticked; warm-up ramp sets, drop stages and mini-sets don't count.
+        public var roundsDone: Int
+        public var hasOpenSet: Bool
+        /// Its next open set is a drop stage or mini-set of the set just done.
+        public var nextIsStage: Bool
+
+        public init(order: Int, roundsDone: Int, hasOpenSet: Bool, nextIsStage: Bool = false) {
+            self.order = order
+            self.roundsDone = roundsDone
+            self.hasOpenSet = hasOpenSet
+            self.nextIsStage = nextIsStage
+        }
+    }
+
+    /// After a set of one half of a superset is ticked: true when the
+    /// partner's set comes next. The half that is a round behind goes next,
+    /// the first half on a tie (A1 → A2 → A1), so a ticked warm-up ramp set
+    /// (no round done yet) stays on its own lift's first working set, as the
+    /// Apple Watch does (`WatchSession.upNext`). A drop stage or mini-set of
+    /// the set just done comes before the partner.
+    public static func partnerIsNext(ticked: SupersetHalf, partner: SupersetHalf) -> Bool {
+        guard partner.hasOpenSet else { return false }
+        guard ticked.hasOpenSet else { return true }
+        if ticked.nextIsStage { return false }
+        return ticked.order < partner.order
+            ? ticked.roundsDone > partner.roundsDone
+            : ticked.roundsDone >= partner.roundsDone
+    }
+
+    // MARK: Weights changed by hand
+
+    /// A set as `indicesTakingWeight` reads it.
+    public struct WeightSlot: Sendable, Equatable {
+        public var weightKg: Double
+        public var isCompleted: Bool
+        public var isWarmup: Bool
+        /// A drop stage or mini-set (`SetKind.isStage`).
+        public var isStage: Bool
+
+        public init(weightKg: Double, isCompleted: Bool = false, isWarmup: Bool = false, isStage: Bool = false) {
+            self.weightKg = weightKg
+            self.isCompleted = isCompleted
+            self.isWarmup = isWarmup
+            self.isStage = isStage
+        }
+    }
+
+    /// The sets that take a weight changed by hand on the working set at
+    /// `index`: the later working sets still to do that were at its old
+    /// weight (`oldKg`, the plan's weight or 0 for a first-time lift), so the
+    /// weight is typed once, not on every set. Sets at another weight are the
+    /// lifter's own and stay; so do ticked sets, warm-up ramp sets and drop
+    /// stages or mini-sets. None when the changed set is itself a warm-up or a stage.
+    public static func indicesTakingWeight(changed index: Int, oldKg: Double, in sets: [WeightSlot]) -> [Int] {
+        guard sets.indices.contains(index), !sets[index].isWarmup, !sets[index].isStage else { return [] }
+        return sets.indices.filter { later in
+            later > index && !sets[later].isCompleted && !sets[later].isWarmup && !sets[later].isStage
+                && abs(sets[later].weightKg - oldKg) < 0.01
+        }
+    }
+
+    // MARK: A set in words
+
+    /// One set in words: "60 kg × 8" with a weight (`weight`: "60 kg" or
+    /// "20 kg per hand"). With none: "Bodyweight × 8" for a lift that has no
+    /// load to set, else "8 reps" (a loaded lift whose weight isn't in yet),
+    /// never "0 kg × 8". For set rows, the rest bar and the Lock Screen.
+    public static func setText(weight: String?, reps: Int, isBodyweight: Bool) -> String {
+        if let weight { return "\(weight) × \(reps)" }
+        if isBodyweight { return "Bodyweight × \(reps)" }
+        return reps == 1 ? "1 rep" : "\(reps) reps"
+    }
+
+    /// A catalog lift done with no added load (push-ups, pull-ups). False
+    /// outside the catalog, where nothing is known about the load.
+    public static func isBodyweight(exerciseID: String) -> Bool {
+        guard let exercise = ExerciseCatalog.exercise(id: exerciseID) else { return false }
+        return exercise.load == nil
     }
 
     // MARK: Orders

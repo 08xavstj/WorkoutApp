@@ -65,6 +65,73 @@ struct AdaptiveWeekCarryOverTests {
         #expect(result.stillToDo.isEmpty)
     }
 
+    /// "Same days as last week" after a missed Lower: this week is saved
+    /// already rotated (Lower, Upper, Lower, Upper), with the rotation recorded.
+    @Test func aStoredRotationSaysWhyAndLeavesTheStandingOrder() throws {
+        let made = AdaptiveWeek.rotatedWeek(upperLower(lastMonday).plannedDays, startingWith: .lower)
+        #expect(made.days.map(\.focus) == [.lower, .upper, .lower, .upper])
+        #expect(made.days.map(\.weekday) == [2, 3, 5, 6])
+        #expect(made.rotation == WeeklyPlan.Rotation(by: 1, focuses: [.lower, .upper, .lower, .upper]))
+        let plan = WeeklyPlan(weekStart: thisMonday, plannedDays: made.days, rotation: made.rotation)
+        // The reason shows this week, though nothing is moved again.
+        let result = try #require(AdaptiveWeek.make(plan: plan, done: lastWeekDone, now: at(thisMonday, 0, hour: 8),
+                                                    carriedOver: .lower, calendar: calendar))
+        #expect(result.slots.map(\.focus) == [.lower, .upper, .lower, .upper])
+        #expect(result.today?.note == "Lower first: it didn't fit last week.")
+        // Next week starts again from the standing order: the split hasn't drifted.
+        #expect(plan.standingDays.map(\.focus) == [.upper, .lower, .upper, .lower])
+        #expect(plan.standingDays.map(\.weekday) == [2, 3, 5, 6])
+        let next = AdaptiveWeek.rotatedWeek(plan.standingDays, startingWith: nil)
+        #expect(next.days.map(\.focus) == [.upper, .lower, .upper, .lower])
+        #expect(next.rotation == nil)
+    }
+
+    @Test func aWeekInItsStandingOrderHasNoRotationOrNote() throws {
+        // Nothing left over, or the left-over already leads: nothing moves and nothing is recorded.
+        #expect(AdaptiveWeek.rotatedWeek(upperLower(lastMonday).plannedDays, startingWith: nil).rotation == nil)
+        #expect(AdaptiveWeek.rotatedWeek(upperLower(lastMonday).plannedDays, startingWith: .upper).rotation == nil)
+        let plan = upperLower(thisMonday)
+        #expect(plan.activeRotation == nil)
+        #expect(plan.standingDays == plan.sortedDays)
+        let result = try #require(AdaptiveWeek.make(plan: plan, done: [], now: at(thisMonday, 0, hour: 8), calendar: calendar))
+        #expect(result.today?.note == nil)
+    }
+
+    @Test func threeDayRotationUnwinds() {
+        let days: [(Int, WorkoutFocus)] = [(2, .push), (4, .pull), (6, .legs)]
+        let standing = days.map { PlannedDay(weekday: $0.0, time: 18 * 60, focus: $0.1, minutes: 60) }
+        let made = AdaptiveWeek.rotatedWeek(standing, startingWith: .legs)
+        #expect(made.days.map(\.focus) == [.legs, .push, .pull])
+        #expect(made.rotation?.by == 2)
+        let plan = WeeklyPlan(weekStart: thisMonday, plannedDays: made.days, rotation: made.rotation)
+        #expect(plan.standingDays.map(\.focus) == [.push, .pull, .legs])
+    }
+
+    @Test func planningTheWeekAgainByHandEndsTheRotation() {
+        let made = AdaptiveWeek.rotatedWeek(upperLower(lastMonday).plannedDays, startingWith: .lower)
+        var plan = WeeklyPlan(weekStart: thisMonday, plannedDays: made.days, rotation: made.rotation)
+        // Only a time changed: still the rotated week.
+        plan.plannedDays[0].time = 7 * 60
+        #expect(plan.activeRotation != nil)
+        // What a day trains changed: the days as they are now are the standing order.
+        plan.plannedDays[0].focus = .fullBody
+        #expect(plan.activeRotation == nil)
+        #expect(plan.standingDays == plan.sortedDays)
+    }
+
+    @Test func rotationSurvivesSavingAndOlderPlansDecode() throws {
+        let made = AdaptiveWeek.rotatedWeek(upperLower(lastMonday).plannedDays, startingWith: .lower)
+        let plan = WeeklyPlan(weekStart: thisMonday, plannedDays: made.days, rotation: made.rotation)
+        let data = try JSONEncoder().encode(plan)
+        #expect(try JSONDecoder().decode(WeeklyPlan.self, from: data) == plan)
+        // A plan saved before rotations were recorded has none.
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["rotation"] = nil
+        let older = try JSONDecoder().decode(WeeklyPlan.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(older.rotation == nil)
+        #expect(older.plannedDays == plan.plannedDays)
+    }
+
     @Test func afterTheLeftOverIsDoneTheWeekCarriesOn() throws {
         let done: [AdaptiveWeek.DoneSession] = [.init(date: at(thisMonday, 0), focus: .lower)]
         let result = try #require(AdaptiveWeek.make(plan: upperLower(thisMonday), done: done, now: at(thisMonday, 1, hour: 8),

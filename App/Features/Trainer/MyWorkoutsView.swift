@@ -237,12 +237,10 @@ struct TemplateEditorView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Environment(UserSettings.self) private var settings
     @Environment(GymStore.self) private var gym
     @State private var name = ""
     @State private var items: [DraftItem] = []
     @State private var showingPicker = false
-    @State private var showingRPEGuide = false
     @State private var loaded = false
 
     struct DraftItem: Identifiable, Equatable {
@@ -253,12 +251,17 @@ struct TemplateEditorView: View {
         var repsLow: Int
         var repsHigh: Int
         var useRange: Bool
+        /// The effort the template was saved with (`TemplateExercise.targetRPE`),
+        /// kept as it is. The editor no longer asks for one: sets work to rep
+        /// goals, and the plan's reserve stays behind the scenes (`RepGoal`).
         var rpe: Double?
         /// In the display unit; nil = suggested.
         var weight: Double?
     }
 
-    private var unit: WeightUnit { settings.weightUnit }
+    /// The gym's unit, as on every lifting screen (`GymStore.liftingUnit`), so a
+    /// weight typed here is the number on the bar.
+    private var unit: WeightUnit { gym.liftingUnit }
 
     var body: some View {
         NavigationStack {
@@ -268,7 +271,7 @@ struct TemplateEditorView: View {
                 }
                 Section {
                     ForEach($items) { $item in
-                        DraftItemRow(item: $item, unit: unit, onShowGuide: { showingRPEGuide = true })
+                        DraftItemRow(item: $item, unit: unit)
                     }
                     .onMove { items.move(fromOffsets: $0, toOffset: $1) }
                     .onDelete { items.remove(atOffsets: $0) }
@@ -308,9 +311,6 @@ struct TemplateEditorView: View {
             }
             .sheet(isPresented: $showingPicker) {
                 ExercisePickerView { exercise in add(exercise) }
-            }
-            .sheet(isPresented: $showingRPEGuide) {
-                RPEGuideView().presentationDetents([.medium, .large])
             }
             .onAppear(perform: load)
         }
@@ -371,9 +371,6 @@ struct TemplateEditorView: View {
 private struct DraftItemRow: View {
     @Binding var item: TemplateEditorView.DraftItem
     let unit: WeightUnit
-    let onShowGuide: () -> Void
-
-    private static let efforts: [Double] = [6, 7, 7.5, 8, 8.5, 9, 9.5, 10]
 
     /// Blank = suggested from history.
     private var weightText: Binding<String> {
@@ -398,20 +395,6 @@ private struct DraftItemRow: View {
                 Stepper("To \(max(item.repsLow, item.repsHigh)) reps", value: $item.repsHigh, in: item.repsLow...50)
             } else {
                 Stepper("Reps: \(item.repsLow)", value: $item.repsLow, in: 1...50)
-            }
-            HStack {
-                Picker("Effort", selection: $item.rpe) {
-                    Text("Default · \(RPEScale.summary(WorkoutPlanner.defaultTemplateRPE))").tag(Double?.none)
-                    ForEach(Self.efforts, id: \.self) { rpe in
-                        Text(RPEScale.summary(rpe)).tag(Double?.some(rpe))
-                    }
-                }
-                Button(action: onShowGuide) {
-                    Image(systemName: "questionmark.circle")
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("What's RPE?")
             }
             HStack {
                 Text("Weight")

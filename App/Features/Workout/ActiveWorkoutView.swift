@@ -86,6 +86,14 @@ struct ActiveWorkoutView: View {
                 VStack(spacing: 6) {
                     headerBar
                     sessionStrip
+                    if session.isActive, session.workingSets.isEmpty {
+                        // Finish is dimmed until a working set is ticked: say why.
+                        Text("Tick a working set to finish.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.horizontal, 4)
+                    }
                     if let recordBanner {
                         RecordBannerView(banner: recordBanner) { self.recordBanner = nil }
                             .transition(.move(edge: .top).combined(with: .opacity))
@@ -130,7 +138,10 @@ struct ActiveWorkoutView: View {
                 ExercisePickerView { exercise in add(exercise) }
             }
             .sheet(isPresented: $showingFinish, onDismiss: { finishEndOverride = nil }) {
-                FinishWorkoutSheet(session: session, records: finishRecords, endOverride: finishEndOverride) {
+                // With no working set ticked (Finish on the Apple Watch can open this before any),
+                // the sheet offers Discard instead of saving an empty session.
+                FinishWorkoutSheet(session: session, records: finishRecords, endOverride: finishEndOverride,
+                                   onDiscard: { discard() }) {
                     WatchSync.shared.sessionFinished(session) // Apple Watch: end its recording
                     dismiss()
                 }
@@ -457,11 +468,15 @@ struct ActiveWorkoutView: View {
 
     /// A red "live" dot and the elapsed time, ticking each second: m:ss under
     /// an hour, h:mm:ss after (`workoutElapsedText`, as on Today and the Watch).
+    /// While the Apple Watch has the workout paused it stands still, grey, with "Paused".
     private var elapsedClock: some View {
         TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
-            let elapsed = max(0, context.date.timeIntervalSince(session.startedAt))
+            // Pause on the Apple Watch stops this clock too (`LiveSessionStore.clock`).
+            let clock = LiveSessionStore.clock(for: session.startedAt, now: context.date)
+            let elapsed = clock.elapsed
+            let spoken = Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
             HStack(spacing: 6) {
-                Circle().fill(Theme.recoveryLow).frame(width: 8, height: 8)
+                Circle().fill(clock.isPaused ? Theme.secondaryText : Theme.recoveryLow).frame(width: 8, height: 8)
                     .accessibilityHidden(true)
                 Text(workoutElapsedText(elapsed))
                     .font(.system(size: timerSize, weight: .bold, design: .rounded))
@@ -470,7 +485,13 @@ struct ActiveWorkoutView: View {
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(Theme.primaryText)
                     .accessibilityLabel("Elapsed time")
-                    .accessibilityValue(Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide)))
+                    .accessibilityValue(clock.isPaused ? "\(spoken), paused on Apple Watch" : spoken)
+                if clock.isPaused {
+                    Text("Paused")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
+                }
             }
         }
     }
@@ -480,7 +501,8 @@ struct ActiveWorkoutView: View {
     /// the sets start high on the screen.
     private var sessionStrip: some View {
         TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
-            let elapsed = max(0, context.date.timeIntervalSince(session.startedAt))
+            // The same clock as the header: paused time adds no strain.
+            let elapsed = LiveSessionStore.clock(for: session.startedAt, now: context.date).elapsed
             let counts = setCounts
             SessionStrip(name: session.name, doneSets: counts.done, totalSets: counts.total,
                          strainGain: liveStrain(elapsed: elapsed), recorder: recorder,
@@ -546,7 +568,8 @@ struct ActiveWorkoutView: View {
 
     /// "Reps left" → RPE on the reps-in-reserve scale (RPE = 10 − reps left;
     /// Zourdos et al., J Strength Cond Res 2016; "4+" logs as 6), then the
-    /// set-by-set check runs as if it had been rated in the editor.
+    /// set-by-set check runs, as it does when the set is rated in the editor
+    /// (`ExerciseCard.rated`).
     private func logEffort(left: Int, for set: SetLog) {
         pendingEffort = nil
         set.rpe = ReserveText.rpe(repsLeft: left)
@@ -653,6 +676,10 @@ struct ActiveWorkoutView: View {
                 sessionStart: session.startedAt,
                 blockRIR: weeklyPlans.blockWeek?.targetRIR
             )
+            // "Swap exercise" keeps the log and changes its lift (`WorkoutLauncher.swap`): a new
+            // identity makes the card load the new lift's plan line, progression note, rest
+            // and set-by-set note instead of keeping the old lift's (they load on appear).
+            .id(exercise.exerciseID)
         } else {
             Button {
                 expanded.insert(exercise.persistentModelID)
@@ -1192,7 +1219,9 @@ private struct ExerciseCard: View {
             kind: editing.isWarmup || isHold ? nil : kindBinding(for: editing),
             unit: unit,
             step: { up in
+                let oldKg = editing.weightKg
                 step(editing, up: up)
+                carryWeight(from: editing, oldKg: oldKg)
                 markTouched(editing)
             },
             plateHint: plateHint(for: editing),
@@ -1201,6 +1230,8 @@ private struct ExerciseCard: View {
             isHold: isHold,
             isPerHand: isPerHand,
             onEdited: { markTouched(editing) },
+            onWeightChanged: { oldKg in carryWeight(from: editing, oldKg: oldKg) },
+            onRated: { rated(editing) },
             onComplete: { toggle(editing) },
             onShowGuide: { showingRPEGuide = true },
             onToggleWarmUp: {
@@ -1236,7 +1267,8 @@ private struct ExerciseCard: View {
             verdictTargetReps: isWorking ? verdictTargetReps(for: set) : nil,
             kindLine: Self.kindLine(set.kind, isStage: position.isStage),
             isHold: isHold,
-            isPerHand: isPerHand
+            isPerHand: isPerHand,
+            isBodyweight: isBodyweight
         )
         .contextMenu {
             Button(set.isWarmup ? "Make working set" : "Make warm-up set") { set.isWarmup.toggle() }
@@ -1368,6 +1400,47 @@ private struct ExerciseCard: View {
         Prescription.isPerHand(ExerciseCatalog.exercise(id: exercise.exerciseID)?.load)
     }
 
+    /// A lift with no load to set (push-ups, pull-ups): a set with no weight
+    /// reads "Bodyweight × 8", not "0 kg × 8" (`LiveWorkoutRules.setText`).
+    private var isBodyweight: Bool { LiveWorkoutRules.isBodyweight(exerciseID: exercise.exerciseID) }
+
+    /// A weight changed by hand on a working set carries to the later working
+    /// sets still to do that were at the old weight (the plan's, or 0 on a
+    /// first-time lift), so it's set once, not on every set. Sets at another
+    /// weight, ticked sets, warm-ups and drop stages or mini-sets stay as they
+    /// are (`LiveWorkoutRules.indicesTakingWeight`).
+    private func carryWeight(from set: SetLog, oldKg: Double) {
+        guard abs(set.weightKg - oldKg) >= 0.001 else { return }
+        let sets = exercise.orderedSets
+        guard let index = sets.firstIndex(where: { $0.persistentModelID == set.persistentModelID }) else { return }
+        let slots = sets.map { item in
+            LiveWorkoutRules.WeightSlot(weightKg: item.weightKg, isCompleted: item.isCompleted,
+                                        isWarmup: item.isWarmup, isStage: item.kind.isStage)
+        }
+        for later in LiveWorkoutRules.indicesTakingWeight(changed: index, oldKg: oldKg, in: slots) {
+            sets[later].weightKg = set.weightKg
+        }
+    }
+
+    /// Effort rated in the editor: the set-by-set check runs as it does from
+    /// the rest bar's "reps left" strip (`LiveSetCoach.autoregulate`), so the
+    /// next set's goal follows the rating wherever it was given. Only for the
+    /// latest working set done: rating an earlier one late just logs it, since
+    /// the set done since says more about the next one.
+    private func rated(_ set: SetLog) {
+        try? modelContext.save()
+        guard set.isCompleted, !set.isWarmup, set.rpe != nil else { return }
+        let doneSince = exercise.sets.contains { later in
+            later.order > set.order && later.isCompleted && !later.isWarmup && !later.kind.isStage
+        }
+        guard !doneSince else { return }
+        if let entry = LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: sessionStart,
+                                                 gym: gym, blockRIR: blockRIR) {
+            adjustment = entry
+            try? modelContext.save()
+        }
+    }
+
     /// A drop stage or mini-set needs a working set to follow.
     private func canAddStage(to sets: [SetLog]) -> Bool {
         sets.last.map { !$0.isWarmup } ?? false
@@ -1421,16 +1494,21 @@ private struct ExerciseCard: View {
     }
 
     /// "3 × 7 · 82.5 kg" under the exercise name (`Prescription`,
-    /// as in the builder): the plan's target shows once, beside last time's
+    /// as in the builder): the target shows once, beside last time's
     /// sets on the rows, so last time isn't the only goal (feature spec §3.1).
+    /// It is the current goal: the next set's reps and weight once they've moved.
     /// Nil without a plan (an exercise added during the workout).
     private var planLine: String? {
         guard let target else { return nil }
         let working = exercise.sets.filter { !$0.isWarmup && !$0.kind.isStage }.count
-        if isHold { return "\(max(1, working)) × \(target.repsToday) s hold" }
+        // The goal moves set by set (`RepGoal`, a weight change): the header follows the
+        // next working set to do, as the collapsed row does, so the two never disagree.
+        let open = exercise.orderedSets.first { !$0.isWarmup && !$0.kind.isStage && !$0.isCompleted }
+        let goal = open.flatMap { $0.reps > 0 ? $0.reps : nil } ?? target.repsToday
+        if isHold { return "\(max(1, working)) × \(goal) s hold" }
         var parts = [Prescription.sets(max(1, working), repsLow: target.repsLow, repsHigh: target.repsHigh,
-                                       targetReps: target.repsToday, rpe: nil)]
-        if let kg = target.loadKg, kg > 0 {
+                                       targetReps: goal, rpe: nil)]
+        if let kg = open.flatMap({ $0.weightKg > 0 ? $0.weightKg : nil }) ?? target.loadKg, kg > 0 {
             let kind = ExerciseCatalog.exercise(id: exercise.exerciseID)?.load ?? libraryLoadKind
             // To 0.1, as the set rows show it (`WeightUnit.format`).
             parts.append(Prescription.load((unit.display(kg) * 10).rounded() / 10, unit: unit.rawValue, kind: kind))
@@ -1498,6 +1576,9 @@ private struct ExerciseCard: View {
         if set.isCompleted, !set.isWarmup { skipOpenWarmUps(before: set) }
         try? modelContext.save()
         if set.isCompleted {
+            // Lifting has begun: the movement warm-up is over, here and on the Watch
+            // (which otherwise stays on its warm-up screen until Skip). No-op once done.
+            WarmUpStore.shared.finish(for: sessionStart)
             // Set-by-set effort check: may move the next set's load (`Autoregulation`).
             if !set.isWarmup, let entry = LiveSetCoach.autoregulate(after: set, in: exercise, sessionStart: sessionStart,
                                                                     gym: gym, blockRIR: blockRIR) {
@@ -1561,6 +1642,8 @@ private struct ExerciseCard: View {
         if isHold { return "\(set.reps) s" }
         // Reps left first, as the plan says it ("3 left"), not an RPE number.
         let effort = set.rpe.map { " · \(ReserveText.short(rpe: $0))" } ?? ""
+        // No weight last time (a bodyweight lift): the reps, not "0 × 8".
+        guard set.weightKg > 0 else { return (set.reps == 1 ? "1 rep" : "\(set.reps) reps") + effort }
         return "\(unit.format(set.weightKg)) × \(set.reps)\(effort)"
     }
 
@@ -1733,6 +1816,8 @@ private struct SetRow: View {
     var isHold = false
     /// Dumbbells or kettlebells: the weight is per hand.
     var isPerHand = false
+    /// A lift with no load to set: with no weight it reads "Bodyweight × 8".
+    var isBodyweight = false
 
     struct WarmUpPosition {
         var number: Int
@@ -1813,11 +1898,13 @@ private struct SetRow: View {
     private var isFilled: Bool { self.set.weightKg > 0 || set.reps > 0 }
 
     /// "60 kg × 8", "20 kg per hand × 10", "30 s" for a hold, or "Not set".
+    /// With no weight: "Bodyweight × 8" or "8 reps", never "0 kg × 8" (`LiveWorkoutRules.setText`).
     private var loadText: String {
         guard isFilled else { return "Not set" }
         if isHold { return "\(set.reps) s" }
         let perHand = isPerHand ? " per hand" : ""
-        return "\(unit.format(set.weightKg)) \(unit.rawValue)\(perHand) × \(set.reps)"
+        let weight = self.set.weightKg > 0 ? "\(unit.format(self.set.weightKg)) \(unit.rawValue)\(perHand)" : nil
+        return LiveWorkoutRules.setText(weight: weight, reps: self.set.reps, isBodyweight: isBodyweight)
     }
 
     /// Number, weight × reps, last time and RPE. At accessibility text sizes
@@ -1977,6 +2064,11 @@ private struct SetEditor: View {
     var isPerHand = false
     /// The weight or reps were changed here (Finish asks about such a set if it's left unticked).
     var onEdited: () -> Void = {}
+    /// The weight was typed here, with the weight it had (kg), so the later
+    /// sets still at that weight can follow (`ExerciseCard.carryWeight`).
+    var onWeightChanged: (Double) -> Void = { _ in }
+    /// The effort was rated or cleared here, so the set-by-set check can run (`ExerciseCard.rated`).
+    var onRated: () -> Void = {}
     let onComplete: () -> Void
     let onShowGuide: () -> Void
     /// The row's context-menu actions, since the row isn't drawn while editing.
@@ -2000,7 +2092,8 @@ private struct SetEditor: View {
             // Effort is rated once the set is done (the "reps left" strip asks after the tick);
             // a drop stage or mini-set is as many good reps as you can, and a hold is timed.
             if set.isCompleted, !set.isWarmup, !set.kind.isStage, !isHold {
-                RPEPicker(rpe: $set.rpe, targetRPE: targetRPE, onShowGuide: onShowGuide)
+                // Rated here, the next set's goal moves as it does from the strip (`onRated`).
+                RPEPicker(rpe: ratingBinding, targetRPE: targetRPE, onShowGuide: onShowGuide)
             }
             Button(action: {
                 typing = nil
@@ -2022,6 +2115,17 @@ private struct SetEditor: View {
         .padding(14)
         .background(Theme.lifting.opacity(0.07), in: .rect(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Theme.lifting.opacity(0.7), lineWidth: 2))
+    }
+
+    /// The set's effort, telling the card when it changes.
+    private var ratingBinding: Binding<Double?> {
+        Binding(
+            get: { set.rpe },
+            set: { value in
+                set.rpe = value
+                onRated()
+            }
+        )
     }
 
     /// "SET 2 · TO FAILURE" with last time under it, an ⓘ for a set type
@@ -2101,7 +2205,9 @@ private struct SetEditor: View {
                 NumberStepper(label: isPerHand ? "\(unit.rawValue) per hand" : unit.rawValue, spokenLabel: "weight") {
                     // Applied as you type, so a tick here or on the Watch uses it (`LiveNumberField`).
                     LiveNumberField(value: unit.display(set.weightKg), decimals: true, isFocused: typing == .weight) { value in
+                        let oldKg = set.weightKg
                         set.weightKg = unit.toKilograms(value)
+                        onWeightChanged(oldKg)
                         onEdited()
                     }
                     .focused($typing, equals: .weight)
@@ -2433,8 +2539,9 @@ private struct CollapsedExerciseRow: View {
             return "\(working.count) × \(seconds) s hold" + (isDone ? " · done" : "")
         }
         if isDone, let best = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) {
-            let perHand = Prescription.isPerHand(ExerciseCatalog.exercise(id: exercise.exerciseID)?.load) ? " per hand" : ""
-            return "\(working.count) sets · \(unit.format(best.weightKg)) \(unit.rawValue)\(perHand) × \(best.reps) · done"
+            // "Bodyweight × 8" with no weight, not "0 kg × 8" (`LiveSetCoach.setText`).
+            let text = LiveSetCoach.setText(weightKg: best.weightKg, reps: best.reps, exerciseID: exercise.exerciseID, unit: unit)
+            return "\(working.count) sets · \(text) · done"
         }
         // The first working set still to do (else the first), not a warm-up ramp or a drop stage:
         // "3 × 7 · 82.5 kg", as the exercise header says it (`Prescription`).
@@ -2666,7 +2773,7 @@ private struct SessionStrip: View {
 /// "How many more reps could you have done?" with 0 / 1 / 2 / 3 / 4+ after
 /// a working set ticked with the circle (no effort logged): one tap logs it
 /// and sets the next set's rep goal (`RepGoal`), as rating it in the editor
-/// would. No plan number is marked: the lifter works to the rep goal.
+/// does (`ExerciseCard.rated`). No plan number is marked: the lifter works to the rep goal.
 private struct RepsLeftStrip: View {
     let onPick: (Int) -> Void
     let onDismiss: () -> Void

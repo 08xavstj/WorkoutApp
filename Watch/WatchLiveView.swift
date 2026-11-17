@@ -179,7 +179,8 @@ struct WatchElapsedLine: View {
         if let start = model.clockStart {
             TimelineView(.periodic(from: start, by: 1)) { context in
                 HStack {
-                    Text(workoutElapsedText(context.date.timeIntervalSince(start)))
+                    // Stands still while paused, and leaves pauses out after (`WatchWorkoutModel.elapsed`).
+                    Text(workoutElapsedText(model.elapsed(at: context.date) ?? 0))
                         .font(.title2.weight(.bold))
                         .monospacedDigit()
                         .foregroundStyle(WatchTheme.strain)
@@ -327,8 +328,8 @@ private struct WatchExerciseBlock: View {
     }
 }
 
-/// Under the set: the plan's target and last session's same set on one line
-/// ("Target 8 · 2 in reserve · Last 60 kg × 8"), and the phone's set-by-set
+/// Under the set: the set's rep goal and last session's same set on one line
+/// ("Goal 8 reps · Last 60 kg × 8 · 2 left"), and the phone's set-by-set
 /// change, if any, on one more. A hold reads in seconds ("Target 30 s · Last 30 s").
 private struct WatchSetGhost: View {
     let set: WatchSession.SetSnapshot
@@ -368,12 +369,11 @@ extension WatchSession.SetSnapshot {
         return "Target \(targetReps) s"
     }
 
-    /// "Last 30 s" (with "· RPE 8" when rated), or nil without a matching set last time.
+    /// "Last 30 s", or nil without a matching set last time. A hold is timed:
+    /// it has no reps left to rate, so no effort is shown.
     nonisolated var holdGhostLine: String? {
         guard let lastReps, lastReps > 0 else { return nil }
-        var line = "Last \(lastReps) s"
-        if let lastRPE { line += " · RPE \(lastRPE.formatted())" }
-        return line
+        return "Last \(lastReps) s"
     }
 }
 

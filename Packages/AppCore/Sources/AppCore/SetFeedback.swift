@@ -20,10 +20,12 @@ public enum SetFeedback {
         case heavier(by: Double)
         /// Same weight as last time, more reps.
         case moreReps(Int)
-        /// Hit the plan's target reps at an effort that was logged (RPE).
+        /// Hit the plan's target reps at the planned effort: the rating leaves
+        /// the next set's goal where it is (`RepGoal.step` is 0).
         case matchedPlan
-        /// Hit the target reps, effort not logged: the reps are known, whether
-        /// it matched the plan's reps in reserve isn't.
+        /// Hit the target reps, with the effort not logged (whether it matched
+        /// the plan isn't known) or a rep or so off the plan (the next set's
+        /// goal moved, so it didn't match).
         case hitTarget(reps: Int)
         /// Same weight and reps as last time (no plan to compare with).
         case matchedLastTime
@@ -89,7 +91,19 @@ public enum SetFeedback {
                 return .moreReps(logged.reps - last.reps)
             }
         }
-        if targetReps != nil { return logged.rpe == nil ? .hitTarget(reps: logged.reps) : .matchedPlan }
+        if targetReps != nil {
+            guard let rpe = logged.rpe else { return .hitTarget(reps: logged.reps) }
+            // "Matched the plan" only when the rating leaves the next set's goal
+            // where it is (`RepGoal.step`): the goal moves on a whole rep either
+            // way, and a row saying "matched" beside "that set was harder than
+            // planned" contradicts itself. A rep off is inside the rating's
+            // error (Halperin et al. 2022), so it isn't a caution either:
+            // the reps were hit, and that's what the row says.
+            if let targetRPE, RepGoal.step(repsLeft: ReserveText.choice(rpe: rpe), targetRIR: max(0, 10 - targetRPE)) != 0 {
+                return .hitTarget(reps: logged.reps)
+            }
+            return .matchedPlan
+        }
         if let last, abs(logged.weight - last.weight) <= 0.01, logged.reps == last.reps {
             return .matchedLastTime
         }

@@ -89,7 +89,14 @@ struct WorkoutDetailView: View {
         .listRowBackground(Theme.card)
     }
 
-    private var totalReps: Int { session.workingSets.reduce(0) { $0 + $1.reps } }
+    /// Reps over the working sets; a plank's seconds aren't reps (`LiveSetCoach.isHold`).
+    private var totalReps: Int {
+        session.exercises
+            .filter { !LiveSetCoach.isHold($0.exerciseID) }
+            .flatMap(\.sets)
+            .filter { $0.isCompleted && !$0.isWarmup }
+            .reduce(0) { $0 + $1.reps }
+    }
 
     private var summaryStats: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
@@ -134,8 +141,9 @@ struct WorkoutDetailView: View {
         .listRowBackground(Theme.card)
     }
 
-    /// One set; VoiceOver hears "Set 2, 8 reps at 60 kilograms, RPE 8"
-    /// (ux-audit.md 4.8, P27).
+    /// One set; VoiceOver hears "Set 2, 8 reps at 60 kilograms, 2 reps left"
+    /// (ux-audit.md 4.8, P27). Effort reads as reps left, the way sets are rated
+    /// (`ReserveText`), not as an RPE number.
     private func setRow(_ set: SetLog, position: SetStructure.Position) -> some View {
         let number = position.number ?? 1
         let label = set.isWarmup ? "W" : (position.isStage ? set.kind.shortLabel : "\(number)")
@@ -152,8 +160,8 @@ struct WorkoutDetailView: View {
                     .foregroundStyle(Theme.liftingText)
             }
             Spacer()
-            if let rpe = set.rpe {
-                Text("RPE \(rpe.formatted())")
+            if let rpe = set.rpe, !isHold(set) {
+                Text(ReserveText.short(rpe: rpe))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -165,10 +173,19 @@ struct WorkoutDetailView: View {
     private func spokenSet(_ set: SetLog, number: Int, isStage: Bool) -> String {
         var parts = [set.isWarmup ? "Warm-up set" : (isStage ? "\(set.kind.stageName) after set \(number)" : "Set \(number)")]
         if set.kind != .straight, !isStage { parts.append(set.kind.title) }
+        // A plank is timed: seconds, and no reps left to rate.
+        if isHold(set) {
+            parts.append(set.reps == 1 ? "1 second" : "\(set.reps) seconds")
+            return parts.joined(separator: ", ")
+        }
         let reps = set.reps == 1 ? "1 rep" : "\(set.reps) reps"
         parts.append(set.weightKg > 0 ? "\(reps) at \(unit.format(set.weightKg)) \(unit.spokenName)" : reps)
-        if let rpe = set.rpe { parts.append("RPE \(rpe.formatted())") }
+        if let rpe = set.rpe { parts.append(ReserveText.spoken(rpe: rpe)) }
         return parts.joined(separator: ", ")
+    }
+
+    private func isHold(_ set: SetLog) -> Bool {
+        set.exercise.map { LiveSetCoach.isHold($0.exerciseID) } ?? false
     }
 }
 
@@ -477,11 +494,11 @@ struct WorkoutEditSheet: View {
         }
     }
 
-    /// "60 kg × 8", "20 kg per hand × 10", "30 s" for a hold.
+    /// "60 kg × 8", "20 kg per hand × 10", "30 s" for a hold; with no weight,
+    /// "Bodyweight × 8" or "8 reps", not "0 kg × 8" (`LiveSetCoach.setText`).
     static func loadText(_ set: SetLog, exerciseID: String?, unit: WeightUnit) -> String {
         if let exerciseID, LiveSetCoach.isHold(exerciseID) { return "\(set.reps) s" }
-        let perHand = exerciseID.map { Prescription.isPerHand(ExerciseCatalog.exercise(id: $0)?.load) } == true ? " per hand" : ""
-        return "\(unit.format(set.weightKg)) \(unit.rawValue)\(perHand) × \(set.reps)"
+        return LiveSetCoach.setText(weightKg: set.weightKg, reps: set.reps, exerciseID: exerciseID ?? "", unit: unit)
     }
 
     private static func number(_ value: Double) -> String {

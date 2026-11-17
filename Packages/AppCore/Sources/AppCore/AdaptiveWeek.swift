@@ -48,6 +48,9 @@ import Foundation
 ///   Keeping each muscle at about twice a week matters more than which day
 ///   it falls on (Schoenfeld, Ogborn & Krieger, Sports Med 2016; Schoenfeld,
 ///   Grgic & Krieger 2019). Rotating instead of skipping is an app choice.
+///   The move lasts one week: a week saved already rotated remembers it
+///   (`WeeklyPlan.rotation`, `rotatedWeek`), so its reason still shows and
+///   the week after starts again from the standing order (`WeeklyPlan.standingDays`).
 ///
 /// Flexible weeks (`WeeklyPlan.Mode.flexible`) have no order or days and keep
 /// their own rule (`TrainingDayPlanner.flexibleGuidance`); `make` returns nil
@@ -332,6 +335,15 @@ public enum AdaptiveWeek {
         }
     }
 
+    /// `rotated`, with the rotation for the new week's plan to remember
+    /// (`WeeklyPlan.rotation`): nil when nothing moved.
+    public static func rotatedWeek(_ days: [PlannedDay], startingWith first: WorkoutFocus?) -> (days: [PlannedDay], rotation: WeeklyPlan.Rotation?) {
+        let sorted = days.sorted { WeeklyPlan.order($0.weekday) < WeeklyPlan.order($1.weekday) }
+        let moved = rotated(sorted, startingWith: first)
+        guard let by = rotation(sorted, startingWith: first).first, by > 0 else { return (moved, nil) }
+        return (moved, WeeklyPlan.Rotation(by: by, focuses: moved.map(\.focus)))
+    }
+
     private static func simulate(plan: WeeklyPlan, done: [DoneSession], today: Date, soreness: [SoreSignal],
                                  swaps: [Swap], carriedOver: WorkoutFocus?, calendar: Calendar) -> Result {
         let queue = plan.sortedDays
@@ -457,8 +469,10 @@ public enum AdaptiveWeek {
             day = shift(day, 1)
         }
 
-        // 3. Say why last week's left-over leads, on its day.
-        if let lead = order.first, lead != 0, let index = slots.firstIndex(where: { $0.plannedWeekday == queue[lead].weekday }),
+        // 3. Say why last week's left-over leads, on its day: moved first here
+        // (`carriedOver`), or when the week was made (`WeeklyPlan.rotation`).
+        if let lead = order.first, lead != 0 || plan.activeRotation != nil,
+           let index = slots.firstIndex(where: { $0.plannedWeekday == queue[lead].weekday }),
            slots[index].note == nil {
             slots[index].note = "\(queue[lead].focus.shortTitle) first: it didn't fit last week."
         }

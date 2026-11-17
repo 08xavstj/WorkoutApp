@@ -8,6 +8,17 @@ nonisolated func workoutElapsedText(_ seconds: TimeInterval) -> String {
     return Duration.seconds(whole).formatted(.time(pattern: pattern))
 }
 
+/// Effort the way the lifter rates a set, from its stored RPE: "2 left",
+/// "2-3 left" for a half, "0 left" (reps left = 10 − RPE; Zourdos et al.,
+/// J Strength Cond Res 2016). The same words as `ReserveText.short` in
+/// AppCore, which the Watch app doesn't link.
+nonisolated func watchRepsLeftText(rpe: Double) -> String {
+    let halves = (max(0, 10 - rpe) * 2).rounded() / 2
+    let low = Int(halves.rounded(.down))
+    let high = Int(halves.rounded(.up))
+    return low == high ? "\(low) left" : "\(low)-\(high) left"
+}
+
 /// The live gym session as the Apple Watch sees it. The phone (`WatchSync`)
 /// sends one whenever the session changes; the Watch shows it and sends
 /// `WatchCommand`s back. Weights stay in kilograms; `unit` says how to show
@@ -47,13 +58,14 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         /// A drop stage or mini-set that carries on from the set before it.
         var isStage: Bool { restBeforeSeconds != nil }
 
-        /// "Last 60 kg × 8 · RPE 8", or nil without a matching set last time.
+        /// "Last 60 kg × 8 · 2 left" (effort as reps left, the way sets are
+        /// rated: `watchRepsLeftText`), or nil without a matching set last time.
         func ghostLine(unit: String) -> String? {
             guard let lastReps, lastReps > 0, let lastWeightKg else { return nil }
             let value = unit == "lb" ? lastWeightKg * 2.20462 : lastWeightKg
             let weight = value.formatted(.number.precision(.fractionLength(0...1)))
             var line = lastWeightKg > 0 ? "Last \(weight) \(unit) × \(lastReps)" : "Last \(lastReps) reps"
-            if let lastRPE { line += " · RPE \(lastRPE.formatted())" }
+            if let lastRPE { line += " · \(watchRepsLeftText(rpe: lastRPE))" }
             return line
         }
 
@@ -103,10 +115,13 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
             return perHand == true ? text + " each" : text
         }
 
-        /// "8 × 60 kg", "30 s" for a hold, "Not set" with nothing filled in.
+        /// "8 × 60 kg", "8 reps" with no weight (a bodyweight lift, or a weight
+        /// not set yet: never "8 × 0 kg"), "30 s" for a hold, "Not set" with
+        /// nothing filled in.
         func setText(reps: Int, weightKg: Double, unit: String) -> String {
             if isHold == true { return reps > 0 ? "\(reps) s" : "Not set" }
             guard reps > 0 || weightKg > 0 else { return "Not set" }
+            guard weightKg > 0 else { return reps == 1 ? "1 rep" : "\(reps) reps" }
             return "\(reps) × \(weightText(weightKg, unit: unit))"
         }
     }
@@ -310,6 +325,8 @@ nonisolated enum WatchCommand: Codable, Sendable, Equatable {
     /// Sent by older Watches for "Skip exercise". The phone no longer deletes
     /// anything for it: the Watch moves on by itself, and Finish drops unticked sets.
     case nextExercise
+    /// The wrist paused or resumed its recording, at the message's `sentAt`:
+    /// the phone's workout clock stands still for the pause too (`LiveSessionStore`).
     case pause
     case resume
     /// Opens the finish sheet on the phone, pre-filled with the session effort (1-10) if given.
@@ -358,8 +375,13 @@ nonisolated struct WatchWorkoutSummary: Codable, Sendable, Equatable {
     var activeKilocalories: Double?
     /// Whole-session effort (1-10) rated on the wrist, if it was.
     var sessionRPE: Int?
+    /// Seconds the recording spent paused (Pause on the wrist); HealthKit
+    /// leaves them out of the workout's duration. Nil when it never paused,
+    /// and from older Watches.
+    var pausedSeconds: Double? = nil
 
-    var minutes: Int { max(1, Int(end.timeIntervalSince(start) / 60)) }
+    /// The workout's length without its pauses, as Apple Health has it.
+    var minutes: Int { max(1, Int((end.timeIntervalSince(start) - max(0, pausedSeconds ?? 0)) / 60)) }
 }
 
 /// Keys in the WatchConnectivity dictionaries. Every value is JSON `Data` of

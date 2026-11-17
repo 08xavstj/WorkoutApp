@@ -33,13 +33,56 @@ public enum RepGoal {
     ///   - targetRIR: the plan's reps in reserve.
     ///   - range: the plan's rep range.
     public static func next(repsDone: Int, repsLeft: Int, targetRIR: Double, range: ClosedRange<Int>) -> Int {
-        let gap = Double(min(4, max(0, repsLeft))) - targetRIR
-        // A half-rep gap is within the guessing error: no change for it.
-        var step = Int(gap.rounded(.towardZero))
-        step = min(maxStepUp, max(-maxStepDown, step))
+        let move = step(repsLeft: repsLeft, targetRIR: targetRIR)
         let low = max(1, range.lowerBound - rangeSlack)
         let high = min(Autoregulation.maxReps, range.upperBound + rangeSlack)
-        return min(high, max(low, repsDone + step))
+        return min(high, max(low, repsDone + move))
+    }
+
+    /// How many reps a rating moves the next goal from the reps just done:
+    /// the whole reps between the reps left and the plan's reserve, within
+    /// `maxStepUp` and `maxStepDown`. 0 means the set was on plan, which is
+    /// also when a set row may say "Matched the plan" (`SetFeedback.verdict`).
+    public static func step(repsLeft: Int, targetRIR: Double) -> Int {
+        let gap = Double(min(4, max(0, repsLeft))) - targetRIR
+        // A half-rep gap is within the guessing error: no change for it.
+        let whole = Int(gap.rounded(.towardZero))
+        return min(maxStepUp, max(-maxStepDown, whole))
+    }
+
+    // MARK: Each set's own goal
+
+    /// The rep goal a set was given this session. Goals move after every
+    /// rated set, so each set keeps the goal it had when it was done
+    /// (`goals`: set order → goal); a set ticked on goal is never judged
+    /// later against another set's goal or the plan's first number.
+    /// - Parameters:
+    ///   - goals: the goals recorded so far, by set order; nil on a change
+    ///     saved before goals were kept per set.
+    ///   - changed: for such an older change: the first set it moved and the
+    ///     reps it set from there on.
+    ///   - planned: today's planned reps, for a set before any change.
+    public static func goal(setOrder: Int, goals: [Int: Int]?, changed: (fromOrder: Int, reps: Int)?, planned: Int?) -> Int? {
+        if let goals {
+            if let own = goals[setOrder] { return own }
+            // No goal of its own (a set added since, which starts as a copy of
+            // the set before it): the goal of the nearest set before it that has one.
+            if let before = goals.keys.filter({ $0 < setOrder }).max(), let goal = goals[before] { return goal }
+            return planned
+        }
+        if let changed, setOrder >= changed.fromOrder { return changed.reps }
+        return planned
+    }
+
+    /// The goals to keep when a new change replaces the one before it: the
+    /// recorded ones, or for a change saved without them, its reps on every
+    /// set from the one it first moved (`setOrders`: the exercise's sets).
+    public static func carriedGoals(_ goals: [Int: Int]?, changed: (fromOrder: Int, reps: Int)?, setOrders: [Int]) -> [Int: Int] {
+        if let goals { return goals }
+        guard let changed else { return [:] }
+        var result: [Int: Int] = [:]
+        for order in setOrders where order >= changed.fromOrder { result[order] = changed.reps }
+        return result
     }
 
     /// "Goal 9 reps: you had 4+ left", "Goal 6 reps: that set was hard";

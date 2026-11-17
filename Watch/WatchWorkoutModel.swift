@@ -36,6 +36,10 @@ final class WatchWorkoutModel: NSObject {
     private(set) var restEndsAt: Date?
     private(set) var restLength = 90
     private(set) var phoneReachable = false
+    /// When the pause now running began; nil while the workout runs.
+    private(set) var pausedAt: Date?
+    /// Seconds of pauses already ended in this workout.
+    private(set) var pausedSeconds: TimeInterval = 0
     /// Sets ticked on the wrist this workout (the end screen when the phone is away).
     private(set) var setsCompletedHere = 0
     /// The exercise on the live page; nil follows the next set to do.
@@ -125,6 +129,8 @@ final class WatchWorkoutModel: NSObject {
             summary = nil
             endedAt = nil
             setsCompletedHere = 0
+            pausedAt = nil
+            pausedSeconds = 0
             startedAt = start
             displayStart = nil
             phase = .running
@@ -180,14 +186,38 @@ final class WatchWorkoutModel: NSObject {
         guard phase == .running else { return }
         workoutSession?.pause()
         phase = .paused
-        send(.pause)
+        beginPause()
     }
 
     func resume() {
         guard phase == .paused else { return }
         workoutSession?.resume()
         phase = .running
+        endPause()
+    }
+
+    /// A pause starts (Pause here, or the system pausing the session): the
+    /// clock on the wrist stands still from now, and the phone is told once.
+    private func beginPause(at date: Date = .now) {
+        guard pausedAt == nil else { return }
+        pausedAt = date
+        send(.pause)
+    }
+
+    private func endPause(at date: Date = .now) {
+        guard let since = pausedAt else { return }
+        pausedSeconds += max(0, date.timeIntervalSince(since))
+        pausedAt = nil
         send(.resume)
+    }
+
+    /// The workout clock at `date`: time since `clockStart` without the
+    /// pauses, so it stands still while paused and matches the workout saved
+    /// to Apple Health (HealthKit leaves paused time out of its duration).
+    func elapsed(at date: Date) -> TimeInterval? {
+        guard let start = clockStart else { return nil }
+        let running = pausedAt.map { max(0, date.timeIntervalSince($0)) } ?? 0
+        return max(0, date.timeIntervalSince(start) - pausedSeconds - running)
     }
 
     /// Finish from the wrist: the phone opens its finish sheet (pre-filled with
@@ -210,7 +240,7 @@ final class WatchWorkoutModel: NSObject {
         } catch {
             problem = "Couldn't save the workout: \(error.localizedDescription)"
         }
-        let summary = WatchWorkoutSummary(
+        var summary = WatchWorkoutSummary(
             sessionID: recordingSessionID,
             workoutUUID: workout?.uuid,
             start: startedAt ?? end,
@@ -220,6 +250,11 @@ final class WatchWorkoutModel: NSObject {
             activeKilocalories: activeKilocalories,
             sessionRPE: sessionRPE
         )
+        // Ended while paused: that pause runs to the end.
+        let paused = pausedSeconds + (pausedAt.map { max(0, end.timeIntervalSince($0)) } ?? 0)
+        if paused > 0 { summary.pausedSeconds = paused }
+        pausedAt = nil
+        pausedSeconds = 0
         self.summary = summary
         endedAt = end
         phase = .ended
@@ -247,6 +282,8 @@ final class WatchWorkoutModel: NSObject {
         workoutSession = nil
         builder = nil
         phase = .idle
+        pausedAt = nil
+        pausedSeconds = 0
         clearRest()
         RepCounter.shared.reset()
         send(.recordingStopped, sessionID: recordingSessionID)
@@ -658,8 +695,13 @@ final class WatchWorkoutModel: NSObject {
 
     private func sessionChanged(to state: HKWorkoutSessionState) {
         switch state {
-        case .running: if phase == .paused || phase == .starting { phase = .running }
-        case .paused: phase = .paused
+        case .running:
+            if phase == .paused || phase == .starting { phase = .running }
+            // Resumed by the system: the clock runs again (nothing to do unless paused).
+            if phase == .running { endPause() }
+        case .paused:
+            phase = .paused
+            beginPause()
         default: break
         }
     }
@@ -670,6 +712,8 @@ final class WatchWorkoutModel: NSObject {
         workoutSession = nil
         builder = nil
         phase = .idle
+        pausedAt = nil
+        pausedSeconds = 0
         clearRest()
         RepCounter.shared.reset()
         send(.recordingStopped, sessionID: recordingSessionID)
