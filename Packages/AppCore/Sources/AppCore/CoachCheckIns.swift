@@ -211,6 +211,15 @@ public enum CoachCheckIns {
         /// A weigh-in is due (`WeighInNudge`): a lose or gain goal with no
         /// reading for a few days. Said only when there is no other tip.
         public var weighInDue = false
+        /// The low-mood rule's finding for this morning (`LowMoodRule.finding`);
+        /// nil when fewer than three of the last seven mornings were low.
+        public var lowMood: LowMoodRule.Finding?
+        /// The "worth raising with someone" sentence may be said today (`LowMoodRule.raiseDue`).
+        public var lowMoodRaiseDue = false
+        /// Symptoms in this morning's check-in, or the illness watch's major signs.
+        public var illnessFlagged = false
+        /// Today's rest follows an unplanned hard day (`TrainingDayPlanner.Kind.recovery`): rest with a physical reason.
+        public var restForRecovery = false
 
         public init() {}
     }
@@ -283,6 +292,9 @@ public enum CoachCheckIns {
         } else {
             title = "Good morning"
         }
+
+        // Low-mood rule (`LowMoodRule`, LowMood.swift): where this would suggest rest, offer a walk or an easy session.
+        if let message = lowMoodMorning(f, title: title, easy: easy) { return message }
 
         var sentences: [String] = []
         if let state = morningState(f, easy: easy) { sentences.append(state) }
