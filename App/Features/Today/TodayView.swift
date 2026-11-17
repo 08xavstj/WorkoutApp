@@ -209,50 +209,37 @@ private struct NutritionCard: View {
     @Environment(UserSettings.self) private var settings
     @State private var showingDetails = false
 
+    /// One line: calories and protein against their targets. The food app
+    /// (Cronometer) is the logger, so Today only says where the day stands;
+    /// macros, water, vitamins and how the target is worked out are one tap
+    /// away (cleanup-2026-11.md B; rule 5: a measure is on Today only if it
+    /// changes what you do today). Warnings still show here when they apply.
     var body: some View {
-        let food = metrics.nutritionToday
-        VStack(alignment: .leading, spacing: 18) {
-            header
-            if !settings.hideCalories {
-                CaloriesToday()
-                Divider().overlay(Theme.separator)
-            }
-            if let food, !food.isEmpty {
-                MacroBars(food: food)
-                if !settings.hideCalories {
-                    MacroTargetsLine()
-                }
-                if let line = habits.proteinLine(metrics: metrics) {
-                    // Protein per meal (`ProteinMeals`), from the old Daily habits card.
-                    Text(line)
-                        .font(Theme.Typography.context)
-                        .foregroundStyle(Theme.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                // Vitamins and minerals this week (`Micronutrients`), once 4 days are logged.
-                if let line = Micronutrients.summaryLine(findings: metrics.micronutrients) {
-                    NavigationLink { MicronutrientsPage() } label: {
-                        HStack(spacing: 6) {
-                            Text(line)
-                                .font(Theme.Typography.context)
-                                .foregroundStyle(Theme.secondaryText)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        .frame(minHeight: 32)
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                showingDetails = true
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        CardLabel(text: "Nutrition")
+                        Text(summary)
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Shows what to fix in your diet")
-                    .accessibilityIdentifier("today-vitamins") // UI tests (ScreenshotTests)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
                 }
-            } else {
-                NoFoodRow(proteinTarget: metrics.proteinTarget)
-                if food?.waterLiters ?? 0 > 0 {
-                    WaterColumn()
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows macros, water and how the target is worked out")
+            .accessibilityIdentifier("today-nutrition") // UI tests (ScreenshotTests)
             WeightPaceLine()
             if settings.hideCalories {
                 HiddenCaloriesSafetyLines()
@@ -260,33 +247,28 @@ private struct NutritionCard: View {
         }
         .card()
         .sheet(isPresented: $showingDetails) {
-            CalorieDetailsSheet()
+            CalorieDetailsSheet(habits: habits)
                 .presentationDetents([.medium, .large])
                 .presentationBackground(Theme.background)
         }
     }
 
-    @ViewBuilder
-    private var header: some View {
-        if settings.hideCalories {
-            CardLabel(text: "Nutrition")
-        } else {
-            HStack {
-                CardLabel(text: "Calories today")
-                Spacer()
-                Button {
-                    showingDetails = true
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.title3)
-                        .foregroundStyle(Theme.secondaryText)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("How calories are calculated")
-            }
+    /// "570 of 2,250 kcal · protein 34 of 177 g"; protein only with calories hidden.
+    private var summary: String {
+        let food = metrics.nutritionToday
+        guard let food, !food.isEmpty else {
+            return "No food logged yet" + (metrics.proteinTarget.map { " · protein goal \(whole($0)) g" } ?? "")
         }
+        var parts: [String] = []
+        if !settings.hideCalories, let eaten = food.calories {
+            let target = metrics.calorieTarget.map { " of \(whole($0).formatted())" } ?? ""
+            parts.append("\(whole(eaten).formatted())\(target) kcal")
+        }
+        if let protein = food.proteinGrams {
+            let target = metrics.proteinTarget.map { " of \(whole($0))" } ?? ""
+            parts.append("\(parts.isEmpty ? "Protein" : "protein") \(whole(protein))\(target) g")
+        }
+        return parts.isEmpty ? "Logged today" : parts.joined(separator: " · ")
     }
 }
 
@@ -655,6 +637,7 @@ private struct WaterPaceBar: View {
 
 /// Where each calorie number comes from.
 private struct CalorieDetailsSheet: View {
+    let habits: TodayHabits
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(CheckInStore.self) private var checkIns
     @Environment(UserSettings.self) private var settings
@@ -676,14 +659,42 @@ private struct CalorieDetailsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if metrics.calories == nil {
+                // Today first: what the card on Today used to hold.
+                Section {
+                    if !settings.hideCalories {
+                        CaloriesToday()
+                    }
+                    if let food = metrics.nutritionToday, !food.isEmpty {
+                        MacroBars(food: food)
+                        if !settings.hideCalories {
+                            MacroTargetsLine()
+                        }
+                        if let line = habits.proteinLine(metrics: metrics) {
+                            // Protein per meal (`ProteinMeals`).
+                            Text(line)
+                                .font(Theme.Typography.context)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        // Vitamins and minerals this week (`Micronutrients`), once 4 days are logged.
+                        if let line = Micronutrients.summaryLine(findings: metrics.micronutrients) {
+                            NavigationLink { MicronutrientsPage() } label: {
+                                Text(line)
+                            }
+                            .accessibilityHint("Shows what to fix in your diet")
+                            .accessibilityIdentifier("today-vitamins") // UI tests (ScreenshotTests)
+                        }
+                    } else {
+                        NoFoodRow(proteinTarget: metrics.proteinTarget)
+                    }
+                }
+                if !settings.hideCalories, metrics.calories == nil {
                     ContentUnavailableView(
                         "No calorie data yet",
                         systemImage: "flame",
                         description: Text("Add your weight in Apple Health (or Settings) and wear your watch to see calories burned.")
                     )
                 }
-                if let summary = metrics.calories {
+                if !settings.hideCalories, let summary = metrics.calories {
                     // The numbers first, then where they come from.
                     Section {
                         if let target = metrics.calorieTarget {
@@ -780,7 +791,7 @@ private struct CalorieDetailsSheet: View {
             // Opaque, so the Today page doesn't show through at the medium detent.
             .scrollContentBackground(.hidden)
             .background(Theme.background)
-            .navigationTitle("Calories")
+            .navigationTitle("Nutrition")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

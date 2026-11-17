@@ -105,13 +105,15 @@ private struct KeyMeasureRow: View {
 /// "Body age"). The page behind it shows the estimate and what moves it.
 private struct BodyAgeRow: View {
     let result: BodyAge.Result
+    /// Apple's Health Age, when it has been typed in (`AppleHealthAgeCard`).
+    @AppStorage(AppleHealthAge.valueKey) private var appleYears = 0
 
     var body: some View {
         MetricRow(
             title: "Body age",
             value: "\(result.range.lowerBound)–\(result.range.upperBound)",
             unit: "years",
-            verdict: MetricVerdict("Estimate"),
+            verdict: MetricVerdict(AppleHealthAge.plausible.contains(appleYears) ? "Apple: \(appleYears)" : "Estimate"),
             hint: "Shows what's moving it",
             destination: BodyAgePage()
         )

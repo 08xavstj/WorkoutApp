@@ -559,6 +559,8 @@ struct BodyAgePage: View {
 
     var body: some View {
         HealthDetailPage(title: "Body age") {
+            // Apple's own Health Age, typed in (no API for it yet), above Tensile's estimate.
+            AppleHealthAgeCard(estimate: vitals.bodyAge?.range)
             BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
         }
     }

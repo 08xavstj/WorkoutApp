@@ -73,15 +73,14 @@ final class ScreenshotTests: XCTestCase {
             }
         }
         openTab(app, "Today")
-        if tap(app, ["How calories are calculated"], name: "Calorie details") {
-            capture(app, "today-calorie-details", pages: 1)
+        // The one-line Nutrition card opens the details; the vitamins line there pushes the micronutrients page.
+        if tap(app, ["today-nutrition"], name: "Nutrition details") {
+            capture(app, "today-calorie-details", pages: 2)
+            if tap(app, ["today-vitamins", "Vitamins and minerals", "Shows what to fix in your diet"], name: "Nutrition vitamins line") {
+                capture(app, "today-micronutrients", pages: 2)
+                back(app)
+            }
             dismissSheet(app)
-        }
-        openTab(app, "Today")
-        // The vitamins line under the macros pushes the micronutrients page.
-        if tap(app, ["today-vitamins", "Vitamins and minerals", "Shows what to fix in your diet"], name: "Today vitamins line") {
-            capture(app, "today-micronutrients", pages: 2)
-            back(app)
         }
         openSheet(app, link: "workoutapp://checkin/morning", name: "morning check-in")
         capture(app, "checkin-morning", pages: 2)
