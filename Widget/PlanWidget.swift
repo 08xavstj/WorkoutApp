@@ -62,8 +62,8 @@ nonisolated struct PlanProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<PlanEntry>) -> Void) {
         let now = Date.now
         let plan = WidgetSnapshot.load()?.plan
-        let relevant = PlanGlance.relevantIntervals(of: plan, after: now)
-        let horizon = now.addingTimeInterval(48 * 3600)
+        let relevant = PlanGlance.relevantWindows(of: plan, after: now).map(\.interval)
+        let horizon = now.addingTimeInterval(PlanGlance.timelineHorizon)
         var dates = [now] + PlanGlance.changeDates(of: plan, after: now)
         dates += relevant.flatMap { [$0.start, $0.end] }.filter { $0 > now && $0 <= horizon }
         let entries = Array(Set(dates)).sorted().map { date in

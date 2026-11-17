@@ -64,6 +64,7 @@ struct GlanceBackground: View {
 
     let wash: Wash
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetFamily) private var family
 
     private var stops: [UInt32] {
         switch (wash, colorScheme == .dark) {
@@ -75,7 +76,13 @@ struct GlanceBackground: View {
     }
 
     var body: some View {
-        LinearGradient(colors: stops.map(GlancePalette.color), startPoint: .topLeading, endPoint: .bottomTrailing)
+        switch family {
+        case .accessoryCircular, .accessoryRectangular, .accessoryInline:
+            // Lock Screen: nothing of its own, so the wallpaper shows through.
+            Color.clear
+        default:
+            LinearGradient(colors: stops.map(GlancePalette.color), startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
     }
 }
 

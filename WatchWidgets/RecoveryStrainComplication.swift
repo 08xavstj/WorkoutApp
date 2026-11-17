@@ -29,6 +29,13 @@ struct RecoveryStrainView: View {
         return data
     }
 
+    /// Strain only while it's current: it rises through the day, so an old
+    /// value reads low (`GlanceFreshness.strainMaxAge`, the iPhone widgets' rule).
+    private var strain: Double? {
+        guard let data, GlanceFreshness.strainIsCurrent(updated: data.updated, at: entry.date) else { return nil }
+        return data.strain.flatMap { $0.isFinite ? $0 : nil }
+    }
+
     private var fullColor: Bool { renderingMode == .fullColor }
 
     private var recoveryColor: Color {
@@ -50,7 +57,7 @@ struct RecoveryStrainView: View {
     }
 
     private var strainPercent: String {
-        guard let strain = data?.strain else { return "--" }
+        guard let strain else { return "--" }
         return facePercent(strain)
     }
 
@@ -86,7 +93,7 @@ struct RecoveryStrainView: View {
 
     private var circular: some View {
         ZStack {
-            StrainRing(strain: data?.strain, target: data?.target, color: strainColor)
+            StrainRing(strain: strain, target: data?.target, color: strainColor)
             VStack(spacing: -2) {
                 Text(recoveryNumber)
                     .font(.system(size: 17, weight: .semibold, design: .rounded))
@@ -111,7 +118,7 @@ struct RecoveryStrainView: View {
             .foregroundStyle(recoveryColor)
             .widgetCurvesContent()
             .widgetLabel {
-                Gauge(value: faceFraction(data?.strain ?? 0)) {
+                Gauge(value: faceFraction(strain ?? 0)) {
                     Text("Strain")
                 } currentValueLabel: {
                     Text(strainPercent)
@@ -144,7 +151,7 @@ struct RecoveryStrainView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            StrainBar(strain: data?.strain, target: data?.target, color: strainColor)
+            StrainBar(strain: strain, target: data?.target, color: strainColor)
                 .frame(height: 6)
         }
         .font(.system(size: 15, weight: .semibold, design: .rounded))

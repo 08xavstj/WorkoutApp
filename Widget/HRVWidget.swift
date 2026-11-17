@@ -1,3 +1,4 @@
+import AppCore
 import SwiftUI
 import WidgetKit
 
@@ -16,10 +17,14 @@ nonisolated struct HRVProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<HRVEntry>) -> Void) {
-        let entry = HRVEntry(date: .now, snapshot: WidgetSnapshot.load())
+        let now = Date.now
+        let snapshot = WidgetSnapshot.load()
+        // Strain goes "--" once it's old (`GlanceFreshness`, as in the Scores widget), every score at midnight.
+        let dates = [now] + GlanceFreshness.changeDates(updated: snapshot?.updated, after: now)
+        let entries = dates.map { HRVEntry(date: $0, snapshot: snapshot) }
         // Redraw after midnight so "today's HRV" resets; the app also reloads it on every sync.
-        let tomorrow = Calendar.current.startOfDay(for: .now.addingTimeInterval(86_400)).addingTimeInterval(60)
-        completion(Timeline(entries: [entry], policy: .after(min(tomorrow, .now.addingTimeInterval(3 * 3600)))))
+        let tomorrow = Calendar.current.startOfDay(for: now.addingTimeInterval(86_400)).addingTimeInterval(60)
+        completion(Timeline(entries: entries, policy: .after(tomorrow)))
     }
 }
 
@@ -139,7 +144,8 @@ struct HRVWidgetView: View {
                         .font(.headline)
                         .foregroundStyle(WidgetPalette.ink)
                 }
-                if let strain = today?.strain {
+                if let strain = today?.strain, let updated = today?.updated,
+                   GlanceFreshness.strainIsCurrent(updated: updated, at: entry.date) {
                     Text("Strain \(Int(strain.rounded()))%")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(WidgetPalette.orange)

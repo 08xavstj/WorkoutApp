@@ -21,7 +21,8 @@ nonisolated extension WatchFaceData {
             bedByStart: bedByStart,
             bedByEnd: bedByEnd,
             weekDone: weekDone,
-            weekPlanned: weekPlanned
+            weekPlanned: weekPlanned,
+            restUntil: restUntil
         )
     }
 }

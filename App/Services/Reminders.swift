@@ -87,7 +87,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
     /// screen first and open the check-in once it has gone.
     private func openCheckIn(_ kind: CheckInKind) {
         let otherOpen = showHRVEntry || showMedications || showProgressPhotos || showWeeklyReview || showWeeklyPlan
-            || showMeasurements || showBloodPressure || showStretch || showSettings || (checkIn != nil && checkIn != kind)
+            || showMeasurements || showBloodPressure || showStretch || showSleep || showSettings || (checkIn != nil && checkIn != kind)
         guard otherOpen else {
             checkIn = kind
             return
@@ -100,6 +100,7 @@ final class AppRouter: NSObject, UNUserNotificationCenterDelegate {
         showMeasurements = false
         showBloodPressure = false
         showStretch = false
+        showSleep = false
         showSettings = false
         checkIn = nil
         Task { @MainActor in

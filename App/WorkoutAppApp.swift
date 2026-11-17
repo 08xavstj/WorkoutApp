@@ -543,7 +543,7 @@ struct RootView: View {
     /// [Widgets] The plan the iPhone widgets and the watch face both show (`PlanGlance`).
     private func glancePlan() -> PlanGlance.Plan {
         GlanceFeed.plan(plans: weeklyPlans, metrics: metrics, checkIns: checkIns, muscles: muscles,
-                        sessions: sessions, restMode: settings.isRestMode)
+                        sessions: sessions, restUntil: settings.restModeUntil)
     }
 
     /// [Widgets] The plan, the week's queue or rest mode changed, or the app left the

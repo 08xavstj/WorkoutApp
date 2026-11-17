@@ -17,7 +17,7 @@ enum GlanceFeed {
 
     /// Today's plan as the app has it now.
     static func plan(plans: WeeklyPlanStore, metrics: DailyMetricsModel, checkIns: CheckInStore, muscles: MuscleModel,
-                     sessions: [WorkoutSession], restMode: Bool, now: Date = .now) -> PlanGlance.Plan {
+                     sessions: [WorkoutSession], restUntil: Date?, now: Date = .now) -> PlanGlance.Plan {
         // The plan file can't be read while the phone is locked; this only runs
         // after Apple Health was read, so the phone is unlocked and it loads now.
         plans.reloadIfUnavailable()
@@ -71,13 +71,15 @@ enum GlanceFeed {
 
         // Tonight's window only: one that has already ended says nothing about tonight.
         let window = metrics.bedtimeWindow.flatMap { $0.end > now ? $0 : nil }
+        let restMode = (restUntil ?? .distantPast) > now
         return PlanGlance.Plan(
             updated: now, hasPlan: hasPlan, slots: slots, weekEnd: weekEnd, nextWeek: nextWeek,
             doneAt: doneAt,
             restToday: restMode || metrics.restMode || metrics.dayGuidance?.isRestDay == true,
             bedByStart: window?.start, bedByEnd: window?.end,
             weekDone: hasPlan ? progress.map { min($0.done, $0.target) } : nil,
-            weekPlanned: hasPlan ? progress?.target : nil
+            weekPlanned: hasPlan ? progress?.target : nil,
+            restUntil: restMode ? restUntil : nil
         )
     }
 
@@ -124,6 +126,7 @@ nonisolated extension WatchFaceData {
         weekEnd = plan.weekEnd
         hasPlan = plan.hasPlan
         nextWeek = plan.nextWeek.rawValue
+        restUntil = plan.restUntil
     }
 }
 

@@ -2,9 +2,11 @@ import RelevanceKit
 import SwiftUI
 import WidgetKit
 
-/// Watch face complications: recovery + strain, and the next planned session.
+/// Watch face complications: recovery + strain, and today's plan.
 /// The Watch app writes `WatchFaceData` to the App Group when the phone sends
-/// it; these only read it.
+/// it; these only read it. What they show and when they go blank follows the
+/// same rules as the iPhone widgets (`PlanGlance`, `GlanceFreshness` in
+/// Packages/AppCore/Sources/AppCore/Glances.swift, compiled into this target).
 @main
 struct TensileComplications: WidgetBundle {
     var body: some Widget {
@@ -22,8 +24,11 @@ nonisolated struct FaceEntry: TimelineEntry {
 }
 
 /// Shared by both complications: entries now and whenever the face should
-/// change on its own (midnight, a session's start and end of its window), so
-/// "next session" rolls forward without the phone.
+/// change on its own, so it rolls forward without the phone. Recovery and
+/// strain: when strain goes blank and at midnight. The plan: midnight, a
+/// session's time passing, the bed-by window taking over and the Smart Stack
+/// windows. The Watch app reloads both whenever the phone sends new data
+/// (`WatchComplications.store`), so the timeline asks again only after midnight.
 nonisolated struct FaceProvider: TimelineProvider {
     /// Which complication this provider feeds: they share entries but not
     /// Smart Stack relevance (`relevance()`).
@@ -50,18 +55,28 @@ nonisolated struct FaceProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<FaceEntry>) -> Void) {
         let now = Date.now
+        let calendar = Calendar.current
         let data = WatchFaceStore.load()
         let doneAt = WatchFaceStore.lastWorkoutEnd(data)
         var dates = [now]
-        dates += data?.changeDates(after: now) ?? [Calendar.current.startOfDay(for: now).addingTimeInterval(86_400)]
-        let entries = dates.map { FaceEntry(date: $0, data: data, doneAt: doneAt) }
-        completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60))))
+        switch kind {
+        case .recoveryStrain:
+            dates += GlanceFreshness.changeDates(updated: data?.updated, after: now, calendar: calendar)
+        case .nextSession:
+            let plan = data?.plan
+            let horizon = now.addingTimeInterval(PlanGlance.timelineHorizon)
+            dates += PlanGlance.changeDates(of: plan, after: now, calendar: calendar)
+            dates += PlanGlance.relevantWindows(of: plan, after: now, alsoDoneAt: doneAt, calendar: calendar)
+                .flatMap { [$0.interval.start, $0.interval.end] }
+                .filter { $0 > now && $0 <= horizon }
+        }
+        let entries = Array(Set(dates)).sorted().map { FaceEntry(date: $0, data: data, doneAt: doneAt) }
+        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now.addingTimeInterval(86_400)
+        completion(Timeline(entries: entries, policy: .after(midnight.addingTimeInterval(5 * 60))))
     }
 
     // MARK: Smart Stack
 
-    /// How long before a planned session "Next session" should surface.
-    static let sessionLeadTime: TimeInterval = 3600
     /// "Recovery & strain" surfaces 06:00-10:00, once the morning scores are in.
     static let morningHours = 6..<10
 
@@ -72,31 +87,33 @@ nonisolated struct FaceProvider: TimelineProvider {
     func relevance() async -> WidgetRelevance<Void> {
         let now = Date.now
         let calendar = Calendar.current
-        var intervals: [DateInterval] = []
-        let dateKind: RelevantContext.DateKind
+        var clues: [(interval: DateInterval, kind: RelevantContext.DateKind)] = []
         switch kind {
         case .nextSession:
-            // The hour before each planned slot (the slots the phone sent, a week ahead).
-            dateKind = .scheduled
-            let slots = (WatchFaceStore.load()?.slots ?? []).sorted { $0.start < $1.start }
-            for slot in slots where slot.start > now {
-                intervals.append(DateInterval(start: slot.start.addingTimeInterval(-Self.sessionLeadTime), end: slot.start))
+            // The hour before each session still to do, and from an hour before
+            // tonight's bed-by window to its end (`PlanGlance.relevantWindows`);
+            // nothing while the plan reads "--".
+            let data = WatchFaceStore.load()
+            let windows = PlanGlance.relevantWindows(of: data?.plan, after: now,
+                                                     alsoDoneAt: WatchFaceStore.lastWorkoutEnd(data), calendar: calendar)
+            for window in windows {
+                let dateKind: RelevantContext.DateKind = window.reason == .session ? .scheduled : .informational
+                clues.append((interval: window.interval, kind: dateKind))
             }
         case .recoveryStrain:
-            dateKind = .informational
             var day = calendar.startOfDay(for: now)
             for _ in 0..<7 {
                 if let start = calendar.date(bySettingHour: Self.morningHours.lowerBound, minute: 0, second: 0, of: day),
                    let end = calendar.date(bySettingHour: Self.morningHours.upperBound, minute: 0, second: 0, of: day),
                    end > now, end > start {
-                    intervals.append(DateInterval(start: start, end: end))
+                    clues.append((interval: DateInterval(start: start, end: end), kind: RelevantContext.DateKind.informational))
                 }
                 guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
                 day = next
             }
         }
-        let attributes = intervals.prefix(10).map { interval in
-            WidgetRelevanceAttribute<Void>(context: .date(interval: interval, kind: dateKind))
+        let attributes = clues.prefix(PlanGlance.maximumRelevantIntervals).map { clue in
+            WidgetRelevanceAttribute<Void>(context: .date(interval: clue.interval, kind: clue.kind))
         }
         return WidgetRelevance(Array(attributes))
     }
@@ -107,6 +124,8 @@ nonisolated struct FaceProvider: TimelineProvider {
 nonisolated enum FacePalette {
     static let strain = color(0xFF8E3C)
     static let lifting = color(0xFF6B97)
+    /// The bed-by window (`Theme.sleep`, dark).
+    static let sleep = color(0x9692FF)
     /// "Easy day" band (`Theme.oxygen`).
     static let easy = color(0x5C9DFF)
     /// "Normal" band (`Theme.recoveryModerate`).

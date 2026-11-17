@@ -215,8 +215,8 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: ""
         TARGETED_DEVICE_FAMILY: "4"
 
-  # Watch face complications (WidgetKit): recovery + strain, and the next
-  # planned session. Reads what the Watch app stores in the App Group.
+  # Watch face complications (WidgetKit): recovery + strain, and today's
+  # plan. Reads what the Watch app stores in the App Group.
   TensileWatchWidgets:
     type: app-extension
     platform: watchOS
@@ -226,6 +226,9 @@ targets:
     sources:
       - path: WatchWidgets
       - path: Shared/WatchFaceData.swift
+      # What the plan says when, and when a score goes "--" (pure Swift; the
+      # iPhone widgets get the same rules from AppCore).
+      - path: Packages/AppCore/Sources/AppCore/Glances.swift
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework

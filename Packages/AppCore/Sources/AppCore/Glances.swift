@@ -5,13 +5,19 @@ import Foundation
 /// data behind a glance is too old to show.
 ///
 /// Why a plan widget: there is no health evidence for widgets. The case is
-/// usability. Most activity-tracker sessions are glances of about five
-/// seconds (Gouveia R, Karapanos E, Hassenzahl M. How do we engage with
-/// activity trackers? UbiComp 2015), and cues in the environment supported
-/// habits where clock reminders did not (Stawarz K, Cox AL, Blandford A.
-/// Beyond self-tracking and reminders. CHI 2015). Both are carried from
-/// docs/research/healthy-living-2026-11.md (§3 item 5), where they were seen
-/// in search summaries only: not re-verified.
+/// usability (docs/research/healthy-living-2026-11.md §3 item 5):
+/// - Over 70% of activity-tracker sessions were glances of about five
+///   seconds with no further interaction (Gouveia R, Pereira F, Caraban A,
+///   Munson SA, Karapanos E. You have 5 seconds: designing glanceable
+///   feedback for physical activity trackers. UbiComp/ISWC 2015 Adjunct).
+///   Verified from the abstract.
+/// - In a 4-week study, reminders helped people repeat a behaviour but got in
+///   the way of it becoming automatic; cues tied to events went with more
+///   automaticity (Stawarz K, Cox AL, Blandford A. Beyond self-tracking and
+///   reminders: designing smartphone apps that support habit formation. CHI
+///   2015: 2653-2662, doi:10.1145/2702123.2702230). Verified from the
+///   abstract. A widget is a cue the user looks at, not an event cue, so this
+///   only supports "a glance instead of another reminder"; small studies.
 ///
 /// Why "--": a widget that disagrees with the app is a top complaint about
 /// competing apps (docs/research/competitors-2026-11.md, lesson 4). So every
@@ -42,6 +48,9 @@ nonisolated public enum PlanGlance {
     public static let bedRelevanceLead: TimeInterval = 3600
     /// Smart Stack intervals handed to the system at once.
     public static let maximumRelevantIntervals = 10
+    /// Timeline entries are laid out this far ahead (the provider asks again
+    /// after midnight, and the app reloads on every change).
+    public static let timelineHorizon: TimeInterval = 48 * 3600
 
     // MARK: Data
 
@@ -101,10 +110,12 @@ nonisolated public enum PlanGlance {
         /// Sessions done and planned in the week it was written in.
         public var weekDone: Int?
         public var weekPlanned: Int?
+        /// Rest mode is on until then (Settings): sessions before it are rest days.
+        public var restUntil: Date?
 
         public init(updated: Date, hasPlan: Bool, slots: [Slot], weekEnd: Date, nextWeek: NextWeek = .unplanned,
                     doneAt: Date? = nil, restToday: Bool = false, bedByStart: Date? = nil, bedByEnd: Date? = nil,
-                    weekDone: Int? = nil, weekPlanned: Int? = nil) {
+                    weekDone: Int? = nil, weekPlanned: Int? = nil, restUntil: Date? = nil) {
             self.updated = updated
             self.hasPlan = hasPlan
             self.slots = slots
@@ -116,6 +127,7 @@ nonisolated public enum PlanGlance {
             self.bedByEnd = bedByEnd
             self.weekDone = weekDone
             self.weekPlanned = weekPlanned
+            self.restUntil = restUntil
         }
 
         /// Sample data for the widget gallery and placeholders: a session
@@ -156,6 +168,24 @@ nonisolated public enum PlanGlance {
         case noPlan
         /// Nothing from the phone yet, or too old to trust: "--".
         case stale
+    }
+
+    /// Why the Smart Stack should offer the plan during `interval`.
+    nonisolated public struct Window: Sendable, Equatable {
+        nonisolated public enum Reason: Sendable, Equatable {
+            /// The hour before a planned session.
+            case session
+            /// From an hour before tonight's bed-by window to its end.
+            case bedtime
+        }
+
+        public var interval: DateInterval
+        public var reason: Reason
+
+        public init(interval: DateInterval, reason: Reason) {
+            self.interval = interval
+            self.reason = reason
+        }
     }
 
     /// Sessions done against planned this week.
@@ -199,12 +229,13 @@ nonisolated public enum PlanGlance {
     public static func state(of plan: Plan?, at now: Date, alsoDoneAt: Date? = nil, calendar: Calendar = .current) -> State {
         guard let plan, let age = age(of: plan, at: now, calendar: calendar) else { return .stale }
         let today = calendar.startOfDay(for: now)
-        let done = [plan.doneAt, alsoDoneAt].compactMap { $0 }.max()
-        func isDone(_ slot: Slot) -> Bool {
-            done.map { calendar.isDate($0, inSameDayAs: slot.start) } ?? false
-        }
+        let done = doneDays(plan, alsoDoneAt: alsoDoneAt, calendar: calendar)
+        func isDone(_ slot: Slot) -> Bool { done.contains(calendar.startOfDay(for: slot.start)) }
+        func isRested(_ slot: Slot) -> Bool { Self.isRested(slot, plan: plan, age: age, calendar: calendar) }
         let sorted = plan.slots.sorted { $0.start < $1.start }
-        if sorted.contains(where: { $0.start < today && !isDone($0) }) { return .stale }
+        // A session before today that wasn't done (and wasn't a rest day): the
+        // week's queue may have moved it to today, and only the app knows.
+        if sorted.contains(where: { $0.start < today && !isDone($0) && !isRested($0) }) { return .stale }
 
         if now >= plan.weekEnd {
             switch plan.nextWeek {
@@ -216,11 +247,11 @@ nonisolated public enum PlanGlance {
             return .noPlan
         }
 
-        let trainedToday = done.map { calendar.isDate($0, inSameDayAs: now) } ?? false
-        let resting = age == 0 && plan.restToday
-        let current = resting ? nil : sorted.first { calendar.isDate($0.start, inSameDayAs: now) && !isDone($0) }
+        let trainedToday = done.contains(today)
+        let open = sorted.filter { !isRested($0) }
+        let current = open.first { calendar.isDate($0.start, inSameDayAs: now) && !isDone($0) }
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86_400)
-        let next = sorted.first { $0.start >= tomorrow }
+        let next = open.first { $0.start >= tomorrow }
 
         var bed: (start: Date, end: Date)?
         if let start = plan.bedByStart, let end = plan.bedByEnd, end > start,
@@ -238,7 +269,7 @@ nonisolated public enum PlanGlance {
             }
         }
         if bedActive, let bed {
-            let following = sorted.first { $0.start >= bed.end && !isDone($0) }
+            let following = open.first { $0.start >= bed.end && !isDone($0) }
             return .bedBy(start: bed.start, end: bed.end, next: following)
         }
         if trainedToday {
@@ -246,6 +277,20 @@ nonisolated public enum PlanGlance {
             return .done
         }
         return .rest(next: next)
+    }
+
+    /// Days with a lift: the plan's latest one and one the Watch recorded
+    /// since. A session planned on such a day counts as done.
+    static func doneDays(_ plan: Plan, alsoDoneAt: Date?, calendar: Calendar) -> Set<Date> {
+        Set([plan.doneAt, alsoDoneAt].compactMap { $0.map { calendar.startOfDay(for: $0) } })
+    }
+
+    /// A session the app wouldn't ask for: the day the plan was written was
+    /// called a rest day (while that is still today), or rest mode covers
+    /// the session's start.
+    static func isRested(_ slot: Slot, plan: Plan, age: Int, calendar: Calendar) -> Bool {
+        if let restUntil = plan.restUntil, slot.start < restUntil { return true }
+        return age == 0 && plan.restToday && calendar.isDate(slot.start, inSameDayAs: plan.updated)
     }
 
     /// This week's sessions done against planned, or nil when it isn't known
@@ -262,7 +307,7 @@ nonisolated public enum PlanGlance {
     /// Moments after `now` when the glance changes on its own, for timeline
     /// entries: each midnight, the end of each session's window, the bed-by
     /// window's lead and the end of its grace.
-    public static func changeDates(of plan: Plan?, after now: Date, horizon: TimeInterval = 48 * 3600,
+    public static func changeDates(of plan: Plan?, after now: Date, horizon: TimeInterval = timelineHorizon,
                                    calendar: Calendar = .current) -> [Date] {
         var dates: [Date] = []
         var day = calendar.startOfDay(for: now)
@@ -279,6 +324,7 @@ nonisolated public enum PlanGlance {
                 dates.append(start.addingTimeInterval(-bedByLead))
                 dates.append(end.addingTimeInterval(bedByGrace))
             }
+            if let restUntil = plan.restUntil { dates.append(restUntil) }
         }
         let limit = now.addingTimeInterval(horizon)
         return Array(Set(dates.filter { $0 > now && $0 <= limit })).sorted()
@@ -286,24 +332,29 @@ nonisolated public enum PlanGlance {
 
     /// When the Smart Stack should offer the plan: the hour before each
     /// session still to do, and from an hour before tonight's bed-by window to
-    /// its end. Only while the plan can be trusted (`carryDays`).
-    public static func relevantIntervals(of plan: Plan?, after now: Date, alsoDoneAt: Date? = nil,
-                                         calendar: Calendar = .current) -> [DateInterval] {
+    /// its end. Only while the plan can be trusted (`carryDays`), and nothing
+    /// while it reads "--".
+    public static func relevantWindows(of plan: Plan?, after now: Date, alsoDoneAt: Date? = nil,
+                                       calendar: Calendar = .current) -> [Window] {
         guard let plan, let age = age(of: plan, at: now, calendar: calendar) else { return [] }
         if case .stale = state(of: plan, at: now, alsoDoneAt: alsoDoneAt, calendar: calendar) { return [] }
         let written = calendar.startOfDay(for: plan.updated)
         let trustedUntil = calendar.date(byAdding: .day, value: carryDays + 1, to: written) ?? written.addingTimeInterval(2 * 86_400)
-        let done = [plan.doneAt, alsoDoneAt].compactMap { $0 }.max()
-        var intervals: [DateInterval] = []
+        let done = doneDays(plan, alsoDoneAt: alsoDoneAt, calendar: calendar)
+        var windows: [Window] = []
         for slot in plan.slots where slot.start > now && slot.start < trustedUntil {
-            if let done, calendar.isDate(done, inSameDayAs: slot.start) { continue }
-            if age == 0, plan.restToday, calendar.isDate(slot.start, inSameDayAs: now) { continue }
-            intervals.append(DateInterval(start: slot.start.addingTimeInterval(-sessionRelevanceLead), end: slot.start))
+            if done.contains(calendar.startOfDay(for: slot.start)) { continue }
+            if isRested(slot, plan: plan, age: age, calendar: calendar) { continue }
+            // Past the week's end only when the next week's sessions are known.
+            if slot.start >= plan.weekEnd, plan.nextWeek != .planned { continue }
+            windows.append(Window(interval: DateInterval(start: slot.start.addingTimeInterval(-sessionRelevanceLead), end: slot.start),
+                                  reason: .session))
         }
         if let start = plan.bedByStart, let end = plan.bedByEnd, end > start, end > now, start < trustedUntil {
-            intervals.append(DateInterval(start: start.addingTimeInterval(-bedRelevanceLead), end: end))
+            windows.append(Window(interval: DateInterval(start: start.addingTimeInterval(-bedRelevanceLead), end: end),
+                                  reason: .bedtime))
         }
-        return Array(intervals.sorted { $0.start < $1.start }.prefix(maximumRelevantIntervals))
+        return Array(windows.sorted { $0.interval.start < $1.interval.start }.prefix(maximumRelevantIntervals))
     }
 
     // MARK: Wording
