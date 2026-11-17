@@ -90,7 +90,7 @@ struct MovementBreaksTests {
     }
 }
 
-// MARK: - Strength for health
+// MARK: - Strength standards
 
 struct StrengthForHealthTests {
     @Test func bandsFollowTheCutPoints() {
@@ -146,6 +146,7 @@ struct StrengthForHealthTests {
         #expect(deadlift.band == .strong)
         #expect(StrengthForHealth.assess(lifts: lifts, bodyMassKg: 0, sex: .male, age: 35).isEmpty)
         #expect(StrengthForHealth.evidenceNote.contains("app choice"))
+        #expect(StrengthForHealth.evidenceNote.contains("not health targets"))
         #expect(StrengthForHealth.evidenceNote.contains("García-Hermoso 2018"))
     }
 
@@ -154,6 +155,7 @@ struct StrengthForHealthTests {
         let results = StrengthForHealth.assess(lifts: lifts, bodyMassKg: 80, sex: .male, age: 35)
         let health = StrengthForHealth.summary(results, goals: Goals(weight: .maintain, focuses: [.health]))
         #expect(health.contains("Bench press below \"Good\""))
+        #expect(health.contains("not the band"))
         let strength = StrengthForHealth.summary(results, goals: Goals(weight: .maintain, focuses: [.strength]))
         #expect(strength.contains("Bench press is the next one up"))
         #expect(strength.contains("Good from 1.00"))

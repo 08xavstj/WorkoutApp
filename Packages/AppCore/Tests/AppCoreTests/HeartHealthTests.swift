@@ -27,27 +27,6 @@ struct HeartHealthTests {
         #expect(HeartRateRecovery.measure(samples, workoutEnd: end) == nil)
     }
 
-    @Test func stressIsLowAtRestAndHigherWhenElevated() throws {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let morning = calendar.date(from: DateComponents(year: 2027, month: 1, day: 4, hour: 9))!
-        let calm = perMinute(Array(repeating: 62, count: 60), from: morning)
-        let tense = perMinute(Array(repeating: 100, count: 60), from: morning)
-        let low = try #require(StressEstimate.estimate(calm, profile: profile, calendar: calendar))
-        let high = try #require(StressEstimate.estimate(tense, profile: profile, calendar: calendar))
-        #expect(low.score < 26)
-        #expect(high.score > 75)
-        #expect(StressEstimate.label(for: low.score) == "Near resting")
-    }
-
-    @Test func stressSkipsWorkoutsAndNight() {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let night = calendar.date(from: DateComponents(year: 2027, month: 1, day: 4, hour: 2))!
-        let samples = perMinute(Array(repeating: 100, count: 60), from: night)
-        #expect(StressEstimate.estimate(samples, profile: profile, calendar: calendar) == nil)
-    }
-
     @Test func intensityMinutesCountVigorousDouble() {
         // Reserve is 130 bpm: 40 % = 112, 60 % = 138.
         let samples = perMinute([100, 115, 120, 140, 150], from: start)

@@ -60,7 +60,6 @@ final class VitalsModel {
 
     private(set) var stats: [Stat] = []
     private(set) var heartRateRecovery: HeartRateRecovery.Result?
-    private(set) var stress: StressEstimate.Result?
     private(set) var bloodOxygen: Double?
     private(set) var intensityMinutes: IntensityMinutes.Result?
     /// Per day (start of day) over the heart rate on hand, about two weeks:
@@ -68,7 +67,6 @@ final class VitalsModel {
     /// recorded cardio workout (`WeeklyChangeReview.cardioVigorousMinutes`).
     private(set) var intensitySplitByDay: [Date: IntensityMinutes.Result] = [:]
     private(set) var cardioVigorousByDay: [Date: Int] = [:]
-    private(set) var bodyAge: BodyAge.Result?
 
     /// One no-test VO₂ max estimate with the inputs it used, for the cardio card.
     struct VO2EstimatePart: Equatable {
@@ -82,7 +80,7 @@ final class VitalsModel {
     var vo2Estimate: VO2MaxEstimate.Result? {
         VO2MaxEstimate.combined([vo2HeartEstimate?.result, vo2ActivityEstimate?.result].compactMap { $0 })
     }
-    /// The VO₂ max the app scores with (body age, levels, fitness age, coach):
+    /// The VO₂ max the app scores with (levels, coach):
     /// the estimate or the watch, per the setting (`VO2Source`, `vo2SourceKey`).
     var vo2ForScores: (value: Double, isEstimate: Bool)? {
         VO2Source.pick(watch: vo2MaxHistory.last?.value, estimate: vo2Estimate?.value, prefer: Self.vo2Source)
@@ -91,9 +89,6 @@ final class VitalsModel {
     static var vo2Source: VO2Source {
         UserDefaults.standard.string(forKey: vo2SourceKey).flatMap(VO2Source.init(rawValue:)) ?? .standard
     }
-    /// Waist / height from a reading in the last 90 days (set by the app from
-    /// `BodyMeasurementsStore`); body age uses it instead of BMI (Ashwell 2012).
-    var waistToHeightRatio: Double?
     @ObservationIgnored private var respirationHistory: [DatedValue] = []
     @ObservationIgnored private var wristTemperatureHistory: [DatedValue] = []
     /// Daily resting heart rate (HealthKit) and the app's own sleeping heart
@@ -298,7 +293,6 @@ final class VitalsModel {
             today: today,
             weekStart: weekAgo
         )
-        stress = derived.stressToday
         intensityMinutes = derived.intensityWeek
         intensitySplitByDay = derived.intensitySplitByDay
         cardioVigorousByDay = derived.cardioVigorousByDay
@@ -366,20 +360,6 @@ final class VitalsModel {
                 id: "hrr", category: .heart, title: "Heart rate recovery", icon: "arrow.down.heart.fill", unit: "bpm",
                 footnote: "Appears after a workout once your watch records heart rate for a couple of minutes afterwards."
             ))
-        }
-
-        if let stress = derived.stressToday {
-            result.append(Stat(
-                id: "stress", category: .heart, title: "Stress (from heart rate)", icon: "heart.text.square",
-                value: "\(stress.score)", unit: "/ 100", status: StressEstimate.label(for: stress.score),
-                tone: .neutral,
-                gauge: Double(stress.score) / 100,
-                series: derived.stressByDay,
-                footnote: "Experimental. Garmin's stress score uses HRV, which it doesn't share with Apple Health."
-            ))
-        } else {
-            result.append(Stat(id: "stress", category: .heart, title: "Stress (from heart rate)", icon: "heart.text.square", unit: "/ 100",
-                               footnote: "Needs about 30 minutes of daytime heart rate."))
         }
 
         let vo2Series: [DatedValue]
@@ -663,29 +643,6 @@ final class VitalsModel {
         readProblem = coreFailures.isEmpty
             ? nil
             : "Some health data couldn't be read from Apple Health (\(coreFailures.joined(separator: ", "))). Pull down to try again."
-
-        // Body age from the same data (30-day averages where it helps).
-        func average(_ series: [DatedValue], last days: Int) -> Double? {
-            let values = series.suffix(days).map(\.value)
-            return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
-        }
-        let fullDaySteps = stepSeries.filter { !calendar.isDateInToday($0.date) }
-        bodyAge = BodyAge.estimate(BodyAge.Inputs(
-            age: settings.age,
-            sex: settings.sex,
-            // The setting's VO₂ max (`vo2ForScores`): the estimate by default.
-            vo2Max: scoredVO2?.value,
-            restingHeartRate: average(rhrSeries, last: 14),
-            sleepHours: averageSleep,
-            dailySteps: average(fullDaySteps, last: 30),
-            bodyFatPercent: fatSeries.last?.value,
-            bmi: bmiSeries.last?.value ?? computedBMI(weightKg: rawWeight.last?.value, heightCm: settings.heightCm),
-            vo2MaxAgeDays: scoredVO2?.isEstimate == true
-                ? 0
-                : vo2Series.last.map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 },
-            bodyCompositionAgeDays: (fatSeries.last ?? bmiSeries.last ?? rawWeight.last).map { calendar.dateComponents([.day], from: $0.date, to: now).day ?? 0 },
-            waistToHeightRatio: waistToHeightRatio
-        ))
     }
 
     /// The two no-test estimates (`VO2MaxEstimate`), each nil when its inputs are missing.
@@ -830,9 +787,6 @@ final class VitalsModel {
         case "hrr":
             stat.chart = .bars
             stat.about = "How many beats your heart rate drops in the first minute after exercise. Bigger drops mean better fitness; a drop of 12 bpm or less was linked with higher mortality (Cole et al., N Engl J Med 1999)."
-        case "stress":
-            stat.chart = .bars
-            stat.about = "Experimental: how far your heart rate sits above your resting rate while you're awake and not exercising (0 = at resting, 100 = far above). Caffeine, heat, digestion, standing and stress all raise it, and no study has validated heart rate alone as a stress score, so read it as a rough trend."
         case "vo2":
             stat.about = "How much oxygen your body can use at full effort: the best single measure of aerobic fitness. Higher fitness is strongly linked with longer life (Mandsager et al., JAMA Netw Open 2018). Watches estimate it from runs and walks with heart rate."
             stat.defaultDays = 90
@@ -967,8 +921,6 @@ final class VitalsModel {
             var result: HeartRateRecovery.Result
         }
         var recoveries: [Recovery] = []
-        var stressToday: StressEstimate.Result?
-        var stressByDay: [DatedValue] = []
         var intensityWeek = IntensityMinutes.Result(moderate: 0, vigorous: 0)
         /// Moderate and vigorous minutes outside logged lifting sessions, over
         /// `aerobicDays` days (the heart rate on hand, about two weeks), for the
@@ -1008,18 +960,6 @@ final class VitalsModel {
             if let result = HeartRateRecovery.measure(nearby, workoutEnd: workout.end) {
                 derived.recoveries.append(.init(date: workout.end, result: result))
             }
-        }
-
-        // Stress per day for the last week.
-        var day = weekStart
-        while day <= today {
-            let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
-            let samples = sorted.filter { $0.date >= day && $0.date < next }
-            if let estimate = StressEstimate.estimate(samples, profile: profile, excluding: workouts, calendar: calendar) {
-                derived.stressByDay.append(DatedValue(date: day, value: Double(estimate.score)))
-                if day == today { derived.stressToday = estimate }
-            }
-            day = next
         }
 
         derived.intensityWeek = IntensityMinutes.count(sorted.filter { $0.date >= weekStart }, profile: profile)

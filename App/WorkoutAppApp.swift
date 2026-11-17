@@ -454,9 +454,6 @@ struct RootView: View {
         // Changes applied from a block report end with the block they were for (`NextBlockStore`).
         NextBlockStore.shared.observe(blockStart: weeklyPlans.block?.start)
         checkIns.recordSleepScore(metrics.sleep?.score)
-        // Tensile's scores go beside Apple's for the same day, when the owner added those (`AppleScoresStore`).
-        AppleScoresStore.shared.keepAppValues(recovery: metrics.recovery?.score, recoveryIsFromYesterday: metrics.recoveryIsFromYesterday,
-                                              bodyAge: vitals.bodyAge?.years)
         // Mood patterns (builder A): each day's strain, your usual training strain and sleep need.
         checkIns.recordContext(dayStrains: metrics.weekStrain.map { (date: $0.date, strain: $0.strain) },
                                usualTrainingStrain: metrics.usualTrainingStrain, sleepNeedHours: settings.sleepNeedHours)
@@ -472,8 +469,6 @@ struct RootView: View {
             await MedsLiveActivity.refresh()
             return
         }
-        // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old (`BodyMeasurementsStore`).
-        vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil))
         await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                              sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
         // The nightly HRV series (`BiologyModel`) here too, not only when Health
@@ -792,7 +787,7 @@ private struct SettingsReactions: ViewModifier {
     let markBiologyStale: () -> Void
     /// Whose sleep comes first (`SleepSourceSetting`): sleep, HRV and recovery change with it.
     @AppStorage(SleepSourceSetting.key) private var sleepSource: SleepSourcePreference = .standard
-    /// Which VO₂ max scores (`VO2Source`): body age and the levels change with it.
+    /// Which VO₂ max scores (`VO2Source`): the levels change with it.
     @AppStorage(VitalsModel.vo2SourceKey) private var vo2Source: VO2Source = .standard
     @State private var oura = OuraLink.shared
 

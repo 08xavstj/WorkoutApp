@@ -38,8 +38,6 @@ struct RecoveryContributorsSheet: View {
                             .foregroundStyle(Theme.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    // Apple's Readiness for the same day, when it was added (`AppleScoresView`).
-                    AppleScoreLine(kind: .readiness, day: Calendar.current.date(byAdding: .day, value: metrics.recoveryIsFromYesterday ? -1 : 0, to: .now) ?? .now)
                     if items.isEmpty {
                         Text("Nothing to explain yet. Recovery needs a couple of weeks of nights to learn your normal HRV and resting heart rate.")
                             .font(.subheadline)

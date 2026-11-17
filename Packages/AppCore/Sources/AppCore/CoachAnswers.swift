@@ -630,7 +630,7 @@ public enum CoachAnswers {
     }
 
     /// Watch VO₂ max is an estimate that under-reads fit people by about 6
-    /// ml/kg/min (health-metrics.md §8, `CardioFitness.watchUncertaintyYears`).
+    /// ml/kg/min (health-metrics.md §8).
     public static func vo2Max(_ f: CoachFacts) -> Answer? {
         guard let vo2 = f.vo2Max else {
             return Answer(question: .vo2Max, text: "There's no VO₂ max in Apple Health yet. Apple Watch estimates it after outdoor walks, runs or hikes with GPS.")

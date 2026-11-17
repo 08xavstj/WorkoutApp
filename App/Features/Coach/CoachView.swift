@@ -446,9 +446,10 @@ extension CoachView {
         }
         // The VO₂ max the app scores with (`VitalsModel.vo2ForScores`); the trend is the watch's readings.
         if let scored = vitals.vo2ForScores {
-            let fitnessAge = CardioFitness.fitnessAge(vo2Max: scored.value, age: settings.age, sex: settings.sex)
+            // The FRIEND percentile only; no fitness age (evidence-audit-2026-11.md, "Should change" 6).
+            let standing = VO2Norms.standing(vo2: scored.value, age: settings.age, sex: settings.sex)
             let source = scored.isEstimate ? "Tensile's no-test estimate, about ±5" : "Apple Watch, which tends to read low"
-            var line = "VO₂ max \(scored.value.formatted(.number.precision(.fractionLength(scored.isEstimate ? 0 : 1)))) ml/kg/min (\(source)); fitness age about \(fitnessAge) ±\(CardioFitness.watchUncertaintyYears) (one measure, FRIEND norms)."
+            var line = "VO₂ max \(scored.value.formatted(.number.precision(.fractionLength(scored.isEstimate ? 0 : 1)))) ml/kg/min (\(source)); \(standing.percentileText) (FRIEND norms)."
             if let trend = CardioFitness.trend(vitals.vo2MaxHistory.map { DayValue(date: $0.date, value: $0.value) }) {
                 line += " Watch 90-day trend \(trend.direction.rawValue)." + (CardioFitness.nudge(for: trend).map { " " + $0 } ?? "")
             }
@@ -499,7 +500,7 @@ extension CoachView {
 }
 
 extension CoachView {
-    /// Caffeine, alcohol, heat, weight pace, body age, what moved recovery,
+    /// Caffeine, alcohol, heat, weight pace, what moved recovery,
     /// and every Health stat, for the coach.
     var habitLines: [String] {
         var lines: [String] = []
@@ -532,14 +533,6 @@ extension CoachView {
            let message = WeightPace.message(WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: mass, goals: settings.goalsSet ? settings.goals : nil)) {
             lines.append("Weight pace: " + message)
         }
-
-        // Body age with its confidence and biggest factors.
-        if let age = vitals.bodyAge {
-            let factors = age.factors.prefix(3).map { "\($0.name) \($0.years >= 0 ? "+" : "")\($0.years.formatted(.number.precision(.fractionLength(1)))) y" }
-            lines.append("Body age \(age.rangeLabel) vs real age \(age.age) (\(age.confidence.label.lowercased())): " + factors.joined(separator: ", ") + ".")
-        }
-        // Apple's own Readiness, Sleep score and Health Age with their days, when the user added them (`AppleScoresStore`).
-        if let apple = AppleScoresStore.shared.coachLine { lines.append(apple) }
 
         // What moved today's recovery.
         let yesterday = calendar.date(byAdding: .day, value: -1, to: .now) ?? .now

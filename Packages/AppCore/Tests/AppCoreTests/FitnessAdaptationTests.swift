@@ -88,31 +88,6 @@ struct CardioFitnessNormTests {
         #expect(CardioFitness.norm(age: 130, sex: .male) == 15) // the floor
     }
 
-    @Test func fitnessAgeIsTheAgeWithYourAverage() {
-        // FRIEND medians (Kaminsky 2015), the same reference as the "Good" label;
-        // these used to be the HUNT3 means (54.4 at 25), which made a "Good"
-        // VO₂ max read as an older fitness age.
-        #expect(CardioFitness.fitnessAge(vo2Max: 48.0, sex: .male) == 25)
-        #expect(CardioFitness.fitnessAge(vo2Max: 42.4, sex: .male) == 35)
-        #expect(CardioFitness.fitnessAge(vo2Max: 40.1, sex: .male) == 40)
-        #expect(CardioFitness.fitnessAge(vo2Max: 37.6, sex: .female) == 25)
-        // Clamped at both ends.
-        #expect(CardioFitness.fitnessAge(vo2Max: 70, sex: .male) == 18)
-        #expect(CardioFitness.fitnessAge(vo2Max: 10, sex: .female) == 90)
-    }
-
-    @Test func aboveYourMedianIsNeverAnOlderFitnessAge() {
-        for sex in BiologicalSex.allCases {
-            for age in 18...90 {
-                let median = Biomarkers.medianVO2Max(age: age, sex: sex)
-                for share in [1.0, 1.05, 1.2, 1.5] {
-                    #expect(CardioFitness.fitnessAge(vo2Max: median * share, age: age, sex: sex) <= age, "\(sex) \(age) \(share)")
-                }
-                #expect(CardioFitness.fitnessAge(vo2Max: median * 0.7, age: age, sex: sex) >= age)
-            }
-        }
-    }
-
     private func series(early: Double?, late: Double?) -> [DayValue] {
         var points: [DayValue] = []
         if let early { points += (-85...(-65)).map { DayValue(date: day($0), value: early) } }

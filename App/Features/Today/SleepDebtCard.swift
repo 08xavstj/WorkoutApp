@@ -63,10 +63,6 @@ struct LastNightSleepSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
-            // Apple's Sleep score for the same night, when it was added (`AppleScoresView`).
-            // While last night hasn't synced the score above is the night before, so
-            // Apple's line follows it (`sleepIsFromYesterday`).
-            AppleScoreLine(kind: .sleepScore, day: Calendar.current.date(byAdding: .day, value: metrics.sleepIsFromYesterday ? -1 : 0, to: .now) ?? .now)
             row("Asleep", SleepText.hours(sleep.asleep / 3600), detail: "Your need: \(SleepText.hours(sleep.need / 3600))")
             // The main sleep's own start and end (`asleepStart`/`asleepEnd`); `bedtime`/
             // `wakeTime` also span in-bed samples, so they're labelled as time in bed.

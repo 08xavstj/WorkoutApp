@@ -1,5 +1,7 @@
 # Daytime vitals (17 November 2026)
 
+> **Removed 17 November 2026.** The view, its rules and its tests are gone from the app (`DaytimeVitals.swift`, `HealthKitClient+Daytime.swift`, `DaytimeVitalsView.swift` and the rest named below). The evidence audit (`evidence-audit-2026-11.md`, "Remove") found that it added a second daily set of HRV, resting heart rate and SpO₂ numbers with no decision attached: ambulatory HRV allows no clear vagal reading (Laborde 2017, below), meals, coffee, posture and heat move it as much as anything health-related, and more numbers that can't be acted on raise the risk of tracker-driven worry (orthosomnia case series, Baron 2017, as cited in the audit). This file is kept as the record of what was built and why it went.
+
 The daytime counterpart of the overnight vitals: Health › All measures › Daytime vitals. Code: `Packages/AppCore/Sources/AppCore/DaytimeVitals.swift` (rules, with tests), `App/Services/HealthKitClient+Daytime.swift` (reads), `App/Features/Health/DaytimeVitalsView.swift` (screen).
 
 Supersedes row 6.5 of `watch-features.md` ("Daytime Vitals view: not built"). The finding in §3.1 of that file stands: this is a vitals view, **not a stress score**.

@@ -390,7 +390,7 @@ struct CoachAnswersTests {
 
     @Test func factLinesStayShortAndOnTopic() {
         var f = facts
-        f.extraLines = ["Water today 1.2 L.", "Usual bedtime 23:10; caffeine cut-off 14:10 for coffee.", "Body age 34-38 vs real age 36."]
+        f.extraLines = ["Water today 1.2 L.", "Usual bedtime 23:10; caffeine cut-off 14:10 for coffee.", "Sleep Regularity Index 78/100 (last week)."]
         f.medicationLines = ["Metformin: can lower resting heart rate readings."]
         f.labLines = ["Ferritin 20 ng/mL (low)."]
         let lines = CoachAnswers.factLines(for: "When should I stop drinking coffee?", topic: .general, facts: f)

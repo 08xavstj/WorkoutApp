@@ -166,7 +166,6 @@ final class ScreenshotTests: XCTestCase {
             (["metric-Weight trend", "Weight trend"], "weight"),
             (["metric-Resting heart rate", "Resting heart rate"], "resting-hr"),
             (["metric-VO₂ max", "VO₂ max"], "vo2max"),
-            (["metric-Body age", "Body age"], "body-age"),
             (["metric-Vitamins & minerals", "row-Vitamins & minerals"], "vitamins-minerals"),
             (["row-Heart", "Heart"], "category-heart"),
             (["row-Sleep", "Sleep"], "category-sleep"),

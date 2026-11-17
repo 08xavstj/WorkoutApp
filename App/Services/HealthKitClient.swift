@@ -798,7 +798,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     }
 
     /// Start and end of every workout in a range, from any app (used for
-    /// heart-rate recovery and to leave workouts out of the stress estimate).
+    /// heart-rate recovery and to find recorded cardio workouts).
     @concurrent
     func workoutIntervals(from start: Date, to end: Date) async throws -> [DateInterval] {
         if let demo = DemoHealth.active { return demo.workoutIntervals(from: start, to: end) }

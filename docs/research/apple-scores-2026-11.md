@@ -1,5 +1,7 @@
 # Apple's Readiness, Sleep score and Health Age: can an app get them?
 
+> **Removed 17 November 2026.** The entry and comparison screen, the Shortcuts action ("Log Apple scores"), the screenshot reader, the Health Age card, the lines on the recovery and sleep sheets and the coach line are gone from the app. The evidence audit (`evidence-audit-2026-11.md`, "Remove") found that Apple publishes no method or validation for any of the three numbers (this file), that typing or screenshotting them every day is the kind of data-entry burden that makes people quit health apps, and that two competing readiness or sleep scores for the same day, with a correlation between them, invite score-checking instead of action. Apple shows its own numbers in its own apps. Values saved on the phone before the removal are left in place and nothing reads them. This file is kept as the record of what was checked.
+
 Checked 17 November 2026, for an owner on iOS 27 with an Apple Watch Series 12 (watchOS 27). This follows `watch-features.md` §6, which found no HealthKit type for any of the three. The question here is wider: every route by which an app could get the numbers, not only HealthKit.
 
 ## Verdict

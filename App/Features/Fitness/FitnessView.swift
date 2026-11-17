@@ -414,7 +414,7 @@ private struct FitnessProgressCard: View {
             unit: "in 7 days · goal \(target)+",
             spokenUnit: "days in the last 7, goal \(target) or more",
             verdict: verdict,
-            hint: "Shows strength days, the health minimum and strength for health",
+            hint: "Shows strength days, the health minimum and strength standards",
             destination: StrengthDetailView()
         )
     }

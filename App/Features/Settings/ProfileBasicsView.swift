@@ -84,8 +84,8 @@ struct ProfileBasicsRows: View {
             }
         } footer: {
             Text(anyFromHealth
-                 ? "Heart-rate zones, calories, fitness norms and body age depend on these. They stay on this iPhone. Fields marked \"Health\" are from Apple Health and update by themselves; change them in the Health app, or turn off Fill in from Apple Health in Settings to type your own."
-                 : "Heart-rate zones, calories, fitness norms and body age depend on these. They stay on this iPhone.")
+                 ? "Heart-rate zones, calories and fitness norms depend on these. They stay on this iPhone. Fields marked \"Health\" are from Apple Health and update by themselves; change them in the Health app, or turn off Fill in from Apple Health in Settings to type your own."
+                 : "Heart-rate zones, calories and fitness norms depend on these. They stay on this iPhone.")
         }
     }
 

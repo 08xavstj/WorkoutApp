@@ -65,7 +65,7 @@ struct HealthExtraStats {
         stat.defaultDays = 180
         stat.goal = WaistToHeightRatio.target
         stat.normalRange = 0.4...WaistToHeightRatio.target
-        stat.about = "Waist divided by height. Keep it under 0.5 (waist less than half your height): across 31 studies it picked out diabetes, high blood pressure and heart-disease risk better than BMI, and it isn't fooled by muscle (Ashwell, Gunn & Gibson, Obes Rev 2012; Browning 2010 for the 0.5 line). 0.5-0.6 is raised, over 0.6 high. Measure monthly in the Log tab under Waist & grip. When a reading is less than 90 days old, body age uses it instead of BMI."
+        stat.about = "Waist divided by height. Keep it under 0.5 (waist less than half your height): across 31 studies it picked out diabetes, high blood pressure and heart-disease risk better than BMI, and it isn't fooled by muscle (Ashwell, Gunn & Gibson, Obes Rev 2012; Browning 2010 for the 0.5 line). 0.5-0.6 is raised, over 0.6 high. Measure monthly in the Log tab under Waist & grip."
         stat.footnote = measurements.waistDue ? "A waist measurement is due (monthly)." : nil
         return stat
     }

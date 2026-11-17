@@ -15,7 +15,6 @@ struct HealthView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(VitalsModel.self) private var vitals
     @Environment(CheckInStore.self) private var checkIns
-    @Environment(BodyMeasurementsStore.self) private var measurements
     @Environment(\.healthClient) private var health
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
@@ -51,10 +50,6 @@ struct HealthView: View {
         }
     }
 
-    private var heightCm: Double? {
-        metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil)
-    }
-
     /// Opening the tab reloads only what is over 10 minutes old (the main
     /// refresh keeps the stats current while the app is open; the app's
     /// choice); pull to refresh reloads everything.
@@ -65,8 +60,6 @@ struct HealthView: View {
         // 28 days: the VO₂ max activity estimate averages 4 weeks of lifting (`VitalsModel`).
         let cutoff = Calendar.current.date(byAdding: .day, value: -28, to: .now) ?? .now
         let recent = sessions.filter { !$0.isActive && $0.startedAt >= cutoff }.map(\.strainSummary)
-        // Body age uses waist-to-height instead of BMI while a waist reading is under 90 days old.
-        vitals.waistToHeightRatio = measurements.freshWaistToHeightRatio(heightCm: heightCm)
         if stale(vitals.lastRefreshed) {
             await vitals.refresh(health: health, settings: settings, profile: metrics.heartRateProfile, sessions: recent,
                                  sleepConsistency: metrics.sleepConsistency, sleepSpreadMinutes: metrics.sleepSpreadMinutes)
@@ -104,7 +97,7 @@ struct SheetNavigationStack<Content: View>: View {
 }
 
 /// A pushed page of cards with an inline title, for Health's detail pages
-/// (body age, patterns, Garmin help).
+/// (patterns, Garmin help).
 struct HealthDetailPage<Content: View>: View {
     let title: String
     @ViewBuilder var content: Content
@@ -380,190 +373,6 @@ struct VitalTile: View {
             }
             .frame(height: 8)
             .accessibilityHidden(true)
-        }
-    }
-}
-
-// MARK: - Body age
-
-/// Body age: the headline number, how it compares with your age, and what moves it.
-struct BodyAgeCard: View {
-    let result: BodyAge.Result?
-    let isLoading: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                CardLabel(text: "Body age")
-                Spacer()
-                // How many inputs it has, not a "confidence" verdict next to a ±5-year range.
-                Text(result.map { "\($0.factors.count) of \(BodyAge.factorSlots) factors" } ?? "Estimate")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            if let result {
-                summary(result)
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("What's moving it")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                    ForEach(result.factors) { factor in
-                        FactorRow(factor: factor)
-                    }
-                }
-                // The factors are listed above, so no second "Based on…" list here.
-                Text("\(result.confidenceReason) A ±\(BodyAge.uncertaintyYears)-year range, because only the parts, not the sum, have been tested in studies. An estimate, not a medical test.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.secondaryText)
-            } else {
-                Text(isLoading ? "Working it out…" : "Needs at least two of: VO₂ max, resting heart rate, sleep, steps, waist-to-height, body fat or BMI. Wear your watch day and night and add your height and weight in Settings.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-        }
-        .card(tint: (result?.difference ?? 0) <= 0 ? Theme.recoveryHigh : Theme.recoveryModerate)
-    }
-
-    private func summary(_ result: BodyAge.Result) -> some View {
-        let younger = result.difference <= 0
-        let tone = younger ? Theme.recoveryHighText : Theme.recoveryModerateText
-        return HStack(alignment: .center, spacing: 18) {
-            // A full ring in the result's color: green when younger, amber when older.
-            GradientRing(
-                progress: 1,
-                colors: younger ? [Theme.recoveryHighLight, Theme.recoveryHigh] : [Theme.recoveryModerateLight, Theme.recoveryModerate],
-                lineWidth: 12
-            ) {
-                VStack(spacing: 0) {
-                    Text("\(result.years)")
-                        .tileNumberFont()
-                        .foregroundStyle(Theme.primaryText)
-                        .minimumScaleFactor(0.7)
-                    Text("years")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                .padding(.horizontal, 14)
-            }
-            .frame(width: 118, height: 118)
-            VStack(alignment: .leading, spacing: 6) {
-                // Within the ±5-year range the estimate can't tell you from your age, so it says so.
-                let gap = result.years - result.age
-                let nearAge = abs(gap) <= BodyAge.uncertaintyYears
-                let direction = younger ? "younger" : "older"
-                if nearAge {
-                    // Leans the way the factors add up, without claiming more than the margin allows.
-                    Text(gap == 0 ? "About your age" : "Likely a little \(direction)")
-                        .font(.headline)
-                        .foregroundStyle(Theme.primaryText)
-                } else {
-                    HStack(spacing: 4) {
-                        Image(systemName: younger ? "arrow.down" : "arrow.up")
-                        Text("\(abs(gap)) years \(direction)")
-                    }
-                    .font(.headline)
-                    .foregroundStyle(tone)
-                }
-                Text(nearAge ? "Within the ±\(BodyAge.uncertaintyYears)-year margin of your age (\(result.age))" : "than your age (\(result.age))")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-                // Whole years with a ±5-year range: no composite "age" is validated finer than that.
-                Text("Body age \(result.rangeLabel)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
-                Text(Self.leverLine(result, younger: younger, nearAge: nearAge))
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-        }
-    }
-}
-
-extension BodyAgeCard {
-    /// Names the factor adding the most years instead of a generic tip.
-    static func leverLine(_ result: BodyAge.Result, younger: Bool, nearAge: Bool) -> String {
-        if let top = result.topAgeingFactor {
-            let added = top.years.formatted(.number.precision(.fractionLength(1)))
-            return "\(top.name) adds the most (+\(added) y)."
-        }
-        return younger ? "Nothing here is adding years." : "Nothing here is adding years; it's about your age."
-    }
-}
-
-private struct FactorRow: View {
-    let factor: BodyAge.Factor
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .subheadline) private var barWidth: CGFloat = 90
-    @ScaledMetric(relativeTo: .subheadline) private var valueWidth: CGFloat = 56
-
-    private var helps: Bool { factor.years <= 0 }
-    /// Under a twentieth of a year shows as "0 y" in grey, with no bar.
-    private var isZero: Bool { abs(factor.years) < 0.05 }
-    private var color: Color { isZero ? Theme.secondaryText : (helps ? Theme.recoveryHigh : Theme.recoveryModerate) }
-    private var yearsText: String {
-        if isZero { return "0 y" }
-        return "\(helps ? "−" : "+")\(abs(factor.years).formatted(.number.precision(.fractionLength(1)))) y"
-    }
-
-    var body: some View {
-        // Name beside the bar normally; above it at accessibility sizes.
-        let stacked = dynamicTypeSize.isAccessibilitySize
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 10))
-        layout {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(factor.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.primaryText)
-                Text(factor.detail)
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            if !stacked { Spacer(minLength: 8) }
-            HStack(spacing: 10) {
-                bar
-                Text(yearsText)
-                    .font(.subheadline.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textColor(for: color))
-                    .frame(width: valueWidth, alignment: .trailing)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// Bar centred on zero: left = younger, right = older.
-    private var bar: some View {
-        GeometryReader { geo in
-            let half = geo.size.width / 2
-            let length = min(half, half * abs(factor.years) / 8)
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.track).frame(height: 6)
-                Rectangle().fill(Theme.secondaryText.opacity(0.4)).frame(width: 1.5, height: 12).offset(x: half - 0.75)
-                if !isZero {
-                    Capsule()
-                        .fill(LinearGradient(colors: helps ? [Theme.recoveryHighLight, color] : [Theme.recoveryModerateLight, color], startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(4, length), height: 6)
-                        .offset(x: helps ? half - max(4, length) : half)
-                }
-            }
-            .frame(height: 12)
-            .frame(maxHeight: .infinity)
-        }
-        .frame(width: barWidth, height: 28)
-    }
-}
-
-/// Body age as its own page, pushed from Key measures. The number is kept
-/// secondary to the factors that move it: an "effective age" older than your
-/// real age is a nocebo risk (docs/research/behaviour-change.md, "Body age").
-struct BodyAgePage: View {
-    @Environment(VitalsModel.self) private var vitals
-
-    var body: some View {
-        HealthDetailPage(title: "Body age") {
-            // Apple's own Health Age, typed in (no API for it yet), above Tensile's estimate.
-            AppleHealthAgeCard(estimate: vitals.bodyAge?.range)
-            BodyAgeCard(result: vitals.bodyAge, isLoading: vitals.isLoading)
         }
     }
 }

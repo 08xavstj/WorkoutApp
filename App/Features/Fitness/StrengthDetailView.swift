@@ -2,7 +2,7 @@ import SwiftUI
 import AppCore
 
 /// Fitness › Progress › Strength: strength days with the health floor,
-/// strength for health and, when one applies, the deload card (moved from
+/// strength standards and, when one applies, the deload card (moved from
 /// the Fitness tab; ux-audit.md 4.3, 4.6). The cards keep their research
 /// notes (WHO 2020; Momma 2022; Shailendra 2022; Bell et al. 2023).
 struct StrengthDetailView: View {
