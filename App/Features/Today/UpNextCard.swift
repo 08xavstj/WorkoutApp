@@ -56,11 +56,14 @@ struct UpNextCard: View {
         items += doseItems()
         if let caffeine = caffeineItem(now: now) { items.append(caffeine) }
         if let nudge = habits.movementNudge { items.append(movementItem(nudge, now: now)) }
-        if WeighInNudge.isDue(goals: metrics.goals, lastWeighIn: metrics.lastWeighIn) {
+        // A held weight (`WeightHold`) keeps one weigh-in a week; off with Hide calories.
+        let held = settings.hideCalories ? nil : HealthyLivingSettings.weightHold
+        if WeighInNudge.isDue(goals: metrics.goals, lastWeighIn: metrics.lastWeighIn, holding: held) {
             // Lose/gain goal with no weigh-in for 3+ days (`WeighInNudge`: Zheng 2015; Madigan 2015).
+            let holdingRow = metrics.goals?.weight == .maintain
             items.append(UpNextItem(id: "weighin", minutes: settings.morningCheckInMinutes, kind: .info(
-                icon: "scalemass", color: Theme.nutrition, title: WeighInNudge.title,
-                detail: WeighInNudge.detail(lastWeighIn: metrics.lastWeighIn))))
+                icon: "scalemass", color: Theme.nutrition, title: holdingRow ? WeightHold.weighInTitle : WeighInNudge.title,
+                detail: holdingRow ? WeightHold.weighInDetail(lastWeighIn: metrics.lastWeighIn) : WeighInNudge.detail(lastWeighIn: metrics.lastWeighIn))))
         }
         // The day's 5-minute stretch until it's done (`Stretching`), at its reminder time.
         if StretchOfferRow.isOffered, !metrics.restMode {

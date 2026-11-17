@@ -361,13 +361,14 @@ public enum Longevity {
     /// mortality, with the curve bending at about 5,000-7,000 (Ding et al.,
     /// Lancet Public Health 2025); risk kept falling to 8,000-10,000 under 60
     /// and 6,000-8,000 from 60 (Paluch et al., Lancet Public Health 2022).
-    /// The on-target line is the app's existing starting goal
-    /// (`StepGoal.standard`: 8,000 under 60, 7,000 from 60); under 5,000, the
-    /// bottom of Ding's bend where the curve is steepest, is "off".
+    /// The on-target line is the health floor the weekly review also ticks
+    /// (`HealthFloors.dailySteps`: 7,000 at every age, where most of the
+    /// benefit is in; why not 8,000 under 60 is argued there). Under 5,000,
+    /// the bottom of Ding's bend where the curve is steepest, is "off".
     public static let stepsLow = 5_000.0
 
     static func steps(_ i: Inputs) -> Measure {
-        let target = StepGoal.standard(age: i.age)
+        let target = HealthFloors.dailySteps
         var measure = Measure(
             id: .steps, area: .movement, title: "Daily steps", valueText: nil,
             targetText: "\(grouped(target)) a day or more", status: .noData,
@@ -384,7 +385,7 @@ public enum Longevity {
             ])
         guard let steps = i.dailySteps, steps > 0 else { return measure }
         measure.valueText = "\(grouped(steps)) a day"
-        if steps >= target {
+        if HealthFloors.stepsMet(steps) {
             measure.status = .onTarget
             measure.standing = "In the range where the studies found most of the benefit."
             measure.nextStep = "Keep it up. More is fine, but the extra gain past here is small."
@@ -405,9 +406,10 @@ public enum Longevity {
     /// Med 2020). On target is the lower end, 150; with a stamina goal it is
     /// the upper end, 300, where a 30-year cohort found a little more benefit
     /// (Lee et al., Circulation 2022). "Close" from half the target is the
-    /// app's choice, not a published band.
+    /// app's choice, not a published band. Without a stamina goal the line
+    /// is the floor the weekly review ticks (`HealthFloors.activeMinutes`).
     public static func activeMinutesTarget(goals: Goals?) -> Int {
-        goals?.focuses.contains(.endurance) == true ? 300 : IntensityMinutes.weeklyGoal
+        goals?.focuses.contains(.endurance) == true ? 300 : HealthFloors.activeMinutes
     }
 
     static func activeMinutes(_ i: Inputs) -> Measure {
@@ -425,10 +427,12 @@ public enum Longevity {
                 Source("Bull et al., Br J Sports Med 2020;54:1451", kind: "WHO guideline",
                        finding: "Adults: 150-300 minutes of moderate or 75-150 minutes of vigorous activity a week, plus muscle strengthening."),
                 Source("Lee et al., Circulation 2022;146:523", kind: "Cohort of 116,221 US adults over 30 years",
-                       finding: "Meeting the guideline was linked with 19-25% lower mortality; 2-4 times the minimum added a little more.")
+                       finding: "Meeting the guideline was linked with 19-25% lower mortality; 2-4 times the minimum added a little more."),
+                Source("Ahmadi et al., Eur Heart J 2022;43:4801", kind: "Cohort of 71,893 UK adults wearing an accelerometer",
+                       finding: "15-20 vigorous minutes a week went with a 16-40% lower mortality hazard; the lowest risk was at about 54 minutes a week.")
             ])
         guard let moderate = i.moderateMinutes, let vigorous = i.vigorousMinutes else { return measure }
-        let total = moderate + 2 * vigorous
+        let total = IntensityMinutes.Result(moderate: moderate, vigorous: vigorous).total
         measure.valueText = "\(total) this week"
         if total >= target {
             measure.status = .onTarget
@@ -449,7 +453,7 @@ public enum Longevity {
     // MARK: - Strength
 
     static func strengthDays(_ i: Inputs) -> Measure {
-        let target = StrengthDays.weeklyTarget
+        let target = HealthFloors.strengthDays
         let lifter = i.goals?.focuses.contains(where: { $0 == .muscle || $0 == .strength }) == true
         var measure = Measure(
             id: .strengthDays, area: .strength, title: "Strength days", valueText: nil,
@@ -469,7 +473,7 @@ public enum Longevity {
         let average = Double(weeks.reduce(0, +)) / Double(weeks.count)
         measure.valueText = "\(one(average)) a week"
         measure.standing = "Average over the last \(weeks.count) week\(weeks.count == 1 ? "" : "s")."
-        if average >= Double(target) {
+        if HealthFloors.strengthDaysMet(average) {
             measure.status = .onTarget
             measure.nextStep = lifter
                 ? "You're past the health line. Extra sessions serve your training goal; the health benefit levelled off well before this."
@@ -574,17 +578,13 @@ public enum Longevity {
     /// mortality (Windred et al., Sleep 2024; 60,977 UK Biobank adults with a
     /// week of wrist accelerometry): median 81.0, interquartile range
     /// 73.8-86.3, and each of the top four fifths had 20-48% lower all-cause
-    /// mortality than the least regular fifth. The abstract gives no fifth
-    /// cut-offs, so "off" is under 74 (the cohort's lowest quarter, a little
-    /// wider than its least regular fifth) and "on target" is 85 and up, the
-    /// line the sleep sheet and sleep score already use for the cohort's most
-    /// regular people (`SleepRegularity.benefitIndex`; the upper quartile
-    /// starts at 86.3), so the two screens agree. The benefit was graded
-    /// across fifths, so 74-84 is "close", not "off". A reading of the paper,
-    /// not thresholds it states. The app's index is worked out from watch
-    /// sleep over a week, not accelerometry.
-    public static let sleepRegularityTarget = SleepRegularity.benefitIndex
-    public static let sleepRegularityLow = 74
+    /// mortality than the least regular fifth. The full text gives the fifth
+    /// cut-offs (71.65, 78.56, 83.16, 87.31): "off" is the least regular fifth
+    /// (under 72) and "on target" the most regular (87 and up), where risk was
+    /// lowest. The app's index is worked out from watch sleep over a week,
+    /// not accelerometry.
+    public static let sleepRegularityTarget = HealthFloors.sleepRegularity
+    public static let sleepRegularityLow = SleepRegularity.leastRegularFifth
 
     static func sleepRegularity(_ i: Inputs) -> Measure {
         var measure = Measure(
@@ -601,19 +601,19 @@ public enum Longevity {
             ])
         guard let index = i.sleepRegularity else { return measure }
         measure.valueText = "\(index) of 100"
-        if index >= sleepRegularityTarget {
+        if HealthFloors.sleepRegularityMet(index) {
             measure.status = .onTarget
-            measure.standing = "Among the more regular sleepers in the study (85 and up; typical is 81)."
+            measure.standing = "In the most regular fifth in the study (87 and up), where risk was lowest."
             measure.nextStep = "Keep your wake time steady, weekends too."
         } else if index >= sleepRegularityLow {
             measure.status = .close
             measure.standing = index >= SleepRegularity.typicalIndex
-                ? "Around the typical 81; the most regular people in the study were at 85 and up."
-                : "A little under the typical 81."
+                ? "Around the typical 81; risk was lowest in the most regular fifth, 87 and up."
+                : "A little under the typical 81; the least regular fifth is under 72."
             measure.nextStep = "Hold one wake time for 7 days, within half an hour. It moves the index most."
         } else {
             measure.status = .off
-            measure.standing = "In the range of the study's least regular quarter."
+            measure.standing = "In the range of the study's least regular fifth (under 72), where risk was highest."
             measure.nextStep = "Pick one wake time and keep it every day for two weeks, then let bedtime follow."
         }
         return measure
@@ -779,13 +779,14 @@ public enum Longevity {
 
     // MARK: - Alcohol
 
-    /// Evenings logged in the last 7 before the week's total is judged (app's choice).
-    public static let alcoholMinimumNights = 4
+    /// Evenings logged in the last 7 before the week's total is judged (app's
+    /// choice; the weekly review uses the same number).
+    public static let alcoholMinimumNights = HealthFloors.drinksMinimumNights
 
     static func alcohol(_ i: Inputs) -> Measure {
         var measure = Measure(
             id: .alcohol, area: .alcohol, title: "Drinks a week", valueText: nil,
-            targetText: "\(whole(AlcoholWeek.lowMax)) or fewer", status: .noData,
+            targetText: "\(whole(HealthFloors.drinks)) or fewer", status: .noData,
             standing: "Fewer than \(alcoholMinimumNights) evenings logged this week.",
             nextStep: "Answer the drinks question in the evening check-in, zero included.",
             why: "Alcohol raises the risk of several cancers at any regular amount, and of heart disease and stroke at higher amounts. Less is lower risk.",

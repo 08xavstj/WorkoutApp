@@ -299,8 +299,9 @@ struct DailyInsightsTests {
             if let active { state.entries[active.id] = .init(variant: active.variant, lastActive: day(39), lastShown: day(39), runDays: 1) }
             return DailyInsights.evaluate(i, state: state).feed
         }
-        // Sleep regularity: low under 74, and it stays until 78.
-        #expect(feed { $0.sleepRegularity = 73 }.today.first?.tone == .watch)
+        // Sleep regularity: low under 72 (the least regular fifth), and it stays until 78.
+        #expect(feed { $0.sleepRegularity = 71 }.today.first?.tone == .watch)
+        #expect(feed { $0.sleepRegularity = 72 }.today.isEmpty)
         #expect(feed { $0.sleepRegularity = 76 }.today.isEmpty)
         #expect(feed({ $0.sleepRegularity = 76 }, active: ("sleepRegularity", "low")).today.first?.tone == .watch)
         #expect(feed({ $0.sleepRegularity = 78 }, active: ("sleepRegularity", "low")).today.isEmpty)

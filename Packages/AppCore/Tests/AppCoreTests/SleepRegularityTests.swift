@@ -177,12 +177,13 @@ struct MidpointShiftTests {
     }
 
     @Test func indexNoteBandsFollowWindred() {
-        // UK Biobank median about 81; benefit from about 85 (Windred 2024).
+        // Windred 2024 (full text): fifth cut-offs 71.65 / 87.31, median 81.
         // No number up front (QA round 3): the row already shows "92 / 100" beside it.
-        #expect(SleepRegularity.indexNote(92).hasPrefix("Above the 85 linked to better health (typical is 81"))
-        #expect(SleepRegularity.indexNote(85).hasPrefix("At the 85"))
-        #expect(SleepRegularity.indexNote(80).hasPrefix("About typical"))
-        #expect(SleepRegularity.indexNote(70).hasPrefix("Below typical"))
+        #expect(SleepRegularity.indexNote(92).hasPrefix("In the range where risk was lowest"))
+        #expect(SleepRegularity.indexNote(87).hasPrefix("In the range where risk was lowest"))
+        #expect(SleepRegularity.indexNote(86).hasPrefix("Above the least regular fifth"))
+        #expect(SleepRegularity.indexNote(72).hasPrefix("Above the least regular fifth"))
+        #expect(SleepRegularity.indexNote(71).hasPrefix("In the study's least regular fifth"))
     }
 }
 

@@ -478,8 +478,9 @@ struct SleepCalculatorTests {
     /// SRI 85+ is full marks, 50 or under none (Windred 2024: median 81).
     @Test func regularityMapsTheRealWorldRange() {
         #expect(SleepCalculator.regularityScore(sri: 100) == 1)
-        #expect(SleepCalculator.regularityScore(sri: 85) == 1)
-        #expect(abs(SleepCalculator.regularityScore(sri: 67) - 17.0 / 35) < 0.001)
+        #expect(SleepCalculator.regularityScore(sri: 87) == 1)
+        #expect(SleepCalculator.regularityScore(sri: 86) < 1)
+        #expect(abs(SleepCalculator.regularityScore(sri: 67) - 17.0 / 37) < 0.001)
         #expect(SleepCalculator.regularityScore(sri: 50) == 0)
         #expect(SleepCalculator.regularityScore(sri: 30) == 0)
     }

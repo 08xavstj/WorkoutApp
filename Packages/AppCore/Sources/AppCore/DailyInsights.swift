@@ -449,8 +449,9 @@ public enum DailyInsights {
     }
 
     /// Sleep Regularity Index lines: low under `Longevity.sleepRegularityLow`
-    /// (74, off again from 78); very regular from 87 (the study's top
-    /// quarter started at 86.3; off again under 83). Windred et al., Sleep 2024.
+    /// (72, the study's least regular fifth; off again from 78); very regular
+    /// from 87 (its most regular fifth; off again under 83). Windred et al.,
+    /// Sleep 2024, full text.
     public static let sleepRegularityLowExit = 78
     public static let sleepRegularityHigh = 87
     public static let sleepRegularityHighExit = 83
@@ -463,7 +464,7 @@ public enum DailyInsights {
                 insight: Insight(
                     id: id, category: .sleep, tone: .watch,
                     title: "Your sleep times are irregular",
-                    comparison: "Regularity index \(index). 81 is typical, and under about 74 was the least regular quarter in a UK study of 61,000 adults.",
+                    comparison: "Regularity index \(index). 81 is typical, and under 72 was the least regular fifth in a UK study of 61,000 adults.",
                     action: "Keep one wake time for 7 days, weekends too."),
                 variant: "low", subject: "sleepRegularity", strength: Double(Longevity.sleepRegularityTarget - index) / 20)
         }

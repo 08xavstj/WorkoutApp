@@ -174,23 +174,29 @@ extension SleepRegularity {
         return MidpointShift(minutes: Int((weekendMean - weekdayMean).rounded()), weekdayNights: weekday.count, weekendNights: weekend.count)
     }
 
-    /// One line of meaning for the Sleep Regularity Index: the UK Biobank
-    /// median is about 81 and the mortality benefit sat in the top quintiles,
-    /// from roughly 85 up (Windred et al., Sleep 2024).
+    /// Lines for the Sleep Regularity Index from the one cohort that tied it
+    /// to mortality (Windred et al., Sleep 2024; 60,977 UK Biobank adults,
+    /// full text checked 17 Nov 2026): median 81; fifth cut-offs 71.65,
+    /// 78.56, 83.16 and 87.31. Each of the four more regular fifths had
+    /// 20-48% lower all-cause mortality than the least regular fifth, and the
+    /// risk kept falling to the most regular fifth (87 and up). Observational.
+    /// (An earlier version said the benefit started "from roughly 85".)
     public static let typicalIndex = 81
-    public static let benefitIndex = 85
+    /// The least regular fifth starts below this.
+    public static let leastRegularFifth = 72
+    /// The most regular fifth, where risk was lowest.
+    public static let benefitIndex = 87
 
-    /// "Above the 85 linked to better health (typical is 81)". No number up
-    /// front: it sits beside the "92 / 100" it explains.
+    /// "In the range where risk was lowest…". No number up front: it sits
+    /// beside the "92 / 100" it explains.
     public static func indexNote(_ sri: Int) -> String {
         if sri >= benefitIndex {
-            let place = sri == benefitIndex ? "At" : "Above"
-            return "\(place) the \(benefitIndex) linked to better health (typical is \(typicalIndex); Windred 2024)."
+            return "In the range where risk was lowest in the study (\(benefitIndex)+; typical is \(typicalIndex); Windred 2024)."
         }
-        if sri >= typicalIndex - 5 {
-            return "About typical (\(typicalIndex)); \(benefitIndex)+ is linked to better health (Windred 2024)."
+        if sri >= leastRegularFifth {
+            return "Above the least regular fifth (under \(leastRegularFifth)); risk kept falling up to \(benefitIndex)+ (Windred 2024)."
         }
-        return "Below typical (\(typicalIndex)); \(benefitIndex)+ is linked to better health (Windred 2024). A steady wake time moves it most."
+        return "In the study's least regular fifth (under \(leastRegularFifth)), where risk was highest (Windred 2024). A steady wake time moves it most."
     }
 }
 

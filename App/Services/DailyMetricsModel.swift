@@ -153,6 +153,8 @@ final class DailyMetricsModel {
     private(set) var calorieAdjustmentNote: String?
     /// The last weigh-in in Apple Health (last 35 days), for the weigh-in nudge.
     private(set) var lastWeighIn: Date?
+    /// Those weigh-ins, for the hold band after a target is reached (`WeightHold`).
+    private(set) var recentWeights: [DayValue] = []
     /// Tonight's bed-by window (`BedtimeWindow`), from sleep need, debt, usual wake time and tomorrow's plan.
     private(set) var bedtimeWindow: BedtimeWindow.Result?
     /// Tomorrow's planned session start from the weekly plan, if any (set by the app before a refresh).
@@ -904,6 +906,7 @@ final class DailyMetricsModel {
             maintenanceProgress = AdaptiveTDEE.progress(intake: intake, weights: weights, now: now, expectedExpenditure: expected)
             weightTrendWeekly = WeightTrend.weeklyChange(weights.filter { $0.date >= (calendar.date(byAdding: .day, value: -28, to: today) ?? today) })
             lastWeighIn = weights.map(\.date).max()
+            recentWeights = weights
             // Energy availability: the last 7 logged days against workout calories (`EnergyAvailability`).
             let workoutEnergy = (try? await health.workoutEnergyPerDay(days: 8)) ?? []
             // The lowest safe target for this body and training (`CalorieSafety`, IOC REDs 2023).

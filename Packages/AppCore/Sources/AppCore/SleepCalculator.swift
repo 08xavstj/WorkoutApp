@@ -27,9 +27,10 @@ import Foundation
 /// - Interruptions: awakenings over 5 minutes; 0-1 is good and 4 or more is
 ///   poor (Ohayon et al., Sleep Health 2017), so 0-1 → full marks, 2-3 → half,
 ///   4+ → none. Awake periods from several trackers are merged first.
-/// - Regularity: the Sleep Regularity Index, mapped so 85+ is full marks and
-///   50 or less is none (`regularityScore`), because the UK Biobank median is
-///   about 81 and the bottom fifth starts near 72 (Windred et al., Sleep 2024).
+/// - Regularity: the Sleep Regularity Index, mapped so 87+ (the most regular
+///   fifth, where mortality was lowest) is full marks and 50 or less is none
+///   (`regularityScore`); the UK Biobank median is 81 and the least regular
+///   fifth is under 72 (Windred et al., Sleep 2024, full text).
 public struct SleepCalculator: Sendable {
     public var baseSleepNeedHours: Double = 8
     /// Extra sleep needed per strain point (%) above 48 the previous day.
@@ -97,7 +98,7 @@ public struct SleepCalculator: Sendable {
     /// SRI/100 would score almost everyone high: the UK Biobank median is 81
     /// and the bottom quintile begins near 72 (Windred et al., Sleep 2024).
     public static func regularityScore(sri: Int) -> Double {
-        min(1, max(0, (Double(sri) - 50) / 35))
+        min(1, max(0, (Double(sri) - 50) / Double(SleepRegularity.benefitIndex - 50)))
     }
 
     public struct Result: Sendable, Equatable {

@@ -15,6 +15,7 @@ struct GoalsView: View {
     /// The saved goals are read once: coming back from a pushed page (the lift
     /// goal editor) must not replace what was changed or added since.
     @State private var loaded = false
+    @State private var showingTargetCheck = false
     @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 90
     /// True when pushed onto another NavigationStack.
     var pushed = false
@@ -128,9 +129,16 @@ struct GoalsView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
+                    Button("Save") { requestSave() }
                         .disabled(goals.focuses.isEmpty)
                 }
+            }
+            // A target under BMI 18.5, or a pace past the personal limit, is asked about first (`WeightHold.targetWarnings`).
+            .alert("Check this target", isPresented: $showingTargetCheck) {
+                Button("Save anyway") { save() }
+                Button("Change it", role: .cancel) {}
+            } message: {
+                Text(targetWarnings.map { WeightHold.message($0, losing: goals.weight == .lose) }.joined(separator: "\n\n"))
             }
             .onAppear {
                 guard !loaded else { return }
@@ -244,11 +252,29 @@ struct GoalsView: View {
         }
     }
 
+    /// What to confirm before saving: a target under a BMI of 18.5, or a pace
+    /// faster than this person's limit. The app has no target date, so the
+    /// chosen pace is what's checked against the limit.
+    private var targetWarnings: [WeightHold.TargetWarning] {
+        WeightHold.targetWarnings(goals: goals, targetKg: parsedTarget, currentKg: metrics.bodyMassKg,
+                                  heightCm: metrics.heightCm ?? (settings.heightCm > 0 ? settings.heightCm : nil), limit: rateLimit)
+    }
+
+    private func requestSave() {
+        if targetWarnings.isEmpty {
+            save()
+        } else {
+            showingTargetCheck = true
+        }
+    }
+
     private func save() {
         var saved = goals
         saved.targetWeightKg = goals.weight == .maintain ? nil : parsedTarget
         settings.goals = saved
         settings.goalsSet = true
+        // A new lose or gain goal ends a weight hold (`WeightHold`).
+        if saved.weight != .maintain { HealthyLivingSettings.weightHold = nil }
         dismiss()
     }
 }

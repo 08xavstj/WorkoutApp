@@ -23,6 +23,8 @@ struct AlcoholEffectCard: View {
         VStack(alignment: .leading, spacing: 12) {
             CardLabel(text: "How alcohol affects you")
             weekRow
+            // The owner's own weekly limit, only from three a week (`DrinkLimit`).
+            DrinkLimitSection()
             if findings.isEmpty {
                 Text(nightsLogged == 0
                      ? "Log drinks in the evening check-in (zero counts too). After 5 nights with and 5 without, you'll see what drinking does to your next morning."

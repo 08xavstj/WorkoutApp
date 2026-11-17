@@ -201,9 +201,12 @@ struct LongevityTests {
         #expect(status(.restingHeartRate) { $0.restingHeartRate = 80.1 } == .off)
     }
 
-    @Test func stepTargetsFollowAge() {
+    /// The line is the health floor the weekly review ticks too
+    /// (`HealthFloors.dailySteps`, 7,000 at every age; it was 8,000 under 60).
+    @Test func stepsUseTheSharedFloorAtEveryAge() {
         #expect(status(.steps) { $0.dailySteps = 8_000 } == .onTarget)
-        #expect(status(.steps) { $0.dailySteps = 7_999 } == .close)
+        #expect(status(.steps) { $0.dailySteps = 7_000 } == .onTarget)
+        #expect(status(.steps) { $0.dailySteps = 6_999 } == .close)
         #expect(status(.steps) { $0.dailySteps = 5_000 } == .close)
         #expect(status(.steps) { $0.dailySteps = 4_999 } == .off)
         var older = Longevity.Inputs(age: 64, sex: .male)
@@ -258,13 +261,12 @@ struct LongevityTests {
     }
 
     @Test func sleepRegularityLinesComeFromTheCohortsSpread() {
-        // On target from 85, the line the sleep sheet uses (`SleepRegularity.benefitIndex`).
-        #expect(status(.sleepRegularity) { $0.sleepRegularity = 85 } == .onTarget)
-        #expect(status(.sleepRegularity) { $0.sleepRegularity = 84 } == .close)
+        // Windred 2024's fifths: on target in the most regular (87+), off in the least (under 72).
+        #expect(status(.sleepRegularity) { $0.sleepRegularity = 87 } == .onTarget)
+        #expect(status(.sleepRegularity) { $0.sleepRegularity = 86 } == .close)
         #expect(status(.sleepRegularity) { $0.sleepRegularity = 81 } == .close)
-        #expect(status(.sleepRegularity) { $0.sleepRegularity = 80 } == .close)
-        #expect(status(.sleepRegularity) { $0.sleepRegularity = 74 } == .close)
-        #expect(status(.sleepRegularity) { $0.sleepRegularity = 73 } == .off)
+        #expect(status(.sleepRegularity) { $0.sleepRegularity = 72 } == .close)
+        #expect(status(.sleepRegularity) { $0.sleepRegularity = 71 } == .off)
     }
 
     @Test func waistAndBloodPressureReuseTheExistingCategories() {

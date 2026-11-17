@@ -241,6 +241,8 @@ private struct NutritionCard: View {
             .accessibilityHint("Shows macros, water and how the target is worked out")
             .accessibilityIdentifier("today-nutrition") // UI tests (ScreenshotTests)
             WeightPaceLine()
+            // Target reached: hold there, and one line on a lasting regain (`WeightHold`).
+            WeightHoldLine()
             if settings.hideCalories {
                 HiddenCaloriesSafetyLines()
             }

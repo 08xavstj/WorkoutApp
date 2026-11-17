@@ -260,6 +260,10 @@ struct StrengthDaysCard: View {
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
+            Text(IntensityMinutes.vigorousLine(vitals.intensityMinutes?.vigorous ?? 0))
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -297,6 +301,12 @@ struct WeeklyMinutesCard: View {
             Text("\(minutes.moderate) moderate + \(minutes.vigorous) vigorous ×2, from heart rate over the last 7 days.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
+            // Vigorous minutes on their own line, against one cohort's reference (Ahmadi 2022).
+            Text(IntensityMinutes.vigorousLine(minutes.vigorous))
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("fitness-vigorous-line")
             Text(WeeklyActivityBand.line(total: minutes.total, goals: metrics.goals))
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
