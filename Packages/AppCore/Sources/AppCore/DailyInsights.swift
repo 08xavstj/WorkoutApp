@@ -542,8 +542,8 @@ public enum DailyInsights {
             return Candidate(
                 insight: Insight(
                     id: id, category: .fitness, tone: .good,
-                    title: "\(IntensityMinutes.weeklyGoal) active minutes reached",
-                    comparison: "\(whole(total)) in the last 7 days, \(whole(weekBefore)) the week before. WHO's range is 150-300 a week.",
+                    title: "\(IntensityMinutes.weeklyGoal) cardio minutes reached",
+                    comparison: "\(whole(total)) outside lifting in the last 7 days, \(whole(weekBefore)) the week before. WHO's range is 150-300 a week.",
                     action: nil),
                 variant: "reached", subject: "activeMinutes", strength: 0.3)
         }
@@ -551,8 +551,8 @@ public enum DailyInsights {
             return Candidate(
                 insight: Insight(
                     id: id, category: .fitness, tone: .watch,
-                    title: "Active minutes are low this week",
-                    comparison: "\(whole(total)) in the last 7 days against WHO's 150.",
+                    title: "Cardio minutes are low this week",
+                    comparison: "\(whole(total)) outside lifting in the last 7 days against WHO's 150.",
                     action: "Brisk walking counts: 20 minutes a day reaches 150."),
                 variant: "low", subject: "activeMinutes", strength: 1 - total / goal)
         }

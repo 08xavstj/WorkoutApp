@@ -412,7 +412,10 @@ struct WeeklyReviewView: View {
         var plan = store.plan(for: thisWeek)
             ?? WeeklyPlan(weekStart: thisWeek,
                           plannedDays: store.newWeekDays(from: last?.plannedDays ?? [], weekStart: thisWeek, sessions: sessions),
-                          mode: last?.mode ?? .fixedDays, sessionsPerWeek: last?.sessionsPerWeek, cardio: last?.cardio)
+                          mode: last?.mode ?? .fixedDays, sessionsPerWeek: last?.sessionsPerWeek,
+                          // Two easy sessions unless none was chosen (evidence audit M2).
+                          cardio: EasyCardio.carriedOver(last?.cardio, choiceSaved: UserDefaults.standard.bool(forKey: WeeklyPlanView.cardioChoiceSavedKey),
+                                                         kind: CardioPlanner.recommendedKind(goals: settings.goalsSet ? settings.goals : nil)))
         // Text still in the field counts, as it did when the changes were three text fields.
         if writingCustom { addCustom() }
         plan.changes = Array(changes.prefix(WeeklyChange.maximumCount))

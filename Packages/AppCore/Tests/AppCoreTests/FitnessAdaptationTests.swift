@@ -72,7 +72,28 @@ struct StepGoalTests {
     @Test func growsWithYourHabitFromASevenThousandFloor() {
         #expect(StepGoal.personal(dailySteps: Array(repeating: 7_200, count: 20)) == 8_000)
         #expect(StepGoal.personal(dailySteps: Array(repeating: 3_000, count: 20)) == 7_000)
-        #expect(StepGoal.personal(dailySteps: Array(repeating: 15_000, count: 20)) == 12_000)
+        // Capped at the plateau, 10,000 (was 12,000; evidence audit should-change 1,
+        // Paluch 2022: risk fell until 8,000-10,000 under 60 and 6,000-8,000 from 60).
+        #expect(StepGoal.personal(dailySteps: Array(repeating: 15_000, count: 20)) == 10_000)
+        #expect(StepGoal.personal(dailySteps: Array(repeating: 15_000, count: 20), age: 65) == 8_000)
+        #expect(StepGoal.personal(dailySteps: Array(repeating: 8_400, count: 20), age: 65) == 8_000)
+    }
+
+    /// The studies use average daily steps, so the week is judged, not today.
+    @Test func judgesTheSevenDayAverage() throws {
+        let met = try #require(StepGoal.weekStatus(lastSevenFullDays: [9_000, 7_000, 8_500, 8_100, 8_400, 8_000, 9_800], goal: 8_000))
+        #expect(met.met)
+        #expect(abs(met.average - 8_400) < 1)
+        #expect(met.text.hasPrefix("7-day average 8"))
+        #expect(met.text.hasSuffix("goal reached"))
+        let short = try #require(StepGoal.weekStatus(lastSevenFullDays: [6_000, 7_000, 7_500, 7_100], goal: 8_000))
+        #expect(!short.met)
+        #expect(short.text.hasSuffix("000") && short.text.contains(" of "))
+        // Too few days to judge.
+        #expect(StepGoal.weekStatus(lastSevenFullDays: [9_000, 9_000, 0], goal: 8_000) == nil)
+        // Only the last 7 count: a big day 8 days ago doesn't lift the week.
+        let old = try #require(StepGoal.weekStatus(lastSevenFullDays: [40_000] + Array(repeating: 6_000, count: 7), goal: 8_000))
+        #expect(!old.met)
     }
 }
 
@@ -175,6 +196,15 @@ struct WeeklyActivityBandTests {
         #expect(WeeklyActivityBand.status(total: 299) == .inBand)
         #expect(WeeklyActivityBand.status(total: 300) == .atBest)
         #expect(WeeklyActivityBand.line(total: 90, goals: nil).hasPrefix("90 of the 150-minute"))
+    }
+
+    /// Evidence audit, should-change 7: "the floor is enough; more cardio is
+    /// optional" undersold Lee 2022 and Garcia 2023, so muscle and strength
+    /// goals now read that 150-300 adds a little more and costs no muscle.
+    @Test func strengthGoalsAreNotToldTheFloorIsEnough() {
+        let line = WeeklyActivityBand.line(total: 160, goals: Goals(weight: .maintain, focuses: [.strength]))
+        #expect(line.hasSuffix("150 is the floor; 150-300 adds a little more health benefit and doesn't cost muscle (Schumann 2022)."))
+        #expect(!line.contains("optional"))
     }
 }
 

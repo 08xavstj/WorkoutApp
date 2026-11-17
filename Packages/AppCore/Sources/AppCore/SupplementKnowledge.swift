@@ -50,8 +50,9 @@ public enum SupplementKnowledge {
         public var id: String { rawValue }
     }
 
-    /// One thing a supplement is taken for, with its own grade: ashwagandha is
-    /// moderate for stress and weak for strength, so one grade would mislead.
+    /// One thing a supplement is taken for, with its own grade: omega-3 is
+    /// moderate for triglycerides and shows nothing for heart events in healthy
+    /// people, so one grade would mislead.
     public struct Claim: Sendable, Equatable, Identifiable {
         public var purpose: String
         public var evidence: Evidence
@@ -387,8 +388,11 @@ public enum SupplementKnowledge {
             names: ["ashwagandha", "withania", "ksm", "ksm 66", "ksm66", "sensoril", "shoden", "ashwaganda"],
             category: .sleepAndStress,
             claims: [
-                c("Stress and anxiety", .moderate, "Pooled RCTs show lower perceived stress and anxiety and lower cortisol, but the trials are small, short (6-12 weeks) and often funded by extract makers; certainty was rated low (Akhgarjand 2022; Chandrasekhar 2012)."),
-                c("Sleep", .moderate, "A modest improvement in sleep quality (SMD about -0.6), clearer with 600 mg a day for 8 weeks or more and in people with insomnia (Cheah 2021)."),
+                // Weak, not moderate (evidence audit, should-change 5): the pooled
+                // certainty was rated low and most trials are small and maker-funded,
+                // which is this file's definition of `weak`.
+                c("Stress and anxiety", .weak, "Pooled RCTs show lower perceived stress and anxiety and lower cortisol, but the trials are small, short (6-12 weeks) and often funded by extract makers; certainty was rated low (Akhgarjand 2022; Chandrasekhar 2012)."),
+                c("Sleep", .weak, "A modest improvement in sleep quality (SMD about -0.6), clearer with 600 mg a day for 8 weeks or more and in people with insomnia (Cheah 2021)."),
                 c("Strength and muscle", .weak, "Two 8-12 week RCTs in men who lift found more bench-press strength (Wankhede 2015, 600 mg KSM-66; Ziegenfuss 2018, 500 mg Sensoril); both were small and extract-maker funded. A Bayesian meta-analysis pooled gains in performance (Bonilla 2021) but called for better trials."),
             ],
             dose: "300-600 mg a day of a root extract (KSM-66) or 250-500 mg (Sensoril, root and leaf)",
@@ -513,18 +517,33 @@ public enum SupplementKnowledge {
             names: ["omega 3", "omega3", "fish oil", "epa", "dha", "krill oil", "algae oil", "cod liver oil"],
             category: .recovery,
             claims: [
-                c("Heart and general health", .moderate, "Lowers triglycerides and, at prescription doses, cardiovascular events in people at risk; many athletes have low omega-3 levels (ISSN 2025)."),
+                // Split by the evidence audit (evidence-audit-2026-11.md M6): the event
+                // reduction is from prescription EPA (icosapent ethyl, 4 g/day) in people
+                // with established heart disease or diabetes on statins (REDUCE-IT), and the
+                // 1 g/day primary-prevention trials found no clear benefit (VITAL: HR 0.92,
+                // 0.80-1.06; ASCEND, people with diabetes: rate ratio 0.97). All three
+                // abstracts checked on PubMed November 2026 (PMIDs 30415628, 30415637, 30146932).
+                c("Triglycerides", .moderate, "Lowers blood triglycerides (ISSN 2025)."),
+                c("Heart events in people at high risk (prescription EPA)", .moderate, "Prescription-dose EPA lowered cardiovascular events in people at high risk already on statins (REDUCE-IT). That's a drug-strength product used under a doctor."),
+                c("Heart health in healthy people", .none, "None shown: large trials of 1 g a day in people without heart disease found no clear drop in heart events (VITAL; ASCEND, in people with diabetes)."),
                 c("Muscle soreness", .weak, "Less soreness after hard eccentric exercise in pooled trials, but below the size people notice and rated low quality (Lv 2020)."),
                 c("Performance and muscle growth", .weak, "No clear effect on strength or muscle in young adults; maybe better endurance measures (ISSN 2025)."),
             ],
             dose: "1-2 g a day of EPA + DHA combined (check the label: a 1 g capsule often holds 300 mg)",
             timing: "with a meal containing fat; any time of day",
-            expect: "No felt effect; it's a long-term health habit. Fishy aftertaste is common.",
-            cautions: ["Above 3 g a day can thin blood; ask your doctor if you take anticoagulants. Choose a tested brand (oxidation and contaminants)."],
-            dataNotes: ["Eating oily fish twice a week does the same; your food log won't show EPA/DHA separately."],
+            expect: "No felt effect. In healthy people, trials haven't shown fewer heart events; oily fish twice a week is the food-first option.",
+            cautions: [
+                // Gencer et al., Circulation 2021;144:1981-90 (7 RCTs, 81,210 people): AF HR 1.25
+                // overall, 1.12 at ≤1 g/day, 1.49 above 1 g/day, 1.11 per extra gram (abstract verified on PubMed, PMID 34612056).
+                "In heart trials, fish-oil supplements slightly raised the risk of atrial fibrillation, more above 1 g a day (Gencer 2021). Ask your doctor if you have palpitations or a heart-rhythm condition.",
+                "Above 3 g a day can thin blood; ask your doctor if you take anticoagulants. Choose a tested brand (oxidation and contaminants).",
+            ],
+            dataNotes: ["Oily fish twice a week is the food-first option; your food log won't show EPA/DHA separately."],
             sources: [
                 "Jäger R. et al. J Int Soc Sports Nutr 2025;22:2441775 (ISSN position stand on long-chain omega-3 fatty acids).",
                 "Lv Z.T. et al. Front Physiol 2020;11:188 (omega-3 and muscle soreness after eccentric exercise, meta-analysis).",
+                "Gencer B. et al. Circulation 2021;144:1981-90 (omega-3 supplements and atrial fibrillation in cardiovascular outcome trials, meta-analysis).",
+                "Bhatt D.L. et al. N Engl J Med 2019;380:11-22 (REDUCE-IT, icosapent ethyl); Manson J.E. et al. N Engl J Med 2019;380:23-32 (VITAL); ASCEND Study Collaborative Group. N Engl J Med 2018;379:1540-50 (omega-3 arm).",
                 ioc,
             ]
         ),

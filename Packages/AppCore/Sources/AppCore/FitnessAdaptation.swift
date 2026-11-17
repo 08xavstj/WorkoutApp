@@ -143,7 +143,7 @@ extension StrainCalculator {
 // MARK: - Steps
 
 /// A step goal that grows with you: about 1,000 above your usual day, from
-/// 7,000 up to 12,000.
+/// 7,000 up to 10,000 (8,000 from 60), judged on the week's average.
 ///
 /// - 7,000 a day vs 2,000 was linked with about half the risk of death, and
 ///   gains past 7,000 were modest (Ding et al., Lancet Public Health 2025), so
@@ -153,9 +153,36 @@ extension StrainCalculator {
 ///   under 60 and 7,000 from 60.
 /// - The +1,000 step is a behaviour choice: small, reachable goals are the ones
 ///   people keep.
+/// - The goal stops at the plateau: 10,000 under 60 and 8,000 from 60, the top
+///   of Paluch 2022's bands (abstract checked on PubMed November 2026); it was
+///   12,000. Ding 2025 found the curve bending at 5,000-7,000 and "10 000 can
+///   still be a viable target for those who are more active" (verified by the
+///   evidence audit). Both studies use average daily steps, so the goal is
+///   judged on the last 7 full days, not on today (`weekStatus`).
 public enum StepGoal {
     public static let minimumGoal = 7_000.0
-    public static let maximumGoal = 12_000.0
+    public static let maximumGoal = 10_000.0
+    /// The cap from age 60 (Paluch 2022: 6,000-8,000).
+    public static let maximumGoalFrom60 = 8_000.0
+
+    public static func maximum(age: Int) -> Double {
+        age >= 60 ? maximumGoalFrom60 : maximumGoal
+    }
+
+    /// Full days needed before the week is judged (app's choice).
+    public static let minimumWeekDays = 4
+
+    /// The last 7 full days' average against the goal: "7-day average 8,400 ·
+    /// goal reached" or "7-day average 6,900 of 8,000". Nil with fewer than
+    /// `minimumWeekDays` days.
+    public static func weekStatus(lastSevenFullDays: [Double], goal: Double) -> (average: Double, text: String, met: Bool)? {
+        let days = lastSevenFullDays.suffix(7).filter { $0 > 0 }
+        guard days.count >= minimumWeekDays, goal > 0 else { return nil }
+        let average = days.reduce(0, +) / Double(days.count)
+        let shown = Int(average.rounded()).formatted(.number.grouping(.automatic))
+        let met = average >= goal
+        return (average, met ? "7-day average \(shown) · goal reached" : "7-day average \(shown) of \(Int(goal).formatted(.number.grouping(.automatic)))", met)
+    }
 
     /// Goal before there are two weeks of steps.
     public static func standard(age: Int) -> Double {
@@ -168,7 +195,7 @@ public enum StepGoal {
         guard days.count >= 14 else { return standard(age: age) }
         let median = days[days.count / 2]
         let goal = ((median + 1000) / 500).rounded() * 500
-        return min(maximumGoal, max(minimumGoal, goal))
+        return min(maximum(age: age), max(minimumGoal, goal))
     }
 }
 
@@ -295,8 +322,8 @@ public enum WeeklyActivityBand {
     }
 
     /// Health, stamina and weight-loss goals aim at the top of the band and
-    /// see it high on the Fitness tab; muscle and strength goals need only the
-    /// floor and more cardio is optional (health-metrics.md §1: He/En/L → 300,
+    /// see it high on the Fitness tab; muscle and strength goals see it as a
+    /// line with the floor as the target (health-metrics.md §1: He/En/L → 300,
     /// others → 150). No goals set counts as general health.
     public static func emphasis(for goals: Goals?) -> Emphasis {
         guard let goals else { return .primary }
@@ -326,7 +353,11 @@ public enum WeeklyActivityBand {
     public static func line(total: Int, goals: Goals?) -> String {
         let goalPart: String = emphasis(for: goals) == .primary
             ? "For your goal, aim toward \(bestMinutes): risk kept falling to about there in a 30-year cohort (Lee 2022)."
-            : "For your goal the \(floorMinutes)-minute floor is enough; more cardio is optional."
+            // Not "enough": for health, 2-4 times the minimum went with 3-13% lower
+            // mortality (Lee 2022) and Garcia 2023 found smaller further gains up to
+            // twice the floor, and cardio alongside lifting doesn't cost muscle
+            // (Schumann 2022: hypertrophy SMD −0.01). Evidence audit, should-change 7.
+            : "\(floorMinutes) is the floor; \(floorMinutes)-\(bestMinutes) adds a little more health benefit and doesn't cost muscle (Schumann 2022)."
         switch status(total: total) {
         case .belowFloor:
             return "\(total) of the \(floorMinutes)-minute WHO floor this week (vigorous counts double). \(goalPart)"

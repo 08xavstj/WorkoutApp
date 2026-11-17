@@ -103,7 +103,7 @@ public enum HealthFloors {
 
         public var title: String {
             switch self {
-            case .activeMinutes: "Active minutes"
+            case .activeMinutes: IntensityMinutes.title
             case .strengthDays: "Strength days"
             case .steps: "Steps"
             case .sleepRegularity: "Sleep regularity"

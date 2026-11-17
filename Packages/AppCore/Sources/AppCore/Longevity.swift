@@ -415,14 +415,14 @@ public enum Longevity {
     static func activeMinutes(_ i: Inputs) -> Measure {
         let target = activeMinutesTarget(goals: i.goals)
         var measure = Measure(
-            id: .activeMinutes, area: .movement, title: "Active minutes", valueText: nil,
+            id: .activeMinutes, area: .movement, title: IntensityMinutes.title, valueText: nil,
             targetText: "\(target) a week or more" + (target > IntensityMinutes.weeklyGoal ? " (the top of WHO's range, for your stamina goal)" : ""),
             status: .noData,
             standing: "No heart-rate minutes yet.",
             nextStep: "Wear your watch during the day and in workouts.",
             why: "Meeting the activity guideline is linked with about 20% lower risk of early death. Hard minutes count double.",
             grade: .strong,
-            gradeNote: "A WHO guideline built on many cohorts, plus a 30-year cohort. Observational. Minutes here come from your heart rate, so lifting counts when it raises it.",
+            gradeNote: "A WHO guideline built on many cohorts, plus a 30-year cohort. Observational. Minutes here come from your heart rate outside lifting: the guideline is for aerobic activity, and lifting has its own (Strength days).",
             sources: [
                 Source("Bull et al., Br J Sports Med 2020;54:1451", kind: "WHO guideline",
                        finding: "Adults: 150-300 minutes of moderate or 75-150 minutes of vigorous activity a week, plus muscle strengthening."),

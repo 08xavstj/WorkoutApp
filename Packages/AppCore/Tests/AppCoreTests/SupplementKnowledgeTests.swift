@@ -69,16 +69,34 @@ struct SupplementKnowledgeTests {
         #expect(SupplementKnowledge.match("tribulus")?.evidence == SupplementKnowledge.Evidence.none)
     }
 
-    @Test func ashwagandhaIsModerateForStressAndWeakForStrength() throws {
+    /// Stress and sleep were "moderate" until the evidence audit (should-change 5):
+    /// the pooled certainty was rated low and the trials are small and maker-funded,
+    /// which is this file's definition of weak.
+    @Test func ashwagandhaIsWeakForStressSleepAndStrength() throws {
         let entry = try #require(SupplementKnowledge.match("ashwagandha"))
         let strength = try #require(entry.claims.first { $0.purpose.contains("Strength") })
         let stress = try #require(entry.claims.first { $0.purpose.contains("Stress") })
+        let sleep = try #require(entry.claims.first { $0.purpose.contains("Sleep") })
         #expect(strength.evidence == .weak)
-        #expect(stress.evidence == .moderate)
-        #expect(entry.evidence == .moderate)
+        #expect(stress.evidence == .weak)
+        #expect(sleep.evidence == .weak)
+        #expect(entry.evidence == .weak)
         #expect(entry.cautions.contains { $0.localizedCaseInsensitiveContains("liver") })
         #expect(entry.cautions.contains { $0.localizedCaseInsensitiveContains("pregnancy") })
         #expect(entry.cautions.contains { $0.localizedCaseInsensitiveContains("thyroid") })
+    }
+
+    /// Evidence audit M6: the old "Heart and general health: moderate" claim
+    /// is split, and the atrial-fibrillation risk is a caution (Gencer 2021).
+    @Test func omega3SplitsHeartClaimsAndWarnsOfAtrialFibrillation() throws {
+        let entry = try #require(SupplementKnowledge.match("fish oil"))
+        func grade(_ purpose: String) -> SupplementKnowledge.Evidence? { entry.claims.first { $0.purpose == purpose }?.evidence }
+        #expect(grade("Triglycerides") == .moderate)
+        #expect(grade("Heart events in people at high risk (prescription EPA)") == .moderate)
+        #expect(grade("Heart health in healthy people") == SupplementKnowledge.Evidence.none)
+        #expect(grade("Heart and general health") == nil)
+        #expect(entry.expect.hasPrefix("No felt effect. In healthy people, trials haven't shown fewer heart events"))
+        #expect(entry.cautions.contains { $0.contains("atrial fibrillation") && $0.contains("Gencer 2021") })
     }
 
     @Test func evidenceOrderingAndCategories() {
