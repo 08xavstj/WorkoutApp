@@ -656,15 +656,8 @@ struct WorkoutBuilderView: View {
         // Without the title, muscles and block week: the card shows those already.
         let detail = plan.rationaleDetail
         if !detail.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Why this session")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
-                Text(detail)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            // Folded: the stats and block line above say what today is; the reasoning is one tap away.
+            EvidenceDisclosure(points: [detail], title: "Why this session")
         }
     }
 
