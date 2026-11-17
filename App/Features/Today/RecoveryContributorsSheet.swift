@@ -32,6 +32,12 @@ struct RecoveryContributorsSheet: View {
                                 .foregroundStyle(Theme.secondaryText)
                         }
                     }
+                    if metrics.recoveryIsFromYesterday {
+                        Text("This is yesterday's score. Today's appears once last night's sleep is recorded.")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if items.isEmpty {
                         Text("Nothing to explain yet. Recovery needs a couple of weeks of nights to learn your normal HRV and resting heart rate.")
                             .font(.subheadline)

@@ -253,7 +253,7 @@ final class ScreenshotTests: XCTestCase {
                 capture(app, "settings-\(inner.name)", pages: 1)
                 back(app)
             }
-            if section.name == "training", tap(app, ["What's RPE?", "RPE guide", "How RPE works", "Reps left guide"], name: "Settings RPE guide") {
+            if section.name == "training", tap(app, ["settings-reps-left-guide", "Reps left guide"], name: "Settings reps-left guide") {
                 capture(app, "settings-rpe-guide", pages: 1)
                 dismissSheet(app)
             }

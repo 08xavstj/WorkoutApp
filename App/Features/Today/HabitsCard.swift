@@ -70,13 +70,14 @@ final class TodayHabits {
         let preWorkoutLine: String
         if let trainingMinutes, trainingMinutes > preWorkout {
             let time = CaffeineTiming.clockText(trainingMinutes)
-            preWorkoutLine = "Training at \(time): choose a caffeine-free pre-workout."
+            preWorkoutLine = "Training at \(time): caffeine-free pre-workout."
         } else {
             preWorkoutLine = "Pre-workout by \(CaffeineTiming.clockText(preWorkout))."
         }
         // Hours from the cut-off to bed, wrapping past midnight.
         let gap = Double(((bedtime - coffee) % 1440 + 1440) % 1440) / 60
-        let gapLine = "That's about \(Self.halfHours(gap)) h before your usual \(bed) bedtime; caffeine later than this cut sleep by about 45 min in studies."
+        // One short line on Up next; the study (Gardiner 2023) is in the evening check-in's evidence note.
+        let gapLine = "About \(Self.halfHours(gap)) h before your usual \(bed) bedtime."
         return Caffeine(
             isLate: false,
             title: "Last coffee by \(CaffeineTiming.clockText(coffee))",

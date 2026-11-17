@@ -128,11 +128,8 @@ final class DailyMetricsModel {
     /// needs explaining: yesterday's score before you wake, or sleep only.
     var recoveryNote: String? {
         guard let recovery else { return nil }
-        if recoveryIsFromYesterday {
-            // In the morning you're awake and the watch simply hasn't synced or wasn't worn.
-            let hour = Calendar.current.component(.hour, from: .now)
-            return hour >= RecoveryTiming.earliestWakeHour + 3 ? "Yesterday · waiting for last night's sleep" : "Yesterday · updates when you wake"
-        }
+        // One word under the ring, so the three rings stay level; the recovery sheet says why.
+        if recoveryIsFromYesterday { return "Yesterday" }
         if recovery.isSleepOnly { return "Sleep-only estimate" }
         return nil
     }
@@ -482,7 +479,7 @@ final class DailyMetricsModel {
         }
         if let strain = strainBeforeScoredNight, strain >= 70 {
             items.append(RecoveryContributor(
-                id: "yesterday", name: recoveryIsFromYesterday ? "The day before's training" : "Yesterday's training",
+                id: "yesterday", name: recoveryIsFromYesterday ? "Training the day before" : "Yesterday's training",
                 detail: "Strain \(Int(strain.rounded()))%: a hard day usually lowers HRV and raises resting heart rate the next morning.",
                 effect: .lowers
             ))

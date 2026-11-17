@@ -310,6 +310,7 @@ private struct TrainingSettingsSection: View {
             Button(action: showRPEGuide) {
                 LabeledContent("Reps left guide", value: "How the rating works")
             }
+            .accessibilityIdentifier("settings-reps-left-guide") // UI tests (ScreenshotTests)
             LiftingExperienceRows()
             EvidenceDisclosure(points: Self.details, title: "How these work")
         } header: {
