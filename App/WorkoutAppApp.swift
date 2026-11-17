@@ -344,6 +344,8 @@ struct RootView: View {
             setRestMode: { metrics.restMode = settings.isRestMode },
             markBiologyStale: { biology.markStale() }
         ))
+        // [Widgets] Plan, queue and rest-mode changes reach the widgets and the watch face at once.
+        .modifier(GlanceReactions(router: router, plans: weeklyPlans, restModeUntil: settings.restModeUntil, update: updateGlances))
     }
 
     /// UI tests pass `-skipHealthPrompt YES` to act like a phone that has
@@ -519,21 +521,37 @@ struct RootView: View {
         let hrv = metrics.recoveryIsFromYesterday ? typedOvernight : metrics.hrv
         let strain = metrics.strain?.strain
         let hasStrainData = (strain ?? 0) > 0 || metrics.todaysHeartRateReadings > 0 || !metrics.activities.isEmpty
-        Reminders.updateWidget(WidgetSnapshot(
+        let snapshot = WidgetSnapshot(
             updated: .now,
             hrv: hrv,
             hrvDate: hrv != nil ? calendar.startOfDay(for: .now) : nil,
             recovery: metrics.recoveryIsFromYesterday ? nil : metrics.recovery?.score,
             strain: hasStrainData ? strain : nil,
             logsHRV: hrvReadings.contains { $0.date >= (calendar.date(byAdding: .day, value: -14, to: .now) ?? .now) }
-        ))
+        )
+        // [Widgets] Today's plan, sleep and the strain target for the Plan and Scores widgets (`GlanceFeed`).
+        Reminders.updateWidget(GlanceFeed.completed(snapshot, metrics: metrics, plan: glancePlan()))
     }
 
     /// [Watch complications] Recovery, strain and the next planned session for the watch face (`WatchFaceData`).
     private func updateWatchFace() {
         guard metrics.errorMessage == nil, metrics.lastUpdated != nil else { return }
         let lastWorkoutEnd = sessions.lazy.compactMap(\.endedAt).max()
-        WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd)
+        WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd, glance: glancePlan())
+    }
+
+    /// [Widgets] The plan the iPhone widgets and the watch face both show (`PlanGlance`).
+    private func glancePlan() -> PlanGlance.Plan {
+        GlanceFeed.plan(plans: weeklyPlans, metrics: metrics, checkIns: checkIns, muscles: muscles,
+                        sessions: sessions, restMode: settings.isRestMode)
+    }
+
+    /// [Widgets] The plan, the week's queue or rest mode changed, or the app left the
+    /// screen: the widgets and the watch face are rewritten now, not at the next refresh.
+    private func updateGlances() {
+        metrics.restMode = settings.isRestMode
+        updateWidget()
+        updateWatchFace()
     }
 
     // MARK: - Reminders: one morning, one evening, workouts before planned slots only

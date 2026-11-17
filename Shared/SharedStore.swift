@@ -43,6 +43,19 @@ nonisolated struct WidgetSnapshot: Codable, Sendable, Equatable {
     /// The user types or measures HRV in the app (recent readings), so the widget
     /// may ask for one; nil (older snapshots) counts as yes. Watch users aren't asked.
     var logsHRV: Bool? = nil
+    // Added with the Plan and Scores widgets. All optional, so a snapshot an
+    // older build saved still decodes (and reads as "--" where it has nothing).
+    /// Today's plan for the Plan widget (`PlanGlance`); its `updated` is this snapshot's.
+    var plan: PlanGlance.Plan? = nil
+    /// Last night's sleep score, 0-100 (nil until the night is recorded).
+    var sleep: Int? = nil
+    /// `RecoveryCalculator.Status.rawValue`: "low", "moderate" or "high".
+    var band: String? = nil
+    /// True while the recovery baseline is still building.
+    var calibrating: Bool? = nil
+    /// Today's strain target (`DailyMetricsModel.targetStrain`).
+    var targetLower: Double? = nil
+    var targetUpper: Double? = nil
 
     static let key = "widgetSnapshot"
 

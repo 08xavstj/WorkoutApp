@@ -15,6 +15,8 @@ nonisolated struct WatchFaceData: Codable, Sendable, Equatable {
         var shortTitle: String
         /// SF Symbol for the focus.
         var symbol: String?
+        /// Planned length. Optional: older data has none.
+        var minutes: Int? = nil
     }
 
     /// Today's recovery, 0-100 (nil: not scored yet).
@@ -35,6 +37,24 @@ nonisolated struct WatchFaceData: Codable, Sendable, Equatable {
     /// When the last gym session logged on the phone ended.
     var lastWorkoutEnd: Date?
     var updated: Date
+    // Added with the plan complication's bed-by window, week count and "--"
+    // rules (`PlanGlance`, compiled into the Watch widgets). All optional, so
+    // data an older build stored still decodes; the complication then falls
+    // back to the sessions alone.
+    /// The app called the day this was written a rest day (rest mode, or the day's guidance).
+    var restToday: Bool? = nil
+    /// Tonight's bed-by window (`BedtimeWindow`).
+    var bedByStart: Date? = nil
+    var bedByEnd: Date? = nil
+    /// Sessions done and planned in the week this was written in.
+    var weekDone: Int? = nil
+    var weekPlanned: Int? = nil
+    /// End of that week (the next Monday 00:00).
+    var weekEnd: Date? = nil
+    /// That week has a plan with sessions.
+    var hasPlan: Bool? = nil
+    /// `PlanGlance.NextWeek.rawValue` for the week after: "unplanned", "planned" or "open".
+    var nextWeek: String? = nil
 
     /// The recovery band as the app words it.
     var bandLabel: String? {
@@ -62,6 +82,9 @@ nonisolated struct WatchFaceData: Codable, Sendable, Equatable {
     func looksSame(as other: WatchFaceData, calendar: Calendar = .current) -> Bool {
         recovery == other.recovery && band == other.band && calibrating == other.calibrating
             && easyDay == other.easyDay && slots == other.slots && lastWorkoutEnd == other.lastWorkoutEnd
+            && restToday == other.restToday && bedByStart == other.bedByStart && bedByEnd == other.bedByEnd
+            && weekDone == other.weekDone && weekPlanned == other.weekPlanned && weekEnd == other.weekEnd
+            && hasPlan == other.hasPlan && nextWeek == other.nextWeek
             && Self.withinAPoint(strain, other.strain)
             && Self.withinAPoint(targetLower, other.targetLower)
             && Self.withinAPoint(targetUpper, other.targetUpper)
@@ -166,16 +189,31 @@ nonisolated enum WatchFaceStore {
         return try? JSONDecoder().decode(WatchFaceData.self, from: data)
     }
 
-    /// Saves newer data. Returns true when the face would look different
-    /// (so the complications are worth reloading), false when the data was
-    /// older or only its timestamp moved.
+    /// The timestamp the complications were last reloaded with may lag the
+    /// phone's by this much before they are reloaded for the timestamp alone:
+    /// strain goes blank once its timestamp is 3 hours old
+    /// (`GlanceFreshness.strainMaxAge`), so timeline entries must not keep an
+    /// old timestamp for long. App's choice.
+    static let timestampReloadAge: TimeInterval = 3600
+    /// `updated` of the data the complications were last reloaded for.
+    static let reloadedKey = "watchFaceReloadedFor"
+
+    /// Saves newer data. Returns true when the complications are worth
+    /// reloading: the face would look different, or the entries on the face
+    /// carry a timestamp over an hour behind. False when the data was older or
+    /// only its timestamp moved a little.
     @discardableResult
     static func save(_ value: WatchFaceData) -> Bool {
         let current = load()
         if let current, current.updated >= value.updated { return false }
         guard let data = try? JSONEncoder().encode(value) else { return false }
         defaults.set(data, forKey: key)
-        return current.map { !value.looksSame(as: $0) } ?? true
+        let reloadedFor = defaults.object(forKey: reloadedKey) as? Date
+        let looksDifferent = current.map { !value.looksSame(as: $0) } ?? true
+        let timestampBehind = reloadedFor.map { value.updated.timeIntervalSince($0) >= timestampReloadAge } ?? true
+        guard looksDifferent || timestampBehind else { return false }
+        defaults.set(value.updated, forKey: reloadedKey)
+        return true
     }
 
     static var watchWorkoutEnd: Date? {
