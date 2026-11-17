@@ -487,6 +487,8 @@ extension CoachView {
         let tired = muscles.states.values.filter { $0.status == .fatigued }.map(\.muscle.name)
         if !tired.isEmpty { lines.append("Fatigued muscles: " + tired.sorted().joined(separator: ", ") + ".") }
         lines.append(contentsOf: habitLines)
+        // This week's changes as the Insights feed has them (`DailyInsights`), once the Health tab has worked them out.
+        if let insights = InsightsFeedStore.shared.feed?.coachSummary() { lines.append(insights) }
         return lines.joined(separator: "\n")
     }
 }
