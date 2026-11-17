@@ -148,6 +148,7 @@ final class UserSettings {
 
     /// Workout reminders 30 minutes before a planned slot (they pause by
     /// themselves after two go unanswered; see `Reminders.WorkoutReminderLog`).
+    /// Off by default (docs/research/evidence-audit-2026-11.md, M4).
     var workoutRemindersOn: Bool { didSet { defaults.set(workoutRemindersOn, forKey: "workoutRemindersOn") } }
     /// The workout reminder's voice (`WorkoutBanter`): playful unless switched to plain.
     var workoutReminderTone: WorkoutBanter.Tone { didSet { defaults.set(workoutReminderTone.rawValue, forKey: "workoutReminderTone") } }
@@ -244,7 +245,9 @@ final class UserSettings {
         eveningCheckInMinutes = defaults.object(forKey: "eveningCheckInMinutes") as? Int ?? 21 * 60 + 30
         weeklyReviewOn = defaults.bool(forKey: "weeklyReviewOn")
         weeklyReviewMinutes = defaults.object(forKey: "weeklyReviewMinutes") as? Int ?? 8 * 60
-        workoutRemindersOn = defaults.object(forKey: "workoutRemindersOn") as? Bool ?? true
+        // Off unless switched on (evidence audit M4: clock reminders by default don't suit an established
+        // lifter; Buyalskaya et al. 2023). A stored choice is kept; Playful stays the style once on.
+        workoutRemindersOn = defaults.object(forKey: "workoutRemindersOn") as? Bool ?? false
         workoutReminderTone = WorkoutBanter.Tone(rawValue: defaults.string(forKey: "workoutReminderTone") ?? "") ?? .playful
         workoutReminderFreshLines = defaults.object(forKey: "workoutReminderFreshLines") as? Bool ?? true
         weighInNudgeDay = defaults.object(forKey: "weighInNudgeDay") as? Date

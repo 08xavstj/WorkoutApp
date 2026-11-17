@@ -186,6 +186,9 @@ public enum WorkoutBanter {
         public var daysSinceLastSession: Int?
         public var sessionsDone: Int?
         public var sessionsPlanned: Int?
+        /// Days left in the plan's week, the session's day included (Monday
+        /// to Sunday). A week-start line needs room for every planned session.
+        public var daysLeftInWeek: Int?
         /// Weeks in a row the plan was kept (`Consistency.weekKept`). Only ever
         /// shown while it stands; a broken run is never mentioned
         /// (Silverman & Barasch, J Consum Res 2023, via behaviour-change.md).
@@ -223,6 +226,14 @@ public enum WorkoutBanter {
             if isRestDay { return .restDay }
             if keepPlain { return .keepPlain }
             return nil
+        }
+
+        /// A caution that means the reminder must not push at all: the
+        /// if-then line is left out and the plain line is always said. Not
+        /// `keepPlain`: there the session stands and only the jokes stop.
+        public var noPush: Bool {
+            guard let caution else { return false }
+            return caution != .keepPlain
         }
 
         /// Sessions still to do this week, when both counts are known.
@@ -274,7 +285,9 @@ public enum WorkoutBanter {
         }
         if let done = facts.sessionsDone, let planned = facts.sessionsPlanned, planned >= 2, done < planned {
             if done == 0 {
-                result.insert(.weekStart)
+                // "The first of 4 this week" only while the week can still hold all 4
+                // (on its first planned day at the latest); later it reads as a count of what's missing.
+                if let daysLeft = facts.daysLeftInWeek, daysLeft >= planned { result.insert(.weekStart) }
             } else if planned - done == 1 {
                 result.insert(.lastOfWeek)
             } else {
@@ -549,7 +562,9 @@ public enum WorkoutBanter {
     /// just sent; then, while anything is left, not the last register, not
     /// the last opening, not the last prop, not the last situation. Among
     /// what remains, lines that use more of the day's data are likelier.
-    public static func pick(facts: Facts, tone: Tone, history: History, seed: UInt64,
+    /// - Parameter held: lines other pending reminders hold, left out while
+    ///   anything else fits, so the same line can't go out twice in a few days.
+    public static func pick(facts: Facts, tone: Tone, history: History, seed: UInt64, held: [Pick] = [],
                             library: [Line] = WorkoutBanterLibrary.all) -> Pick {
         let all = eligible(facts: facts, tone: tone, library: library)
         guard !all.isEmpty else {
@@ -571,6 +586,8 @@ public enum WorkoutBanter {
         let recentIDs = Set(history.entries.suffix(recentWindow).map(\.lineID))
         let recentTexts = Set(history.entries.suffix(recentWindow).map(\.text))
         narrow { !recentIDs.contains($0.line.id) && !recentTexts.contains($0.text) }
+        let heldIDs = Set(held.map(\.lineID)), heldTexts = Set(held.map(\.text))
+        narrow { !heldIDs.contains($0.line.id) && !heldTexts.contains($0.text) }
         if let last = history.entries.last {
             narrow { $0.line.id != last.lineID && $0.text != last.text }
             narrow { $0.line.register.rawValue != last.register }
@@ -683,8 +700,11 @@ public enum WorkoutBanter {
     ///   true: same tone, still fits the day, same words when filled in again.
     ///   One written ahead is rewritten once on its own day.
     /// - A new line is picked as if the earlier pending reminders had already
-    ///   gone out, so the week ahead doesn't repeat itself.
-    public static func reconcile(_ store: Store, requests: [DayRequest], tone: Tone, now: Date,
+    ///   gone out, so the week ahead doesn't repeat itself, and never one a
+    ///   later reminder keeps while anything else fits.
+    /// - Parameter freshLines: the on-device model may write lines (switched
+    ///   on and available). When not, a model's line still pending goes.
+    public static func reconcile(_ store: Store, requests: [DayRequest], tone: Tone, now: Date, freshLines: Bool = true,
                                  library: [Line] = WorkoutBanterLibrary.all) -> Store {
         var result = Store()
         result.history = store.history
@@ -692,16 +712,26 @@ public enum WorkoutBanter {
         for assigned in delivered where !result.history.entries.contains(where: { $0.dayKey == assigned.dayKey }) {
             result.history.record(assigned.pick.entry(dayKey: assigned.dayKey))
         }
-        var ahead = result.history
-        for request in requests.sorted(by: { $0.fire < $1.fire }) where request.fire > now {
-            let existing = store.pending.first { $0.dayKey == request.dayKey && $0.fire > now }
-            var assigned: Assigned
-            if let existing, stillTrue(existing, facts: request.facts, tone: tone, library: library),
+        let upcoming = requests.sorted(by: { $0.fire < $1.fire }).filter { $0.fire > now }
+        // First which pending lines stay, so a new pick can stay clear of all of them.
+        var kept: [String: Assigned] = [:]
+        for request in upcoming {
+            if let existing = store.pending.first(where: { $0.dayKey == request.dayKey && $0.fire > now }),
+               stillTrue(existing, facts: request.facts, tone: tone, freshLines: freshLines, library: library),
                !(existing.ahead && request.isToday) {
+                kept[request.dayKey] = existing
+            }
+        }
+        var ahead = result.history
+        for request in upcoming {
+            var assigned: Assigned
+            if let existing = kept[request.dayKey] {
                 assigned = existing
                 assigned.fire = request.fire
             } else {
-                let chosen = pick(facts: request.facts, tone: tone, history: ahead, seed: seed(for: request.dayKey), library: library)
+                let held = kept.filter { $0.key != request.dayKey }.values.map(\.pick)
+                let chosen = pick(facts: request.facts, tone: tone, history: ahead, seed: seed(for: request.dayKey), held: held,
+                                  library: library)
                 assigned = Assigned(dayKey: request.dayKey, fire: request.fire, pick: chosen, tone: tone, ahead: !request.isToday)
             }
             ahead.record(assigned.pick.entry(dayKey: request.dayKey))
@@ -711,12 +741,13 @@ public enum WorkoutBanter {
     }
 
     /// Whether a pending line can stay: same tone, its situation still fits,
-    /// and it reads the same with today's facts (a model's line: the facts it
-    /// was written from are unchanged and it still passes every check).
-    static func stillTrue(_ assigned: Assigned, facts: Facts, tone: Tone, library: [Line]) -> Bool {
+    /// and it reads the same with today's facts (a model's line: fresh lines
+    /// are still on, the facts it was written from are unchanged and it still
+    /// passes every check).
+    static func stillTrue(_ assigned: Assigned, facts: Facts, tone: Tone, freshLines: Bool = true, library: [Line]) -> Bool {
         guard assigned.tone == tone else { return false }
         if assigned.isGenerated {
-            return tone == .playful && facts.caution == nil && !facts.lastCall
+            return freshLines && tone == .playful && facts.caution == nil && !facts.lastCall
                 && assigned.modelAsked == WorkoutBanterPrompt.signature(facts)
                 && WorkoutBanterGuard.problems(in: assigned.pick.text, facts: facts).isEmpty
         }
@@ -743,14 +774,26 @@ public enum WorkoutBanter {
     /// Notes that the model was asked for `dayKey`'s reminder and, when its
     /// line passed every check (`WorkoutBanterGuard.acceptGenerated`), puts
     /// that line in. The library line it replaces was never sent, so it isn't used up.
-    public static func applyGenerated(_ store: Store, dayKey: String, facts: Facts, accepted: String?) -> Store {
+    ///
+    /// The model takes seconds, and the reminder may be rescheduled meanwhile.
+    /// So nothing changes when the pending line is no longer the one the
+    /// model was asked about (`askedFor`), and the model's line goes in only
+    /// if it is still true for the facts as they stand now (`currentFacts`).
+    public static func applyGenerated(_ store: Store, dayKey: String, facts: Facts, accepted: String?,
+                                      askedFor: Assigned? = nil, currentFacts: Facts? = nil, freshLines: Bool = true,
+                                      library: [Line] = WorkoutBanterLibrary.all) -> Store {
         var result = store
         guard let index = result.pending.firstIndex(where: { $0.dayKey == dayKey }) else { return store }
+        let pending = result.pending[index]
+        if let askedFor, pending.pick != askedFor.pick || pending.tone != askedFor.tone || pending.modelAsked != askedFor.modelAsked {
+            return store
+        }
         result.pending[index].modelAsked = WorkoutBanterPrompt.signature(facts)
         guard let accepted else { return result }
-        let old = result.pending[index].pick
-        result.pending[index].pick = Pick(lineID: generatedPrefix + dayKey, situation: old.situation,
-                                          register: "generated", text: accepted)
+        var updated = result.pending[index]
+        updated.pick = Pick(lineID: generatedPrefix + dayKey, situation: pending.pick.situation, register: "generated", text: accepted)
+        guard stillTrue(updated, facts: currentFacts ?? facts, tone: updated.tone, freshLines: freshLines, library: library) else { return result }
+        result.pending[index] = updated
         return result
     }
 }

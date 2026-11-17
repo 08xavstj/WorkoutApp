@@ -50,7 +50,9 @@ struct WorkoutBanterTests {
         switch situation {
         case .stuckLift: facts.lift?.weeksAtWeight = 3
         case .longBreak: facts.daysSinceLastSession = 30
-        case .weekStart: facts.sessionsDone = 0
+        case .weekStart:
+            facts.sessionsDone = 0
+            facts.daysLeftInWeek = 6
         case .lastOfWeek: facts.sessionsDone = 4
         case .afterVolume: facts.standout?.recordLift = nil
         case .deload: facts.isDeloadWeek = true
@@ -388,6 +390,7 @@ struct WorkoutBanterTests {
         facts.hour = day % 3 == 0 ? 7 : (day % 3 == 1 ? 13 : 19)
         facts.sessionsPlanned = 4
         facts.sessionsDone = min(3, weekday * 4 / 7)
+        facts.daysLeftInWeek = 7 - weekday
         let week = day / 7
         facts.isDeloadWeek = week % 6 == 5
         if week >= 2 { facts.weeksInARow = (week % 13) + 1 }
@@ -550,6 +553,15 @@ struct WorkoutBanterTests {
         "Here's a line: Upper A in 30 minutes. The barbell is ready.",
         "Upper A in 30 minutes. Even the owl from that language app is impressed.",
         "Upper A in 30 minutes. Don't break your streak now.",
+        // Skipping, quitting and thin-limb jokes (review findings).
+        "Upper A in 30 minutes. Never skip leg day, as the barbell says.",
+        "Upper A in 30 minutes. Don't skip it, bro.",
+        "Upper A in 30 minutes. Don't miss it, the rack is waiting.",
+        "Last time you quit early. Upper A in 30 minutes, the bar is ready.",
+        "Upper A in 30 minutes. The rack never gave up on the barbell.",
+        "Upper A in 30 minutes. No noodle legs on this barbell's watch.",
+        "Upper A in 30 minutes. The barbell says chicken legs are a myth.",
+        "Upper A in 30 minutes. The plates refuse to stay puny.",
         "Upper A in {lead} minutes. The barbell is ready.",
         "Go.",
         "Upper A in 30 minutes. One. Two. Many. Sentences. Here.",
@@ -726,6 +738,127 @@ struct WorkoutBanterTests {
         #expect(WorkoutBanterFacts.neglected(lastTrained: [.abdominals: date(day: 1), .glutes: date(day: 2)], now: now, calendar: calendar) == nil)
         #expect(WorkoutBanterFacts.neglected(lastTrained: [.chest: date(day: 1).addingTimeInterval(-90 * 86_400)], now: now, calendar: calendar) == nil)
         #expect(WorkoutBanterFacts.neglected(lastTrained: [.middleBack: date(day: 10)], now: now, calendar: calendar)?.muscle == "upper back")
+    }
+
+    @Test func theLiftIsOneTodaysSessionTrains() throws {
+        let now = date(day: 30)
+        // Bench press stuck for three weeks, back squat close to its best.
+        let log = [session(4, [("Bench Press", 82.5, 5), ("Back Squat", 100, 5)]), session(11, [("Bench Press", 82.5, 5), ("Back Squat", 102.5, 5)]),
+                   session(18, [("Bench Press", 82.5, 5), ("Back Squat", 105, 5)]), session(25, [("Bench Press", 82.5, 5), ("Back Squat", 107.5, 5)])]
+        let primary: [String: [Muscle]] = ["bench press": [.chest], "back squat": [.quadriceps]]
+        func lift(on focus: WorkoutFocus) -> WorkoutBanter.Lift? {
+            WorkoutBanterFacts.lift(sessions: log, now: now, nextWeightKg: { _, kg in kg + 2.5 },
+                                    inSession: { WorkoutBanterFacts.trains(focus, primary: primary[$0] ?? []) })
+        }
+        #expect(try #require(lift(on: .push)).name == "Bench Press")
+        #expect(try #require(lift(on: .legs)).name == "Back Squat", "leg day never hears about the bench")
+        #expect(lift(on: .pull) == nil, "nothing trained on a pull day: no lift line")
+        #expect(try #require(lift(on: .fullBody)).name == "Bench Press", "the stuck one first when both are in the session")
+        // What each focus trains first.
+        #expect(WorkoutBanterFacts.trains(.upper, primary: [.biceps]))
+        #expect(!WorkoutBanterFacts.trains(.lower, primary: [.chest]))
+        #expect(!WorkoutBanterFacts.trains(.fullBody, primary: []), "unknown muscles: left out")
+        #expect(WorkoutBanterFacts.catalogPrimary("Barbell_Squat") == [.quadriceps])
+        #expect(WorkoutBanterFacts.catalogPrimary("Barbell_Bench_Press_-_Medium_Grip") == [.chest])
+        #expect(WorkoutBanterFacts.catalogPrimary("not-a-lift").isEmpty)
+    }
+
+    @Test func aWeekStartLineOnlyWhileTheWeekCanHoldEverySession() {
+        var facts = base()
+        facts.sessionsDone = 0
+        facts.sessionsPlanned = 4
+        facts.daysLeftInWeek = 7
+        #expect(WorkoutBanter.situations(for: facts).contains(.weekStart), "Monday, four planned")
+        facts.daysLeftInWeek = 4
+        #expect(WorkoutBanter.situations(for: facts).contains(.weekStart), "the first planned day can be Thursday")
+        // Friday with none done: "the first of 4 this week" would count what's missing.
+        facts.daysLeftInWeek = 3
+        #expect(WorkoutBanter.situations(for: facts).isDisjoint(with: [.weekStart, .weekProgress, .lastOfWeek]))
+        facts.daysLeftInWeek = nil
+        #expect(!WorkoutBanter.situations(for: facts).contains(.weekStart), "unknown: no week-start line")
+        for seed in 0..<40 {
+            let pick = WorkoutBanter.pick(facts: facts, tone: .playful, history: .init(), seed: UInt64(seed))
+            #expect(pick.situation != WorkoutBanter.Situation.weekStart.rawValue)
+        }
+    }
+
+    @Test func easyDayLinesDontClaimTheScoreIsLow() {
+        // `lowRecovery` is also a 7-day HRV below normal with an ordinary score.
+        for line in WorkoutBanterLibrary.all where line.situation == .lowRecovery {
+            let text = line.template.lowercased()
+            #expect(!text.contains("recovery is low") && !text.contains("low recovery"), "\(line.id)")
+        }
+    }
+
+    @Test func keepingPlainStillShowsYourIfThenLine() {
+        #expect(!rich(for: .keepPlain).noPush, "the session stands; only the jokes stop")
+        #expect(!base().noPush)
+        for caution in WorkoutBanter.Caution.allCases where caution != .keepPlain {
+            #expect(rich(for: caution.situation).noPush, "\(caution)")
+        }
+    }
+
+    @Test func aNewLineStaysClearOfLinesLaterRemindersKeep() {
+        // Two lines fit; Tuesday keeps one, so Monday's rewrite on the day takes the other.
+        let library = WorkoutBanterLibrary.all.filter { ["pl01", "pl02"].contains($0.id) }
+        #expect(library.count == 2)
+        // Thirty different weeks (the day key seeds the pick).
+        for week in 0..<30 {
+            let monday = WorkoutBanter.DayRequest(dayKey: "w\(week)-mon", fire: date(day: 11, hour: 17), facts: base(), isToday: true)
+            let tuesday = WorkoutBanter.DayRequest(dayKey: "w\(week)-tue", fire: date(day: 12, hour: 17), facts: base("Legs"), isToday: false)
+            let first = WorkoutBanter.reconcile(.init(), requests: [tuesday], tone: .playful, now: date(day: 10, hour: 8), library: library)
+            let held = first.pending[0].pick
+            // Monday's reminder is added on Monday itself; Tuesday's stays as it is.
+            let both = WorkoutBanter.reconcile(first, requests: [monday, tuesday], tone: .playful, now: date(day: 11, hour: 8), library: library)
+            #expect(both.pending[1].pick == held)
+            #expect(both.pending[0].pick.lineID != held.lineID, "week \(week): \(both.pending[0].pick.text)")
+        }
+    }
+
+    @Test func aModelLineWaitsForFreshLinesToBeOn() {
+        let facts = rich(for: .nearRecord)
+        let key = dayKey(date(day: 20))
+        let line = "Upper A in 30 minutes. The barbell has been stretching since noon, which is odd for a barbell."
+        var store = WorkoutBanter.Store()
+        store.pending = [WorkoutBanter.Assigned(dayKey: key, fire: date(day: 20, hour: 17),
+                                                pick: .init(lineID: "pl01", situation: "planned", register: "deadpan", text: "x"),
+                                                tone: .playful, ahead: false)]
+        let done = WorkoutBanter.applyGenerated(store, dayKey: key, facts: facts, accepted: line)
+        let request = WorkoutBanter.DayRequest(dayKey: key, fire: date(day: 20, hour: 17), facts: facts, isToday: true)
+        #expect(WorkoutBanter.reconcile(done, requests: [request], tone: .playful, now: date(day: 20, hour: 8)).pending[0].isGenerated)
+        // Switched off, or Apple Intelligence no longer available: a library line takes its place.
+        let off = WorkoutBanter.reconcile(done, requests: [request], tone: .playful, now: date(day: 20, hour: 8), freshLines: false)
+        #expect(!off.pending[0].isGenerated)
+        // Switched off while the model was still writing: its line doesn't go in.
+        #expect(!WorkoutBanter.applyGenerated(store, dayKey: key, facts: facts, accepted: line, freshLines: false).pending[0].isGenerated)
+    }
+
+    @Test func aModelLineIsUsedOnlyForTheLineItWasWrittenFor() {
+        let facts = rich(for: .nearRecord)
+        let key = dayKey(date(day: 20))
+        let line = "Upper A in 30 minutes. The barbell has been stretching since noon, which is odd for a barbell."
+        let asked = WorkoutBanter.Assigned(dayKey: key, fire: date(day: 20, hour: 17),
+                                           pick: .init(lineID: "pl01", situation: "planned", register: "deadpan", text: "x"),
+                                           tone: .playful, ahead: false)
+        var store = WorkoutBanter.Store()
+        store.pending = [asked]
+        // Unchanged while the model wrote: its line goes in.
+        let applied = WorkoutBanter.applyGenerated(store, dayKey: key, facts: facts, accepted: line, askedFor: asked, currentFacts: facts)
+        #expect(applied.pending[0].pick.text == line)
+        // Rescheduled meanwhile with another line (the facts changed): the model's line is dropped, nothing noted.
+        var moved = store
+        moved.pending[0].pick = .init(lineID: "pl02", situation: "planned", register: "absurd", text: "y")
+        #expect(WorkoutBanter.applyGenerated(moved, dayKey: key, facts: facts, accepted: line, askedFor: asked, currentFacts: facts) == moved)
+        // Same pending line, but the facts moved on (a session logged): asked once, the library line stays.
+        var later = facts
+        later.sessionsDone = 3
+        let stale = WorkoutBanter.applyGenerated(store, dayKey: key, facts: facts, accepted: line, askedFor: asked, currentFacts: later)
+        #expect(stale.pending[0].pick.lineID == "pl01")
+        #expect(stale.pending[0].modelAsked == WorkoutBanterPrompt.signature(facts))
+        // Illness flagged meanwhile: never a joke.
+        var ill = facts
+        ill.illnessFlagged = true
+        #expect(!WorkoutBanter.applyGenerated(store, dayKey: key, facts: facts, accepted: line, askedFor: asked, currentFacts: ill).pending[0].isGenerated)
     }
 
     @Test func everyFocusHasADayNameThatReadsInALine() throws {

@@ -19,6 +19,12 @@ import Foundation
 /// - No number the facts don't hold: an invented "three weeks" or "100 kg"
 ///   would be the app making up data about the owner.
 /// - No other product's name or mascot.
+///
+/// What it can't do: the word lists and the number check catch the usual ways
+/// a line goes wrong, not every one. A model line can still invent a claim in
+/// words the lists don't hold ("the barbell saw you leave early"). So only
+/// training-log facts go into the prompt, model lines are at most half of what
+/// is sent (`WorkoutBanter.generatedEvery`), and they can be switched off.
 public enum WorkoutBanterGuard {
     public enum Problem: String, Sendable, CaseIterable {
         case tooLong, tooShort, unfilledSlot, bodyTalk, guiltOrShame, illnessOrInjury, pushesToTrain
@@ -35,6 +41,9 @@ public enum WorkoutBanterGuard {
         "toned", "shredded", "ripped", "jacked", "swole", "buff", "lean", "bulk", "bulking", "scale", "scales", "weigh",
         "weighs", "weighed", "bmi", "looks", "appearance", "attractive", "pretty", "handsome", "gains", "booty", "butt",
         "thighs", "pounds", "kilos", "overweight", "obese",
+        // Jokes about thin limbs are body talk too ("noodle legs", "chicken legs"). Not "arms" or
+        // "legs" on their own: lines name muscles and "Leg day" on purpose.
+        "noodle", "noodles", "chicken", "scrawny", "puny", "twig", "twigs",
     ]
 
     static let bodyPhrases = [
@@ -50,12 +59,14 @@ public enum WorkoutBanterGuard {
         "behind", "sad", "lonely", "cry", "crying", "cries", "heartbroken", "abandoned", "betrayed", "forgot", "forgotten",
         "ignored", "ignoring", "worthless", "useless", "coward", "wimp", "soft", "embarrassing", "embarrassed", "pitiful",
         "streak", "streaks", "slob", "sloth", "couch",
+        // Skipping and quitting talk ("Never skip leg day", "Don't miss it", "Last time you quit early").
+        "skip", "skips", "skipping", "miss", "quit", "quits",
     ]
 
     static let guiltPhrases = [
         "have to", "need to", "no excuses", "no excuse", "let me down", "let you down", "let yourself", "miss you",
         "misses you", "missing you", "where were you", "where have you been", "you owe", "don't break", "dont break",
-        "you promised", "you said you", "you always", "you never", "what happened to",
+        "you promised", "you said you", "you always", "you never", "what happened to", "give up", "gave up",
     ]
 
     /// Never in a joke; a caution line may name the state it is about.
@@ -230,7 +241,7 @@ public enum WorkoutBanterPrompt {
     You write one short, funny reminder line for a workout log app. Dry, playful and kind. \
     Joke about the barbell, the plates, the gym or the app itself, never about the person. \
     Use only the facts given and no other numbers. Nothing about food, looks, health or feeling bad. \
-    Never say "should", "must" or "missed". One or two sentences, under 140 characters. Reply with the line only.
+    Never say "should", "must", "missed" or "skip". One or two sentences, under 140 characters. Reply with the line only.
     """
 
     /// The facts as the model sees them. Also what a model line is tied to:

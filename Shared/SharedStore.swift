@@ -56,6 +56,10 @@ nonisolated struct WidgetSnapshot: Codable, Sendable, Equatable {
     /// Today's strain target (`DailyMetricsModel.targetStrain`).
     var targetLower: Double? = nil
     var targetUpper: Double? = nil
+    /// The 7-day HRV against your normal range (`RecoveryCalculator.HRVTrend.Status.rawValue`:
+    /// "below", "within", "above"), with today's recovery only. The HRV widget shows this,
+    /// not one night's value (evidence audit 2026-11, widgets).
+    var hrvTrend: String? = nil
 
     static let key = "widgetSnapshot"
 

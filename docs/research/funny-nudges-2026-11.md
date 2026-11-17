@@ -302,6 +302,13 @@ written for, or why it is plain today.
 requires nor forbids it. Plain is one tap away and is also what every caution
 state uses regardless of the setting.
 
+**Workout reminders themselves are off by default** (2026-11 evidence audit,
+M4): gym-goers whose attendance is already predictable responded less to a
+nudge to go (Buyalskaya et al. 2023), and clock reminders support repetition
+more than habit (Stawarz et al. 2015). A choice already stored is kept, and
+Playful is the style once they are switched on. Switching them back on, or
+turning rest mode on, starts the going-quiet rules afresh.
+
 ## 3. Guardrails (`WorkoutBanterGuard`; every one has a test)
 
 | Rule | Why |
@@ -319,7 +326,23 @@ state uses regardless of the setting.
 The word lists are the app's own. No study tested them; they err on the side
 of dropping a harmless line (a model line that mentions "protein" is dropped).
 The owner's own names (a session called "Full body", a lift) are taken out
-before the word check, so they never trip it.
+before the word check, so they never trip it. After a review found model
+lines like "Never skip leg day", "Don't miss it", "Last time you quit early"
+and "noodle legs" passing, skip/miss/quit/give up and thin-limb words
+(noodle, chicken, scrawny, puny, twig) were added; "arms" and "legs" alone
+stay allowed because library lines name muscles and "Leg day".
+
+**What the guard cannot do.** A word list and a number check catch the usual
+ways a line goes wrong, not every one. A model line can still invent a claim
+in words no list holds ("the barbell saw you leave early"). The limits on
+that risk are elsewhere: only training-log facts go into the prompt, model
+lines are at most every other reminder, a model line is dropped as soon as
+the facts it was written from change, and "Fresh lines from Apple
+Intelligence" can be switched off.
+
+**Easy-day wording.** The low-recovery state also covers a 7-day HRV below
+normal with an ordinary score, so its lines say "Today's numbers point to an
+easy day", never "Recovery is low".
 
 ## 4. What is not known
 

@@ -9,7 +9,7 @@ nonisolated struct HRVEntry: TimelineEntry {
 
 nonisolated struct HRVProvider: TimelineProvider {
     func placeholder(in context: Context) -> HRVEntry {
-        HRVEntry(date: .now, snapshot: WidgetSnapshot(updated: .now, hrv: 58, hrvDate: .now, recovery: 72, strain: 34))
+        HRVEntry(date: .now, snapshot: WidgetSnapshot(updated: .now, hrv: 58, hrvDate: .now, recovery: 72, strain: 34, hrvTrend: "within"))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (HRVEntry) -> Void) {
@@ -28,6 +28,11 @@ nonisolated struct HRVProvider: TimelineProvider {
     }
 }
 
+// Today's recovery and the 7-day HRV trend. Not one night's HRV: a single
+// night is mostly noise, and the 7-day rolling HRV against your normal range
+// is what guided training in the trials (Plews et al., Eur J Appl Physiol
+// 2012; Javaloyes et al., IJSPP 2019; docs/research/evidence-audit-2026-11.md,
+// widgets). The kind keeps its old name so widgets already placed stay.
 struct HRVWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "HRVWidget", provider: HRVProvider()) { entry in
@@ -38,8 +43,8 @@ struct HRVWidget: Widget {
                 }
                 .widgetURL(URL(string: "workoutapp://hrv"))
         }
-        .configurationDisplayName("HRV & recovery")
-        .description("Last night's HRV and today's recovery. Tap to add your HRV.")
+        .configurationDisplayName("Recovery & HRV trend")
+        .description("Today's recovery and your 7-day HRV against your normal range. Tap to add your HRV.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
     }
 }
@@ -55,14 +60,25 @@ struct HRVWidgetView: View {
         return snapshot
     }
 
-    private var hrvToday: Double? {
-        guard let snapshot = entry.snapshot, snapshot.hrvIsFromToday else { return nil }
-        return snapshot.hrv
+    /// Whether last night's HRV is in (only for the button's "Add" or "Edit"; the value isn't shown).
+    private var hasHRVToday: Bool {
+        guard let snapshot = entry.snapshot, snapshot.hrvIsFromToday else { return false }
+        return snapshot.hrv != nil
     }
 
     private var recoveryText: String {
         guard let recovery = today?.recovery else { return "--" }
         return "\(recovery)%"
+    }
+
+    /// "7-day HRV: in range", or nil before today's recovery (or while the range is building).
+    private var trendText: String? {
+        switch today?.hrvTrend ?? "" {
+        case "below": "7-day HRV: below range"
+        case "within": "7-day HRV: in range"
+        case "above": "7-day HRV: above range"
+        default: nil
+        }
     }
 
     /// Ask for a reading only from people who log HRV in the app; for a
@@ -82,36 +98,21 @@ struct HRVWidgetView: View {
 
     private var small: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("HRV", systemImage: "waveform.path.ecg")
+            Label("Recovery", systemImage: "heart.circle")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(WidgetPalette.green)
             Spacer(minLength: 0)
-            if let hrv = hrvToday {
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text("\(Int(hrv.rounded()))")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundStyle(WidgetPalette.ink)
-                    Text("ms").font(.caption.weight(.semibold)).foregroundStyle(WidgetPalette.secondary)
-                }
-                if let recovery = today?.recovery {
-                    Text("Recovery \(recovery)%")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WidgetPalette.recovery(recovery))
-                }
-            } else if asksForHRV {
-                Text("Log last night's HRV")
-                    .font(.headline)
-                    .foregroundStyle(WidgetPalette.ink)
+            Text(recoveryText)
+                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .foregroundStyle(today?.recovery == nil ? WidgetPalette.secondary : WidgetPalette.recovery(today?.recovery))
+            if let trendText {
+                Text(trendText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WidgetPalette.secondary)
+                    .lineLimit(2)
+            }
+            if asksForHRV, !hasHRVToday {
                 addButton
-            } else {
-                Text("No HRV yet today")
-                    .font(.headline)
-                    .foregroundStyle(WidgetPalette.ink)
-                if let recovery = today?.recovery {
-                    Text("Recovery \(recovery)%")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WidgetPalette.recovery(recovery))
-                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -127,7 +128,7 @@ struct HRVWidgetView: View {
                             style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 VStack(spacing: 0) {
-                    Text(today?.recovery.map { "\($0)%" } ?? "--")
+                    Text(recoveryText)
                         .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundStyle(WidgetPalette.ink)
                     Text("Recovery").font(.caption2).foregroundStyle(WidgetPalette.secondary)
@@ -135,22 +136,16 @@ struct HRVWidgetView: View {
             }
             .padding(5)
             VStack(alignment: .leading, spacing: 6) {
-                if let hrv = hrvToday {
-                    Text("HRV \(Int(hrv.rounded())) ms")
-                        .font(.headline)
-                        .foregroundStyle(WidgetPalette.ink)
-                } else {
-                    Text("No HRV yet today")
-                        .font(.headline)
-                        .foregroundStyle(WidgetPalette.ink)
-                }
+                Text(trendText ?? "7-day HRV: --")
+                    .font(.headline)
+                    .foregroundStyle(WidgetPalette.ink)
                 if let strain = today?.strain, let updated = today?.updated,
                    GlanceFreshness.strainIsCurrent(updated: updated, at: entry.date) {
                     Text("Strain \(Int(strain.rounded()))%")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(WidgetPalette.orange)
                 }
-                if asksForHRV || hrvToday != nil {
+                if asksForHRV || hasHRVToday {
                     Link(destination: URL(string: "workoutapp://hrv")!) {
                         addButton
                     }
@@ -161,7 +156,7 @@ struct HRVWidgetView: View {
     }
 
     private var addButton: some View {
-        Label(hrvToday == nil ? "Add HRV" : "Edit HRV", systemImage: "plus")
+        Label(hasHRVToday ? "Edit HRV" : "Add HRV", systemImage: "plus")
             .font(.caption.weight(.bold))
             .foregroundStyle(.white)
             .padding(.horizontal, 10)
@@ -173,9 +168,9 @@ struct HRVWidgetView: View {
         ZStack {
             AccessoryWidgetBackground()
             VStack(spacing: 0) {
-                Image(systemName: hrvToday == nil && asksForHRV ? "plus" : "waveform.path.ecg")
+                Image(systemName: !hasHRVToday && asksForHRV ? "plus" : "heart.circle")
                     .font(.caption.weight(.bold))
-                Text(hrvToday.map { "\(Int($0.rounded()))" } ?? "HRV")
+                Text(today?.recovery.map { "\($0)" } ?? "--")
                     .font(.system(.headline, design: .rounded))
             }
         }
@@ -183,14 +178,13 @@ struct HRVWidgetView: View {
 
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Label("HRV", systemImage: "waveform.path.ecg").font(.caption.weight(.bold))
-            if let hrv = hrvToday {
-                Text("\(Int(hrv.rounded())) ms · recovery \(today?.recovery.map { "\($0)%" } ?? "--")")
-                    .font(.headline)
-            } else if asksForHRV {
-                Text("Tap to log last night's HRV").font(.headline)
+            Label("Recovery \(recoveryText)", systemImage: "heart.circle").font(.headline)
+            if let trendText {
+                Text(trendText).font(.caption)
+            } else if asksForHRV, !hasHRVToday {
+                Text("Tap to log last night's HRV").font(.caption)
             } else {
-                Text("No HRV yet · recovery \(recoveryText)").font(.headline)
+                Text("7-day HRV: --").font(.caption)
             }
         }
     }

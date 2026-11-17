@@ -32,11 +32,21 @@ nonisolated final class WorkoutVoiceStore: @unchecked Sendable {
         file.saveLogged(store, canSave: true)
     }
 
+    /// Each pending reminder's facts as last scheduled, so a line the model
+    /// finishes later is checked against them (`finishAsking`). Not saved.
+    private var latestFacts: [String: WorkoutBanter.Facts] = [:]
+    /// Whether model lines were allowed at the last schedule (switched on, model available).
+    private var latestFreshLines = true
+
     /// Gives each reminder being scheduled its line (`WorkoutBanter.reconcile`) and saves the result.
-    func reconcile(_ requests: [WorkoutBanter.DayRequest], tone: WorkoutBanter.Tone, now: Date) -> [String: WorkoutBanter.Assigned] {
+    /// - Parameter freshLines: model lines are switched on and the model is available.
+    func reconcile(_ requests: [WorkoutBanter.DayRequest], tone: WorkoutBanter.Tone, freshLines: Bool,
+                   now: Date) -> [String: WorkoutBanter.Assigned] {
         lock.lock(); defer { lock.unlock() }
+        latestFacts = Dictionary(requests.map { ($0.dayKey, $0.facts) }, uniquingKeysWith: { _, last in last })
+        latestFreshLines = freshLines
         let before = loaded()
-        let after = WorkoutBanter.reconcile(before, requests: requests, tone: tone, now: now)
+        let after = WorkoutBanter.reconcile(before, requests: requests, tone: tone, now: now, freshLines: freshLines)
         if after != before { save(after) }
         return Dictionary(after.pending.map { ($0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
     }
@@ -55,13 +65,18 @@ nonisolated final class WorkoutVoiceStore: @unchecked Sendable {
     }
 
     /// Notes that the model was asked about `dayKey`'s reminder and stores its
-    /// line when it passed every check. Returns what that reminder holds now,
-    /// or nil when it is no longer pending.
-    func finishAsking(dayKey: String, facts: WorkoutBanter.Facts, accepted: String?) -> WorkoutBanter.Assigned? {
+    /// line when it passed every check, only if the reminder still holds the
+    /// line it was asked about (`askedFor`) and the line is still true for the
+    /// facts as last scheduled (`WorkoutBanter.applyGenerated`). Returns what
+    /// that reminder holds now, or nil when it is no longer pending.
+    func finishAsking(dayKey: String, facts: WorkoutBanter.Facts, accepted: String?,
+                      askedFor: WorkoutBanter.Assigned) -> WorkoutBanter.Assigned? {
         lock.lock(); defer { lock.unlock() }
         asking = false
         let before = loaded()
-        let after = WorkoutBanter.applyGenerated(before, dayKey: dayKey, facts: facts, accepted: accepted)
+        let after = WorkoutBanter.applyGenerated(before, dayKey: dayKey, facts: facts, accepted: accepted,
+                                                 askedFor: askedFor, currentFacts: latestFacts[dayKey] ?? facts,
+                                                 freshLines: latestFreshLines)
         if after != before { save(after) }
         return after.pending.first { $0.dayKey == dayKey }
     }
