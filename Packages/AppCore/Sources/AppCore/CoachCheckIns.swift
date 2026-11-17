@@ -233,6 +233,9 @@ public enum CoachCheckIns {
         public var proteinSoFarGrams: Double?
         public var proteinTargetGrams: Double?
         public var bedByText: String?
+        /// Tonight's sleep window while the insomnia path is on (`SleepWindow`),
+        /// "23:45 to 6:30"; `bedByText` is then left nil.
+        public var sleepWindowText: String?
 
         public init(name: String, minutes: Int, workingSets: Int) {
             self.name = name
@@ -247,6 +250,9 @@ public enum CoachCheckIns {
         public var bedByText: String?
         /// Why that window (`BedtimeWindow.Result.reason`): "8 h need, up at 6:30".
         public var bedByReason: String?
+        /// The insomnia path's sleep window is on (`SleepWindow`): `bedByText`
+        /// is then the earliest bedtime ("23:45"), not a time to be in bed by.
+        public var sleepWindow = false
         public var tomorrowSession: Session?
         /// Caffeine logged today past the cut-off for tonight (`CaffeineTiming.isTooLate`).
         public var lateCaffeine = false
@@ -397,6 +403,10 @@ public enum CoachCheckIns {
             return eaten >= target
         }()
         if proteinDone {
+            if let window = f.sleepWindowText {
+                // Not "a full night's sleep": the window is short on purpose (`SleepWindow`).
+                return "Protein is covered today. Tonight's sleep window is \(window)" + next + "."
+            }
             if let bedBy = f.bedByText {
                 return "Protein is covered today, so sleep is the next lever: in bed by \(bedBy)" + next + "."
             }
@@ -420,7 +430,7 @@ public enum CoachCheckIns {
         let session = f.restMode ? nil : f.tomorrowSession
         let title: String
         if let bedBy = f.bedByText {
-            title = fit("In bed by \(bedBy)", maxTitleCharacters)
+            title = fit(f.sleepWindow ? "Bed from \(bedBy), when sleepy" : "In bed by \(bedBy)", maxTitleCharacters)
         } else if let session {
             title = fit("Tomorrow: \(session.label)", maxTitleCharacters)
         } else {
@@ -428,7 +438,9 @@ public enum CoachCheckIns {
         }
 
         var sentences: [String] = []
-        if f.bedByText != nil, let reason = f.bedByReason {
+        if f.sleepWindow, f.bedByText != nil, let reason = f.bedByReason {
+            sentences.append("Tonight: \(reason).")
+        } else if f.bedByText != nil, let reason = f.bedByReason {
             sentences.append("Worked back from \(reason)" + (session.map { ", ready for \($0.name) tomorrow." } ?? "."))
         } else if f.bedByText != nil, let session {
             sentences.append("That sets you up for \(session.label) tomorrow.")
