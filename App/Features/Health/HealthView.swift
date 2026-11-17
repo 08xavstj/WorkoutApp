@@ -26,6 +26,8 @@ struct HealthView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     HRVBaselineCard()
                     OuraCard()
+                    // This week's changes and the long-run measures (`LongevityView.swift`).
+                    HealthHighlightsSection()
                     KeyMeasuresSection()
                     AllMeasuresSection()
                     RecordsSection()
