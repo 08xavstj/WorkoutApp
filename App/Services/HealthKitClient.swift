@@ -63,7 +63,6 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.leanBodyMass),
             HKQuantityType(.bloodPressureSystolic),
             HKQuantityType(.bloodPressureDiastolic),
-            HKCategoryType(.mindfulSession),
             HKQuantityType(.dietaryEnergyConsumed),
             HKQuantityType(.dietaryProtein),
             HKQuantityType(.dietaryCarbohydrates),
@@ -806,25 +805,6 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return try await descriptor.result(for: store).map {
             DateInterval(start: $0.startDate, end: max($0.startDate, $0.endDate))
         }
-    }
-
-    /// Total mindful minutes per day (breathing or meditation sessions).
-    @concurrent
-    func mindfulMinutes(days: Int) async throws -> [DatedValue] {
-        if let demo = DemoHealth.active { return demo.mindfulMinutes(days: days) }
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) else { return [] }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: .now)
-        let descriptor = HKSampleQueryDescriptor(
-            predicates: [.categorySample(type: HKCategoryType(.mindfulSession), predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
-        )
-        var byDay: [Date: Double] = [:]
-        for sample in try await descriptor.result(for: store) {
-            byDay[calendar.startOfDay(for: sample.startDate), default: 0] += sample.endDate.timeIntervalSince(sample.startDate) / 60
-        }
-        return byDay.keys.sorted().map { DatedValue(date: $0, value: byDay[$0] ?? 0) }
     }
 
     /// Step count in a range, split into steps inside and outside the given

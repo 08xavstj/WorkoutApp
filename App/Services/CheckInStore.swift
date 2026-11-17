@@ -201,10 +201,6 @@ final class CheckInStore {
         for workout in (try? await health.workoutIntervals(from: moodStart, to: .now)) ?? [] where workout.duration >= 10 * 60 {
             trainingDays.insert(key(workout.start))
         }
-        var mindfulByDay: [String: Double] = [:]
-        for day in (try? await health.mindfulMinutes(days: 91)) ?? [] {
-            mindfulByDay[key(day.date)] = day.value
-        }
         // Sleep debt up to each morning: the running 14-night balance (`SleepDebt`).
         var debtByMorning: [String: Double] = [:]
         if let need = saved.sleepNeedHours {
@@ -244,8 +240,7 @@ final class CheckInStore {
                 trainedYesterday: trainingDays.contains(key(previous)),
                 strainYesterday: saved.strains?[key(previous)],
                 usualTrainingStrain: saved.usualTrainingStrain,
-                sleepDebtHours: debtByMorning[key(morning)],
-                mindfulMinutes: mindfulByDay[key(previous)] ?? 0
+                sleepDebtHours: debtByMorning[key(morning)]
             ))
         }
         alcoholFindings = AlcoholEffect.compare(alcoholNights)

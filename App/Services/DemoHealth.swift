@@ -455,10 +455,6 @@ nonisolated final class DemoHealth: Sendable {
         return byDay.keys.sorted(by: >).map { DatedValue(date: day($0), value: byDay[$0] ?? 0) }
     }
 
-    func mindfulMinutes(days: Int) -> [DatedValue] {
-        (0..<min(days, historyDays)).reversed().filter { $0 % 4 == 2 }.map { DatedValue(date: day($0), value: 6) }
-    }
-
     // MARK: Daily series
 
     private enum Spread { case waking, allDay, meals, single }

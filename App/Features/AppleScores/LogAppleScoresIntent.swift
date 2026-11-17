@@ -11,10 +11,10 @@ import Foundation
 /// from somewhere: "Ask for Input", or the text of a screenshot. This action is
 /// only the way in.
 ///
-/// Declared `nonisolated` so every requirement of `AppIntent` is met without
-/// the main actor; only `perform()` runs there, where the store lives. Runs in
-/// the app's process without opening the app.
-nonisolated struct LogAppleScoresIntent: AppIntent {
+/// Main-actor isolated like the app's other intents (`AdjustRestIntent`):
+/// `@Parameter` properties can't be `nonisolated`. Runs in the app's process
+/// without opening the app.
+struct LogAppleScoresIntent: AppIntent {
     static let title: LocalizedStringResource = "Log Apple scores"
     static let description = IntentDescription(
         "Saves Apple's Readiness, Sleep score or Health Age in Tensile, beside Tensile's own scores. Leave out the ones you don't have."

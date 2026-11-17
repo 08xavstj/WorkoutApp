@@ -237,7 +237,6 @@ final class VitalsModel {
         async let systolic = health.dailySeries(.bloodPressureSystolic, unit: .millimeterOfMercury(), days: 90, cumulative: false)
         async let diastolic = health.dailySeries(.bloodPressureDiastolic, unit: .millimeterOfMercury(), days: 90, cumulative: false)
         async let water = health.dailySeries(.dietaryWater, unit: .liter(), days: 90, cumulative: true)
-        async let mindful = health.mindfulMinutes(days: 90)
         async let workouts = health.workoutIntervals(from: twoWeeksAgo, to: now)
         let fullHeartRateRead = heartRateCacheEdge == nil
             || lastFullHeartRateRead.map { now.timeIntervalSince($0) >= 3600 } ?? true
@@ -453,13 +452,6 @@ final class VitalsModel {
             let shownBody = body.map { DatedValue(date: $0.date, value: UnitText.temperature(fromCelsius: $0.value)) }
             result.append(makeStat("temperature", .breathing, "Body temperature", "thermometer.medium", series: shownBody, unit: UnitText.temperatureSymbol, digits: 1))
         }
-        let mindfulSeries = get(try? await mindful)
-        var mindfulStat = makeStat("mindful", .breathing, "Mindful minutes", "leaf.fill", series: mindfulSeries, unit: "min", digits: 0)
-        if latestToday(mindfulSeries) == nil, !mindfulSeries.isEmpty {
-            mindfulStat.value = "0"
-            mindfulStat.status = "None today"
-        }
-        result.append(mindfulStat)
 
         // MARK: Activity
         let stepSeries: [DatedValue]
@@ -843,9 +835,6 @@ final class VitalsModel {
             stat.about = "Breaths per minute while asleep. 12-20 is typical for adults. What matters most is change: a rise of 1-2 above your normal can be an early sign of illness."
         case "temperature":
             stat.about = "Your temperature while asleep. Compare it with your own normal: a rise of about 0.5 °C (0.9 °F) over a night or two can come before illness, and it also shifts across a menstrual cycle."
-        case "mindful":
-            stat.chart = .bars
-            stat.about = "Minutes logged in mindfulness or breathing apps."
         case "steps":
             stat.about = "Steps each day. 7,000 a day was linked with about half the risk of death of 2,000, with smaller gains beyond (Ding et al., Lancet Public Health 2025); risk kept falling to about 8,000-10,000 for adults under 60 (Paluch et al., 2022). Your goal starts at 8,000 (7,000 from age 60) and then follows your usual day, never below 7,000."
         case "distance":

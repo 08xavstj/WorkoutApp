@@ -301,13 +301,11 @@ public struct CheckInDay: Sendable, Equatable {
     public var usualTrainingStrain: Double?
     /// Hours of sleep debt over the 14 nights up to and including this night (`SleepDebt`).
     public var sleepDebtHours: Double?
-    /// Mindful minutes logged the day before (Mindfulness app, breathing, Calm...).
-    public var mindfulMinutes: Double?
 
     public init(morning: Date, evening: EveningCheckIn?, checkIn: MorningCheckIn?, hrv: Double?, restingHeartRate: Double?, sleepScore: Double?,
                 waterLiters: Double? = nil, bedtimeMinutes: Int? = nil,
                 moodValence: Double? = nil, trainedYesterday: Bool? = nil, strainYesterday: Double? = nil,
-                usualTrainingStrain: Double? = nil, sleepDebtHours: Double? = nil, mindfulMinutes: Double? = nil) {
+                usualTrainingStrain: Double? = nil, sleepDebtHours: Double? = nil) {
         self.morning = morning
         self.evening = evening
         self.checkIn = checkIn
@@ -321,7 +319,6 @@ public struct CheckInDay: Sendable, Equatable {
         self.strainYesterday = strainYesterday
         self.usualTrainingStrain = usualTrainingStrain
         self.sleepDebtHours = sleepDebtHours
-        self.mindfulMinutes = mindfulMinutes
     }
 
     /// Associations named in the evening before or this morning ("work", "family"...).
@@ -426,11 +423,6 @@ public enum CheckInInsights {
         // Sleep loss lowers positive affect and raises anxiety (Palmer et al.,
         // Psychol Bull 2024, 154 experiments). 3 h is `SleepDebt`'s "moderate" line.
         Factor(id: "sleepDebt", name: "3 h+ of sleep debt") { $0.sleepDebtHours.map { $0 >= 3 } },
-        // Mindfulness programmes: anxiety ES 0.38, depression 0.30 at 8 weeks
-        // (Goyal et al., JAMA Intern Med 2014, 47 RCTs). Those were daily
-        // practice over weeks; 10 minutes in a day is the app's own cut, so
-        // the evidence for a one-day effect is weak.
-        Factor(id: "mindful10", name: "10+ mindful minutes") { $0.mindfulMinutes.map { $0 >= 10 } },
     ]
 
     /// What the mood was about, from the check-ins' "What's affecting it?"

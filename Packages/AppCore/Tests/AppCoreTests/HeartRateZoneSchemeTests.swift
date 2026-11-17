@@ -101,7 +101,10 @@ struct HeartRateZoneSchemeTests {
         let scheme = HeartRateZoneScheme.percentOfMax(maximum: 190, resting: 55)
         #expect(scheme.kind == .percentOfMax)
         #expect(scheme.floor == 95)
-        #expect(scheme.boundaries == [0.6 * 190, 0.7 * 190, 0.8 * 190, 0.9 * 190])
+        // Typed out: the literal-array comparison was too slow for the macOS type checker.
+        let expected: [Double] = [114, 133, 152, 171]
+        #expect(zip(scheme.boundaries, expected).allSatisfy { abs($0 - $1) < 1e-9 })
+        #expect(scheme.boundaries.count == 4)
         #expect(scheme.zone(for: 94.9) == nil)
         // A heart rate exactly on a limit is in the zone that starts there.
         #expect(scheme.zone(for: 95) == 1)
