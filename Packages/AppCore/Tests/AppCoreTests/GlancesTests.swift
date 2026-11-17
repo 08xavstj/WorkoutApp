@@ -211,6 +211,18 @@ struct PlanGlanceTests {
         #expect(PlanGlance.relevantWindows(of: nil, after: date(hour: 9), calendar: calendar).isEmpty)
     }
 
+    @Test func smartStackOffersBedtimeOnlyWhenTheGlanceShowsIt() {
+        let bed = (start: date(hour: 22, minute: 30), end: date(hour: 23))
+        // No plan this week: the glance reads "No plan yet" all evening, so bedtime isn't offered.
+        let none = plan(slots: [], hasPlan: false, bed: bed)
+        #expect(state(none, date(hour: 21, minute: 30)) == .noPlan)
+        #expect(PlanGlance.relevantWindows(of: none, after: date(hour: 9), calendar: calendar).isEmpty)
+        // A late session still on its clock as the window opens: offered, since it reads "In bed by" by bedtime.
+        let late = plan(slots: [slot(day: 11, hour: 20)], bed: bed)
+        #expect(state(late, date(hour: 21, minute: 30)) == .session(slot(day: 11, hour: 20), timed: true))
+        #expect(PlanGlance.relevantWindows(of: late, after: date(hour: 9), calendar: calendar).map(\.reason) == [.session, .bedtime])
+    }
+
     @Test func smartStackDoesNotPromiseNextWeekWithoutItsPlan() {
         let sunday = plan(day: 17, slots: [slot(day: 17), slot(day: 18, hour: 7)], nextWeek: .open)
         #expect(PlanGlance.relevantWindows(of: sunday, after: date(day: 17, hour: 9), calendar: calendar)
