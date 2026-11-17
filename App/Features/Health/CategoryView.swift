@@ -33,6 +33,9 @@ struct AllMeasuresSection: View {
                         Divider()
                     }
                 }
+                // The overnight vitals are in the rows above; this is their daytime counterpart (`DaytimeVitalsView`).
+                Divider()
+                DaytimeVitalsRow()
             }
             .card()
         }
