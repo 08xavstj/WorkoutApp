@@ -41,15 +41,24 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         public var isDeload: Bool
         /// HRV was below normal when the week began, so the ramp stayed put.
         public var isHeld: Bool
+        /// True in a planned busy week (`BusyWeek`): the block is paused, and
+        /// `week` is the week it goes on with afterwards. Nil otherwise and in
+        /// blocks saved before busy weeks existed.
+        public var busy: Bool?
 
-        public init(week: Int, length: Int, setMultiplier: Double, targetRIR: Int, isDeload: Bool, isHeld: Bool = false) {
+        public init(week: Int, length: Int, setMultiplier: Double, targetRIR: Int, isDeload: Bool, isHeld: Bool = false,
+                    busy: Bool? = nil) {
             self.week = week
             self.length = length
             self.setMultiplier = setMultiplier
             self.targetRIR = targetRIR
             self.isDeload = isDeload
             self.isHeld = isHeld
+            self.busy = busy
         }
+
+        /// A planned busy week: the block is paused (`BusyWeek`).
+        public var isBusy: Bool { busy == true }
 
         /// The RIR target as an RPE on the reps-in-reserve scale (RIR 1 = RPE 9).
         public var targetRPE: Double { Double(10 - targetRIR) }
@@ -58,7 +67,8 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         /// reps in the tank": the same words the sets and the builder use (`ReserveText`).
         public var label: String {
             // No reps-in-reserve number: sets show a rep goal (`RepGoal`), and the reserve stays behind it.
-            isDeload ? "Deload week (\(week) of \(length))" : "Block week \(week) of \(length)"
+            if isBusy { return "Busy week" }
+            return isDeload ? "Deload week (\(week) of \(length))" : "Block week \(week) of \(length)"
         }
 
         /// The note, plus "Today eased to 3-4 reps in the tank." when the day's plan
@@ -72,6 +82,7 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         /// One short line on what this week changes.
         public var note: String {
             // RIR 3 at the usual reps makes the planner's weights a little lighter (`WorkoutPlanner.suggestedLoad`).
+            if isBusy { return BusyWeek.blockNote }
             if isDeload { return "Planned easier week: about half the sets, a little lighter." }
             if isHeld { return "HRV is below your normal range, so this week repeats last week's sets instead of adding more." }
             let percent = Int(((setMultiplier - 1) * 100).rounded())
@@ -174,6 +185,12 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     /// unless the next week is the deload, which is the right week for a low
     /// HRV anyway.
     public func nextWeek(after week: WeekState, hrvBelowNormal: Bool = false) -> WeekState? {
+        if week.isBusy {
+            // A busy week pauses the block: the week it stood in for comes next, unless that
+            // was the planned deload, which the busy week has already been (`BusyWeek`).
+            let paused = Self.weekState(week.week, style: style, length: length)
+            return paused.isDeload ? nil : paused
+        }
         guard week.week < length else { return nil }
         let next = Self.weekState(week.week + 1, style: style, length: length)
         if hrvBelowNormal && !next.isDeload && !week.isDeload {
@@ -197,21 +214,51 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     /// the same calendar week, moved on one week otherwise, or a fresh block
     /// (in `style`, default the same) when this one has finished or more than
     /// a week was skipped.
-    public func advanced(to now: Date, hrvBelowNormal: Bool = false, style newStyle: TrainingStyle? = nil, calendar: Calendar = .current) -> TrainingBlock {
+    ///
+    /// With `busy` (the week containing `now` is a planned busy week,
+    /// `BusyWeek`) the block pauses instead: the week that would have come is
+    /// kept for afterwards and this one is marked busy. A busy week in place
+    /// of the planned deload is the block's easier week, so a new block
+    /// starts after it. A busy week never reads as time away: the four-week
+    /// rule above counts weeks the app didn't see, and a busy week is seen.
+    public func advanced(to now: Date, hrvBelowNormal: Bool = false, style newStyle: TrainingStyle? = nil,
+                         busy: Bool = false, calendar: Calendar = .current) -> TrainingBlock {
         let thisWeek = WeeklyPlan.weekStart(containing: now, calendar: calendar)
         guard thisWeek > weekStart else { return self }
         let days = calendar.dateComponents([.day], from: weekStart, to: thisWeek).day ?? 7
         let weeksGone = max(1, days / 7)
-        if weeksGone >= Self.restartAfterWeeksAway {
-            return TrainingBlock(start: thisWeek, style: newStyle ?? style)
+        func fresh() -> TrainingBlock {
+            var block = TrainingBlock(start: thisWeek, style: newStyle ?? style)
+            if busy { block.week = block.busyState(pausing: block.week) }
+            return block
         }
-        guard let next = nextWeek(after: week, hrvBelowNormal: hrvBelowNormal) else {
-            return TrainingBlock(start: thisWeek, style: newStyle ?? style)
-        }
+        if weeksGone >= Self.restartAfterWeeksAway { return fresh() }
+        // HRV holds the ramp only when the week is a normal one; a busy week adds nothing anyway.
+        guard let next = nextWeek(after: week, hrvBelowNormal: hrvBelowNormal && !busy && !week.isBusy) else { return fresh() }
         var block = self
-        block.week = next
+        block.week = busy ? busyState(pausing: next) : next
         block.weekStart = thisWeek
-        if next.isHeld { block.heldWeeks += 1 }
+        // A week the ramp didn't move: held for HRV, or the busy week just left.
+        if next.isHeld || week.isBusy { block.heldWeeks += 1 }
+        return block
+    }
+
+    /// `paused` as a busy week: about a third of the sets (`BusyWeek.setFraction`)
+    /// at the effort of a building week, never easier than two reps in reserve,
+    /// so the planner keeps the usual weights (the deload's lighter loads and
+    /// week 1's three in reserve would not be "the usual load").
+    public func busyState(pausing paused: WeekState) -> WeekState {
+        let building = paused.isDeload ? Self.weekState(max(1, paused.week - 1), style: style, length: length) : paused
+        return WeekState(week: paused.week, length: length, setMultiplier: BusyWeek.setMultiplier,
+                         targetRIR: min(BusyWeek.maximumRIR, building.targetRIR), isDeload: false, busy: true)
+    }
+
+    /// This week switched to a busy week, or back, part-way through it
+    /// (`advanced(busy:)` does the same when a week begins).
+    public func settingBusy(_ busy: Bool) -> TrainingBlock {
+        guard busy != week.isBusy else { return self }
+        var block = self
+        block.week = busy ? busyState(pausing: week) : Self.weekState(week.week, style: style, length: length)
         return block
     }
 
@@ -224,7 +271,8 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     /// to rep goals (`RepGoal`), so the coach shouldn't talk in RIR.
     public var coachLine: String {
         var line = "Training block: week \(week.week) of \(week.length) (the user works to rep goals per set; don't mention reps in reserve or RIR)"
-        if week.isDeload { line += " (planned easier week, about half the sets)" }
+        if week.isBusy { line += " (planned busy week: one or two short sessions that hold strength and muscle, not build them)" }
+        else if week.isDeload { line += " (planned easier week, about half the sets)" }
         else if week.isHeld { line += " (ramp held: HRV below normal)" }
         else if week.setMultiplier > 1 { line += " (sets ×\(week.setMultiplier.formatted()))" }
         return line + "."

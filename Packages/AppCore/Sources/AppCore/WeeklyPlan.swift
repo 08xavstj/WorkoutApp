@@ -114,6 +114,11 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
     /// change the split for good. Nil for a week in its standing order and for
     /// plans saved before this existed.
     public var rotation: Rotation?
+    /// Set when this is a planned busy week (`BusyWeek`): `plannedDays` are its
+    /// one or two short holding sessions, and this keeps the week as it stood
+    /// for next week to go back to. Nil for a normal week and for plans saved
+    /// before busy weeks existed. Not an init parameter: set it after.
+    public var busy: BusyWeek?
 
     /// How a week's sessions were moved round from the standing order.
     public struct Rotation: Codable, Sendable, Equatable {
@@ -145,6 +150,7 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case weekStart, plannedDays, changes, mode, sessionsPerWeek, cardio, rotation
+        case busy
     }
 
     /// Plans saved before `mode` existed are fixed-day plans.
@@ -159,6 +165,8 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
         cardio = try container.decodeIfPresent(EasyCardio.self, forKey: .cardio)
         // Plans saved before rotations were recorded are in their standing order.
         rotation = try container.decodeIfPresent(Rotation.self, forKey: .rotation)
+        // Plans saved before busy weeks existed are normal weeks.
+        busy = try container.decodeIfPresent(BusyWeek.self, forKey: .busy)
     }
 
     public var isFlexible: Bool { mode == .flexible }
@@ -372,18 +380,27 @@ public struct WeekRecord: Codable, Sendable, Equatable {
     /// score is sessions against the week's target in both plan modes, never
     /// weekday matches.
     public var done: Int
+    /// True for a planned busy week (`BusyWeek`); nil otherwise and in records
+    /// saved before busy weeks existed. Such a week is kept from its first
+    /// session and is left out of the score, never counted against it, when
+    /// it had none (`Consistency.score`).
+    public var busy: Bool?
 
-    public init(weekStart: Date, planned: Int, done: Int) {
+    public init(weekStart: Date, planned: Int, done: Int, busy: Bool? = nil) {
         self.weekStart = weekStart
         self.planned = planned
         self.done = done
+        self.busy = busy
     }
+
+    public var isBusy: Bool { busy == true }
 
     /// Distinct training days in the plan's week.
     public static func make(plan: WeeklyPlan, trainingDays: [Date], calendar: Calendar = .current) -> WeekRecord {
         let days = Set(trainingDays.map { calendar.startOfDay(for: $0) })
             .filter { $0 >= plan.weekStart && $0 < (calendar.date(byAdding: .day, value: 7, to: plan.weekStart) ?? plan.weekStart) }
-        return WeekRecord(weekStart: plan.weekStart, planned: plan.sessionTarget, done: days.count)
+        return WeekRecord(weekStart: plan.weekStart, planned: plan.sessionTarget, done: days.count,
+                          busy: plan.busy == nil ? nil : true)
     }
 }
 
@@ -439,6 +456,9 @@ public enum Consistency {
         var counted = 0
         for record in window {
             let isKept = weekKept(planned: record.planned, done: record.done)
+            // A planned busy week with no session is left out: it was chosen in advance,
+            // so it neither counts as kept nor against the score (`BusyWeek`).
+            if record.isBusy, !isKept { continue }
             if calendar.isDate(record.weekStart, inSameDayAs: thisWeek) {
                 if isKept { kept += 1; counted += 1 }
             } else {
@@ -450,7 +470,7 @@ public enum Consistency {
         let label = counted >= 2 ? "\(kept) of \(counted) weeks" : "Getting going"
         // The most recent finished week, if it wasn't kept.
         let lastFinished = window.last { !calendar.isDate($0.weekStart, inSameDayAs: thisWeek) }
-        let note: String? = lastFinished.map { weekKept(planned: $0.planned, done: $0.done) } == false
+        let note: String? = lastFinished.map { $0.isBusy || weekKept(planned: $0.planned, done: $0.done) } == false
             ? "Last week was lighter than planned. One week off changes nothing; this week counts as soon as you show up."
             : nil
         return Result(keptWeeks: kept, plannedWeeks: counted, score: score, label: label, note: note)
@@ -466,8 +486,9 @@ public enum Consistency {
         let byWeek = Dictionary(records.map { ($0.weekStart, $0) }, uniquingKeysWith: { _, latest in latest })
         var weeks = 0
         var cursor = calendar.date(byAdding: .day, value: -7, to: thisWeek)
-        while let week = cursor, let record = byWeek[week], record.done >= minimum {
-            weeks += 1
+        while let week = cursor, let record = byWeek[week], record.done >= minimum || record.isBusy {
+            // A planned busy week (`BusyWeek`) neither adds to the run nor ends it.
+            if !record.isBusy { weeks += 1 }
             cursor = calendar.date(byAdding: .day, value: -7, to: week)
         }
         return weeks

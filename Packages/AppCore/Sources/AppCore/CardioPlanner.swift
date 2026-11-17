@@ -73,11 +73,18 @@ public struct EasyCardio: Codable, Sendable, Equatable {
     public var sessionsPerWeek: Int
     public var minutes: Int
     public var kind: Kind
+    /// The week's one hard interval session (`HardCardio`), when you took the
+    /// offer: it takes the place of one of the easy sessions, or is the one
+    /// cardio session of a week with none. Nil by default, and in plans saved
+    /// before it existed: it is offered, never scheduled for you.
+    public var hard: HardCardio.Choice?
 
-    public init(sessionsPerWeek: Int, minutes: Int = EasyCardio.standardMinutes, kind: Kind = .bike) {
+    public init(sessionsPerWeek: Int, minutes: Int = EasyCardio.standardMinutes, kind: Kind = .bike,
+                hard: HardCardio.Choice? = nil) {
         self.sessionsPerWeek = max(0, min(EasyCardio.maximumPerWeek, sessionsPerWeek))
         self.minutes = minutes
         self.kind = kind
+        self.hard = hard
     }
 
     /// The most easy cardio sessions the plan schedules: the "1-2 easy
@@ -156,14 +163,17 @@ public enum CardioPlanner {
     /// is as good. Ties go to the earlier day.
     public static func slots(for plan: WeeklyPlan, goals: Goals?) -> [Slot] {
         guard let cardio = plan.cardio, cardio.sessionsPerWeek > 0 else { return [] }
-        let count = min(EasyCardio.maximumPerWeek, cardio.sessionsPerWeek)
+        // The hard session (`HardCardio`), when it runs this week, takes one easy session's place and its day.
+        let hard = HardCardio.slot(for: plan, goals: goals)
+        let count = min(EasyCardio.maximumPerWeek, cardio.sessionsPerWeek) - (hard == nil ? 0 : 1)
+        guard count > 0 else { return [] }
         if plan.isFlexible {
             return (0..<count).map { Slot(index: $0, weekday: nil, kind: cardio.kind, minutes: cardio.minutes) }
         }
         let strengthGoal = goals?.focuses.contains(.strength) == true
         // Score each weekday: lower is better; nil means not allowed.
         var scores: [Int: Double] = [:]
-        for weekday in WeeklyPlan.weekdayOrder {
+        for weekday in WeeklyPlan.weekdayOrder where weekday != hard?.weekday {
             if let lifting = plan.day(for: weekday) {
                 if isHeavyLower(lifting.focus) {
                     if !strengthGoal { scores[weekday] = 4 }
@@ -292,14 +302,17 @@ public enum CardioPlanner {
     }
 
     /// Planned cardio minutes for the week, toward the 150-300 band.
-    public static func plannedMinutes(_ cardio: EasyCardio?) -> Int {
+    public static func plannedMinutes(_ cardio: EasyCardio?, goals: Goals? = nil) -> Int {
         guard let cardio else { return 0 }
-        return min(EasyCardio.maximumPerWeek, cardio.sessionsPerWeek) * cardio.minutes
+        // With the hard session chosen, one easy session fewer (`slots`); its own minutes are said on its row.
+        let hard = cardio.hard != nil && !HardCardio.isHardCut(goals)
+        let easy = min(EasyCardio.maximumPerWeek, cardio.sessionsPerWeek) - (hard ? 1 : 0)
+        return max(0, easy) * cardio.minutes
     }
 
     /// "60 planned minutes toward the 150-minute WHO floor (easy cardio counts as moderate)."
     public static func bandLine(_ cardio: EasyCardio?, goals: Goals?) -> String? {
-        let minutes = plannedMinutes(cardio)
+        let minutes = plannedMinutes(cardio, goals: goals)
         guard minutes > 0 else { return nil }
         let target = WeeklyActivityBand.target(for: goals)
         return "\(minutes) planned minutes toward your \(target) a week (WHO 2020); easy zone 2 counts as moderate."
