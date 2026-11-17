@@ -757,6 +757,10 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         return values.reduce(0, +) / Double(values.count)
     }
 
+    /// Metadata key on a cardio workout saved by Tensile's Watch app
+    /// (`WatchCardioModel.metadataKey`; its value is the `CardioActivity`).
+    nonisolated static let watchCardioMetadataKey = "TensileCardioActivity"
+
     /// Workouts recorded by other apps (Garmin Connect, Strava...) in a time range.
     @concurrent
     func externalWorkouts(from start: Date, to end: Date) async throws -> [ExternalWorkout] {
@@ -769,7 +773,11 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         let ownBundle = Bundle.main.bundleIdentifier
         let strengthTypes: [HKWorkoutActivityType] = [.traditionalStrengthTraining, .functionalStrengthTraining]
         return try await descriptor.result(for: store).compactMap { workout in
-            guard workout.sourceRevision.source.bundleIdentifier != ownBundle else { return nil }
+            // The phone's own saved gym sessions are left out (they are logged sessions
+            // already). A cardio workout from Tensile's Watch app is kept even if Health
+            // files it under the phone app's source: it has no logged session to stand for it.
+            guard workout.sourceRevision.source.bundleIdentifier != ownBundle
+                    || workout.metadata?[Self.watchCardioMetadataKey] != nil else { return nil }
             let distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meterUnit(with: .kilo))
             let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
             return ExternalWorkout(

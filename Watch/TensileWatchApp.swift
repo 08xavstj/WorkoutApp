@@ -4,20 +4,25 @@ import WatchConnectivity
 import WatchKit
 
 /// Tensile on the wrist: log sets, see the rest timer, and record heart rate
-/// and calories for the gym session running on the iPhone.
+/// and calories for the gym session running on the iPhone; or record a
+/// cardio workout with live heart-rate zones (`WatchCardioModel`).
 @main
 struct TensileWatchApp: App {
     @WKApplicationDelegateAdaptor(WatchAppDelegate.self) private var delegate
     @State private var model = WatchWorkoutModel.shared
+    @State private var cardio = WatchCardioModel.shared
 
     var body: some Scene {
         WindowGroup {
             WatchRootView()
                 .environment(model)
+                .environment(cardio)
                 .task { model.activate() }
                 // A tapped complication (`tensile://start`) opens the start screen.
                 .onOpenURL { url in
-                    if url.scheme == "tensile", model.phase == .ended { model.reset() }
+                    guard url.scheme == "tensile" else { return }
+                    if model.phase == .ended { model.reset() }
+                    if cardio.phase == .ended { cardio.reset() }
                 }
         }
     }

@@ -393,6 +393,9 @@ nonisolated enum WatchMessage {
     static let summary = "summary"
     /// `WatchFaceData` for the complications (phone → Watch).
     static let faceData = "faceData"
+    /// The chosen heart-rate zones for the Watch's cardio mode (phone → Watch):
+    /// a `HeartRateZoneScheme` (AppCore; the Watch compiles that file itself).
+    static let zones = "zones"
 
     static func encode<T: Encodable>(_ value: T) -> Data? {
         try? JSONEncoder().encode(value)

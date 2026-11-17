@@ -18,6 +18,10 @@ struct StartWorkoutIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let model = WatchWorkoutModel.shared
         model.activate()
+        // A cardio workout is recording (`WatchCardioModel`): opening the app is all there is to do.
+        let cardio = WatchCardioModel.shared
+        if cardio.isBusy { return .result() }
+        if cardio.phase == .ended { cardio.reset() }
         switch model.phase {
         case .starting, .running, .paused:
             // Already recording: opening the app is all there is to do.
@@ -29,6 +33,31 @@ struct StartWorkoutIntent: AppIntent {
         }
         let waiting = model.snapshot.flatMap { $0.isFinished ? nil : $0.id }
         await model.start(sessionID: waiting)
+        return .result()
+    }
+}
+
+/// "Start cardio in Tensile": opens the Watch app on its cardio list, with
+/// the last activity on top (one tap or a double tap starts it). It doesn't
+/// start a workout by itself: a run, a ride and a row are saved as different
+/// workouts, and a wrong guess would have to be discarded.
+struct StartCardioIntent: AppIntent {
+    static let title: LocalizedStringResource = "Start cardio"
+    static let description = IntentDescription(
+        "Opens the cardio list on your Apple Watch, with your last activity on top."
+    )
+    static let openAppWhenRun = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let lifting = WatchWorkoutModel.shared
+        let cardio = WatchCardioModel.shared
+        lifting.activate()
+        // Already recording, either kind: opening the app is all there is to do.
+        if cardio.isBusy || lifting.isRecording || lifting.phase == .starting { return .result() }
+        if lifting.phase == .ended { lifting.reset() }
+        if cardio.phase == .ended { cardio.reset() }
+        cardio.pickerRequested = true
         return .result()
     }
 }
@@ -45,6 +74,16 @@ struct TensileWatchShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Start workout",
             systemImageName: "figure.strengthtraining.traditional"
+        )
+        AppShortcut(
+            intent: StartCardioIntent(),
+            phrases: [
+                "Start cardio in \(.applicationName)",
+                "Start a cardio workout in \(.applicationName)",
+                "Open cardio in \(.applicationName)",
+            ],
+            shortTitle: "Start cardio",
+            systemImageName: "figure.run"
         )
     }
 }

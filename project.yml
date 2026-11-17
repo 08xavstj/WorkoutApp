@@ -139,8 +139,9 @@ targets:
         ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME: ""
 
   # Apple Watch app: logs sets and records the workout (heart rate, calories) on the
-  # wrist, so each gym session is one HKWorkout. Single-target watch app (no WatchKit
-  # extension); bundle ID is the iPhone app's plus ".watchkitapp".
+  # wrist, so each gym session is one HKWorkout; also records cardio workouts with
+  # live heart-rate zones. Single-target watch app (no WatchKit extension); bundle
+  # ID is the iPhone app's plus ".watchkitapp".
   TensileWatch:
     type: application
     platform: watchOS
@@ -159,6 +160,9 @@ targets:
       - path: Shared/WatchFaceData.swift
       # The experimental rep counter's signal maths (pure Swift).
       - path: Packages/AppCore/Sources/AppCore/RepDetection.swift
+      # Heart-rate zones and the cardio mode's zone clock (pure Swift).
+      - path: Packages/AppCore/Sources/AppCore/HeartRateZoneScheme.swift
+      - path: Packages/AppCore/Sources/AppCore/CardioZoneTracker.swift
     dependencies:
       - sdk: HealthKit.framework
       - sdk: WatchConnectivity.framework
@@ -192,10 +196,12 @@ targets:
         WKBackgroundModes:
           - workout-processing
         NSHealthShareUsageDescription: >-
-          Tensile reads your heart rate and active energy during a workout to show
-          them on your wrist.
+          Tensile reads your heart rate, active energy and distance during a workout
+          to show them on your wrist, and your date of birth to estimate heart-rate
+          zones when your iPhone hasn't sent any.
         NSHealthUpdateUsageDescription: >-
-          Tensile saves your gym workouts, with heart rate and calories, to Apple Health.
+          Tensile saves your gym and cardio workouts, with heart rate and calories, to
+          Apple Health.
         NSMotionUsageDescription: >-
           Tensile reads your wrist's motion during squat and deadlift sets to count
           reps, only when rep counting is on.
