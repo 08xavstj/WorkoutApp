@@ -1,12 +1,15 @@
 import SwiftUI
 import AppCore
 
-/// Settings, a sheet from the profile button on every tab. One inset-grouped
-/// list in the order of ux-audit.md 4.6: You → Profile → Training →
-/// Reminders → Sleep & rest → Nutrition → Coach → Data sources → Appearance →
-/// About. Everything that opens a page pushes inside this sheet's own stack
-/// (ux-audit.md 4.1 rule 5); only the RPE guide, which has its own stack and
-/// is shared with the workout screens, is still a sheet.
+/// Settings, a sheet from the profile button on every tab. The root is one
+/// short screen: You (name, goals, city), five pages (Profile, Training,
+/// Notifications, Sleep & nutrition, Data & privacy), then Appearance and
+/// About. It was a single list seven screens long; a short root with pages
+/// one level down follows HIG Settings ("Minimize the number of settings you
+/// offer") and NN/g's two-level limit for progressive disclosure
+/// (docs/research/cleanup-2026-11.md, rules 1 and B). Pages push inside this
+/// sheet's own stack; only the RPE guide, which has its own stack and is
+/// shared with the workout screens, is still a sheet.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingRPEGuide = false
@@ -15,14 +18,26 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 YouSettingsSection()
-                ProfileSettingsSection()
-                TrainingSettingsSection(showRPEGuide: { showingRPEGuide = true })
-                RemindersSettingsSection()
-                CoachCheckInsSettingsSection()
-                SleepSettingsSection()
-                NutritionSettingsSection()
-                CoachSettingsSection()
-                DataSourcesSettingsSection()
+                Section {
+                    SettingsPageLink(title: "Profile", detail: "Age, height, weight, heart rate", icon: "person.fill", id: "profile") {
+                        ProfileSettingsSection()
+                    }
+                    SettingsPageLink(title: "Training", detail: "Gym, rest timer, warm-up, Apple Watch", icon: "dumbbell.fill", id: "training") {
+                        TrainingSettingsSection(showRPEGuide: { showingRPEGuide = true })
+                    }
+                    SettingsPageLink(title: "Notifications", detail: "Reminders, doses, coach messages", icon: "bell.fill", id: "notifications") {
+                        RemindersSettingsSection()
+                        CoachCheckInsSettingsSection()
+                    }
+                    SettingsPageLink(title: "Sleep & nutrition", detail: "Sleep need, rest mode, calories", icon: "bed.double.fill", id: "sleep-nutrition") {
+                        SleepSettingsSection()
+                        NutritionSettingsSection()
+                    }
+                    SettingsPageLink(title: "Data & privacy", detail: "Apple Health, Oura, where the coach runs", icon: "lock.fill", id: "data") {
+                        DataSourcesSettingsSection()
+                        CoachSettingsSection()
+                    }
+                }
                 AppearanceSettingsSection()
                 AboutSettingsSection()
             }
@@ -38,6 +53,41 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingRPEGuide) { RPEGuideView() }
         }
+    }
+}
+
+/// One row on the Settings root that pushes a page holding the given sections.
+private struct SettingsPageLink<Sections: View>: View {
+    let title: String
+    let detail: String
+    let icon: String
+    /// "settings-<id>" for UI tests (ScreenshotTests).
+    let id: String
+    @ViewBuilder var sections: Sections
+
+    var body: some View {
+        NavigationLink {
+            Form { sections }
+                .scrollContentBackground(.hidden)
+                .scrollEdgeEffectStyle(.hard, for: .top)
+                .background(Theme.background)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+        } label: {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(Theme.primaryText)
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            } icon: {
+                Image(systemName: icon)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .accessibilityIdentifier("settings-\(id)")
     }
 }
 
@@ -258,7 +308,7 @@ private struct TrainingSettingsSection: View {
                 Text("Added on top of planned workouts")
             }
             Button(action: showRPEGuide) {
-                LabeledContent("RPE guide", value: "What each number means")
+                LabeledContent("Reps left guide", value: "How the rating works")
             }
             LiftingExperienceRows()
             EvidenceDisclosure(points: Self.details, title: "How these work")

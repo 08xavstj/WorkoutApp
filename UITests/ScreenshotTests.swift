@@ -224,30 +224,40 @@ final class ScreenshotTests: XCTestCase {
     private func tourSettings(_ app: XCUIApplication) {
         openTab(app, "Today")
         guard tap(app, ["Settings"], name: "Settings button", scroll: false) else { return }
-        // Reminders, Data sources, Appearance and About are sections of this page.
-        capture(app, "settings", pages: 7)
-        let pages: [(keys: [String], name: String)] = [
-            (["Goals"], "goals"),
-            (["Gym equipment"], "gym"),
-            (["City"], "city"),
-            (["Medications & supplements", "Medication reminders"], "medications"),
-            (["Using a Garmin"], "garmin-help"),
-            (["Using Cronometer"], "cronometer-help"),
-        ]
-        for page in pages {
-            if tap(app, page.keys, name: "Settings \(page.name)") {
-                capture(app, "settings-\(page.name)", pages: page.name == "goals" ? 2 : 1)
-                if page.name == "goals", tap(app, ["Bench Press"], name: "Goals lift goal") {
-                    capture(app, "settings-lift-goal-editor", pages: 1)
-                    back(app)
-                }
-                // Goals opens as its own sheet (Cancel/Save); the rest are pushed.
-                if page.name == "goals" { dismissSheet(app) } else { back(app) }
+        // The root is short: You, five pages, Appearance and About.
+        capture(app, "settings", pages: 2)
+        if tap(app, ["Goals"], name: "Settings goals") {
+            capture(app, "settings-goals", pages: 2)
+            if tap(app, ["Bench Press"], name: "Goals lift goal") {
+                capture(app, "settings-lift-goal-editor", pages: 1)
+                back(app)
             }
+            dismissSheet(app) // Goals opens as its own sheet (Cancel/Save)
         }
-        if tap(app, ["What's RPE?", "RPE guide", "How RPE works"], name: "Settings RPE guide") {
-            capture(app, "settings-rpe-guide", pages: 1)
-            dismissSheet(app)
+        if tap(app, ["City"], name: "Settings city") {
+            capture(app, "settings-city", pages: 1)
+            back(app)
+        }
+        // Each page, then the pages it pushes.
+        let sections: [(key: String, name: String, pages: Int, inner: [(keys: [String], name: String)])] = [
+            ("settings-profile", "profile", 2, []),
+            ("settings-training", "training", 2, [(["Gym equipment"], "gym")]),
+            ("settings-notifications", "notifications", 3, [(["Medications & supplements", "Medication reminders"], "medications")]),
+            ("settings-sleep-nutrition", "sleep-nutrition", 1, []),
+            ("settings-data", "data", 1, [(["Using a Garmin"], "garmin-help"), (["Using Cronometer"], "cronometer-help")]),
+        ]
+        for section in sections {
+            guard tap(app, [section.key], name: "Settings \(section.name)") else { continue }
+            capture(app, "settings-\(section.name)", pages: section.pages)
+            for inner in section.inner where tap(app, inner.keys, name: "Settings \(inner.name)") {
+                capture(app, "settings-\(inner.name)", pages: 1)
+                back(app)
+            }
+            if section.name == "training", tap(app, ["What's RPE?", "RPE guide", "How RPE works", "Reps left guide"], name: "Settings RPE guide") {
+                capture(app, "settings-rpe-guide", pages: 1)
+                dismissSheet(app)
+            }
+            back(app)
         }
         // Settings and any sheet still open on it (Gym equipment, Goals) close
         // here, so the next tour starts from the tab bar, not from Settings.
