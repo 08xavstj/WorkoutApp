@@ -120,14 +120,18 @@ private struct FitnessTodayCard: View {
     }
 }
 
+/// Today's strain in one line, with its range and where it stands. It was a
+/// 250-point gauge: the third place showing the same number as the Today ring
+/// and the strain sheet (cleanup-2026-11.md rule 14: a number that doesn't
+/// need analysing is a row, not a chart).
 private struct DayStrainGauge: View {
     @Environment(DailyMetricsModel.self) private var metrics
-    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 60
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 40
 
     var body: some View {
         let current = metrics.strain?.strain ?? 0
         let target = metrics.targetStrain
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 CardLabel(text: "Day strain")
                 Spacer()
@@ -135,34 +139,27 @@ private struct DayStrainGauge: View {
                     rangeChip(current: current, target: target)
                 }
             }
-            gauge(current: current, target: target)
-                .frame(maxWidth: .infinity)
-            rangeLine(target)
-        }
-    }
-
-    private func gauge(current: Double, target: ClosedRange<Double>?) -> some View {
-        ArcGauge(
-            value: current / StrainCalculator.maximum,
-            band: target.map { ($0.lowerBound / StrainCalculator.maximum)...($0.upperBound / StrainCalculator.maximum) },
-            colors: [Theme.strainLight, Theme.strain, Theme.lifting],
-            lineWidth: 24
-        ) {
-            VStack(spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(strainText(current))
-                    .font(.system(size: min(heroSize, 76), weight: .bold, design: .rounded))
+                    .font(.system(size: min(heroSize, 56), weight: .bold, design: .rounded))
                     .minimumScaleFactor(0.6)
                     .monospacedDigit()
                     .foregroundStyle(LinearGradient(colors: [Theme.strain, Theme.lifting], startPoint: .leading, endPoint: .trailing))
-                Text("day strain")
+                if let target {
+                    Text("today · range \(strainRangeText(target))")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenGauge(current: current, target: target))
+            if target == nil {
+                Text("Wear your watch to sleep so the app can set a daily strain range from your recovery.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(width: 250, height: 250)
-        .padding(.bottom, -40)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenGauge(current: current, target: target))
     }
 
     /// "In range" / "Below range" / "Above range" (ux-audit.md 4.7). Calm
@@ -177,22 +174,6 @@ private struct DayStrainGauge: View {
         case .above: ("Above range", Theme.strain)
         }
         return notStarted ? Chip(text: "Not started", color: Theme.secondaryText) : Chip(text: chip.text, color: chip.color)
-    }
-
-    @ViewBuilder
-    private func rangeLine(_ target: ClosedRange<Double>?) -> some View {
-        if let target {
-            Text("Today's range \(strainRangeText(target))")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.recoveryHighText)
-                .frame(maxWidth: .infinity)
-                .accessibilityHidden(true)
-        } else {
-            Text("Wear your watch to sleep so the app can set a daily strain range from your recovery.")
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 
     private func spokenGauge(current: Double, target: ClosedRange<Double>?) -> String {
