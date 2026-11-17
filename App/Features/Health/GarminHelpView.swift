@@ -21,7 +21,7 @@ struct GarminHelpView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Body Battery, stress and HRV stay in Garmin Connect. Tensile estimates stress from heart rate; type HRV under Log › Overnight HRV.")
+                Text("Body Battery, stress and HRV stay in Garmin Connect. Type HRV under Log › Overnight HRV.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)

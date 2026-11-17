@@ -701,110 +701,6 @@ struct AuditGoalTests {
     }
 }
 
-// MARK: - N13 Body age
-
-struct AuditBodyAgeTests {
-    func factor(_ name: String, _ inputs: BodyAge.Inputs) throws -> BodyAge.Factor {
-        let result = try #require(BodyAge.estimate(inputs))
-        return try #require(result.factors.first { $0.name == name })
-    }
-
-    @Test func bodyFatHasNoStepAtTwentyPercent() throws {
-        // Was −0.5 at 19.9% and +1.0 at 20.1%.
-        func years(_ fat: Double, _ sex: BiologicalSex = .male) throws -> Double {
-            try factor("Body fat", BodyAge.Inputs(age: 30, sex: sex, restingHeartRate: 60, bodyFatPercent: fat)).years
-        }
-        #expect(abs(try years(20.1) - years(19.9)) <= 0.1)
-        // The same anchor values, each at the middle of its band.
-        #expect(try years(15) == -0.5)
-        #expect(try years(20) == -0.5)
-        #expect(try years(22.5) == 1)
-        #expect(try years(27.5) == 2.5)
-        #expect(try years(32.5) == 4.5)
-        #expect(try years(45) == 4.5)
-        #expect(try years(30, .female) == -0.5)
-        #expect(try years(42.5, .female) == 4.5)
-        var previous = try years(10)
-        for fat in stride(from: 10.5, through: 40, by: 0.5) {
-            let now = try years(fat)
-            #expect(now >= previous && now - previous <= 0.4)
-            previous = now
-        }
-    }
-
-    @Test func sleepHasNoCliffAtSixHours() throws {
-        // Was 0 at 6.0 h and +1.3 at 5.9 h.
-        func years(_ hours: Double) throws -> Double {
-            try factor("Sleep", BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, sleepHours: hours)).years
-        }
-        #expect(try years(5) == 1.3)
-        #expect(try years(6) == 1.3)
-        #expect(try years(6.5) == 0.7) // half of 1.31, to the 0.1 shown
-        #expect(try years(7) == 0)
-        #expect(try years(7.25) == 0)
-        #expect(abs(try years(6.1) - years(5.9)) <= 0.2)
-    }
-
-    @Test func bmiIsReadOffLinesNotSteps() throws {
-        func years(_ bmi: Double) throws -> Double {
-            try factor("BMI", BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, bmi: bmi)).years
-        }
-        #expect(try years(22) == 0)
-        #expect(try years(24.7) == 0) // the owner
-        #expect(abs(try years(30.1) - years(29.9)) <= 0.2) // was 2.1 → 4.3
-        #expect(abs(try years(32.5) - BodyAge.gompertzYears(hazard: 1.45)) < 0.05)
-        #expect(abs(try years(37.5) - BodyAge.gompertzYears(hazard: 1.94)) < 0.05)
-        #expect(abs(try years(19.25) - BodyAge.gompertzYears(hazard: 1.13)) < 0.05)
-    }
-
-    @Test func bodySizeIsCountedOnce() throws {
-        // 118 kg, 179 cm man of 35 (BMI 36.8) with a VO₂ max of 26 mL/kg/min:
-        // fitness and BMI used to add +12 and +7.6 years.
-        let inputs = BodyAge.Inputs(age: 35, sex: .male, vo2Max: 26, restingHeartRate: 60, bmi: 36.8)
-        let result = try #require(BodyAge.estimate(inputs))
-        let fitness = try #require(result.factors.first { $0.name == "Fitness (VO₂ max)" })
-        let bmi = try #require(result.factors.first { $0.name == "BMI" })
-        #expect(fitness.years > 0 && bmi.years >= 0)
-        #expect(fitness.years + bmi.years <= BodyAge.bodySizeAndFitnessCapYears + 0.05)
-        #expect(result.bodyAge <= 35 + 12)
-        #expect(bmi.detail.contains("Counted in part"))
-        // A fit heavy person isn't touched: fitness adds nothing, BMI counts in full.
-        let fit = try #require(BodyAge.estimate(BodyAge.Inputs(age: 35, sex: .male, vo2Max: 48, restingHeartRate: 60, bmi: 36.8)))
-        let fitBMI = try #require(fit.factors.first { $0.name == "BMI" })
-        #expect(abs(fitBMI.years - 7.2) < 0.2)
-        #expect(!fitBMI.detail.contains("Counted in part"))
-    }
-
-    @Test func articleMatchesTheNumber() throws {
-        #expect(BodyAge.article(for: 18) == "an")
-        #expect(BodyAge.article(for: 81) == "an")
-        #expect(BodyAge.article(for: 80) == "an")
-        #expect(BodyAge.article(for: 24) == "a")
-        #expect(BodyAge.article(for: 90) == "a")
-        // Was "typical of a 18-year-old" / "a 81-year-old".
-        let young = try factor("Fitness (VO₂ max)", BodyAge.Inputs(age: 30, sex: .male, vo2Max: 60, restingHeartRate: 60))
-        #expect(young.detail.contains("typical of an 18-year-old"))
-        let old = try factor("Fitness (VO₂ max)", BodyAge.Inputs(age: 50, sex: .male, vo2Max: 22.5, restingHeartRate: 60))
-        #expect(old.detail.contains("typical of an 8"))
-    }
-
-    @Test func factorsNeverPrintMinusZero() throws {
-        // A resting rate a shade under 60 used to give −0.04 years: "−0.0 y" in the coach's summary.
-        let result = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 59.7, sleepHours: 7.5)))
-        for factor in result.factors {
-            #expect(factor.years == (factor.years * 10).rounded() / 10)
-            #expect(!(factor.years == 0 && factor.years.sign == .minus))
-            #expect(!String(format: "%.1f", factor.years).hasPrefix("-0.0"))
-        }
-    }
-
-    @Test func ownerBodyAgeIsUnchanged() throws {
-        // VO₂ 48.5 (the combined estimate), resting 55, 7.25 h, 9,000 steps, BMI 24.7: 25 before and after.
-        let inputs = BodyAge.Inputs(age: 30, sex: .male, vo2Max: 48.5, restingHeartRate: 55, sleepHours: 7.25, dailySteps: 9_000, bmi: 80 / 3.24)
-        #expect(try #require(BodyAge.estimate(inputs)).bodyAge == 25)
-    }
-}
-
 // MARK: - N14 Nutrition
 
 struct AuditNutritionTests {
@@ -908,9 +804,6 @@ struct AuditInputGuardTests {
         #expect(WaistToHeightRatio.ratio(waistCm: 60, heightCm: 160) == 0.375) // a small real waist still counts
         #expect(WaistToHeightRatio.ratio(waistCm: 200, heightCm: 180) == nil)
         #expect(WaistToHeightRatio.ratio(waistCm: 84, heightCm: 1_800) == nil)
-        // Body age ignores an implausible ratio rather than calling it healthy.
-        let result = BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, bmi: 31, waistToHeightRatio: 0.19))
-        #expect(result?.factors.contains { $0.name == "BMI" } == true)
     }
 
     @Test func aLiftGoalOfZeroIsNotReached() {

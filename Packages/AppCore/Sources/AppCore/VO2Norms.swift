@@ -16,7 +16,7 @@ import Foundation
 /// - The FRIEND update (Kaminsky et al., Mayo Clin Proc 2022;97:285-293)
 ///   reports treadmill values 1.5-4.6 ml/kg/min lower than 2015 (its
 ///   abstract; the full tables weren't checked for this app). The app
-///   keeps the 2015 table for the medians, percentiles and fitness age alike;
+///   keeps the 2015 table for the medians and percentiles alike;
 ///   if it moves to 2022 it must move all of them together.
 /// - FRIEND volunteers were referred for or chose a lab test; they are not a
 ///   random sample of the population.

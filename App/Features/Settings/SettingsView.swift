@@ -154,8 +154,8 @@ private struct ProfileSettingsSection: View {
         } footer: {
             // Only mentions "Health" labels when the switch is on and there can be some.
             Text(settings.profileFromHealth
-                 ? "Age and sex set your heart-rate zones, calorie estimate and body age. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in Apple Health (profile › Health Details), or turn the switch off to type your own."
-                 : "Age and sex set your heart-rate zones, calorie estimate and body age. Turn on the switch to fill them in from Apple Health.")
+                 ? "Age and sex set your heart-rate zones, calorie estimate and fitness norms. Fields marked \"Health\" come from Apple Health and update by themselves; add missing ones in Apple Health (profile › Health Details), or turn the switch off to type your own."
+                 : "Age and sex set your heart-rate zones, calorie estimate and fitness norms. Turn on the switch to fill them in from Apple Health.")
         }
         Section {
             maxHeartRateRow
@@ -175,7 +175,7 @@ private struct ProfileSettingsSection: View {
             }
         } footer: {
             // Lambe et al., PLOS ONE 2025 (`VO2Source`).
-            Text("Body age, your fitness level and fitness age, and the coach use this one. Apple Watch read about 6 points low on average against lab tests and only measures on outdoor walks, runs and hikes; Tensile's estimate comes from your resting and max heart rate and your activity, lifting included, and is about ±5. If the one you pick has no value yet, the other is used.")
+            Text("Your fitness level and the coach use this one. Apple Watch read about 6 points low on average against lab tests and only measures on outdoor walks, runs and hikes; Tensile's estimate comes from your resting and max heart rate and your activity, lifting included, and is about ±5. If the one you pick has no value yet, the other is used.")
         }
     }
 

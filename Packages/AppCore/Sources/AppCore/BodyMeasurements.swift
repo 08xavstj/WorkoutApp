@@ -105,15 +105,6 @@ public enum WaistToHeightRatio {
         guard let due = nextDue(lastMeasured: lastMeasured, calendar: calendar) else { return true }
         return calendar.startOfDay(for: now) >= due
     }
-
-    /// Days the body-age estimate treats a waist reading as current (body age
-    /// uses WHtR instead of BMI only while a reading this fresh exists).
-    public static let freshDays = 90
-
-    public static func isFresh(_ measured: Date, now: Date = .now, calendar: Calendar = .current) -> Bool {
-        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: measured), to: calendar.startOfDay(for: now)).day ?? 0
-        return days <= freshDays
-    }
 }
 
 /// Centimetres or inches for typing a waist measurement. Stored in cm; the

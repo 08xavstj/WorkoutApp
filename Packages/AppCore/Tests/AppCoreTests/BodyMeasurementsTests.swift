@@ -37,9 +37,6 @@ struct WaistToHeightRatioTests {
         #expect(!WaistToHeightRatio.isDue(lastMeasured: measured, now: measured.addingTimeInterval(20 * 86_400), calendar: utc))
         #expect(WaistToHeightRatio.isDue(lastMeasured: measured, now: due, calendar: utc))
         #expect(WaistToHeightRatio.isDue(lastMeasured: nil, calendar: utc))
-        // Body age treats a waist reading as current for 90 days.
-        #expect(WaistToHeightRatio.isFresh(measured, now: measured.addingTimeInterval(90 * 86_400), calendar: utc))
-        #expect(!WaistToHeightRatio.isFresh(measured, now: measured.addingTimeInterval(91 * 86_400), calendar: utc))
     }
 
     @Test func lengthUnits() {

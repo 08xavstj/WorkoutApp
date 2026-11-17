@@ -5,8 +5,8 @@ import Foundation
 ///
 /// What this is not: a score. There is no composite "longevity score" and no
 /// "years gained" here, because no validated published model supports one
-/// from this data (the app's one composite, `BodyAge`, already says so about
-/// itself). Each measure stands alone with its own published target, its
+/// from this data (the body-age composite was removed for that reason:
+/// evidence-audit-2026-11.md). Each measure stands alone with its own published target, its
 /// source and an evidence grade.
 ///
 /// Almost all of the evidence is observational: people who had the better

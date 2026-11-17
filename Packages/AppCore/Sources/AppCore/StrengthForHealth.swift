@@ -1,16 +1,19 @@
 import Foundation
 
 /// Relative strength (best estimated 1RM ÷ body mass) for the three big
-/// lifts against age-and-sex bands, framed as a health marker next to
-/// VO₂ max, not a leaderboard.
+/// lifts against age-and-sex bands, shown as training standards
+/// (crowd-sourced, not health targets).
 ///
 /// Muscular strength predicts all-cause mortality (García-Hermoso et al.,
 /// Arch Phys Med Rehabil 2018, meta-analysis of about 2 million people);
 /// in PURE, grip strength beat systolic blood pressure as a predictor
 /// (Leong et al., Lancet 2015). That evidence is for strength in general,
-/// not for any lift or ratio. The bands here are an app choice adapted from
-/// commonly published, crowd-sourced strength-standards tables (not
-/// re-verified; docs/research/competitors.md item 10), so they're labelled as such.
+/// not for any lift or ratio, so no band here is a health target
+/// (evidence-audit-2026-11.md, "Should change" 6). For health the guideline
+/// is muscle-strengthening on 2 or more days a week (WHO 2020: Bull et al.,
+/// Br J Sports Med 2020). The bands are an app choice adapted from commonly
+/// published, crowd-sourced strength-standards tables (not re-verified;
+/// docs/research/competitors.md item 10), so they're labelled as such.
 public enum StrengthForHealth {
     public enum Lift: String, CaseIterable, Sendable, Equatable, Identifiable {
         case bench, squat, deadlift
@@ -54,12 +57,12 @@ public enum StrengthForHealth {
         public var id: Lift { lift }
     }
 
-    public static let evidenceNote = "An app choice: bands adapted from strength-standards tables; the health link is for strength in general (García-Hermoso 2018; Leong 2015)."
+    public static let evidenceNote = "Training standards (crowd-sourced, not health targets): an app choice adapted from strength-standards tables. The health link is for strength in general (García-Hermoso 2018; Leong 2015); for health, the guideline is 2+ strength days a week (WHO 2020)."
 
     /// The band most people can reach with a couple of years of consistent
-    /// training; the "keep 2+ strength days and reach this" target for
-    /// health and stamina goals (competitors.md item 10 goal tailoring).
-    public static let healthTargetBand = Band.good
+    /// training: the reference line on the card for health and stamina goals
+    /// (app choice; a training standard, not a health target).
+    public static let referenceBand = Band.good
 
     /// Cut points (ratio of body mass) between the five bands at age 40 or
     /// under, from the lowest band up: the ratio that enters Building, Good,
@@ -139,7 +142,8 @@ public enum StrengthForHealth {
     }
 
     /// One line for the card and the coach: health and stamina goals see
-    /// the "good" band as the target; strength and muscle goals see the next band.
+    /// the "good" band as a reference and the 2-day guideline as what counts;
+    /// strength and muscle goals see the next band.
     public static func summary(_ results: [Result], goals: Goals?) -> String {
         guard !results.isEmpty else { return "Log bench press, squat or deadlift sets and your relative strength shows here." }
         let strengthFocused = goals.map { $0.focuses.contains(.strength) || $0.focuses.contains(.muscle) } ?? false
@@ -148,8 +152,8 @@ public enum StrengthForHealth {
             guard let next = lowest.nextThreshold else { return "Every lift is in the top band." }
             return "\(lowest.lift.name) is the next one up: \(lowest.band.label) now, \(Band(rawValue: lowest.band.rawValue + 1)?.label ?? "") from \(next.formatted(.number.precision(.fractionLength(2)))) × body weight."
         }
-        let below = results.filter { $0.band < healthTargetBand }
-        if below.isEmpty { return "All your big lifts are at \"\(healthTargetBand.label)\" or above. Keeping 2+ strength days a week holds the health benefit." }
-        return "\(below.map(\.lift.name).joined(separator: ", ")) below \"\(healthTargetBand.label)\". For health, 2+ strength days a week and reaching that band is plenty."
+        let below = results.filter { $0.band < referenceBand }
+        if below.isEmpty { return "All your big lifts are at \"\(referenceBand.label)\" or above on the training standards. For health, keep 2+ strength days a week." }
+        return "\(below.map(\.lift.name).joined(separator: ", ")) below \"\(referenceBand.label)\" on the training standards. For health, 2+ strength days a week is what counts, not the band."
     }
 }

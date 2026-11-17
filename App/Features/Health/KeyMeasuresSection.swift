@@ -28,9 +28,9 @@ struct KeyMeasuresSection: View {
         return result
     }
 
-    /// Six rows when everything has data (five stats plus body age).
+    /// Five rows when everything has data.
     private var isMissingRows: Bool {
-        stats.count + (vitals.bodyAge == nil ? 0 : 1) < 6
+        stats.count < 5
     }
 
     var body: some View {
@@ -41,12 +41,8 @@ struct KeyMeasuresSection: View {
                     if index > 0 { Divider() }
                     KeyMeasureRow(stat: stat)
                 }
-                if let bodyAge = vitals.bodyAge {
-                    if !stats.isEmpty { Divider() }
-                    BodyAgeRow(result: bodyAge)
-                }
                 if !metrics.micronutrients.isEmpty {
-                    if !stats.isEmpty || vitals.bodyAge != nil { Divider() }
+                    if !stats.isEmpty { Divider() }
                     MicronutrientsKeyRow(findings: metrics.micronutrients)
                 }
                 footer
@@ -60,7 +56,7 @@ extension KeyMeasuresSection {
     /// "Loading…" before the first refresh, else the "Add data" hint when a row is hidden.
     @ViewBuilder
     private var footer: some View {
-        let hasRows = !stats.isEmpty || vitals.bodyAge != nil
+        let hasRows = !stats.isEmpty
         if vitals.isLoading && vitals.stats.isEmpty {
             Text("Loading your health stats…")
                 .font(.subheadline)
@@ -95,27 +91,6 @@ private struct KeyMeasureRow: View {
             trend: Array(stat.series.suffix(30)),
             trendColor: colors.last ?? Theme.secondaryText,
             destination: VitalDetailView(stat: stat, colors: colors, pushed: true)
-        )
-    }
-}
-
-/// Body age shown as its ±5-year range, not one number: only the parts, not
-/// the composite, have been validated (`BodyAge.uncertaintyYears`), and an
-/// older-than-you headline is a nocebo risk (docs/research/behaviour-change.md,
-/// "Body age"). The page behind it shows the estimate and what moves it.
-private struct BodyAgeRow: View {
-    let result: BodyAge.Result
-    /// Apple's Health Age, when it has been typed in (`AppleHealthAgeCard`).
-    @AppStorage(AppleHealthAge.valueKey) private var appleYears = 0
-
-    var body: some View {
-        MetricRow(
-            title: "Body age",
-            value: "\(result.range.lowerBound)–\(result.range.upperBound)",
-            unit: "years",
-            verdict: MetricVerdict(AppleHealthAge.plausible.contains(appleYears) ? "Apple: \(appleYears)" : "Estimate"),
-            hint: "Shows what's moving it",
-            destination: BodyAgePage()
         )
     }
 }

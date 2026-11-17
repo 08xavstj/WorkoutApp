@@ -85,12 +85,6 @@ final class BodyMeasurementsStore {
         return WaistToHeightRatio.ratio(waistCm: latest.centimeters, heightCm: heightCm)
     }
 
-    /// The ratio only while the reading is fresh enough for body age (last 90 days).
-    func freshWaistToHeightRatio(heightCm: Double?, now: Date = .now) -> Double? {
-        guard let latest = latestWaist, WaistToHeightRatio.isFresh(latest.date, now: now) else { return nil }
-        return waistToHeightRatio(heightCm: heightCm)
-    }
-
     /// One point per measurement day (the last reading of the day), for the history chart.
     var waistSeries: [DatedValue] {
         var byDay: [Date: Double] = [:]

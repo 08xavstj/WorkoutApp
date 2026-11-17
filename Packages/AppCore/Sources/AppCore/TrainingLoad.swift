@@ -115,7 +115,7 @@ public enum Biomarkers {
     /// Median treadmill VO₂ max by age decade from the FRIEND registry
     /// (Kaminsky et al., Mayo Clin Proc 2015, Table 3): 20s, 30s, ... 70s.
     /// Read from `VO2Norms.friendTreadmill` (its 50th percentile column) so
-    /// the medians, percentiles and fitness age share one table:
+    /// the medians and percentiles share one table:
     /// men 48.0, 42.4, 37.8, 32.6, 28.2, 24.4; women 37.6, 30.2, 26.7, 23.4, 20.0, 18.3.
     static let friendMedians: [BiologicalSex: [Double]] = [
         .male: VO2Norms.column(3, sex: .male),
@@ -131,45 +131,6 @@ public enum Biomarkers {
         let fraction = position - Double(lower)
         return medians[lower] + (medians[upper] - medians[lower]) * fraction
     }
-
-    /// "Fitness age": the age whose FRIEND median VO₂ max (`medianVO2Max`)
-    /// matches yours, found by running the same median line backwards (the
-    /// wearable fitness age of Nes et al., Med Sci Sports Exerc 2011, on the
-    /// FRIEND reference so every VO₂ max screen uses one set of norms).
-    /// Outside 25-75 the end decades' slopes are extended, and the result is
-    /// clamped to 18-90. With `age`, a value at or above your own age's median
-    /// never gives a fitness age above your age (the medians are flat under 25
-    /// and over 75, where running the line backwards is ambiguous), and one
-    /// below it never gives an age under yours.
-    public static func fitnessAge(vo2Max: Double, age: Int? = nil, sex: BiologicalSex) -> Double {
-        let medians = friendMedians[sex] ?? friendMedians[.male]!
-        // Decade midpoints 25, 35, ... 75; medians fall with age.
-        var found: Double
-        if vo2Max >= medians[0] {
-            let slope = (medians[0] - medians[1]) / 10
-            found = 25 - (vo2Max - medians[0]) / slope
-        } else if vo2Max <= medians[medians.count - 1] {
-            let last = medians.count - 1
-            let slope = (medians[last - 1] - medians[last]) / 10
-            found = 25 + Double(last) * 10 + (medians[last] - vo2Max) / slope
-        } else {
-            found = 75
-            for index in 0..<(medians.count - 1) where vo2Max <= medians[index] && vo2Max > medians[index + 1] {
-                let fraction = (medians[index] - vo2Max) / (medians[index] - medians[index + 1])
-                found = 25 + (Double(index) + fraction) * 10
-            }
-        }
-        if let age {
-            let own = medianVO2Max(age: age, sex: sex)
-            found = vo2Max >= own ? min(found, Double(age)) : max(found, Double(age))
-        }
-        return min(90, max(18, found))
-    }
-
-    /// Body age's "about typical" floor, as a share of the median: from 95%
-    /// to 100% of the median VO₂ max adds no years (`BodyAge`; app choice).
-    /// It sits inside the FRIEND 25th-50th band ("Average") at every age.
-    public static let goodVO2MaxFraction = 0.95
 
     /// VO₂ max compared with people your age and sex, named by the FRIEND
     /// percentile band it falls in (`VO2Norms.category`: Low, Below average,

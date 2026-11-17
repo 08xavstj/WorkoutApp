@@ -295,24 +295,6 @@ struct ProteinTargetTests {
     }
 }
 
-struct BodyAgeConfidenceTests {
-    @Test func moreFreshFactorsMeanMoreConfidence() throws {
-        let full = try #require(BodyAge.estimate(BodyAge.Inputs(
-            age: 30, sex: .male, vo2Max: 48, restingHeartRate: 58, sleepHours: 7.5, dailySteps: 9000, bodyFatPercent: 18,
-            vo2MaxAgeDays: 10, bodyCompositionAgeDays: 5
-        )))
-        #expect(full.confidence == .high)
-        let thin = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 58, sleepHours: 7.5)))
-        #expect(thin.confidence == .low)
-        let stale = try #require(BodyAge.estimate(BodyAge.Inputs(
-            age: 30, sex: .male, vo2Max: 48, restingHeartRate: 58, sleepHours: 7.5, dailySteps: 9000, bodyFatPercent: 18,
-            vo2MaxAgeDays: 200
-        )))
-        #expect(stale.confidence == .medium)
-        #expect(stale.confidenceReason.contains("VO₂ max"))
-    }
-}
-
 struct AlcoholWeekTests {
     @Test func canadianTiers() {
         // CCSA 2023: 0–2 low, 3–6 moderate, 7+ increasingly high.

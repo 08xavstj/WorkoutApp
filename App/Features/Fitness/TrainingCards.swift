@@ -372,7 +372,8 @@ struct MinutesBandBar: View {
 
 /// The Fitness headline: VO₂ max with its 90-day trend, where it sits against
 /// people your age and sex on a FRIEND percentile bar (`VO2Norms`, with the
-/// no-test estimates marked), a fitness age from this one measure, the
+/// no-test estimates marked; the percentile only, with no fitness age:
+/// evidence-audit-2026-11.md), the
 /// interval nudge when the trend is flat or falling, and tips to raise it
 /// (`CardioFitness`; Mandsager 2018; Kokkinos 2022; Milanović 2015; Wen 2019).
 struct CardioFitnessCard: View {
@@ -449,7 +450,7 @@ struct CardioFitnessCard: View {
     }
 
     /// Everything that used to crowd the card: the estimates, other
-    /// comparisons, fitness age, where readings come from, and the evidence.
+    /// comparisons, where readings come from, and the evidence.
     @ViewBuilder
     private func details(_ result: CardioFitness.Result?, history: [DatedValue], estimates: VO2Estimates) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -468,9 +469,6 @@ struct CardioFitnessCard: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
-            }
-            if let scored = vitals.vo2ForScores {
-                fitnessAgeLine(scored.value)
             }
             if result != nil {
                 // Lambe et al., PLOS ONE 2025: 6.1 mL/kg/min low on average against lab tests.
@@ -574,17 +572,6 @@ struct CardioFitnessCard: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Fitness age from VO₂ max alone (FRIEND medians, the same as the norms line; Nes 2011), with the
-    /// ±5-year range a watch estimate deserves. An estimate from one measure.
-    private func fitnessAgeLine(_ vo2: Double) -> some View {
-        let age = CardioFitness.fitnessAge(vo2Max: vo2, age: settings.age, sex: settings.sex)
-        let spread = CardioFitness.watchUncertaintyYears
-        return Text("Fitness age about \(age) (\(max(18, age - spread))–\(age + spread)): the age whose typical VO₂ max matches yours, estimated from this one measure (FRIEND; Nes 2011). Your age: \(settings.ageText).")
-            .font(.subheadline)
-            .foregroundStyle(Theme.primaryText)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
     private func adviceLabel(_ result: CardioFitness.Result, trend: CardioFitness.Trend?) -> some View {
         let nudging = trend.flatMap(CardioFitness.nudge(for:)) != nil || (trend?.change == nil && result.isPlateau)
         return Label {
@@ -631,13 +618,13 @@ struct CardioFitnessCard: View {
     }
 }
 
-// MARK: - Strength for health
+// MARK: - Strength standards
 
 /// Relative strength (best e1RM ÷ body weight) for bench, squat and
-/// deadlift against age-and-sex bands (`StrengthForHealth`): a health marker
-/// next to VO₂ max, not a leaderboard. The bands are an app choice adapted
-/// from strength-standards tables; the mortality link is for strength in
-/// general (García-Hermoso 2018; Leong 2015).
+/// deadlift against age-and-sex bands (`StrengthForHealth`): training
+/// standards (crowd-sourced, not health targets; evidence-audit-2026-11.md).
+/// The mortality link is for strength in general (García-Hermoso 2018;
+/// Leong 2015).
 struct StrengthForHealthCard: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @Environment(UserSettings.self) private var settings
@@ -648,9 +635,9 @@ struct StrengthForHealthCard: View {
         let results = StrengthForHealth.assess(lifts: bestLifts, bodyMassKg: bodyMassKg, sex: settings.sex, age: settings.age)
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                CardLabel(text: "Strength for health", color: Theme.lifting)
+                CardLabel(text: "Strength standards", color: Theme.lifting)
                 Spacer()
-                Chip(text: "App choice", color: Theme.secondaryText)
+                Chip(text: "Crowd-sourced", color: Theme.secondaryText)
             }
             ForEach(results) { result in
                 liftRow(result)
@@ -700,7 +687,7 @@ struct StrengthForHealthCard: View {
             }
             Spacer(minLength: 8)
             BandDots(band: result.band)
-            Chip(text: result.band.label, color: result.band >= StrengthForHealth.healthTargetBand ? Theme.recoveryHigh : Theme.lifting)
+            Chip(text: result.band.label, color: result.band >= StrengthForHealth.referenceBand ? Theme.recoveryHigh : Theme.lifting)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(result.lift.name): \(result.band.label), \(result.ratio.formatted(.number.precision(.fractionLength(2)))) times body weight")
@@ -805,7 +792,7 @@ private struct VO2EstimatesSection: View {
 }
 
 /// The two no-test estimates for the bar and the rows, as `VitalsModel`
-/// worked them out (the same numbers body age and the coach use).
+/// worked them out (the same numbers the coach uses).
 struct VO2Estimates {
     let heart: (result: VO2MaxEstimate.Result, detail: String)?
     let activity: (result: VO2MaxEstimate.Result, detail: String)?

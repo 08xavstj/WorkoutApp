@@ -61,9 +61,6 @@ struct RecordsSection: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader("Records")
             VStack(spacing: 0) {
-                // Apple's Readiness, Sleep score and Health Age (`AppleScoresView`).
-                AppleScoresRecordsRow()
-                Divider()
                 HealthNavigationRow(title: "Lab results", detail: labsDetail, icon: "testtube.2") {
                     LabsView(pushed: true)
                 }

@@ -220,8 +220,8 @@ public enum VO2MaxEstimate {
     }
 }
 
-/// Which VO₂ max the app scores with: body age, the level and fitness age,
-/// the Health and Fitness pages and the coach.
+/// Which VO₂ max the app scores with: the level (FRIEND percentile), the
+/// Health and Fitness pages and the coach.
 ///
 /// Apple Watch's VO₂ max ran low against lab tests: 6.1 mL/kg/min under on
 /// average (95% CI 3.8-8.4), 13% mean absolute error, in 30 adults (Lambe et

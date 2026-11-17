@@ -26,7 +26,7 @@ struct VO2NormsTests {
         }
     }
 
-    /// One table: the medians, the fitness age and the percentiles agree.
+    /// One table: the medians and the percentiles agree.
     @Test func medianIsTheBiomarkerMedianAtEveryAge() {
         for sex in BiologicalSex.allCases {
             for age in 15...95 {
