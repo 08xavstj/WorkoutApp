@@ -149,6 +149,10 @@ final class UserSettings {
     /// Workout reminders 30 minutes before a planned slot (they pause by
     /// themselves after two go unanswered; see `Reminders.WorkoutReminderLog`).
     var workoutRemindersOn: Bool { didSet { defaults.set(workoutRemindersOn, forKey: "workoutRemindersOn") } }
+    /// The workout reminder's voice (`WorkoutBanter`): playful unless switched to plain.
+    var workoutReminderTone: WorkoutBanter.Tone { didSet { defaults.set(workoutReminderTone.rawValue, forKey: "workoutReminderTone") } }
+    /// Apple's on-device model may write some of the playful lines (`WorkoutVoiceWriter`).
+    var workoutReminderFreshLines: Bool { didSet { defaults.set(workoutReminderFreshLines, forKey: "workoutReminderFreshLines") } }
     /// The morning whose reminder last carried the weigh-in line (at most once a week).
     var weighInNudgeDay: Date? { didSet { defaults.set(weighInNudgeDay, forKey: "weighInNudgeDay") } }
     /// The calorie target in force this week; it moves on Mondays only, by at
@@ -241,6 +245,8 @@ final class UserSettings {
         weeklyReviewOn = defaults.bool(forKey: "weeklyReviewOn")
         weeklyReviewMinutes = defaults.object(forKey: "weeklyReviewMinutes") as? Int ?? 8 * 60
         workoutRemindersOn = defaults.object(forKey: "workoutRemindersOn") as? Bool ?? true
+        workoutReminderTone = WorkoutBanter.Tone(rawValue: defaults.string(forKey: "workoutReminderTone") ?? "") ?? .playful
+        workoutReminderFreshLines = defaults.object(forKey: "workoutReminderFreshLines") as? Bool ?? true
         weighInNudgeDay = defaults.object(forKey: "weighInNudgeDay") as? Date
         calorieTargetOverride = defaults.object(forKey: "calorieTargetOverride") as? Double
         calorieTargetOverrideDate = defaults.object(forKey: "calorieTargetOverrideDate") as? Date
