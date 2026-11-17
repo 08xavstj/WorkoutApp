@@ -38,7 +38,10 @@ enum WorkoutLinker {
 
     private static func apply(_ workouts: [ExternalWorkout], to session: WorkoutSession) -> Bool {
         guard let end = session.endedAt, end > session.startedAt else { return false }
-        let candidates = workouts.map(\.linkCandidate)
+        // A cardio workout from Tensile's Watch (a treadmill warm-up during the
+        // session) is its own workout: linking it would hide it and give the
+        // gym session its calories.
+        let candidates = workouts.filter { !$0.isTensileCardio }.map(\.linkCandidate)
         guard let match = WorkoutLinking.match(session: DateInterval(start: session.startedAt, end: end), candidates: candidates) else {
             return false
         }

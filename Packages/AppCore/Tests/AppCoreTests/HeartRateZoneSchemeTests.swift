@@ -97,6 +97,29 @@ struct HeartRateZoneSchemeTests {
         #expect(scheme.zone(for: 240) == 5)
     }
 
+    /// Every whole-beat heart rate gets the same zone from the badge
+    /// (`zone(for:)`) as from the ranges shown (`band(forZone:)`): on a limit
+    /// it belongs to the zone that starts there. 289 mismatches before the fix.
+    @Test func zoneAndBandAgreeOnEveryWholeBeat() {
+        var mismatches = 0
+        for resting in stride(from: 45.0, through: 75, by: 1) {
+            for maximum in stride(from: 170.0, through: 200, by: 1) {
+                let scheme = HeartRateZoneScheme.reserve(resting: resting, maximum: maximum)
+                for bpm in stride(from: 80.0, through: 210, by: 1) {
+                    guard let zone = scheme.zone(for: bpm) else { continue }
+                    guard let band = scheme.band(forZone: zone), bpm >= band.lower - 1e-6, bpm < band.upper else {
+                        mismatches += 1
+                        continue
+                    }
+                }
+            }
+        }
+        #expect(mismatches == 0)
+        let profile = HeartRateProfile(age: 30, sex: .male, restingHeartRate: 55, maxHeartRateOverride: 185)
+        #expect(profile.zone(for: 133) == 2)
+        #expect(HeartRateZoneScheme.reserve(resting: 55, maximum: 185).zone(for: 133) == 2)
+    }
+
     @Test func percentOfMaxLimitsAndTheirEdges() {
         let scheme = HeartRateZoneScheme.percentOfMax(maximum: 190, resting: 55)
         #expect(scheme.kind == .percentOfMax)

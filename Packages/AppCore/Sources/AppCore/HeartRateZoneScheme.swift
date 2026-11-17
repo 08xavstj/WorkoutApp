@@ -263,8 +263,19 @@ public nonisolated struct HeartRateZoneScheme: Codable, Sendable, Equatable {
         let reserve = basis.maximum - basis.resting
         guard reserve > 0 else { return nil }
         let fraction = min(1, max(0, (bpm - basis.resting) / reserve))
-        guard fraction >= 0.5 else { return nil }
-        return min(5, Int((fraction - 0.5) / 0.1) + 1)
+        return reserveZone(fraction: fraction)
+    }
+
+    /// Zone 1-5 for a fraction of heart-rate reserve (zone 1 from 50%, one
+    /// zone per 10%), with a little slack so a heart rate exactly on a limit
+    /// lands in the zone that starts there: 133 bpm at a limit of 133.0 came
+    /// out as 0.59999… of reserve and fell a zone short. `HeartRateProfile`
+    /// (strain) uses this too, so the two never disagree. Foundation only:
+    /// this file is also compiled into the Watch app.
+    public static func reserveZone(fraction: Double) -> Int? {
+        let slack = 1e-9
+        guard fraction >= 0.5 - slack else { return nil }
+        return min(5, max(1, Int((fraction - 0.5) / 0.1 + slack) + 1))
     }
 
     /// The bpm range of zone 1-5 (`zone` outside that gives nil). Zone 1 starts

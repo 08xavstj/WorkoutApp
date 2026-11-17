@@ -58,6 +58,8 @@ final class WatchWorkoutModel: NSObject {
     @ObservationIgnored private let store = HKHealthStore()
     @ObservationIgnored private var workoutSession: HKWorkoutSession?
     @ObservationIgnored private var builder: HKLiveWorkoutBuilder?
+    /// When Pause or Resume was last tapped here (`sessionChanged` ignores older callbacks).
+    @ObservationIgnored private var lastLocalPauseChange: Date?
     @ObservationIgnored private var connection: WCSession?
     /// Snapshots older than the last set ticked here are ignored, so a stale
     /// one can't un-tick it before the phone has applied the command.
@@ -109,6 +111,9 @@ final class WatchWorkoutModel: NSObject {
         }
         phase = .starting
         problem = nil
+        // A finished run's end screen sits above the lifting pages in
+        // `WatchRootView`, and its old message on the start screen: clear both.
+        WatchCardioModel.shared.clearForLifting()
         await requestAuthorization()
         do {
             let session = try HKWorkoutSession(healthStore: store, configuration: configuration)
@@ -151,6 +156,9 @@ final class WatchWorkoutModel: NSObject {
             }
         } catch {
             problem = "Couldn't start the workout: \(error.localizedDescription)"
+            // A session whose activity started but whose collection failed
+            // would otherwise keep running with nothing to end it.
+            workoutSession?.end()
             workoutSession = nil
             builder = nil
             phase = .idle
@@ -188,6 +196,7 @@ final class WatchWorkoutModel: NSObject {
         guard phase == .running else { return }
         workoutSession?.pause()
         phase = .paused
+        lastLocalPauseChange = .now
         beginPause()
     }
 
@@ -195,6 +204,7 @@ final class WatchWorkoutModel: NSObject {
         guard phase == .paused else { return }
         workoutSession?.resume()
         phase = .running
+        lastLocalPauseChange = .now
         endPause()
     }
 
@@ -425,7 +435,7 @@ final class WatchWorkoutModel: NSObject {
         guard !shownRecordIDs.contains(note.id) else { return }
         shownRecordIDs.insert(note.id)
         recordNote = note
-        WKInterfaceDevice.current().play(.notification)
+        if !WatchCardioModel.shared.isActive { WKInterfaceDevice.current().play(.notification) }
         recordTask?.cancel()
         recordTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.recordSeconds))
@@ -547,7 +557,8 @@ final class WatchWorkoutModel: NSObject {
     private func restEnded() {
         restTask = nil
         restEndsAt = nil
-        if snapshot?.restBuzz != false {
+        // Not while a cardio workout records here: the same tap means "ease off" there.
+        if snapshot?.restBuzz != false, !WatchCardioModel.shared.isActive {
             WKInterfaceDevice.current().play(.notification)
         }
     }
@@ -594,7 +605,7 @@ final class WatchWorkoutModel: NSObject {
         if let note = incoming.records { showRecords(note) }
         // The phone moved the warm-up on (its countdown ended, or a tap there): a tick on the wrist.
         if let previous, previous.id == incoming.id, previous.warmUp != nil,
-           previous.warmUpStepIndex != incoming.warmUpStepIndex {
+           previous.warmUpStepIndex != incoming.warmUpStepIndex, !WatchCardioModel.shared.isActive {
             WKInterfaceDevice.current().play(.click)
         }
         if isRecording, recordingSessionID == nil { adopt(incoming.id) }
@@ -695,7 +706,10 @@ final class WatchWorkoutModel: NSObject {
 
     // MARK: HealthKit callbacks (hop to the main actor)
 
-    private func sessionChanged(to state: HKWorkoutSessionState) {
+    private func sessionChanged(to state: HKWorkoutSessionState, at date: Date = .now) {
+        // A callback for a pause or resume from before the last tap here (a quick
+        // Pause then Resume) would start the same pause again and count it twice.
+        if let local = lastLocalPauseChange, date < local, state == .paused || state == .running, phase != .starting { return }
         switch state {
         case .running:
             if phase == .paused || phase == .starting { phase = .running }
@@ -737,7 +751,7 @@ extension WatchWorkoutModel: HKWorkoutSessionDelegate {
         from fromState: HKWorkoutSessionState,
         date: Date
     ) {
-        Task { @MainActor in self.sessionChanged(to: toState) }
+        Task { @MainActor in self.sessionChanged(to: toState, at: date) }
     }
 
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: any Error) {

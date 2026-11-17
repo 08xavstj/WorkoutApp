@@ -61,6 +61,8 @@ final class WatchCardioModel: NSObject {
     @ObservationIgnored private var runningSince: Date?
     /// End was tapped and the save is under way.
     @ObservationIgnored private var isEnding = false
+    /// When Pause or Resume was last tapped here (`sessionChanged` ignores older callbacks).
+    @ObservationIgnored private var lastLocalPauseChange: Date?
 
     var isActive: Bool { phase == .running || phase == .paused }
     /// Starting or recording: the lifting model must not start a workout now.
@@ -194,6 +196,14 @@ final class WatchCardioModel: NSObject {
             let start = Date.now
             session.startActivity(with: start)
             try await builder.beginCollection(at: start)
+            // The session failed (or was discarded) while this waited: `fail` has
+            // already reset everything, and a "running" workout with no session
+            // could never be ended.
+            guard phase == .starting, self.workoutSession === session else {
+                session.end()
+                builder.discardWorkout()
+                return
+            }
             // Marks the workout as Tensile's cardio, with which activity (treadmill and outdoor run share a type).
             builder.addMetadata([Self.metadataKey: activity.rawValue]) { _, _ in }
             heartRate = nil
@@ -211,6 +221,9 @@ final class WatchCardioModel: NSObject {
             WKInterfaceDevice.current().play(.start)
         } catch {
             problem = "Couldn't start the workout: \(error.localizedDescription)"
+            // A session whose activity started but whose collection failed
+            // would otherwise keep running with nothing to end it.
+            workoutSession?.end()
             workoutSession = nil
             builder = nil
             phase = .idle
@@ -221,6 +234,7 @@ final class WatchCardioModel: NSObject {
         guard phase == .running, !isEnding else { return }
         workoutSession?.pause()
         phase = .paused
+        lastLocalPauseChange = .now
         beginPause()
         WKInterfaceDevice.current().play(.stop)
     }
@@ -229,6 +243,7 @@ final class WatchCardioModel: NSObject {
         guard phase == .paused, !isEnding else { return }
         workoutSession?.resume()
         phase = .running
+        lastLocalPauseChange = .now
         endPause()
         WKInterfaceDevice.current().play(.start)
     }
@@ -296,6 +311,17 @@ final class WatchCardioModel: NSObject {
         phase = .idle
     }
 
+    /// A lifting workout is starting: the end screen of a finished run would
+    /// sit above its pages (`WatchRootView`), and an old message here would
+    /// show on the start screen afterwards.
+    func clearForLifting() {
+        if phase == .ended {
+            phase = .idle
+            summary = nil
+        }
+        if !isBusy { problem = nil }
+    }
+
     /// Back to the start screen after the end screen.
     func reset() {
         guard phase == .ended else { return }
@@ -308,6 +334,9 @@ final class WatchCardioModel: NSObject {
 
     private func sessionChanged(to state: HKWorkoutSessionState, at date: Date) {
         guard isActive, !isEnding else { return }
+        // A callback for a pause or resume from before the last tap here (a quick
+        // Pause then Resume) would start the same pause again and count it twice.
+        if let local = lastLocalPauseChange, date < local { return }
         switch state {
         case .running:
             // Resumed by the system.
@@ -328,6 +357,7 @@ final class WatchCardioModel: NSObject {
         guard isBusy, !isEnding else { return }
         problem = "Recording stopped: \(message)"
         builder?.discardWorkout()
+        workoutSession?.end()
         workoutSession = nil
         builder = nil
         pausedAt = nil

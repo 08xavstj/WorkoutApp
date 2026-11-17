@@ -12,6 +12,7 @@ iPhone app (iOS 26+, Swift 6.2, SwiftUI, SwiftData, HealthKit, Foundation Models
 ## Conventions
 
 - Research comes first. Every score, target, threshold and recommendation must follow published evidence (prefer meta-analyses, systematic reviews and position stands), with the citation in a comment next to the constant, and must be tailored to the user's goals (`Goals`) where the evidence differs by goal. If the evidence is weak or mixed, say so in the code and in the UI; don't present app-made numbers as science. Research write-ups live in `docs/research/`.
+- The owner's goal is the app that gives him the best chance of better health, as the research sees it. When he asks for a feature the evidence advises against, follow the evidence: leave it out or remove it, and tell him why with the source (his standing instruction, 17 Nov 2026). Prefer what has the strongest evidence and the biggest health effect over what is easy to build, and remove features that have no evidence and add clutter.
 
 - Build settings: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and approachable concurrency. Types that are Codable or shared across actors are declared `nonisolated` (see `CoachSnapshot`, `Exercise`). HealthKit work goes through `HealthKitClient`, whose methods are `@concurrent` and return AppCore value types.
 - Weights are stored in kilograms; convert only in the UI via `WeightUnit`.

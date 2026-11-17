@@ -791,7 +791,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
                 distanceKm: distance,
                 uuid: workout.uuid,
                 sourceName: workout.device?.name ?? workout.sourceRevision.source.name,
-                activeKcal: energy
+                activeKcal: energy,
+                isTensileCardio: workout.metadata?[Self.watchCardioMetadataKey] != nil
             )
         }
     }
@@ -1046,6 +1047,10 @@ nonisolated struct ExternalWorkout: Sendable, Identifiable, Equatable {
     var sourceName: String? = nil
     /// Active calories the workout reports, if any.
     var activeKcal: Double? = nil
+    /// Recorded with Tensile's own Watch cardio mode: a workout of its own,
+    /// never the recording of a gym session logged on the phone, so it is
+    /// never linked to one (`WorkoutLinker`).
+    var isTensileCardio = false
     var id: UUID { uuid }
     var minutes: Int { Int(end.timeIntervalSince(start) / 60) }
 

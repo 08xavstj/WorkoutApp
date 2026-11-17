@@ -45,10 +45,10 @@ public struct HeartRateProfile: Sendable, Equatable {
     /// Returns nil below zone 1. Same bands as Edwards' (1993) five zones but on
     /// reserve, not % of max, to match the TRIMP. Display only: strain uses the
     /// continuous TRIMP weighting, not zone counts.
+    /// `HeartRateZoneScheme.reserveZone(fraction:)`, shared so the strain
+    /// zones and the shown zones always agree, on a limit too.
     public func zone(for bpm: Double) -> Int? {
-        let fraction = reserveFraction(for: bpm)
-        guard fraction >= 0.5 else { return nil }
-        return min(5, Int((fraction - 0.5) / 0.1) + 1)
+        HeartRateZoneScheme.reserveZone(fraction: reserveFraction(for: bpm))
     }
 
     /// The light band below zone 1: 30-50% of reserve. 30% is where strain
