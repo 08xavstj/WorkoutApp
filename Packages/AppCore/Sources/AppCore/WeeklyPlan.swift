@@ -96,8 +96,10 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
     /// any day (the weekday is only the session's id and a default time).
     public var plannedDays: [PlannedDay]
     /// Up to three changes the user confirmed for this week at the review
-    /// (review of goals: Michie et al., Health Psychol 2009).
-    public var changes: [String]
+    /// (review of goals: Michie et al., Health Psychol 2009). Typed, so the
+    /// app can check the measurable ones (`WeeklyChange`); plans saved with
+    /// plain strings decode as free-text changes.
+    public var changes: [WeeklyChange]
     /// Fixed weekdays (plans saved before modes existed decode as this) or a
     /// weekly quota on any days.
     public var mode: Mode
@@ -131,7 +133,7 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
         }
     }
 
-    public init(weekStart: Date, plannedDays: [PlannedDay] = [], changes: [String] = [],
+    public init(weekStart: Date, plannedDays: [PlannedDay] = [], changes: [WeeklyChange] = [],
                 mode: Mode = .fixedDays, sessionsPerWeek: Int? = nil, cardio: EasyCardio? = nil,
                 rotation: Rotation? = nil) {
         self.weekStart = weekStart
@@ -152,7 +154,7 @@ public struct WeeklyPlan: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         weekStart = try container.decode(Date.self, forKey: .weekStart)
         plannedDays = try container.decodeIfPresent([PlannedDay].self, forKey: .plannedDays) ?? []
-        changes = try container.decodeIfPresent([String].self, forKey: .changes) ?? []
+        changes = try container.decodeIfPresent([WeeklyChange].self, forKey: .changes) ?? []
         mode = try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .fixedDays
         sessionsPerWeek = try container.decodeIfPresent(Int.self, forKey: .sessionsPerWeek)
         // Plans saved before easy cardio existed have none.

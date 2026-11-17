@@ -201,9 +201,12 @@ struct LongevityTests {
         #expect(status(.restingHeartRate) { $0.restingHeartRate = 80.1 } == .off)
     }
 
-    @Test func stepTargetsFollowAge() {
+    /// The line is the health floor the weekly review ticks too
+    /// (`HealthFloors.dailySteps`, 7,000 at every age; it was 8,000 under 60).
+    @Test func stepsUseTheSharedFloorAtEveryAge() {
         #expect(status(.steps) { $0.dailySteps = 8_000 } == .onTarget)
-        #expect(status(.steps) { $0.dailySteps = 7_999 } == .close)
+        #expect(status(.steps) { $0.dailySteps = 7_000 } == .onTarget)
+        #expect(status(.steps) { $0.dailySteps = 6_999 } == .close)
         #expect(status(.steps) { $0.dailySteps = 5_000 } == .close)
         #expect(status(.steps) { $0.dailySteps = 4_999 } == .off)
         var older = Longevity.Inputs(age: 64, sex: .male)

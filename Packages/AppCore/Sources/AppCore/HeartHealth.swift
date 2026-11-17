@@ -115,10 +115,22 @@ public enum StressEstimate {
 /// heart-rate reserve). Vigorous minutes count double toward the WHO goal of
 /// 150 a week, as on Garmin watches.
 public enum IntensityMinutes {
+    /// Moderate minutes one vigorous minute counts as toward the 150-minute
+    /// total. 2 is the WHO guideline's own exchange rate: 150-300 moderate or
+    /// 75-150 vigorous minutes a week (Bull et al., Br J Sports Med 2020).
+    /// Wrist-accelerometer data from 73,485 UK Biobank adults put it nearer 4
+    /// for all-cause mortality and 8-9 for cardiovascular death and type 2
+    /// diabetes (Biswas et al., Nat Commun 2025;16:8315), but that is one
+    /// cohort, observational, with intensity classed by a wrist accelerometer
+    /// rather than heart rate as here. So the constant stays at the
+    /// guideline's 2, which can only undercount hard work, and vigorous
+    /// minutes get a line of their own (`vigorousLine`, HealthFloors.swift).
+    public static let vigorousWeight = 2
+
     public struct Result: Sendable, Equatable {
         public var moderate: Int
         public var vigorous: Int
-        public var total: Int { moderate + 2 * vigorous }
+        public var total: Int { moderate + IntensityMinutes.vigorousWeight * vigorous }
 
         public init(moderate: Int, vigorous: Int) {
             self.moderate = moderate
