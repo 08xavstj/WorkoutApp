@@ -576,10 +576,14 @@ public enum Longevity {
     /// 73.8-86.3, and each of the top four fifths had 20-48% lower all-cause
     /// mortality than the least regular fifth. The abstract gives no fifth
     /// cut-offs, so "off" is under 74 (the cohort's lowest quarter, a little
-    /// wider than its least regular fifth) and "on target" is the median and
-    /// up: a reading of the paper, not thresholds it states. The app's index
-    /// is worked out from watch sleep over a week, not accelerometry.
-    public static let sleepRegularityTarget = SleepRegularity.typicalIndex
+    /// wider than its least regular fifth) and "on target" is 85 and up, the
+    /// line the sleep sheet and sleep score already use for the cohort's most
+    /// regular people (`SleepRegularity.benefitIndex`; the upper quartile
+    /// starts at 86.3), so the two screens agree. The benefit was graded
+    /// across fifths, so 74-84 is "close", not "off". A reading of the paper,
+    /// not thresholds it states. The app's index is worked out from watch
+    /// sleep over a week, not accelerometry.
+    public static let sleepRegularityTarget = SleepRegularity.benefitIndex
     public static let sleepRegularityLow = 74
 
     static func sleepRegularity(_ i: Inputs) -> Measure {
@@ -599,11 +603,13 @@ public enum Longevity {
         measure.valueText = "\(index) of 100"
         if index >= sleepRegularityTarget {
             measure.status = .onTarget
-            measure.standing = "At or above the typical 81 in the study."
+            measure.standing = "Among the more regular sleepers in the study (85 and up; typical is 81)."
             measure.nextStep = "Keep your wake time steady, weekends too."
         } else if index >= sleepRegularityLow {
             measure.status = .close
-            measure.standing = "A little under the typical 81."
+            measure.standing = index >= SleepRegularity.typicalIndex
+                ? "Around the typical 81; the most regular people in the study were at 85 and up."
+                : "A little under the typical 81."
             measure.nextStep = "Hold one wake time for 7 days, within half an hour. It moves the index most."
         } else {
             measure.status = .off

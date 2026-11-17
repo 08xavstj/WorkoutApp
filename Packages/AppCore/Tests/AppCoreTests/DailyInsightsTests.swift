@@ -74,6 +74,26 @@ struct DailyInsightsTests {
         }
     }
 
+    /// The check-in pattern's sentence carries a percentage that moves with
+    /// each new check-in. Its rest rule must follow the pattern, not the
+    /// wording, or the line shows every day.
+    @Test func aPatternWhosePercentageMovesStillRests() {
+        var state = DailyInsights.State()
+        var shownDays = 0
+        for n in 30..<58 {
+            var i = inputs(on: n)
+            let percent = 9 + n % 4
+            i.pattern = DailyInsights.Pattern(id: "drinks2hrv", sentence: "HRV is \(percent)% lower after 2 or more drinks",
+                                              daysWith: 9, daysWithout: 21)
+            let result = DailyInsights.evaluate(i, state: state)
+            state = result.state
+            if result.feed.today.contains(where: { $0.id == "pattern" }) { shownDays += 1 }
+        }
+        // Two days on, three weeks off: at most four days in four weeks.
+        #expect(shownDays >= 1)
+        #expect(shownDays <= 4)
+    }
+
     @Test func theFeedIsCappedAndNeverCrowdsOneCategoryOrTone() {
         for feed in simulate() {
             #expect(feed.today.count <= DailyInsights.maxShown)

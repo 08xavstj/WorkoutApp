@@ -11,7 +11,9 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// Beat-to-beat RMSSD for finished nights, so they're read only once (kept on disk).
     private let rmssdCache = NightlyValueCache(fileName: "rmssd-nights.json")
     /// Apple's own overnight RMSSD ("Recovery HRV") for finished nights.
-    private let recoveryHRVCache = NightlyValueCache(fileName: "recovery-hrv-nights.json")
+    /// Versioned: a change to how nights are read starts a new file, so a
+    /// night stored as "nothing there" by an older rule is read again.
+    private let recoveryHRVCache = NightlyValueCache(fileName: "recovery-hrv-nights-v2.json")
 
     /// Apple Health's RMSSD type, new in iOS and watchOS 27
     /// (developer.apple.com/documentation/healthkit/hkquantitytypeidentifier/heartratevariabilityrmssd).
@@ -355,6 +357,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         let ms = HKUnit.secondUnit(with: .milli)
         var hrvByNight: [Date: [Double]] = [:]
         var readings: [OvernightReading] = []
+        var windowCounts: [Date: Int] = [:]
         for sample in try await hrvDescriptor.result(for: store) {
             let value = sample.quantity.doubleValue(for: ms)
             readings.append(OvernightReading(date: sample.startDate, milliseconds: value))
@@ -363,6 +366,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             // Drop noon-6 pm (the fallback when the night has no reading inside its sleep).
             guard calendar.component(.hour, from: shifted) < 18 else { continue }
             hrvByNight[calendar.startOfDay(for: shifted), default: []].append(value)
+            windowCounts[calendar.startOfDay(for: shifted), default: 0] += 1
         }
         // One reading inside the sleep is enough here: older watches take only a few a night.
         let sleep = ((try? await sleepHistory(nights: days + 1)) ?? []).filter { $0.date <= lastNight }
@@ -388,7 +392,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             let hrv = hrvByNight[night].map { $0.reduce(0, +) / Double($0.count) }
             return DailyVitals(date: night, hrvMilliseconds: hrv, restingHeartRate: rhrByDay[night])
         }
-        return OvernightHRV.preferringSleep(byClock, asleep: asleep, calendar: calendar)
+        return OvernightHRV.preferringSleep(byClock, asleep: asleep, windowCounts: windowCounts, calendar: calendar)
     }
 
     // MARK: - Sleep
@@ -485,7 +489,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         guard let samples = try? await descriptor.result(for: store) else { return known.compactMapValues { $0 } }
         let ms = HKUnit.secondUnit(with: .milli)
         let readings = samples.map { OvernightReading(date: $0.startDate, milliseconds: $0.quantity.doubleValue(for: ms)) }
-        let values = OvernightHRV.nightly(readings, nights: nights.map(\.overnight))
+        let values = OvernightHRV.nightlyAllowingSummaries(readings, nights: nights.map(\.overnight))
         var finished: [(night: SleepNight, value: Double?)] = []
         for night in nights {
             known[night.date] = .some(values[night.date])

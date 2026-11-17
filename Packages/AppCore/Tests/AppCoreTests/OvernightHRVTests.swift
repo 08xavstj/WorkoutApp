@@ -142,6 +142,41 @@ import Testing
         #expect(result[1].restingHeartRate == nil)
     }
 
+    /// A Series 12 charged overnight: no sleep recorded, but ~200 awake
+    /// readings in the evening-to-noon window. The night gets no HRV rather
+    /// than an awake one; an older watch's handful of readings still count.
+    @Test func aDenseWindowWithoutSleepGivesNoHRV() {
+        let yesterday = morning.addingTimeInterval(-86_400)
+        let vitals = [
+            DailyVitals(date: morning, hrvMilliseconds: 31, restingHeartRate: 55),
+            DailyVitals(date: yesterday, hrvMilliseconds: 64, restingHeartRate: 54),
+        ]
+        let result = OvernightHRV.preferringSleep(vitals, asleep: [:], windowCounts: [morning: 190, yesterday: 4], calendar: calendar)
+        #expect(result[0].hrvMilliseconds == nil)
+        #expect(result[0].restingHeartRate == 55)
+        #expect(result[1].hrvMilliseconds == 64)
+        // A night with an in-sleep value keeps it however dense its window.
+        let slept = OvernightHRV.preferringSleep(vitals, asleep: [morning: 70], windowCounts: [morning: 190], calendar: calendar)
+        #expect(slept[0].hrvMilliseconds == 70)
+        // Exactly at the limit still counts.
+        let edge = OvernightHRV.preferringSleep(vitals, asleep: [:], windowCounts: [morning: OvernightHRV.maximumWindowReadings], calendar: calendar)
+        #expect(edge[0].hrvMilliseconds == 31)
+    }
+
+    /// If the watch writes one summary per night, stamped at wake or just
+    /// after, the night still gets it; dense in-sleep readings still win.
+    @Test func oneSummaryAtWakeStillCounts() {
+        let one = night(morning)
+        let summary = [OvernightReading(date: one.wake.addingTimeInterval(20 * 60), milliseconds: 58)]
+        #expect(OvernightHRV.nightly(summary, nights: [one]).isEmpty)
+        #expect(OvernightHRV.nightlyAllowingSummaries(summary, nights: [one])[morning] == 58)
+        let late = [OvernightReading(date: one.wake.addingTimeInterval(2 * 3600), milliseconds: 58)]
+        #expect(OvernightHRV.nightlyAllowingSummaries(late, nights: [one]).isEmpty)
+        let dense = readings(from: one.bedtime, to: one.wake, everyMinutes: 5, ms: 66)
+            + [OvernightReading(date: one.wake.addingTimeInterval(10 * 60), milliseconds: 30)]
+        #expect(abs((OvernightHRV.nightlyAllowingSummaries(dense, nights: [one])[morning] ?? 0) - 66) < 0.001)
+    }
+
     @Test func evenlySpacedKeepsTheEndsAndTheOrder() {
         let items = Array(0..<100)
         let picked = OvernightHRV.evenlySpaced(items, limit: 10)

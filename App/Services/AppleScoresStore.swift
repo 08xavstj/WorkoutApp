@@ -164,7 +164,9 @@ final class AppleScoresStore {
         let calendar = Calendar.current
         if let recovery {
             let day = recoveryIsFromYesterday ? calendar.date(byAdding: .day, value: -1, to: now) ?? now : now
-            if log.setAppValue(.readiness, recovery, day: Self.key(day)) { changed = true }
+            // Kept for two weeks even without Apple's reading that day, so a
+            // Readiness logged later for that day is still paired.
+            if log.noteAppRecovery(recovery, day: Self.key(day)) { changed = true }
         }
         if let bodyAge, log.setAppValue(.healthAge, bodyAge, day: todayKey) { changed = true }
         if fillSleepScores() { changed = true }

@@ -164,7 +164,11 @@ final class CheckInStore {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         let nights = (try? await health.sleepHistory(nights: 90)) ?? []
-        let rmssd = await health.nightlyRMSSD(nights: nights).merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+        // The ring's and the watch's nights on one scale, as Recovery uses them
+        // (`DailyVitals.mergingOvernightRMSSD`), so patterns and recovery agree.
+        let rmssd = DailyVitals.mergingOvernightRMSSD(preferred: DailyMetricsModel.ouraRMSSD(), other: await health.nightlyRMSSD(nights: nights),
+                                                      today: today, calendar: calendar).nights
+            .merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
         let vitals = DailyVitals.merging((try? await health.nightlyVitals(days: 90, endingOn: today)) ?? [], manualHRV: rmssd, manualOnlyHRV: true)
         var byMorning: [String: DailyVitals] = [:]
         for vital in vitals { byMorning[key(vital.date)] = vital }

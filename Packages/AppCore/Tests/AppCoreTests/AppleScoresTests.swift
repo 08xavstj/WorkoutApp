@@ -57,6 +57,45 @@ import Testing
 
     // MARK: Day keys
 
+    /// A Readiness logged for yesterday (a "Yesterday" screenshot) gets the
+    /// app's recovery from that day, which was noted before Apple's number came in.
+    @Test func aReadinessLoggedLaterIsStillPaired() {
+        var log = AppleScoreLog()
+        let noted = log.noteAppRecovery(62, day: "2026-11-16")
+        #expect(noted)
+        #expect(log.days.isEmpty)
+        log.record(.readiness, value: 7, day: "2026-11-16", at: now, source: .screenshot)
+        #expect(log.days["2026-11-16"]?.appRecovery == 62)
+        // Noting it again for a day that now has Apple's number updates the pair.
+        let updated = log.noteAppRecovery(64, day: "2026-11-16")
+        #expect(updated)
+        #expect(log.days["2026-11-16"]?.appRecovery == 64)
+        let again = log.noteAppRecovery(64, day: "2026-11-16")
+        #expect(!again)
+    }
+
+    @Test func onlyTwoWeeksOfRecoveryAreKept() {
+        var log = AppleScoreLog()
+        log.noteAppRecovery(50, day: "2026-11-01")
+        log.noteAppRecovery(55, day: "2026-11-14")
+        #expect(log.recentRecovery?["2026-11-01"] == 50)
+        log.noteAppRecovery(60, day: "2026-11-15")
+        #expect(log.recentRecovery?["2026-11-01"] == nil)
+        #expect(log.recentRecovery?["2026-11-14"] == 55)
+        // Too old to have been kept: no pair.
+        log.record(.readiness, value: 6, day: "2026-11-01", at: now, source: .typed)
+        #expect(log.days["2026-11-01"]?.appRecovery == nil)
+        let bad = log.noteAppRecovery(60, day: "not a day")
+        #expect(!bad)
+    }
+
+    @Test func aLogSavedBeforeRecoveryWasKeptStillDecodes() throws {
+        let old = #"{"days":{"2026-11-16":{"readiness":{"value":7,"recordedAt":0,"source":"typed"}}}}"#
+        let log = try JSONDecoder().decode(AppleScoreLog.self, from: Data(old.utf8))
+        #expect(log.days["2026-11-16"]?.readiness?.value == 7)
+        #expect(log.recentRecovery == nil)
+    }
+
     @Test func dayKeys() {
         let key = AppleScoreLog.key(for: now, calendar: calendar)
         #expect(key == "2026-11-17")

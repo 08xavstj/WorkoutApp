@@ -95,11 +95,17 @@ public enum DailyInsights {
 
     /// A personal pattern from the check-ins (`CheckInInsights`), passed through.
     public struct Pattern: Sendable, Equatable {
+        /// Which pattern it is (factor and outcome), stable while its numbers
+        /// move. The rest and run rules follow this, not the sentence: the
+        /// sentence carries a percentage that changes with each check-in, and
+        /// keying on it put the line on screen every day.
+        public var id: String
         public var sentence: String
         public var daysWith: Int
         public var daysWithout: Int
 
-        public init(sentence: String, daysWith: Int, daysWithout: Int) {
+        public init(id: String? = nil, sentence: String, daysWith: Int, daysWithout: Int) {
+            self.id = id ?? sentence
             self.sentence = sentence
             self.daysWith = daysWith
             self.daysWithout = daysWithout
@@ -745,7 +751,7 @@ public enum DailyInsights {
                 title: pattern.sentence,
                 comparison: "\(pattern.daysWith) days with against \(pattern.daysWithout) without. A pattern, not proof.",
                 action: nil),
-            variant: pattern.sentence, subject: "pattern", strength: 0.2, maxRun: standingRunDays, rest: standingRestDays)
+            variant: pattern.id, subject: "pattern", strength: 0.2, maxRun: standingRunDays, rest: standingRestDays)
     }
 
     /// When nothing else shows: one line naming the core measures that are

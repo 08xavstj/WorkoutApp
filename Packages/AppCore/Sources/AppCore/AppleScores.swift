@@ -226,6 +226,16 @@ public struct AppleScoreLog: Codable, Sendable, Equatable {
 
     public private(set) var days: [String: Day]
 
+    /// The app's recovery for each recent day, kept whether or not Apple's
+    /// Readiness was logged that day, so a Readiness entered later for a past
+    /// day (a "Yesterday" screenshot, a Shortcut with a date) still gets
+    /// the app's number beside it. Optional so files from before it decode.
+    public private(set) var recentRecovery: [String: Int]?
+
+    /// Days of recovery kept for late entries (app's choice: two weeks
+    /// covers a screenshot taken days later).
+    public static let recoveryDaysKept = 14
+
     public init(days: [String: Day] = [:]) {
         self.days = days
     }
@@ -280,9 +290,36 @@ public struct AppleScoreLog: Codable, Sendable, Equatable {
         guard kind.accepts(value), Self.parts(of: day) != nil else { return false }
         var entry = days[day] ?? Day()
         entry[kind] = Reading(value: value, recordedAt: recordedAt, source: source)
+        if kind == .readiness, entry.appRecovery == nil, let recovery = recentRecovery?[day] {
+            entry.appRecovery = recovery
+        }
         days[day] = entry
         trim()
         return true
+    }
+
+    /// Keeps the app's recovery for `day`: beside Apple's Readiness if it is
+    /// already there, and for a Readiness logged later. True when something
+    /// changed.
+    @discardableResult
+    public mutating func noteAppRecovery(_ value: Int, day: String) -> Bool {
+        guard let ordinal = Self.ordinal(forKey: day) else { return false }
+        var kept = recentRecovery ?? [:]
+        var changed = false
+        if kept[day] != value {
+            kept[day] = value
+            changed = true
+        }
+        // Only the last two weeks, counted back from the newest day kept.
+        let newest = kept.keys.compactMap(Self.ordinal(forKey:)).max() ?? ordinal
+        for key in kept.keys {
+            guard let old = Self.ordinal(forKey: key), newest - old >= Self.recoveryDaysKept else { continue }
+            kept[key] = nil
+            changed = true
+        }
+        recentRecovery = kept
+        if setAppValue(.readiness, value, day: day) { changed = true }
+        return changed
     }
 
     public mutating func remove(_ kind: AppleScoreKind, day: String) {

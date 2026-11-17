@@ -258,7 +258,10 @@ struct LongevityTests {
     }
 
     @Test func sleepRegularityLinesComeFromTheCohortsSpread() {
-        #expect(status(.sleepRegularity) { $0.sleepRegularity = 81 } == .onTarget)
+        // On target from 85, the line the sleep sheet uses (`SleepRegularity.benefitIndex`).
+        #expect(status(.sleepRegularity) { $0.sleepRegularity = 85 } == .onTarget)
+        #expect(status(.sleepRegularity) { $0.sleepRegularity = 84 } == .close)
+        #expect(status(.sleepRegularity) { $0.sleepRegularity = 81 } == .close)
         #expect(status(.sleepRegularity) { $0.sleepRegularity = 80 } == .close)
         #expect(status(.sleepRegularity) { $0.sleepRegularity = 74 } == .close)
         #expect(status(.sleepRegularity) { $0.sleepRegularity = 73 } == .off)

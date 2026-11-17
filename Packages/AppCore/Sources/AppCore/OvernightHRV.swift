@@ -84,14 +84,56 @@ public enum OvernightHRV {
         return result
     }
 
+    /// Most readings a night's evening-to-noon window may hold and still be
+    /// used when none fell inside the sleep. Older watches take a few a night,
+    /// nearly all asleep; a Series 12 takes about 200 in that window, most of
+    /// them awake (the watch worn in the evening and morning, charged
+    /// overnight). Past this the night has no HRV rather than an awake one.
+    /// App's choice: twice the most an older watch was seen to take.
+    public static let maximumWindowReadings = 12
+
+    /// Like `nightly`, for a type whose cadence Apple hasn't documented
+    /// (Health's RMSSD, iOS 27): a night with fewer than `minimumReadings`
+    /// inside the sleep still gets a value from the one or two readings
+    /// timed from bedtime to `wakeGrace` after waking, in case the watch
+    /// writes one summary per night, stamped at or just after wake.
+    /// The hour is the app's choice.
+    public static func nightlyAllowingSummaries(
+        _ readings: [OvernightReading],
+        nights: [Night],
+        minimumReadings: Int = OvernightHRV.minimumReadings,
+        wakeGrace: TimeInterval = 3600
+    ) -> [Date: Double] {
+        var result = nightly(readings, nights: nights, minimumReadings: minimumReadings)
+        let widened = nights.map { Night(date: $0.date, bedtime: $0.bedtime, wake: $0.wake.addingTimeInterval(max(0, wakeGrace))) }
+        for (date, value) in nightly(readings, nights: widened, minimumReadings: 1) where result[date] == nil {
+            result[date] = value
+        }
+        return result
+    }
+
     /// `vitals` with each night's HRV replaced by its in-sleep value where
     /// there is one. A night without one keeps the value it had (no sleep
-    /// recorded, or no reading inside it), so no night is lost.
+    /// recorded, or no reading inside it), so no night is lost, unless its
+    /// window held more than `maximumWindowReadings` readings
+    /// (`windowCounts`): then most of them were taken awake and the night's
+    /// HRV is left empty.
     public static func preferringSleep(
         _ vitals: [DailyVitals],
         asleep: [Date: Double],
+        windowCounts: [Date: Int] = [:],
         calendar: Calendar = .current
     ) -> [DailyVitals] {
+        var counts: [Date: Int] = [:]
+        for (date, count) in windowCounts { counts[calendar.startOfDay(for: date), default: 0] += count }
+        let vitals = vitals.map { vital -> DailyVitals in
+            let day = calendar.startOfDay(for: vital.date)
+            guard !asleep.keys.contains(where: { calendar.isDate($0, inSameDayAs: day) }),
+                  (counts[day] ?? 0) > maximumWindowReadings else { return vital }
+            var changed = vital
+            changed.hrvMilliseconds = nil
+            return changed
+        }
         guard !asleep.isEmpty else { return vitals }
         var byDay: [Date: Double] = [:]
         for (date, value) in asleep where value > 0 && value.isFinite {

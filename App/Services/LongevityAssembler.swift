@@ -123,7 +123,7 @@ enum LongevityAssembler {
         inputs.mood = m.checkIns.moods.map { DayValue(date: $0.date, value: $0.valence) }
         inputs.headphoneBudgetPercent = headphonePercent(m)
         if let top = m.checkIns.insights.first {
-            inputs.pattern = DailyInsights.Pattern(sentence: top.sentence, daysWith: top.daysWith, daysWithout: top.daysWithout)
+            inputs.pattern = DailyInsights.Pattern(id: top.id, sentence: top.sentence, daysWith: top.daysWith, daysWithout: top.daysWithout)
         }
         inputs.longevity = assessment
         return inputs

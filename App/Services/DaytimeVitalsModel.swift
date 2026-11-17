@@ -20,6 +20,8 @@ final class DaytimeVitalsModel {
     /// True once a load has finished (with or without data).
     private(set) var hasLoaded = false
     @ObservationIgnored private var isRunning = false
+    /// A pull to refresh that came while a load was running: done once it ends.
+    @ObservationIgnored private var refreshQueued = false
 
     /// - Parameters:
     ///   - logged: gym sessions logged in this app over the last month.
@@ -29,7 +31,10 @@ final class DaytimeVitalsModel {
             hasLoaded = true
             return
         }
-        guard !isRunning else { return }
+        guard !isRunning else {
+            if force { refreshQueued = true }
+            return
+        }
         isRunning = true
         isLoading = true
         defer {
@@ -37,6 +42,10 @@ final class DaytimeVitalsModel {
             isLoading = false
             isReadingEarlierDays = false
             hasLoaded = true
+            if refreshQueued {
+                refreshQueued = false
+                Task { await load(health: health, logged: logged, force: true) }
+            }
         }
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: .now)
