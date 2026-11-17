@@ -1,21 +1,27 @@
 import SwiftUI
+import AppCore
 
-/// Apple's Health Age, as typed in from the Health app.
+/// Apple's Health Age, as brought in from the Health app.
 ///
 /// The Health app in iOS 27.3 (with an Apple Watch) shows a Health Age worked
 /// out from resting heart rate, VO₂ max, sleep and HRV (Apple's announcement,
 /// 3 Nov 2026; the method isn't published). Apple offers no HealthKit type
-/// for it: checked on 17 Nov 2026, the HealthKit updates page lists none and
-/// there is no `healthAge` identifier. So the app can't read it, and the
-/// number is typed in. When Apple adds an API, read it in `VitalsModel` and
-/// keep this entry as the fallback.
+/// for it: checked again on 17 Nov 2026 against the type lists, the HealthKit
+/// updates page and the iOS 27.2 and 27.3 release notes
+/// (docs/research/apple-scores-2026-11.md). So the app can't read it.
+///
+/// The value and its history now live in `AppleScoresStore`, with Apple's
+/// Readiness and Sleep score. These two UserDefaults keys are where the first
+/// version kept its one typed value: the store moves that value into its log
+/// once and then keeps the keys in step with the latest Health Age, because
+/// Health › Key measures still reads them with `@AppStorage`.
 enum AppleHealthAge {
     static let valueKey = "appleHealthAge"
     static let dateKey = "appleHealthAgeDate"
     /// Ages a typed value may be (anything else is a typo).
-    static let plausible = 10...120
+    static let plausible = AppleScoreKind.healthAge.range
 
-    /// The saved value, or nil when none was typed.
+    /// The value in UserDefaults, or nil when there is none.
     static var saved: (years: Int, date: Date)? {
         let years = UserDefaults.standard.integer(forKey: valueKey)
         guard plausible.contains(years) else { return nil }
@@ -24,31 +30,33 @@ enum AppleHealthAge {
 }
 
 /// The card on Health › Body age: Apple's number beside Tensile's estimate,
-/// a field to type it into, and a link to the Health app.
+/// a field to type it into, and links to the Health app and to the page with
+/// all of Apple's scores.
 struct AppleHealthAgeCard: View {
     /// Tensile's own estimate, for the comparison line.
     let estimate: ClosedRange<Int>?
 
-    @AppStorage(AppleHealthAge.valueKey) private var years = 0
-    @AppStorage(AppleHealthAge.dateKey) private var enteredAt = 0.0
+    @Environment(VitalsModel.self) private var vitals
     @State private var draft = ""
     @FocusState private var editing: Bool
 
+    private var store: AppleScoresStore { .shared }
+
     private var parsed: Int? {
-        guard let value = Int(draft.trimmingCharacters(in: .whitespaces)), AppleHealthAge.plausible.contains(value) else { return nil }
+        guard let value = Int(draft.trimmingCharacters(in: .whitespaces)), AppleScoreKind.healthAge.accepts(value) else { return nil }
         return value
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             CardLabel(text: "Apple's Health Age")
-            if AppleHealthAge.plausible.contains(years) {
+            if let latest = store.latest(.healthAge) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(years)")
+                    Text("\(latest.reading.value)")
                         .font(.largeTitle.weight(.bold))
                         .fontDesign(.rounded)
                         .foregroundStyle(Theme.primaryText)
-                    Text("years · entered \(Date(timeIntervalSince1970: enteredAt).formatted(.relative(presentation: .named)))")
+                    Text("years · added \(AppleScoresView.dayText(latest.day))")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -72,15 +80,9 @@ struct AppleHealthAgeCard: View {
                     .frame(maxWidth: 130)
                     .focused($editing)
                     .accessibilityLabel("Apple's Health Age in years")
-                Button("Save") {
-                    guard let parsed else { return }
-                    years = parsed
-                    enteredAt = Date.now.timeIntervalSince1970
-                    draft = ""
-                    editing = false
-                }
-                .buttonStyle(.bordered)
-                .disabled(parsed == nil)
+                Button("Save", action: save)
+                    .buttonStyle(.bordered)
+                    .disabled(parsed == nil)
                 Spacer(minLength: 0)
                 if let url = URL(string: "x-apple-health://") {
                     Link("Open Health", destination: url)
@@ -88,8 +90,37 @@ struct AppleHealthAgeCard: View {
                 }
             }
             .frame(minHeight: 44)
+            NavigationLink {
+                AppleScoresView()
+            } label: {
+                HStack {
+                    Text("Readiness and Sleep score too")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .accessibilityHidden(true)
+                }
+                .foregroundStyle(Theme.primaryText)
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens Apple's scores, with a screenshot reader and history")
+            .accessibilityIdentifier("apple-scores-link")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
+    }
+
+    /// Saves today's Health Age with Tensile's current body age beside it.
+    private func save() {
+        guard let parsed else { return }
+        store.save([.healthAge: parsed], on: store.now, source: .typed)
+        if let years = vitals.bodyAge?.years {
+            store.keepAppValues(recovery: nil, recoveryIsFromYesterday: false, bodyAge: years)
+        }
+        draft = ""
+        editing = false
     }
 }

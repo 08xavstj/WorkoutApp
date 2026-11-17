@@ -531,10 +531,8 @@ extension CoachView {
             let factors = age.factors.prefix(3).map { "\($0.name) \($0.years >= 0 ? "+" : "")\($0.years.formatted(.number.precision(.fractionLength(1)))) y" }
             lines.append("Body age \(age.rangeLabel) vs real age \(age.age) (\(age.confidence.label.lowercased())): " + factors.joined(separator: ", ") + ".")
         }
-        // Apple's own Health Age, when the user typed it in from the Health app (`AppleHealthAgeCard`).
-        if let apple = AppleHealthAge.saved {
-            lines.append("Apple's Health Age (from the Health app, typed in by the user): \(apple.years).")
-        }
+        // Apple's own Readiness, Sleep score and Health Age with their days, when the user added them (`AppleScoresStore`).
+        if let apple = AppleScoresStore.shared.coachLine { lines.append(apple) }
 
         // What moved today's recovery.
         let yesterday = calendar.date(byAdding: .day, value: -1, to: .now) ?? .now

@@ -63,6 +63,8 @@ struct LastNightSleepSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             }
+            // Apple's Sleep score for the same night, when it was added (`AppleScoresView`).
+            AppleScoreLine(kind: .sleepScore, day: .now)
             row("Asleep", SleepText.hours(sleep.asleep / 3600), detail: "Your need: \(SleepText.hours(sleep.need / 3600))")
             // The main sleep's own start and end (`asleepStart`/`asleepEnd`); `bedtime`/
             // `wakeTime` also span in-bed samples, so they're labelled as time in bed.
