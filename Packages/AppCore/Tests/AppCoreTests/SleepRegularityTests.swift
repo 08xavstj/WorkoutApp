@@ -49,10 +49,15 @@ struct SleepDebtTests {
     @Test func longNightsPayItBack() throws {
         let debt = try #require(SleepDebt.compute(nightlyHours: [6, 6, 6, 6, 10, 10], needHours: 8))
         #expect(debt.hours == 4)
-        #expect(debt.level == .moderate)
-        #expect(debt.extraMinutesPerNight == 45)
-        #expect(debt.paybackNights == 6)
+        // Changed on purpose (numbers audit N4): 4 h over the 14-night window is
+        // 17 minutes a night, which is Low (levels were on the total: 3 h and 6 h),
+        // and the plan spreads it over two weeks at the 30-minute minimum.
+        #expect(debt.level == .low)
+        #expect(debt.extraMinutesPerNight == 30)
+        #expect(debt.paybackNights == 8)
         #expect(debt.plan != nil)
+        #expect(debt.isEarly)
+        #expect(debt.windowLabel == "first 6 of 14 nights")
     }
 
     @Test func caughtUpHasNoPlan() throws {

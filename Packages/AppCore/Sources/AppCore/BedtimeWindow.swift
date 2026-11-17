@@ -1,8 +1,8 @@
 import Foundation
 
 /// Tonight's "bed by" window: a 30-minute span to be in bed by, worked back
-/// from when you usually get up, your sleep need and the part of your sleep
-/// debt to repay tonight.
+/// from when you usually get up, the time in bed your sleep need takes and
+/// the part of your sleep debt to repay tonight.
 ///
 /// - Why a bedtime and not a wake time: regular sleep timing predicted
 ///   mortality more strongly than sleep length in 60,977 UK Biobank adults
@@ -13,12 +13,30 @@ import Foundation
 /// - Why at most an hour a night: debt is paid back over days, not in one
 ///   long night (Kitamura et al., Sci Rep 2016), and an hour is already the
 ///   top of the `SleepDebt` plan.
+/// - Why longer in bed than the need: the need is hours asleep, and nobody is
+///   asleep for all the time in bed. Sleep efficiency of 85% or more is the
+///   mark of good sleep (Ohayon et al., Sleep Health 2017, National Sleep
+///   Foundation), and healthy adults in sleep-lab studies average in the high
+///   80s, about 2 points lower per decade of age (Boulos et al., Lancet Respir
+///   Med 2019, meta-analysis of 169 studies; figures as summarised from the
+///   abstract, the full text wasn't opened). So the window starts at wake −
+///   need ÷ 0.9 (`assumedSleepEfficiency`). Without that, a 7.5 h need and a
+///   6:30 wake gave 23:00-23:30: 7.0-7.5 h in bed, about 6.3-6.7 h asleep,
+///   which builds the very debt the window is meant to prevent.
 /// - Tomorrow's planned session only brings the wake time forward when it
 ///   starts early; there's no trial support for needing more sleep before a
 ///   hard day (docs/research/competitors.md), so it doesn't add to the need.
 public enum BedtimeWindow {
     /// Width of the window, minutes.
     public static let windowMinutes = 30
+    /// Share of time in bed spent asleep that the window assumes: 0.9, the top
+    /// of the typical healthy range (85% or more is good sleep quality, Ohayon
+    /// et al., Sleep Health 2017; sleep-lab averages for healthy adults are in
+    /// the high 80s, Boulos et al., Lancet Respir Med 2019). The single figure
+    /// is the app's choice: it isn't measured for the user, and someone asleep
+    /// for 85% of the night gets about 25 minutes less than the need even from
+    /// the start of the window (7.5 h need: 8 h 20 min in bed, 7 h 05 asleep).
+    public static let assumedSleepEfficiency = 0.9
     /// Most sleep debt repaid in one night, minutes (Kitamura et al., Sci Rep 2016).
     public static let maxRepaymentMinutes = 60
     /// Time to get up and get going before an early planned session, minutes
@@ -39,6 +57,10 @@ public enum BedtimeWindow {
         /// The wake time the window is worked back from.
         public var wake: Date
         public var needHours: Double
+        /// Hours in bed the need takes at `assumedSleepEfficiency`
+        /// (need ÷ 0.9); the window starts this long, plus tonight's
+        /// repayment, before `wake`.
+        public var timeInBedHours: Double = 0
         /// Minutes of sleep debt repaid tonight (0 when caught up).
         public var repaymentMinutes: Int
         /// True when `wake` was brought forward for a planned session.
@@ -46,9 +68,10 @@ public enum BedtimeWindow {
         /// Shown when the Sleep Regularity Index is low.
         public var regularityNote: String?
 
-        /// "8 h need + 40 min of debt to repay, up at 6:30"
+        /// "8 h need (about 8 h 55 min in bed) + 40 min of debt to repay, up at 6:30"
         public var reason: String {
             var parts = "\(Self.hours(needHours)) need"
+            if timeInBedHours > needHours { parts += " (about \(Self.hoursMinutes(timeInBedHours)) in bed)" }
             if repaymentMinutes > 0 { parts += " + \(repaymentMinutes) min of debt to repay" }
             parts += ", up at \(Self.clock(wake))"
             if wakeForSession { parts += " for your session" }
@@ -63,6 +86,12 @@ public enum BedtimeWindow {
 
         static func hours(_ value: Double) -> String {
             "\(value.formatted(.number.precision(.fractionLength(0...2)))) h"
+        }
+
+        /// "8 h 20 min", to the nearest 5 minutes.
+        static func hoursMinutes(_ value: Double) -> String {
+            let minutes = Int((value * 60 / 5).rounded()) * 5
+            return minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes / 60) h \(minutes % 60) min"
         }
 
         static func clock(_ date: Date) -> String {
@@ -116,7 +145,9 @@ public enum BedtimeWindow {
             }
         }
         let repayment = min(maxRepaymentMinutes, max(0, sleepDebt?.extraMinutesPerNight ?? 0))
-        let exactStart = wake.addingTimeInterval(-(need * 3600 + Double(repayment) * 60))
+        // Time in bed for the need, not the need itself: about 90% of time in bed is sleep.
+        let timeInBed = need / assumedSleepEfficiency
+        let exactStart = wake.addingTimeInterval(-(timeInBed * 3600 + Double(repayment) * 60))
         // Down to 5 minutes ("21:50", not "21:53"): a little earlier, never later (display choice).
         let start = Date(timeIntervalSinceReferenceDate: (exactStart.timeIntervalSinceReferenceDate / 300).rounded(.down) * 300)
         let end = start.addingTimeInterval(TimeInterval(windowMinutes * 60))
@@ -124,7 +155,7 @@ public enum BedtimeWindow {
         if let regularity, regularity < lowRegularity {
             note = "Your sleep timing varies a lot (regularity \(regularity)/100). The same bedtime every night matters more than the extra minutes."
         }
-        return Result(start: start, end: end, wake: wake, needHours: need, repaymentMinutes: repayment,
-                      wakeForSession: wakeForSession, regularityNote: note)
+        return Result(start: start, end: end, wake: wake, needHours: need, timeInBedHours: timeInBed,
+                      repaymentMinutes: repayment, wakeForSession: wakeForSession, regularityNote: note)
     }
 }

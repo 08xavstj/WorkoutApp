@@ -193,7 +193,7 @@ struct WeeklyReviewView: View {
             return debt.level == .none ? behind + " (under 1 h)" : behind
         } ?? "No debt data"
         let detail = regularity.map { "Regularity \($0)/100 over the last week" + ($0 >= 70 ? ", a regular pattern." : "; a steadier wake time helps more than extra hours (Windred 2024).") }
-        return ReviewLine(id: "sleep", title: "Sleep debt, 14 nights", value: value, detail: detail)
+        return ReviewLine(id: "sleep", title: "Sleep debt, \(debt?.windowLabel ?? "14 nights")", value: value, detail: detail)
     }
 
     private var hrvLine: ReviewLine? {

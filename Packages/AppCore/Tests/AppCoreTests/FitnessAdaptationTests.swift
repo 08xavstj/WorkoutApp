@@ -40,8 +40,12 @@ struct ObservedMaxHeartRateTests {
 struct AdaptiveTargetTests {
     @Test func defaultMatchesTheFixedBands() {
         // HRV-guided: normal or high recovery trains as planned; low goes easy.
-        #expect(StrainCalculator.targetStrain(forRecovery: 80, usualTrainingStrain: nil) == 50...70)
-        #expect(StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: nil) == 50...70)
+        // Changed on purpose (numbers audit N6): 50-80 while there is no history
+        // (`noHistoryHeadroom`), so a normal 70-78% lifting day isn't "above".
+        #expect(StrainCalculator.targetStrain(forRecovery: 80, usualTrainingStrain: nil) == 50...80)
+        #expect(StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: nil) == 50...80)
+        // With history the band is U − 15 to U + 5, as before.
+        #expect(StrainCalculator.targetStrain(forRecovery: 50, usualTrainingStrain: 65) == 50...70)
         #expect(StrainCalculator.targetStrain(forRecovery: 20, usualTrainingStrain: nil) == 20...45)
     }
 

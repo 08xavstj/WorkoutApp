@@ -54,9 +54,15 @@ public enum NutritionTargets {
     /// about 0.24 g/kg young, 0.40 g/kg older per dose; Kerksick et al., ISSN
     /// nutrient timing 2017: 20-40 g every 3-4 h). With 3 logged meals the
     /// per-meal dose rises so the day still reaches 1.6 g/kg (0.53 g/kg, inside
-    /// Schoenfeld's 0.55 ceiling). Endurance or health-only goals get the
-    /// lighter 3 × 0.3 g/kg pattern from docs/research/nutrition.md. Long-term
-    /// body-composition trials are few, so the UI says "about".
+    /// Schoenfeld's 0.55 ceiling). Endurance or health-only goals get 3 meals
+    /// of 0.4 g/kg, which add up to their 1.2 g/kg daily target
+    /// (`GoalPlanner.proteinPerKg`) and clear the dose that fully stimulates
+    /// muscle protein synthesis at any age (Moore 2015: 0.24 g/kg young, 0.40
+    /// older). It was 3 × 0.3 = 0.9 g/kg, short of the daily figure shown
+    /// beside it. When the day's protein target is known
+    /// (`dailyProteinGrams`), the per-meal figure is simply that target split
+    /// over the meals, so the two always agree. Long-term body-composition
+    /// trials on meal distribution are few, so the UI says "about".
     public static let proteinPerMealGramsPerKg = ProteinMeals.gramsPerKgPerMeal
     public static let proteinPerMealCeilingGramsPerKg = 0.55
 
@@ -67,18 +73,46 @@ public enum NutritionTargets {
     /// Dir Assoc 2013: 1.0-1.2 g/kg, 1.2 or more when exercising).
     public static let olderAdultPerMealGramsPerKg = 0.4
 
+    /// Meals for endurance or health-only goals (app choice: three ordinary meals).
+    public static let nonLiftingMeals = 3
+    /// Daily protein for endurance or health-only goals, g/kg (`GoalPlanner.proteinPerKg`).
+    static let nonLiftingDailyGramsPerKg = 1.2
+
     /// Grams per meal and how many meals, or nil without a weight.
     /// - Parameters:
     ///   - loggedMeals: meals seen in today's food log (3 switches to the 3-meal spread).
-    ///   - age: 65 and older raises the endurance/health dose to 0.4 g/kg
-    ///     (Moore 2015); lifters already get at least 0.4 g/kg.
+    ///   - age: kept for callers; the endurance/health dose is 0.4 g/kg at
+    ///     every age now (it was 0.3 under 65), which is Moore 2015's dose for
+    ///     older adults and above the one for young adults.
     public static func proteinPerMeal(bodyMassKg: Double?, goals: Goals?, loggedMeals: Int? = nil, age: Int? = nil) -> (grams: Double, meals: Int)? {
+        proteinPerMeal(bodyMassKg: bodyMassKg, goals: goals, loggedMeals: loggedMeals, age: age, dailyProteinGrams: nil)
+    }
+
+    /// Grams per meal and how many meals, worked out from the day's protein
+    /// target so that meals × grams comes to that target (within rounding).
+    /// - Parameters:
+    ///   - dailyProteinGrams: the protein target shown for the day
+    ///     (`MacroSplit.proteinGrams`, else `GoalPlanner.proteinGrams`). It
+    ///     already allows for body fat, a high BMI and the calorie target,
+    ///     which grams per kg of body weight can't: a 118 kg beginner was told
+    ///     4 × 47 g = 188 g against a 152 g daily target. Nil falls back to
+    ///     g/kg of body weight: 1.2 g/kg over 3 meals for endurance or health
+    ///     goals, at least 0.4 g/kg a meal for lifters.
+    ///   - loggedMeals: meals seen in today's food log (3 switches lifters to
+    ///     3 meals, unless that would put a meal over Schoenfeld & Aragon's
+    ///     0.55 g/kg; then it stays at 4).
+    public static func proteinPerMeal(bodyMassKg: Double?, goals: Goals?, loggedMeals: Int? = nil, age: Int? = nil,
+                                      dailyProteinGrams: Double?) -> (grams: Double, meals: Int)? {
         guard let bodyMassKg, bodyMassKg > 0 else { return nil }
         let lifting = goals.map { $0.focuses.contains(.muscle) || $0.focuses.contains(.strength) || $0.weight == .lose } ?? true
+        if let daily = dailyProteinGrams, daily > 0 {
+            var meals = lifting ? ProteinMeals.targetMeals : nonLiftingMeals
+            if lifting, loggedMeals == 3, daily / 3 <= bodyMassKg * proteinPerMealCeilingGramsPerKg { meals = 3 }
+            return ((daily / Double(meals)).rounded(), meals)
+        }
         if !lifting {
-            // Endurance / health only: 3 meals of about 0.3 g/kg (nutrition.md), 0.4 from 65 (Moore 2015).
-            let older = (age ?? 0) >= GoalPlanner.olderAdultAge
-            return ((bodyMassKg * (older ? olderAdultPerMealGramsPerKg : 0.3)).rounded(), 3)
+            // Endurance / health only: the 1.2 g/kg day over 3 meals, 0.4 g/kg each (Moore 2015).
+            return ((bodyMassKg * nonLiftingDailyGramsPerKg / Double(nonLiftingMeals)).rounded(), nonLiftingMeals)
         }
         let meals = loggedMeals == 3 ? 3 : ProteinMeals.targetMeals
         let perKg = min(proteinPerMealCeilingGramsPerKg, max(proteinPerMealGramsPerKg, 1.6 / Double(meals)))
@@ -102,18 +136,57 @@ public enum NutritionTargets {
         return trainingDay ? 3...5 : 2...3
     }
 
-    /// Grams for the day, from the per-kg band; nil without a weight.
+    /// Grams for the day, from the per-kg band; nil without a weight. This
+    /// version knows nothing about calories; with a calorie target use
+    /// `carbsGrams(bodyMassKg:trainingDay:goals:split:)`.
     public static func carbsGrams(bodyMassKg: Double?, trainingDay: Bool, goals: Goals?) -> ClosedRange<Double>? {
         guard let bodyMassKg, bodyMassKg > 0 else { return nil }
         let band = carbsPerKg(trainingDay: trainingDay, goals: goals)
         return (bodyMassKg * band.lowerBound).rounded()...(bodyMassKg * band.upperBound).rounded()
     }
 
+    /// The most carbohydrate the day's calories leave room for: what is left
+    /// of the calorie target after the split's protein and the fat floor
+    /// (arithmetic on `MacroSplit`, 4 kcal/g carbohydrate and protein, 9 kcal/g fat).
+    public static func maximumCarbsGrams(split: MacroSplit) -> Double {
+        let left = split.calorieTarget - split.proteinGrams * MacroSplit.kcalPerGramProtein
+            - min(split.fatGrams, split.fatFloorGrams) * MacroSplit.kcalPerGramFat
+        return max(split.carbsGrams, (left / MacroSplit.kcalPerGramCarbs).rounded(.down))
+    }
+
+    /// The per-kg band, held inside what the calorie target allows so it
+    /// agrees with the macro split shown beside it. Burke's g/kg bands were
+    /// written for athletes eating to their needs; per kg of a heavy body, or
+    /// on a cut, they can ask for more carbohydrate than the whole calorie
+    /// target (a 118 kg beginner: 354-590 g against a 416 g split, and
+    /// 590-826 g on an endurance goal). So the top is capped at
+    /// `maximumCarbsGrams(split:)` and the bottom never sits above the split's
+    /// own carbohydrate target. Capping is the app's arithmetic, not a study;
+    /// Helms et al. (JISSN 2014) treat carbohydrate as what is left after
+    /// protein and fat. Without a split this is the plain per-kg band.
+    public static func carbsGrams(bodyMassKg: Double?, trainingDay: Bool, goals: Goals?, split: MacroSplit?) -> ClosedRange<Double>? {
+        guard let band = carbsGrams(bodyMassKg: bodyMassKg, trainingDay: trainingDay, goals: goals) else { return nil }
+        guard let split else { return band }
+        let ceiling = maximumCarbsGrams(split: split)
+        let upper = min(band.upperBound, ceiling)
+        let lower = min(band.lowerBound, split.carbsGrams, upper)
+        return lower...upper
+    }
+
     /// "Carbs: about 240-400 g today (training day), 160-240 g on rest days."
     public static func carbsText(bodyMassKg: Double?, trainingDay: Bool, goals: Goals?) -> String? {
-        guard let today = carbsGrams(bodyMassKg: bodyMassKg, trainingDay: trainingDay, goals: goals),
-              let other = carbsGrams(bodyMassKg: bodyMassKg, trainingDay: !trainingDay, goals: goals) else { return nil }
-        func text(_ range: ClosedRange<Double>) -> String { "\(Int(range.lowerBound))-\(Int(range.upperBound)) g" }
+        carbsText(bodyMassKg: bodyMassKg, trainingDay: trainingDay, goals: goals, split: nil)
+    }
+
+    /// The same line with both bands held inside the calorie target
+    /// (`carbsGrams(bodyMassKg:trainingDay:goals:split:)`). A band the cap has
+    /// squeezed to one number reads "about 416 g".
+    public static func carbsText(bodyMassKg: Double?, trainingDay: Bool, goals: Goals?, split: MacroSplit?) -> String? {
+        guard let today = carbsGrams(bodyMassKg: bodyMassKg, trainingDay: trainingDay, goals: goals, split: split),
+              let other = carbsGrams(bodyMassKg: bodyMassKg, trainingDay: !trainingDay, goals: goals, split: split) else { return nil }
+        func text(_ range: ClosedRange<Double>) -> String {
+            Int(range.lowerBound) == Int(range.upperBound) ? "\(Int(range.upperBound)) g" : "\(Int(range.lowerBound))-\(Int(range.upperBound)) g"
+        }
         return trainingDay
             ? "Carbs: about \(text(today)) today (training day), \(text(other)) on rest days."
             : "Carbs: about \(text(today)) today (rest day), \(text(other)) on training days."

@@ -26,7 +26,11 @@ import Foundation
 ///     about 1 year per 10 bpm.
 ///   - Sleep: short sleep (mostly defined as under 6 h) had hazard 1.12 vs
 ///     7-8 h (Cappuccio et al., Sleep 2010). That compares whole groups, so
-///     it's applied once (about 1.3 years), not per missing hour. Long sleep
+///     it's applied once (about 1.3 years), not per missing hour: in full at
+///     6 h or less, nothing from 7 h (the bottom of the reference group), and
+///     a straight line between, because the studies say nothing about where
+///     inside 6-7 h the risk starts and a cliff at 6.0 h made 5 minutes of
+///     sleep worth 1.3 years (the ramp is the app's choice). Long sleep
 ///     (9 h+) is linked with higher risk too, but is thought to be a sign of
 ///     ill health rather than a cause, so it adds no years and is flagged instead.
 ///   - Steps: risk falls up to about 8-10k steps a day under 60 and 6-8k from
@@ -45,6 +49,24 @@ import Foundation
 ///       used because BMI overrates muscular people.
 ///     - BMI hazards (never-smokers, vs 22.5-25) from the Global BMI Mortality
 ///       Collaboration (Lancet 2016), as the fallback.
+///     Each of the three is read off straight lines, not steps: a band's
+///     figure applies at the middle of the band and the healthy range is flat
+///     (`bodyFatPoints`, `bmiHazardPoints`, `waistHazardPoints`). The studies
+///     report one figure per band; joining them is the app's choice, made so
+///     that 0.2 points of body fat can't be worth 1.5 years.
+/// - Body size is counted once. VO₂ max is per kilogram, so extra weight
+///   lowers it and raises BMI, body fat or waist at the same time: a heavy,
+///   unfit person was getting up to +12 years twice. In pooled cohorts, unfit
+///   people had about twice the mortality risk whatever their BMI, and fit
+///   people who were overweight or obese had about the same risk as fit
+///   people of normal weight (Barry et al., Prog Cardiovasc Dis
+///   2014;56:382-390, meta-analysis of 10 studies; "fit" there meant only
+///   "not in the lowest fitness group"), so most of the body-size risk is
+///   already in the fitness figure. The years from fitness and from
+///   body composition together are therefore capped at
+///   `bodySizeAndFitnessCapYears` (12, the fitness factor's own ceiling);
+///   the cap, and trimming the body-composition factor rather than fitness,
+///   are the app's choice.
 public enum BodyAge {
     public struct Inputs: Sendable, Equatable {
         public var age: Int
@@ -159,6 +181,65 @@ public enum BodyAge {
         }
     }
 
+    /// Most years fitness and body composition may add together (see the
+    /// type's notes: body size is counted once). The app's choice.
+    public static let bodySizeAndFitnessCapYears = 12.0
+
+    /// Years by body-fat % (men; women are 10 points higher): −0.5 up to the
+    /// healthy line (20%), then each band's figure at its middle: +1 at 22.5%
+    /// (band 20-25), +2.5 at 27.5% (25-30), +4.5 from 32.5% (over 30). An app
+    /// heuristic, as before (no mortality study by body-fat %); only the
+    /// steps became lines.
+    static func bodyFatPoints(sex: BiologicalSex) -> [(x: Double, y: Double)] {
+        let shift = sex == .male ? 0.0 : 10.0
+        return [(20 + shift, -0.5), (22.5 + shift, 1), (27.5 + shift, 2.5), (32.5 + shift, 4.5)]
+    }
+
+    /// Years by BMI: the Global BMI Mortality Collaboration's hazards for
+    /// never-smokers (Lancet 2016) turned into years, each at the middle of
+    /// its band (16.75 for 15-18.5: 1.51; 19.25: 1.13; 26.25: 1.07; 28.75:
+    /// 1.20; 32.5: 1.45; 37.5: 1.94; 45 for 40 and over: 2.76), flat at 1.0
+    /// across 20-25. The band figures are the study's; the lines between are
+    /// the app's.
+    static let bmiHazardPoints: [(x: Double, y: Double)] = [
+        (16.75, gompertzYears(hazard: 1.51)), (19.25, gompertzYears(hazard: 1.13)), (20, 0), (25, 0),
+        (26.25, gompertzYears(hazard: 1.07)), (28.75, gompertzYears(hazard: 1.20)), (32.5, gompertzYears(hazard: 1.45)),
+        (37.5, gompertzYears(hazard: 1.94)), (45, gompertzYears(hazard: 2.76)),
+    ]
+
+    /// Years by waist-to-height ratio: nothing up to 0.5, the "raised" figure
+    /// (hazard 1.20, borrowed from BMI 27.5-30) at 0.55, the middle of
+    /// 0.5-0.6, and the "high" figure (1.45, BMI 30-35) from 0.65. App
+    /// mapping, as before; only the steps became lines.
+    static let waistHazardPoints: [(x: Double, y: Double)] = [
+        (WaistToHeightRatio.target, 0), (0.55, gompertzYears(hazard: 1.20)), (0.65, gompertzYears(hazard: 1.45)),
+    ]
+
+    /// Hours at or under which short sleep counts in full, and from which it
+    /// doesn't count (Cappuccio 2010: short mostly under 6 h, reference 7-8 h).
+    static let shortSleepHours = 6.0
+    static let referenceSleepHours = 7.0
+
+    /// Straight lines through `points` (sorted by x), flat outside them.
+    static func interpolate(_ value: Double, _ points: [(x: Double, y: Double)]) -> Double {
+        guard let first = points.first, let last = points.last else { return 0 }
+        if value <= first.x { return first.y }
+        if value >= last.x { return last.y }
+        for (low, high) in zip(points, points.dropFirst()) where value <= high.x {
+            let span = high.x - low.x
+            return span > 0 ? low.y + (high.y - low.y) * (value - low.x) / span : high.y
+        }
+        return last.y
+    }
+
+    /// "a" or "an" before a number read aloud: "an 18-year-old", "an 81-year-old", "a 24-year-old".
+    static func article(for number: Int) -> String {
+        let value = abs(number)
+        if value == 8 || value == 11 || value == 18 { return "an" }
+        if (80...89).contains(value) || (800...899).contains(value) { return "an" }
+        return "a"
+    }
+
     /// Needs at least two factors; returns nil otherwise.
     public static func estimate(_ inputs: Inputs) -> Result? {
         var factors: [Factor] = []
@@ -179,15 +260,17 @@ public enum BodyAge {
             }
             let detail = abs(years) < 0.05
                 ? "VO₂ max \(format(vo2)), about typical for your age (\(format(median)))"
-                : "VO₂ max \(format(vo2)) is typical of a \(Int(fitnessAge.rounded()))-year-old"
-            factors.append(Factor(name: "Fitness (VO₂ max)", years: years, detail: detail))
+                : "VO₂ max \(format(vo2)) is typical of \(article(for: Int(fitnessAge.rounded()))) \(Int(fitnessAge.rounded()))-year-old"
+            factors.append(Factor(name: Self.fitnessFactorName, years: years, detail: detail))
         }
         if let rhr = inputs.restingHeartRate, rhr > 30 {
             let years = clamp(gompertzYears(hazard: pow(1.09, (rhr - 60) / 10)), -2, 4)
             factors.append(Factor(name: "Resting heart rate", years: years, detail: "\(Int(rhr.rounded())) bpm (2-week average)"))
         }
         if let hours = inputs.sleepHours, hours > 2 {
-            let years = hours < 6 ? gompertzYears(hazard: 1.12) : 0
+            // In full at 6 h or less, none from 7 h, a straight line between (see the type's notes).
+            let share = clamp((referenceSleepHours - hours) / (referenceSleepHours - shortSleepHours), 0, 1)
+            let years = gompertzYears(hazard: 1.12) * share
             let detail = hours >= 9
                 ? "\(format(hours)) h a night. Regularly sleeping 9 h+ can be a sign of poor sleep or illness; worth mentioning to a doctor if you still feel tired"
                 : "\(format(hours)) h a night"
@@ -198,33 +281,36 @@ public enum BodyAge {
             let years = clamp(-(min(steps, plateau) - reference) / 1000 * 0.6, -2.5, 4)
             factors.append(Factor(name: "Daily steps", years: years, detail: "\(Int(steps.rounded()).formatted()) a day (30-day average)"))
         }
-        if let ratio = inputs.waistToHeightRatio, ratio > 0.25, ratio < 1 {
-            // Waist-to-height ratio (Ashwell 2012 bands; hazard steps borrowed from the BMI table below).
-            let hazard: Double
-            switch WaistToHeightRatio.category(ratio) {
-            case .low, .healthy: hazard = 1.0
-            case .raised: hazard = 1.20
-            case .high: hazard = 1.45
-            }
-            factors.append(Factor(name: "Waist-to-height", years: gompertzYears(hazard: hazard),
+        var bodySizeFactor: String?
+        if let ratio = inputs.waistToHeightRatio, WaistToHeightRatio.plausibleRatios.contains(ratio) {
+            // Waist-to-height ratio (Ashwell 2012 bands; hazards borrowed from the BMI table, see `waistHazardPoints`).
+            bodySizeFactor = "Waist-to-height"
+            factors.append(Factor(name: "Waist-to-height", years: interpolate(ratio, waistHazardPoints),
                                   detail: "\(String(format: "%.2f", ratio)) (\(WaistToHeightRatio.category(ratio).rawValue.lowercased()); under 0.5 is the target)"))
         } else if let fat = inputs.bodyFatPercent, fat > 3, fat < 60 {
-            let (healthy, high, veryHigh) = inputs.sex == .male ? (20.0, 25.0, 30.0) : (30.0, 35.0, 40.0)
-            let years: Double = fat <= healthy ? -0.5 : (fat <= high ? 1 : (fat <= veryHigh ? 2.5 : 4.5))
-            factors.append(Factor(name: "Body fat", years: years, detail: "\(format(fat))%"))
+            bodySizeFactor = "Body fat"
+            factors.append(Factor(name: "Body fat", years: interpolate(fat, bodyFatPoints(sex: inputs.sex)), detail: "\(format(fat))%"))
         } else if let bmi = inputs.bmi, bmi > 12 {
-            let hazard: Double
-            switch bmi {
-            case ..<18.5: hazard = 1.51
-            case ..<20: hazard = 1.13
-            case ..<25: hazard = 1.0
-            case ..<27.5: hazard = 1.07
-            case ..<30: hazard = 1.20
-            case ..<35: hazard = 1.45
-            case ..<40: hazard = 1.94
-            default: hazard = 2.76
+            bodySizeFactor = "BMI"
+            factors.append(Factor(name: "BMI", years: interpolate(bmi, bmiHazardPoints), detail: format(bmi)))
+        }
+
+        // Body size is counted once: fitness (per kg) and body composition
+        // together add at most `bodySizeAndFitnessCapYears`; the excess comes
+        // off the body-composition factor.
+        if let name = bodySizeFactor,
+           let fitness = factors.first(where: { $0.name == Self.fitnessFactorName })?.years, fitness > 0,
+           let index = factors.firstIndex(where: { $0.name == name }), factors[index].years > 0 {
+            let room = max(0, bodySizeAndFitnessCapYears - fitness)
+            if factors[index].years > room {
+                factors[index].years = room
+                factors[index].detail += ". Counted in part: a low VO₂ max per kg already reflects body size"
             }
-            factors.append(Factor(name: "BMI", years: gompertzYears(hazard: hazard), detail: format(bmi)))
+        }
+        // To the 0.1 shown, and never "−0.0".
+        for index in factors.indices {
+            let rounded = (factors[index].years * 10).rounded() / 10
+            factors[index].years = rounded == 0 ? 0 : rounded
         }
 
         guard factors.count >= 2 else { return nil }
@@ -235,6 +321,8 @@ public enum BodyAge {
         return Result(bodyAge: bodyAge.rounded(), age: inputs.age, factors: factors.sorted { abs($0.years) > abs($1.years) },
                       confidence: trust.0, confidenceReason: trust.reason)
     }
+
+    static let fitnessFactorName = "Fitness (VO₂ max)"
 
     /// Years added by a mortality hazard ratio, if risk doubles every 8 years.
     static func gompertzYears(hazard: Double) -> Double {

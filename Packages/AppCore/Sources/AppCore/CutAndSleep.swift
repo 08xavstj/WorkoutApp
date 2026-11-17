@@ -11,8 +11,8 @@ import Foundation
 /// costing muscle and ease the rate. The calorie loop (`CalorieBand`) is not
 /// changed; the advice suggests a slower rate in Goals and the sleep plan.
 public enum CutAndSleep {
-    /// The `SleepDebt` level that triggers the advice: "high" starts at 6 h
-    /// over 14 nights, the existing threshold nearest the report's "over 5 h".
+    /// The `SleepDebt` level that triggers the advice: "high" is an average
+    /// of an hour or more short a night over the 14 nights (`SleepDebt.Level`).
     public static let triggerLevel: SleepDebt.Level = .high
 
     public static let title = "Short sleep while cutting costs muscle"

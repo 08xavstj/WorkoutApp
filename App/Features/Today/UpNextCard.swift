@@ -136,7 +136,7 @@ struct UpNextCard: View {
         // After midnight the window shown would be last night's, already past.
         let hour = Calendar.current.component(.hour, from: .now)
         guard hour >= RecoveryTiming.earliestWakeHour,
-              let debt = metrics.sleepDebt, debt.level != .none, let window = metrics.bedtimeWindow else { return nil }
+              let debt = metrics.sleepDebt, debt.level == .moderate || debt.level == .high, let window = metrics.bedtimeWindow else { return nil }
         let parts = Calendar.current.dateComponents([.hour, .minute], from: window.start)
         var minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
         // A window after midnight still comes last today.

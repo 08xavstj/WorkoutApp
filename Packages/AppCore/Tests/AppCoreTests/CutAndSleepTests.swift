@@ -4,7 +4,10 @@ import Testing
 
 struct CutAndSleepTests {
     let highDebt = SleepDebt.compute(nightlyHours: Array(repeating: 6, count: 14), needHours: 8)
-    let moderateDebt = SleepDebt.compute(nightlyHours: [6, 6, 6, 6, 10, 10], needHours: 8)
+    // Fixture changed on purpose (numbers audit N4): sleep-debt levels now sit on
+    // the average shortfall a night over the 14-night window. 45 minutes a night
+    // short is Moderate; the old fixture (4 h in total) is Low on that scale.
+    let moderateDebt = SleepDebt.compute(nightlyHours: Array(repeating: 7.25, count: 14), needHours: 8)
 
     @Test func onlyWhileCuttingWithHighDebt() {
         #expect(highDebt?.level == .high)

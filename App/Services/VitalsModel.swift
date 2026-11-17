@@ -287,6 +287,7 @@ final class VitalsModel {
         let derived = await Self.derive(
             heartRate: heartRateMinutes,
             workouts: workoutWindows,
+            lifting: sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) },
             sleep: (try? await lastNight) ?? [],
             nights: nights,
             profile: resolvedProfile,
@@ -608,7 +609,7 @@ final class VitalsModel {
             value: currentDebt.map { Duration.seconds($0.hours * 3600).formatted(.units(allowed: [.hours, .minutes], width: .narrow)) },
             // "Caught up" only at zero; a small debt reads "Under 1 h" (`SleepDebt.Result.statusLabel`).
             unit: "", status: currentDebt.map(\.statusLabel),
-            tone: (currentDebt?.hours ?? 0) < 3 ? .good : .caution,
+            tone: (currentDebt?.level == .moderate || currentDebt?.level == .high) ? .caution : .good, // the level, not raw hours (`SleepDebt.Level`)
             gauge: currentDebt.map { min(1, $0.hours / 10) },
             series: debtSeries,
             footnote: currentDebt?.plan
@@ -643,7 +644,7 @@ final class VitalsModel {
         (vo2HeartEstimate, vo2ActivityEstimate) = Self.vo2Estimates(
             restingHeartRates: rhrSeries.suffix(7).map(\.value), maxHeartRate: resolvedProfile.maxHeartRate,
             measuredMax: settings.maxHeartRate > 0 || settings.learnedMaxOverride != nil,
-            intensity: derived.intensityWeek, liftingMinutesPerWeek: liftingMinutesPerWeek,
+            aerobic: derived.aerobic, aerobicDays: derived.aerobicDays, liftingMinutesPerWeek: liftingMinutesPerWeek,
             settings: settings, bmi: estimateBMI, bodyFatPercent: fatSeries.last?.value)
         // With the estimate in use, the VO₂ max stat shows it; the watch's readings stay as its history.
         let scoredVO2 = VO2Source.pick(watch: vo2Series.last?.value, estimate: vo2Estimate?.value, prefer: Self.vo2Source)
@@ -688,20 +689,26 @@ final class VitalsModel {
 
     /// The two no-test estimates (`VO2MaxEstimate`), each nil when its inputs are missing.
     private static func vo2Estimates(restingHeartRates: [Double], maxHeartRate: Double, measuredMax: Bool,
-                                     intensity: IntensityMinutes.Result?, liftingMinutesPerWeek: Double,
+                                     aerobic: IntensityMinutes.Result, aerobicDays: Int, liftingMinutesPerWeek: Double,
                                      settings: UserSettings, bmi: Double?, bodyFatPercent: Double?)
         -> (VO2EstimatePart?, VO2EstimatePart?) {
         var heart: VO2EstimatePart?
         if !restingHeartRates.isEmpty {
             let resting = restingHeartRates.reduce(0, +) / Double(restingHeartRates.count)
-            if let result = VO2MaxEstimate.heartRateRatio(maxHeartRate: maxHeartRate, restingHeartRate: resting, measuredMax: measuredMax) {
+            // Capped at the top of the norms for the age and sex, and weighted down for women
+            // (the formula was validated in trained men: Uth et al. 2004).
+            if let result = VO2MaxEstimate.heartRateRatio(maxHeartRate: maxHeartRate, restingHeartRate: resting, measuredMax: measuredMax,
+                                                          age: settings.age, sex: settings.sex) {
                 let source = measuredMax ? "your max" : "age-based max"
                 heart = VO2EstimatePart(result: result, detail: "\(source) \(Int(maxHeartRate.rounded())) ÷ resting \(Int(resting.rounded())) bpm")
             }
         }
-        let rating = VO2MaxEstimate.activityRating(vigorousMinutes: Double(intensity?.vigorous ?? 0),
-                                                   moderateMinutes: Double(intensity?.moderate ?? 0),
-                                                   liftingMinutes: liftingMinutesPerWeek)
+        // Aerobic minutes a week outside lifting, averaged over the days on hand, so one
+        // session doesn't move the level; lifting is rated by its own minutes.
+        let weeks = Double(max(7, aerobicDays)) / 7
+        let rating = VO2MaxEstimate.activityRating(aerobicVigorousMinutes: Double(aerobic.vigorous) / weeks,
+                                                   aerobicModerateMinutes: Double(aerobic.moderate) / weeks,
+                                                   liftingMinutes: liftingMinutesPerWeek, overDays: 7)
         var activity: VO2EstimatePart?
         if let result = VO2MaxEstimate.activity(rating: rating, age: settings.age, sex: settings.sex, bmi: bmi, bodyFatPercent: bodyFatPercent) {
             let lifting = Int(liftingMinutesPerWeek.rounded())
@@ -965,6 +972,11 @@ final class VitalsModel {
         var stressToday: StressEstimate.Result?
         var stressByDay: [DatedValue] = []
         var intensityWeek = IntensityMinutes.Result(moderate: 0, vigorous: 0)
+        /// Moderate and vigorous minutes outside logged lifting sessions, over
+        /// `aerobicDays` days (the heart rate on hand, about two weeks), for the
+        /// VO₂ max estimate's activity level.
+        var aerobic = IntensityMinutes.Result(moderate: 0, vigorous: 0)
+        var aerobicDays = 7
         var sleepingHeartRate: SleepingHeartRate.Result?
         var sleepingHeartRateByNight: [DatedValue] = []
         var intensityByDay: [DatedValue] = []
@@ -974,6 +986,7 @@ final class VitalsModel {
     nonisolated private static func derive(
         heartRate: [HeartRateSample],
         workouts: [DateInterval],
+        lifting: [DateInterval] = [],
         sleep: [SleepSample],
         nights: [SleepNight],
         profile: HeartRateProfile,
@@ -1007,6 +1020,14 @@ final class VitalsModel {
         }
 
         derived.intensityWeek = IntensityMinutes.count(sorted.filter { $0.date >= weekStart }, profile: profile)
+        // Jackson's activity scale is about aerobic exercise over the last month and puts
+        // weight lifting at levels 2-3 (`VO2MaxEstimate.activityRating`), so heart rate inside
+        // lifting sessions is left out, and the whole span on hand is used, not one week.
+        if let first = sorted.first, let last = sorted.last {
+            let outsideLifting = sorted.filter { sample in !lifting.contains { $0.contains(sample.date) } }
+            derived.aerobic = IntensityMinutes.count(outsideLifting, profile: profile)
+            derived.aerobicDays = max(7, (calendar.dateComponents([.day], from: first.date, to: last.date).day ?? 0) + 1)
+        }
 
         // Daily intensity minutes and average heart rate asleep each night, for history charts.
         if let first = sorted.first {

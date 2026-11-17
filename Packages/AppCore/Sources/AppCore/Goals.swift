@@ -135,6 +135,14 @@ public enum GoalPlanner {
         )?.deltaKcal
     }
 
+    /// Daily protein, g per kg of reference weight. Losing: 2.2 (Helms 2014,
+    /// see the type's notes). Muscle or strength: 1.6 (Morton et al., BJSM
+    /// 2018). Health or stamina only: 1.2, the bottom of the 1.2-2.0 g/kg
+    /// range for active people (Thomas, Erdman & Burke, ACSM/AND/DC position
+    /// stand, Med Sci Sports Exerc 2016;48:543-568; the range as quoted in
+    /// reviews, the paper itself wasn't opened) and the PROT-AGE figure for
+    /// active older adults (Bauer et al., J Am Med Dir Assoc 2013).
+    /// The per-meal doses are worked out from this (`NutritionTargets.proteinPerMeal`).
     public static func proteinPerKg(_ goals: Goals) -> Double {
         if goals.weight == .lose { return 2.2 }
         return goals.focuses.contains(.muscle) || goals.focuses.contains(.strength) ? 1.6 : 1.2
@@ -385,13 +393,50 @@ public enum GoalPlanner {
         return Goals(weight: .maintain, focuses: [.muscle, .health])
     }
 
-    /// Weeks to reach the target weight at the chosen rate.
+    /// Weeks to reach the target weight at the chosen rate. This assumes the
+    /// calorie target delivers that rate; when a safety minimum holds the
+    /// target up it doesn't, so screens that show a target in force should
+    /// use `weeksToTarget(currentKg:goals:maintenance:calorieTarget:)`.
     public static func weeksToTarget(currentKg: Double, goals: Goals) -> Double? {
         guard let target = goals.targetWeightKg, goals.weight != .maintain else { return nil }
         let weekly = currentKg * goals.weeklyRatePercent / 100
         guard weekly > 0 else { return nil }
         let remaining = goals.weight == .lose ? currentKg - target : target - currentKg
         return remaining > 0 ? remaining / weekly : 0
+    }
+
+    /// The weekly rate (% of body weight) the calorie target in force really
+    /// delivers: the gap between maintenance and the target, at 7,700 kcal
+    /// per kg (`AdaptiveTDEE.kcalPerKg`; Hall et al., Lancet 2011). When the
+    /// safety minimum (`CalorieSafety.minimumTarget`) holds the target above
+    /// what the chosen rate needs, this is lower than `goals.weeklyRatePercent`:
+    /// an 80 kg man on "1% a week" was getting 0.74%. 0 when the target
+    /// isn't on the goal's side of maintenance; nil when maintaining or
+    /// without a weight.
+    public static func deliveredWeeklyRatePercent(bodyMassKg: Double, goals: Goals, maintenance: Double,
+                                                  calorieTarget: Double) -> Double? {
+        guard goals.weight != .maintain, bodyMassKg > 0 else { return nil }
+        let gap = goals.weight == .lose ? maintenance - calorieTarget : calorieTarget - maintenance
+        return max(0, gap) * 7 / AdaptiveTDEE.kcalPerKg / bodyMassKg * 100
+    }
+
+    /// Weeks to reach the target weight at the rate the calorie target in
+    /// force delivers (`deliveredWeeklyRatePercent`), not the rate picked: a
+    /// 118 kg man whose plan said 15 weeks was on course for 32. Nil when the
+    /// target in force gives no loss (or gain) at all, when maintaining, or
+    /// without a target weight. Like the rate itself it is a straight-line
+    /// estimate from today's gap; real loss slows as weight falls (Hall 2011),
+    /// so the screen should say "about".
+    /// - Parameters:
+    ///   - maintenance: the maintenance the target was worked from.
+    ///   - calorieTarget: the daily target actually shown, after every minimum.
+    public static func weeksToTarget(currentKg: Double, goals: Goals, maintenance: Double, calorieTarget: Double) -> Double? {
+        guard let target = goals.targetWeightKg, goals.weight != .maintain else { return nil }
+        let remaining = goals.weight == .lose ? currentKg - target : target - currentKg
+        guard remaining > 0 else { return 0 }
+        guard let rate = deliveredWeeklyRatePercent(bodyMassKg: currentKg, goals: goals, maintenance: maintenance,
+                                                    calorieTarget: calorieTarget), rate > 0 else { return nil }
+        return remaining / (currentKg * rate / 100)
     }
 }
 

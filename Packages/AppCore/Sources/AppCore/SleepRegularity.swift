@@ -181,10 +181,39 @@ extension SleepRegularity {
 /// Kitamura et al., Sci Rep 2016: debt is paid back over days), so longer
 /// nights pay the debt down. (Sletten et al., Sleep Health 2023 is the NSF
 /// consensus on sleep regularity, not on catch-up sleep.)
+///
+/// The number shown is the running total in hours. The level (Low / Moderate
+/// / High) is **the app's choice, not a published scale**: it is set on the
+/// average shortfall a night across the 14-night window, because that is
+/// the unit the restriction trials used. What they tested: 6 h and 4 h in bed
+/// a night for 14 nights against 8 h, i.e. about 2 and 4 h a night short
+/// (Van Dongen et al., Sleep 2003;26:117-126), and 7, 5 and 3 h in bed for
+/// 7 nights (Belenky et al., J Sleep Res 2003;12:1-12: at 7 h reaction speed
+/// fell slightly and then held, with no more lapses; at 5 h lapses rose). No
+/// trial tested a shortfall of half an hour, and 7 h a night meets the adult
+/// guideline (Watson 2015, AASM/SRS), so:
+/// - up to half an hour a night short (7 h of debt over the window): Low;
+/// - more than that, up to an hour a night: Moderate;
+/// - an hour a night or more (14 h over the window): High, the smallest
+///   restriction with a measured effect (Belenky's 7 h group).
+/// A steady 7.0 h on a 7.5 h need used to read "High" (the levels sat on the
+/// total: 3 h and 6 h); it now reads Low.
 public enum SleepDebt {
     public static let nights = 14
     /// More than this is shown as "over 20 h": beyond it the number means little.
     public static let cap = 20.0
+    /// Fewest nights for a reading. With fewer than `nights` the result is
+    /// marked `isEarly` (the card names 14 nights), and because the level
+    /// divides by the full window a first reading needs 14 h of debt to read
+    /// High: five 5.6 h nights on a 7.5 h need (9.5 h) are Moderate, where the
+    /// old total-based scale already called them High.
+    public static let minimumNights = 5
+    /// Average shortfall a night, in hours, above which the debt is Moderate
+    /// (app choice; see the type's notes).
+    public static let moderateShortfallHours = 0.5
+    /// Average shortfall a night, in hours, from which the debt is High
+    /// (app choice; Belenky 2003's mildest restriction was about an hour).
+    public static let highShortfallHours = 1.0
 
     public enum Level: String, Sendable {
         case none = "None"
@@ -206,6 +235,18 @@ public enum SleepDebt {
         /// caught up on one screen and "Under 1 h" on another.
         public var isCaughtUp: Bool { hours <= 0 }
 
+        /// True when fewer than the 14 nights the card names were counted.
+        public var isEarly: Bool { nightsCounted < SleepDebt.nights }
+
+        /// "14 nights", or "first 6 of 14 nights" while the window fills, for
+        /// the card's heading ("Sleep debt · first 6 of 14 nights").
+        public var windowLabel: String {
+            isEarly ? "first \(nightsCounted) of \(SleepDebt.nights) nights" : "\(SleepDebt.nights) nights"
+        }
+
+        /// The debt as an average shortfall a night across the 14-night window, hours.
+        public var averageShortfallHours: Double { hours / Double(SleepDebt.nights) }
+
         /// The level label shared by every screen: "Caught up" at zero,
         /// "Under 1 h" below an hour, else Low / Moderate / High.
         public var statusLabel: String {
@@ -215,8 +256,18 @@ public enum SleepDebt {
 
         public var plan: String? {
             guard let extra = extraMinutesPerNight, let nights = paybackNights else { return nil }
-            return "Sleep about \(extra) min more for \(nights) night\(nights == 1 ? "" : "s"): go to bed earlier rather than sleeping in, so your wake time stays regular."
+            return "Sleep about \(extra) min more than your need for \(nights) night\(nights == 1 ? "" : "s"): go to bed earlier rather than sleeping in, so your wake time stays regular."
         }
+    }
+
+    /// The level for a running debt, from its average over the 14-night
+    /// window (the app's scale; see the type's notes). Under an hour in total
+    /// is "none" ("Under 1 h" on screen).
+    public static func level(debtHours: Double) -> Level {
+        guard debtHours >= 1 else { return .none }
+        let perNight = debtHours / Double(nights)
+        if perNight >= highShortfallHours { return .high }
+        return perNight > moderateShortfallHours + 1e-9 ? .moderate : .low
     }
 
     /// - Parameters:
@@ -225,22 +276,26 @@ public enum SleepDebt {
     /// - Returns: nil with fewer than 5 nights.
     public static func compute(nightlyHours: [Double], needHours: Double) -> Result? {
         let recent = Array(nightlyHours.suffix(nights))
-        guard recent.count >= 5, needHours > 0 else { return nil }
+        guard recent.count >= minimumNights, needHours > 0 else { return nil }
         // Running balance: short nights add debt, long nights pay it back (never below 0).
         var debt = 0.0
         for hours in recent {
             debt = max(0, debt + needHours - hours)
         }
+        let level = Self.level(debtHours: debt)
         debt = min(cap, debt)
-        let level: Level = debt < 1 ? .none : (debt < 3 ? .low : (debt < 6 ? .moderate : .high))
         var extra: Int?
         var payback: Int?
         if debt >= 1 {
-            // 30-60 extra minutes a night is realistic; spread over at most two weeks.
-            let minutes = min(60, max(30, debt * 60 / 7))
+            // Paid back across the same two weeks it was built over, at 30-60
+            // extra minutes a night (an hour is the most `BedtimeWindow`
+            // repays in a night; Kitamura 2016: debt clears over days). It was
+            // spread over one week, which asked a steady 7 h sleeper for an
+            // extra hour a night.
+            let minutes = min(60, max(30, debt * 60 / Double(nights)))
             let rounded = Int((minutes / 15).rounded(.up) * 15)
             extra = rounded
-            payback = min(14, Int((debt * 60 / Double(rounded)).rounded(.up)))
+            payback = min(nights, Int((debt * 60 / Double(rounded)).rounded(.up)))
         }
         return Result(hours: (debt * 10).rounded() / 10, nightsCounted: recent.count, level: level,
                       extraMinutesPerNight: extra, paybackNights: payback)

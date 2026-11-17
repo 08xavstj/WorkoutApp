@@ -34,10 +34,13 @@ struct NutritionTests {
         #expect(three.grams == 43)
         // Two logged meals is still shown as the 4-meal target (not a 2-meal plan).
         #expect(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: lifter, loggedMeals: 2)?.meals == 4)
-        // Endurance / health only: 3 meals of about 0.3 g/kg (nutrition.md).
-        let endurance = try #require(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: Goals(weight: .maintain, focuses: [.endurance])))
-        #expect(endurance.grams == 24)
+        // Endurance / health only. Changed on purpose (numbers audit N14): 3 meals
+        // of 0.4 g/kg, which add up to the 1.2 g/kg daily target; 3 × 0.3 = 0.9 didn't.
+        let enduranceGoals = Goals(weight: .maintain, focuses: [.endurance])
+        let endurance = try #require(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: enduranceGoals))
+        #expect(endurance.grams == 32)
         #expect(endurance.meals == 3)
+        #expect(endurance.grams * Double(endurance.meals) == 80 * GoalPlanner.proteinPerKg(enduranceGoals))
         // Losing weight counts as lifting (protein matters most in a deficit); no goal defaults to the lifter spread.
         #expect(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: Goals(weight: .lose, focuses: [.health]))?.grams == 32)
         #expect(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: nil)?.meals == 4)

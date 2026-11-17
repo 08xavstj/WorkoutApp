@@ -28,9 +28,12 @@ struct TrainingStatusTests {
         #expect(TrainingStatus.estimate(sessionDates: sessions(days: 913, on: [0, 2, 4]), now: now) == .advanced)
     }
 
-    @Test func underTwiceAWeekStaysNovice() {
-        // 1.5 sessions a week for a year: regular, but under the 2-a-week line.
-        #expect(TrainingStatus.estimate(sessionDates: sessions(days: 365, cycle: 14, on: [0, 4, 9]), now: now) == .novice)
+    // Changed on purpose (numbers audit N11): the "trained" line is 1.5 sessions
+    // a week, not 2.0, so three sessions a fortnight for a year now reads
+    // intermediate; once a week still reads novice.
+    @Test func threeAFortnightIsTrainedOnceAWeekIsNot() {
+        #expect(TrainingStatus.estimate(sessionDates: sessions(days: 365, cycle: 14, on: [0, 4, 9]), now: now) == .intermediate)
+        #expect(TrainingStatus.estimate(sessionDates: sessions(days: 365, cycle: 7, on: [0]), now: now) == .novice)
     }
 
     @Test func eightWeeksOffIsUntrained() {
@@ -198,8 +201,10 @@ struct PersonalProteinAndCycleTests {
         let older = try #require(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: health, age: 70))
         #expect(older.grams == 32)
         #expect(older.meals == 3)
+        // Changed on purpose (numbers audit N14): under 65 it is 0.4 g/kg too, so
+        // 3 meals reach the 1.2 g/kg daily target (3 × 0.3 was 0.9 g/kg).
         let younger = try #require(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: health, age: 40))
-        #expect(younger.grams == 24)
+        #expect(younger.grams == 32)
         // Lifters already get 0.4 g/kg at any age.
         #expect(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: Goals(weight: .maintain, focuses: [.muscle]), age: 70)?.grams == 32)
     }

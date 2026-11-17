@@ -210,18 +210,27 @@ struct GoalsView: View {
     }
 
     private var calorieTarget: Double? {
-        guard let base = metrics.maintenance?.maintenance ?? metrics.calories?.projected,
-              let weight = metrics.bodyMassKg else { return nil }
+        guard let base = maintenanceBase, let weight = metrics.bodyMassKg else { return nil }
         // The same safety minimum as Home (`CalorieSafety`, IOC REDs 2023).
         return max(GoalPlanner.calorieTarget(maintenance: base, bodyMassKg: weight,
                                              goals: GoalPlanner.cappedGoals(goals, limit: rateLimit), sex: settings.sex),
                    metrics.calorieMinimum ?? 0)
     }
 
+    /// Measured maintenance, else a usual full day's burn (as on Today).
+    private var maintenanceBase: Double? {
+        metrics.maintenance?.maintenance ?? metrics.usualDailyBurn ?? metrics.calories?.projected
+    }
+
     private var weeksToTarget: Double? {
         guard let weight = metrics.bodyMassKg else { return nil }
         var withTarget = GoalPlanner.cappedGoals(goals, limit: rateLimit)
         withTarget.targetWeightKg = parsedTarget
+        // From the calorie target in force: when the safety minimum holds the target up,
+        // the real rate is slower than the one picked, and so is the date.
+        if let base = maintenanceBase, let target = calorieTarget {
+            return GoalPlanner.weeksToTarget(currentKg: weight, goals: withTarget, maintenance: base, calorieTarget: target)
+        }
         return GoalPlanner.weeksToTarget(currentKg: weight, goals: withTarget)
     }
 

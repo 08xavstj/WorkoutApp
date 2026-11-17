@@ -2,6 +2,9 @@ import Foundation
 import Testing
 @testable import AppCore
 
+// Times changed on purpose (numbers audit N4): the window is worked back from
+// the time in bed the need takes at 90% sleep efficiency (need ÷ 0.9), not from
+// the need itself. 7.5 h asleep is 8 h 20 min in bed; 8 h is 8 h 53 min.
 struct BedtimeWindowTests {
     var calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
@@ -19,28 +22,29 @@ struct BedtimeWindowTests {
     }
 
     @Test func startRoundsDownToFiveMinutes() throws {
-        // Need 7.5 h, 13 min to repay, up at 6:30 → 22:47, shown as 22:45 (QA round 1).
+        // Need 7.5 h (8 h 20 min in bed), 13 min to repay, up at 6:30 → 21:57, shown as 21:55 (QA round 1).
         var debt = try #require(makeDebt([6, 6, 6, 6, 6]))
         debt.extraMinutesPerNight = 13
         let window = try #require(BedtimeWindow.compute(
             sleepNeedHours: 7.5, sleepDebt: debt, usualWakeMinutes: 6 * 60 + 30, regularity: 85,
             now: date(hour: 20), calendar: calendar))
-        #expect(window.start == date(hour: 22, minute: 45))
+        #expect(window.start == date(hour: 21, minute: 55))
     }
 
     @Test func worksBackFromWakeNeedAndRepayment() throws {
-        // Need 8 h, 40 min to repay, up at 6:30 → 21:50–22:20 (the roadmap's example).
+        // Need 8 h (8 h 53 min in bed), 40 min to repay, up at 6:30 → 20:56, shown as 20:55–21:25.
         var debt = try #require(makeDebt([6, 6, 6, 6, 6]))
         debt.extraMinutesPerNight = 40
         let window = try #require(BedtimeWindow.compute(
             sleepNeedHours: 8, sleepDebt: debt, usualWakeMinutes: 6 * 60 + 30, regularity: 85,
             now: date(hour: 20), calendar: calendar))
         #expect(window.wake == date(day: 11, hour: 6, minute: 30))
-        #expect(window.start == date(hour: 21, minute: 50))
-        #expect(window.end == date(hour: 22, minute: 20))
+        #expect(window.start == date(hour: 20, minute: 55))
+        #expect(window.end == date(hour: 21, minute: 25))
         #expect(window.repaymentMinutes == 40)
         #expect(window.regularityNote == nil)
-        #expect(window.reason.contains("8 h need"))
+        #expect(abs(window.timeInBedHours - 8 / 0.9) < 0.0001)
+        #expect(window.reason.contains("8 h need (about 8 h 55 min in bed)"))
         #expect(window.reason.contains("40 min of debt"))
         #expect(window.line.contains("in bed by"))
     }
@@ -51,7 +55,7 @@ struct BedtimeWindowTests {
             sleepNeedHours: 8, sleepDebt: makeDebt(Array(repeating: 6, count: 14)), usualWakeMinutes: 7 * 60, regularity: nil,
             now: date(hour: 20), calendar: calendar))
         #expect(window.repaymentMinutes == 60)
-        #expect(window.start == date(hour: 22))
+        #expect(window.start == date(hour: 21, minute: 5))
     }
 
     @Test func noDebtMeansNoRepayment() throws {
@@ -59,18 +63,18 @@ struct BedtimeWindowTests {
             sleepNeedHours: 7.5, sleepDebt: makeDebt([8, 8, 8, 8, 8]), usualWakeMinutes: 7 * 60, regularity: 80,
             now: date(hour: 20), calendar: calendar))
         #expect(window.repaymentMinutes == 0)
-        #expect(window.start == date(hour: 23, minute: 30))
+        #expect(window.start == date(hour: 22, minute: 40))
         #expect(!window.reason.contains("debt"))
     }
 
     @Test func earlySessionBringsWakeForward() throws {
-        // Usual wake 7:30, session at 6:30 → up at 5:30, in bed by 21:30.
+        // Usual wake 7:30, session at 6:30 → up at 5:30, in bed by 20:35 (8 h 53 min before).
         let window = try #require(BedtimeWindow.compute(
             sleepNeedHours: 8, sleepDebt: nil, usualWakeMinutes: 7 * 60 + 30, regularity: nil,
             plannedSessionStart: date(day: 11, hour: 6, minute: 30), now: date(hour: 20), calendar: calendar))
         #expect(window.wake == date(day: 11, hour: 5, minute: 30))
         #expect(window.wakeForSession)
-        #expect(window.start == date(hour: 21, minute: 30))
+        #expect(window.start == date(hour: 20, minute: 35))
     }
 
     @Test func lateSessionLeavesWakeAlone() throws {
@@ -87,7 +91,7 @@ struct BedtimeWindowTests {
             sleepNeedHours: 8, sleepDebt: nil, usualWakeMinutes: 7 * 60, regularity: nil,
             now: date(day: 11, hour: 1), calendar: calendar))
         #expect(window.wake == date(day: 11, hour: 7))
-        #expect(window.start == date(hour: 23))
+        #expect(window.start == date(hour: 22, minute: 5))
     }
 
     @Test func lowRegularityAddsTheNote() throws {

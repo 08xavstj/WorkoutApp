@@ -764,10 +764,9 @@ private struct CalorieDetailsSheet: View {
                             }
                         } else {
                             let progress = metrics.maintenanceProgress
-                            Text(progress.map { p -> String in
-                                let skipped = p.partialDays > 0 ? " (\(p.partialDays) partly logged day\(p.partialDays == 1 ? "" : "s") don't count)" : ""
-                                return "\(p.fullyLoggedDays) of 14 fully logged days in the last 4 weeks\(skipped), and 4+ weigh-ins over 10+ days. Until then, maintenance comes from your watch."
-                            } ?? "Needs 14 fully logged days of food and 4+ weigh-ins over 10+ days in the last 4 weeks.")
+                            // What is still missing, from the rule itself (`AdaptiveTDEE.Progress.stillNeeded`).
+                            Text(progress.flatMap { p in p.stillNeeded.map { "Still needed: \($0). Until then, maintenance comes from your watch." } }
+                                ?? "Needs 14 fully logged days of food and 8 weigh-ins over 14 days in the last 4 weeks.")
                                 .font(.footnote)
                                 .foregroundStyle(Theme.secondaryText)
                         }

@@ -15,7 +15,9 @@ import Foundation
 ///     fewer than half. A meta-analysis of 29 studies in athletes found it the
 ///     most accurate and precise equation (80% of people within ±10%; O'Neill,
 ///     Corish & Horner, Sports Med 2023). Outside 18-35 it hasn't been
-///     tested, so Mifflin-St Jeor stays. The Tinsley equations (Appl Physiol
+///     tested, so Mifflin-St Jeor is used from 40; from 36 to 39 the two are
+///     blended (`athleteEquationWeight`, the app's choice) so a birthday
+///     doesn't move the figure by 200 kcal. The Tinsley equations (Appl Physiol
 ///     Nutr Metab 2019) were built on a small group of physique athletes and need
 ///     outside validation, so they aren't used.
 ///   - With body fat from DXA or a clinic (`Body.bodyFatIsClinical`) a
@@ -27,11 +29,18 @@ import Foundation
 ///   - Age: energy use per kg of lean mass is stable from 20 to 60 and falls
 ///     after 60 (Pontzer et al., Science 2021); the equations' own age terms
 ///     cover this, so nothing extra is subtracted.
-/// - Exercise: Keytel et al. (2005) heart-rate equation for minutes when heart
-///   rate is clearly raised; for logged gym sessions, at least a MET-based floor
-///   (2024 Adult Compendium, Herrmann et al., J Sport Health Sci 2024: vigorous
-///   weight lifting 6.0 METs, moderate multi-exercise sessions 3.5),
-///   because heart rate swings during lifting.
+/// - Exercise: the Keytel et al. heart-rate equation (J Sports Sci
+///   2005;23:289-297), which was fitted on steady treadmill and cycle exercise
+///   at 35%, 62% and 80% of VO₂ max (57%, 77% and 90% of max heart rate). It
+///   is used in full inside logged workouts, and outside them only once heart
+///   rate is clearly at exercise level (`everydayReserveThreshold`): a raised
+///   heart rate while standing, in the heat or after coffee isn't oxygen use.
+///   Logged gym sessions use METs alone (2024 Adult Compendium, Herrmann et
+///   al., J Sport Health Sci 2024: vigorous weight lifting 6.0 METs, moderate
+///   multi-exercise sessions 3.5), because heart rate in lifting swings with
+///   the pressor response and rests, not with oxygen use: the equation put a
+///   70-minute session at 100-135 bpm at about 600 kcal (7.5 METs) for an
+///   80 kg man.
 /// - Everyday movement (NEAT): steps outside workouts, ~0.00042 kcal per step
 ///   per kg net of rest (ACSM walking equation: net VO₂ = 0.1 mL/kg/min per
 ///   m/min of speed; at 100 steps/min and 0.8 m steps that is about 0.0004
@@ -56,9 +65,33 @@ public struct EnergyCalculator: Sendable {
     public var fatThermicEffect: Double = 0.02
     /// Net calories per step per kg (ACSM walking equation at ~100 steps/min, 0.8 m steps).
     public var kcalPerStepPerKg: Double = 0.00042
-    /// Keytel is validated for exercise; below this fraction of heart-rate reserve
-    /// a minute counts as rest/everyday movement instead.
+    /// Inside a logged workout (`workouts`), minutes below this fraction of
+    /// heart-rate reserve count as rest instead of exercise (30% is the bottom
+    /// of ACSM's "light" band).
     public var exerciseReserveThreshold: Double = 0.30
+    /// Outside logged workouts the Keytel equation starts here: 40% of reserve,
+    /// the bottom of ACSM's "moderate" band and the level `StrainCalculator`
+    /// credits to an exercise minute. Keytel's lowest test stage was 35% of
+    /// VO₂ max, 57% of max heart rate (Keytel 2005), which is 39% of reserve
+    /// for a max of 187 and a resting rate of 55; under that the equation was
+    /// never fitted, and it reads about 5 kcal a minute for an 80 kg man
+    /// standing at 96 bpm (1,550 kcal for five hours on his feet).
+    public var everydayReserveThreshold: Double = 0.40
+    /// Outside logged workouts the equation counts in full from here, and in
+    /// a straight line from 0 at `everydayReserveThreshold`, so there is no
+    /// 300 → 2,100 kcal step at 40%. The 10-point ramp is the app's choice; no
+    /// study sets it. (An unlogged brisk hour at 45% of reserve with 6,000
+    /// steps reads about 340 kcal with it against about 480 without, for an
+    /// 80 kg man; brisk walking at 4.3 METs is about 265 above rest.)
+    public var everydayFullReserve: Double = 0.50
+    /// Lowest gross METs credited to a raised-heart-rate minute inside a logged
+    /// workout: the bottoms of ACSM's light (30-39% of reserve, 2.0-2.9 METs)
+    /// and moderate (40-59%, 3.0-5.9 METs) bands (Garber et al., ACSM position
+    /// stand, Med Sci Sports Exerc 2011; cited from memory). Keytel's weight
+    /// term is negative for women, so for a heavy woman the equation alone can
+    /// fall under any plausible cost of moving.
+    public var lightFloorMETs: Double = 2.0
+    public var moderateFloorMETs: Double = 3.0
     /// The most time one heart-rate reading stands for (as in StrainCalculator).
     public var maxMinutesPerSample: Double = 2
     /// Steps per raised-heart-rate minute already covered by heart-rate calories.
@@ -142,13 +175,36 @@ public struct EnergyCalculator: Sendable {
 
     /// Ages the ten Haaf & Weijs (2014) equation was built on.
     public static let athleteEquationAges = 18...35
+    /// From this age a trained person gets Mifflin-St Jeor alone. Between the
+    /// top of `athleteEquationAges` and it the two equations are blended.
+    public static let athleteEquationFadeOutAge = 40
+
+    /// The share of the ten Haaf equation in a trained person's resting
+    /// energy: 1 for 18-35 (the ages it was built on), 0 from 40 and under 18,
+    /// falling in a straight line between (0.8 at 36, 0.2 at 39). The fade is
+    /// the app's choice: the equation is untested past 35, but metabolism per
+    /// kg of lean mass doesn't change at a birthday (Pontzer et al., Science
+    /// 2021), and a switch moved an 80 kg, 180 cm man from 1,949 to 1,750 kcal
+    /// on his 36th. Across the fade the equation is used up to 4 years past
+    /// its tested range, at a falling weight.
+    public static func athleteEquationWeight(age: Int) -> Double {
+        if athleteEquationAges.contains(age) { return 1 }
+        guard age > athleteEquationAges.upperBound, age < athleteEquationFadeOutAge else { return 0 }
+        return Double(athleteEquationFadeOutAge - age) / Double(athleteEquationFadeOutAge - athleteEquationAges.upperBound)
+    }
 
     /// Method names shown in the app ("Resting energy: …").
     public static let tenHaafMethod = "ten Haaf equation for people who train"
     public static let cunninghamMethod = "Cunningham equation (lean mass)"
+    /// Shown for trained people aged 36-39 (`athleteEquationWeight`).
+    public static let blendedMethod = "ten Haaf and Mifflin-St Jeor equations, blended for your age"
+    /// Shown when there is no body weight to work from.
+    public static let missingWeightMethod = "no body weight yet"
 
     /// Basal metabolic rate, kcal/day, and the equation used (see the type's notes).
+    /// Without a body weight (0 or less) it is 0, not a figure made from height and age alone.
     public func bmr(_ body: Body) -> (kcal: Double, method: String) {
+        guard body.weightKg > 0, body.weightKg.isFinite else { return (0, Self.missingWeightMethod) }
         let trained = body.trainingStatus?.isTrained == true
         if body.bodyFatIsClinical, let fat = body.bodyFatPercent, fat > 2, fat < 60 {
             let leanMass = body.weightKg * (1 - fat / 100)
@@ -156,20 +212,25 @@ public struct EnergyCalculator: Sendable {
             if trained { return (500 + 22 * leanMass, Self.cunninghamMethod) }
             return (370 + 21.6 * leanMass, "Katch-McArdle")
         }
-        if trained, Self.athleteEquationAges.contains(body.age), let heightCm = body.heightCm {
+        let height = body.heightCm ?? (body.sex == .male ? 176 : 163)
+        let mifflin = 10 * body.weightKg + 6.25 * height - 5 * Double(body.age) + (body.sex == .male ? 5 : -161)
+        let athleteShare = trained ? Self.athleteEquationWeight(age: body.age) : 0
+        if athleteShare > 0, let heightCm = body.heightCm {
             // ten Haaf & Weijs, PLoS One 2014, in kJ/day: 49.940 × weight (kg)
             // + 2459.053 × height (m) − 34.014 × age + 799.257 (men) + 122.502.
             let kilojoules = 49.940 * body.weightKg + 2459.053 * heightCm / 100 - 34.014 * Double(body.age)
                 + (body.sex == .male ? 799.257 : 0) + 122.502
-            return (kilojoules / 4.184, Self.tenHaafMethod)
+            let tenHaaf = kilojoules / 4.184
+            if athleteShare >= 1 { return (tenHaaf, Self.tenHaafMethod) }
+            return (athleteShare * tenHaaf + (1 - athleteShare) * mifflin, Self.blendedMethod)
         }
-        let height = body.heightCm ?? (body.sex == .male ? 176 : 163)
-        let base = 10 * body.weightKg + 6.25 * height - 5 * Double(body.age)
-        return (base + (body.sex == .male ? 5 : -161), body.heightCm == nil ? "Mifflin-St Jeor (estimated height)" : "Mifflin-St Jeor")
+        return (mifflin, body.heightCm == nil ? "Mifflin-St Jeor (estimated height)" : "Mifflin-St Jeor")
     }
 
     /// Keytel et al. (2005) gross energy expenditure, kcal/min, without VO2 max.
+    /// 0 without a body weight (the weight term would otherwise be left out silently).
     public func keytelKcalPerMinute(bpm: Double, body: Body) -> Double {
+        guard body.weightKg > 0 else { return 0 }
         let kj: Double
         switch body.sex {
         case .male: kj = -55.0969 + 0.6309 * bpm + 0.1988 * body.weightKg + 0.2017 * Double(body.age)
@@ -178,10 +239,49 @@ public struct EnergyCalculator: Sendable {
         return max(0, kj / 4.184)
     }
 
+    /// Session RPE at or under which a gym session counts at
+    /// `moderateStrengthMETs`, and at or over which at `vigorousStrengthMETs`.
+    /// The Compendium names effort in words, not ratings, so the mapping is
+    /// the app's choice: 5 is the top of what 8-15-rep sessions were rated
+    /// (3.3 at 15 reps, 5.2 at 10 reps; Day et al., J Strength Cond Res 2004),
+    /// the kind of session the 3.5 MET entry describes, and 6.0 METs, the
+    /// Compendium's highest lifting figure, is kept for near-maximal sessions.
+    public var moderateStrengthRPE: Double = 5
+    public var vigorousStrengthRPE: Double = 9
+    /// 2024 Adult Compendium (Herrmann et al., J Sport Health Sci 2024):
+    /// moderate multi-exercise resistance sessions 3.5 METs, vigorous weight
+    /// lifting 6.0 METs. (The 3.5 entry reads "multiple exercises, 8-15 reps
+    /// at varied resistance" in the 2011 edition; wording cited from memory.)
+    public var moderateStrengthMETs: Double = 3.5
+    public var vigorousStrengthMETs: Double = 6.0
+
+    /// Gross METs for a gym session by its session RPE: a straight line from
+    /// 3.5 METs at 5 or under to 6.0 at 9 or over (4.75 at RPE 7), so one
+    /// step on the rating never doubles the calories (it used to jump from
+    /// 3.5 to 6.0 at RPE 7). Unrated sessions count as
+    /// `StrainCalculator.defaultSessionRPE`.
+    public func strengthMETs(rpe: Double?) -> Double {
+        let rating = rpe ?? StrainCalculator.defaultSessionRPE
+        let span = vigorousStrengthRPE - moderateStrengthRPE
+        guard span > 0 else { return rating >= vigorousStrengthRPE ? vigorousStrengthMETs : moderateStrengthMETs }
+        let share = min(1, max(0, (rating - moderateStrengthRPE) / span))
+        return moderateStrengthMETs + (vigorousStrengthMETs - moderateStrengthMETs) * share
+    }
+
     /// Calories from a resistance session by METs, above resting.
     public func strengthKcal(minutes: Double, rpe: Double?, body: Body) -> Double {
-        let mets = (rpe ?? 7) >= 7 ? 6.0 : 3.5
-        return max(0, (mets - 1) * body.weightKg * minutes / 60)
+        guard body.weightKg > 0, minutes > 0 else { return 0 }
+        return max(0, (strengthMETs(rpe: rpe) - 1) * body.weightKg * minutes / 60)
+    }
+
+    /// The share of the Keytel equation counted for a minute outside any
+    /// logged workout: 0 under `everydayReserveThreshold` (40% of reserve),
+    /// rising in a straight line to 1 at `everydayFullReserve` (50%).
+    public func everydayExerciseWeight(reserveFraction fraction: Double) -> Double {
+        guard fraction >= everydayReserveThreshold else { return 0 }
+        let span = everydayFullReserve - everydayReserveThreshold
+        guard span > 0 else { return 1 }
+        return min(1, max(0, ((fraction - everydayReserveThreshold) / span * 1e9).rounded() / 1e9))
     }
 
     /// Thermic effect of food. With macros: 25% of protein calories, 7.5% of
@@ -204,6 +304,12 @@ public struct EnergyCalculator: Sendable {
     ///   - measuredRestingPerDay: resting calories a day as measured by the
     ///     user's watch (average of recent full days from Apple Health). Used
     ///     instead of the formula when it's plausible, so totals line up with the watch.
+    ///   - workouts: when other logged workouts ran today (a run, a match:
+    ///     Apple Health workouts that aren't one of `strengthSessions`). The
+    ///     heart-rate equation runs from 30% of reserve inside them and their
+    ///     minutes never cancel steps (`stepsOutsideWorkouts` already leaves
+    ///     their steps out). Without them a workout's heart rate is treated
+    ///     like any other raised heart rate.
     public func estimate(
         body: Body,
         profile: HeartRateProfile,
@@ -214,7 +320,8 @@ public struct EnergyCalculator: Sendable {
         macros: Macros? = nil,
         dayStart: Date,
         now: Date,
-        measuredRestingPerDay: Double? = nil
+        measuredRestingPerDay: Double? = nil,
+        workouts: [DateInterval] = []
     ) -> Result {
         let (bmrKcal, method): (Double, String) = {
             if let measured = measuredRestingPerDay, (800...4000).contains(measured) {
@@ -225,39 +332,58 @@ public struct EnergyCalculator: Sendable {
         let bmrPerMinute = bmrKcal / 1440
         let elapsedMinutes = min(1440, max(0, now.timeIntervalSince(dayStart) / 60))
 
-        // Exercise from heart rate: Keytel gross minus resting, for raised-HR minutes.
+        // Exercise from heart rate: Keytel gross minus resting, for raised-HR minutes
+        // outside gym sessions (those are counted by METs alone, below).
         let samples = heartRate.sorted { $0.date < $1.date }
-        var hrExercise = 0.0
+        var workoutExercise = 0.0
+        var everydayExercise = 0.0
+        // Raised minutes outside workouts, weighted like their calories: the
+        // steps taken in them are already in the heart-rate figure.
         var raisedMinutesOutside = 0.0
-        var sessionHR = Array(repeating: 0.0, count: strengthSessions.count)
         for (current, next) in zip(samples, samples.dropFirst()) {
             let gap = next.date.timeIntervalSince(current.date)
             guard gap > 0, gap <= 600 else { continue }
-            guard profile.reserveFraction(for: current.bpm) >= exerciseReserveThreshold else { continue }
+            guard !strengthSessions.contains(where: { $0.contains(current.date) }) else { continue }
+            let fraction = profile.reserveFraction(for: current.bpm)
             // One reading stands for at most 2 minutes (as in StrainCalculator),
             // so a single raised reading before a sync gap isn't 10 minutes of exercise.
             let minutes = min(gap / 60, maxMinutesPerSample)
-            let kcal = max(0, keytelKcalPerMinute(bpm: current.bpm, body: body) - bmrPerMinute) * minutes
-            if let index = strengthSessions.firstIndex(where: { $0.contains(current.date) }) {
-                sessionHR[index] += kcal
+            let keytel = max(0, keytelKcalPerMinute(bpm: current.bpm, body: body) - bmrPerMinute)
+            if workouts.contains(where: { $0.contains(current.date) }) {
+                guard fraction >= exerciseReserveThreshold else { continue }
+                // Never under the bottom of the ACSM band the heart rate sits in.
+                let floorMETs = fraction >= everydayReserveThreshold ? moderateFloorMETs : lightFloorMETs
+                let floor = max(0, floorMETs - 1) * max(0, body.weightKg) / 60
+                workoutExercise += max(keytel, floor) * minutes
             } else {
-                hrExercise += kcal
-                raisedMinutesOutside += minutes
+                let weight = everydayExerciseWeight(reserveFraction: fraction)
+                guard weight > 0 else { continue }
+                everydayExercise += keytel * weight * minutes
+                raisedMinutesOutside += weight * minutes
             }
-        }
-        var exercise = hrExercise
-        for (index, session) in strengthSessions.enumerated() {
-            // Capped like sRPE load, so a session left running overnight doesn't add thousands of kcal.
-            let floor = strengthKcal(minutes: min(session.duration / 60, 180), rpe: session.sessionRPE, body: body)
-            exercise += max(sessionHR[index], floor)
         }
 
         // Steps taken during raised-heart-rate minutes are already in the
         // heart-rate calories, so they aren't counted again as movement.
         // About 100 steps a minute is a brisk, moderate-intensity walk
-        // (Tudor-Locke et al., Br J Sports Med 2020).
-        let stepsInRaisedMinutes = min(max(0, stepsOutsideWorkouts), raisedMinutesOutside * stepsPerRaisedMinute)
-        let movement = max(0, stepsOutsideWorkouts - stepsInRaisedMinutes) * kcalPerStepPerKg * body.weightKg
+        // (Tudor-Locke et al., Br J Sports Med 2020). Only raised minutes
+        // outside logged workouts cancel steps: the caller has already left a
+        // workout's own steps out, so a match no longer wipes the day's walking.
+        let stepsOutside = max(0, stepsOutsideWorkouts)
+        let stepsInRaisedMinutes = min(stepsOutside, raisedMinutesOutside * stepsPerRaisedMinute)
+        let kcalPerStep = kcalPerStepPerKg * max(0, body.weightKg)
+        // The heart-rate figure never reads lower than those steps alone would
+        // (Keytel's weight term is negative for women, so a 125 kg woman's
+        // brisk hour came out under her 6,000 steps).
+        everydayExercise = max(everydayExercise, stepsInRaisedMinutes * kcalPerStep)
+        let movement = (stepsOutside - stepsInRaisedMinutes) * kcalPerStep
+
+        var exercise = workoutExercise + everydayExercise
+        for session in strengthSessions {
+            // METs alone (see the type's notes). Capped like sRPE load, so a
+            // session left running overnight doesn't add thousands of kcal.
+            exercise += strengthKcal(minutes: min(session.duration / 60, 180), rpe: session.sessionRPE, body: body)
+        }
         let fromMacros = (macros?.totalKcal ?? 0) > 0
 
         return Result(

@@ -327,7 +327,7 @@ extension WorkoutSession {
                                                  isStage: set.kind.isStage, completedAt: set.completedAt)
                     },
                     // A plank's "reps" are seconds: shown as "3 × 30 s" and left out of rep totals.
-                    isHold: LiveSetCoach.isHold(exercise.exerciseID)
+                    isHold: CoreMoves.move(id: exercise.exerciseID)?.isHold == true
                 )
             }
         )

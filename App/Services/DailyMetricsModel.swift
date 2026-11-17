@@ -370,7 +370,8 @@ final class DailyMetricsModel {
         heartRate: [HeartRateSample],
         sessions: [StrengthSessionSummary],
         profile: HeartRateProfile,
-        exerciseMinutes: [Date]
+        exerciseMinutes: [Date],
+        workouts: [DateInterval] = []
     ) async -> [Date: StrainCalculator.Result] {
         let calendar = Calendar.current
         var byDay: [Date: [HeartRateSample]] = [:]
@@ -389,7 +390,10 @@ final class DailyMetricsModel {
                 heartRate: byDay[day] ?? [],
                 strengthSessions: sessions.filter { $0.start >= day && $0.start < next },
                 profile: profile,
-                movementMinutes: minutesByDay[day] ?? []
+                movementMinutes: minutesByDay[day] ?? [],
+                // Recorded non-strength workouts count in full; everyday heart rate tapers in
+                // between 30% and 40% of reserve (`StrainCalculator`).
+                workouts: workouts.filter { $0.end >= day && $0.start < next }
             )
         }
         return results
@@ -658,7 +662,9 @@ final class DailyMetricsModel {
                 allDays.append(day)
                 day = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
             }
-            let profileKey = "\(Int(profile.restingHeartRate))-\(Int(profile.maxHeartRate))-\(profile.sex.rawValue)"
+            // "v2": the strain rules changed (taper at low heart rates, awake resting heart rate),
+            // so days cached under the old rules are recomputed once.
+            let profileKey = "v2-\(Int(profile.restingHeartRate))-\(Int(profile.maxHeartRate))-\(profile.sex.rawValue)"
             func key(for day: Date) -> String {
                 let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day
                 let daySessions = sessions.filter { $0.start >= day && $0.start < next }
@@ -719,8 +725,10 @@ final class DailyMetricsModel {
                 // Apple Watch exercise minutes fill the gaps between its sparse
                 // all-day heart-rate readings (`StrainCalculator.movementReserveFraction`).
                 let exerciseMinutes = (try? await health.exerciseMinutes(from: firstNeeded, to: now)) ?? []
+                let recordedWorkouts = fetchedWorkouts.filter { !$0.isStrength }
+                    .map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                 let computed = await Self.computeDays(needed, heartRate: heartRate, sessions: sessions, profile: profile,
-                                                      exerciseMinutes: exerciseMinutes)
+                                                      exerciseMinutes: exerciseMinutes, workouts: recordedWorkouts)
                 for (date, result) in computed {
                     dayCache[date] = (key(for: date), result)
                 }
@@ -920,7 +928,9 @@ final class DailyMetricsModel {
                     intake: nutritionToday?.calories,
                     macros: nutritionToday.flatMap { EnergyCalculator.Macros($0) },
                     dayStart: today, now: now,
-                    measuredRestingPerDay: watchResting
+                    measuredRestingPerDay: watchResting,
+                    // Recorded workouts: their heart rate counts in full and doesn't cancel the day's steps.
+                    workouts: externalWorkouts.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                 )
             } else {
                 energy = nil
@@ -1023,7 +1033,8 @@ final class DailyMetricsModel {
         var items: [ActivityItem] = []
         for session in sessions {
             let hrLoad = strainCalculator.dailyStrain(
-                heartRate: heartRate.filter { session.contains($0.date) }, strengthSessions: [], profile: profile
+                heartRate: heartRate.filter { session.contains($0.date) }, strengthSessions: [], profile: profile,
+                workouts: [DateInterval(start: session.start, end: max(session.start, session.end))]
             ).cardioLoad
             let load = max(hrLoad, strainCalculator.rpeLoad(for: session))
             let minutes = Int(session.duration / 60)
@@ -1053,7 +1064,8 @@ final class DailyMetricsModel {
             let workoutHeartRate = heartRate.filter { $0.date >= workout.start && $0.date <= workout.end }
             let load = strainCalculator.dailyStrain(
                 heartRate: workoutHeartRate,
-                strengthSessions: [], profile: profile
+                strengthSessions: [], profile: profile,
+                workouts: [DateInterval(start: workout.start, end: max(workout.start, workout.end))]
             ).cardioLoad
             var detail = "\(workout.minutes) min"
             if let km = workout.distanceKm, km > 0.1 {

@@ -22,11 +22,45 @@ import Foundation
 ///   al., J Sports Sci 2016), and no separate male threshold has been established
 ///   (Wasserfurth et al., Sports Med Open 2020). With no agreed lower number,
 ///   the app keeps the conservative 30 for everyone (docs/research/calories.md).
+/// - **Not for people carrying a lot of body fat.** The 30 kcal/kg line was
+///   measured in lean, exercising people (Loucks 2011; the IOC statements are
+///   about athletes), and nobody has tested it in obesity, where body fat is
+///   a large energy reserve. Applied to a 118 kg man with a BMI of 37 it sets
+///   a floor of about 2,400 kcal, which holds his "1% a week" plan to under
+///   half that. Standard weight-loss care for that group prescribes
+///   1,500-1,800 kcal a day for men and 1,200-1,500 for women, or a deficit of
+///   500-750 kcal (Jensen et al., 2013 AHA/ACC/TOS obesity guideline,
+///   Circulation 2014; checked against a summary of the guideline, not its
+///   full text). So above the app's own "high body fat" line
+///   (`GoalPlanner.highBodyFatPercent`: 22% men, 32% women), or with no
+///   body-fat reading and a BMI of 35 or more, only the absolute minimum
+///   applies (`energyAvailabilityFloorApplies`). Where exactly the athlete
+///   floor stops applying is the app's choice; the evidence only covers the
+///   lean end.
 public enum CalorieSafety {
     /// Lowest believable maintenance, as a multiple of resting metabolism (FAO/WHO/UNU 2004).
     public static let minimumPhysicalActivityLevel = 1.4
     /// Energy availability below this, kcal per kg fat-free mass, is low (IOC REDs 2023).
     public static let minimumEnergyAvailability = 30.0
+    /// Without a body-fat reading, a BMI from here up switches the athlete
+    /// floor off: WHO obesity class II. The app's choice; at this BMI the
+    /// weight is very rarely muscle, where at 30-35 it sometimes is.
+    public static let energyAvailabilityFloorBMILimit = 35.0
+
+    /// Whether the athlete energy-availability floor is used for this person
+    /// (see the type's notes): not above the "high body fat" line, and, with
+    /// no body-fat reading, not from BMI 35.
+    public static func energyAvailabilityFloorApplies(sex: BiologicalSex, weightKg: Double, heightCm: Double?,
+                                                      bodyFatPercent: Double?) -> Bool {
+        if let fat = bodyFatPercent, fat > 3, fat < 60 {
+            return fat <= (sex == .male ? GoalPlanner.highBodyFatPercent.male : GoalPlanner.highBodyFatPercent.female)
+        }
+        if let heightCm, heightCm > 100, weightKg > 0 {
+            let meters = heightCm / 100
+            return weightKg / (meters * meters) < energyAvailabilityFloorBMILimit
+        }
+        return true
+    }
 
     /// Fat-free mass, kg: from body fat when known, otherwise the Boer
     /// lean-body-mass equation from height and weight (Boer, Am J Physiol 1984).
@@ -50,11 +84,15 @@ public enum CalorieSafety {
     }
 
     /// The lowest daily target: enough left after exercise for 30 kcal per kg
-    /// of fat-free mass, and never under the absolute minimum.
+    /// of fat-free mass, and never under the absolute minimum. For people
+    /// above the high-body-fat line the athlete floor is left out and only the
+    /// absolute minimum (1,500 / 1,200 kcal) holds (`energyAvailabilityFloorApplies`).
     /// - Parameter exerciseKcalPerDay: average exercise calories a day (recent workouts).
     public static func minimumTarget(
         sex: BiologicalSex, weightKg: Double, heightCm: Double?, bodyFatPercent: Double?, exerciseKcalPerDay: Double
     ) -> Double {
+        guard energyAvailabilityFloorApplies(sex: sex, weightKg: weightKg, heightCm: heightCm, bodyFatPercent: bodyFatPercent)
+        else { return GoalPlanner.calorieFloor(sex: sex) }
         let fatFree = fatFreeMassKg(weightKg: weightKg, heightCm: heightCm, sex: sex, bodyFatPercent: bodyFatPercent)
         let availability = minimumEnergyAvailability * fatFree + max(0, exerciseKcalPerDay)
         return max(GoalPlanner.calorieFloor(sex: sex), availability.rounded())

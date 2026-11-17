@@ -277,6 +277,9 @@ public enum LiftGoalProjection {
         var projection = Projection(status: .needsMoreData, targetKg: targetKg, latestKg: latest, fit: nil, horizon: horizon,
                                     range: nil, reachFrom: nil, reachLine: nil, reachBy: nil, band: [], recent: recent,
                                     widenedForTrainingAge: factor > 1)
+        // A target of zero (or a broken one) isn't a goal: every session
+        // "reaches" 0 kg, so it used to read "You've reached it".
+        guard targetKg > 0, targetKg.isFinite else { return projection }
         if recent.contains(where: { $0.kg >= targetKg }) {
             projection.status = .reached
             return projection
@@ -363,6 +366,7 @@ public enum LiftGoalProjection {
         let target = weight(projection.targetKg)
         switch projection.status {
         case .needsMoreData:
+            guard projection.targetKg > 0 else { return "Set a target above zero to see a projection." }
             return "Log a few more sessions to see a projection."
         case .reached:
             let latest = projection.recent.map(\.kg).max().map(weight) ?? target

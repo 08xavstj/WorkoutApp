@@ -71,8 +71,13 @@ struct WellbeingTests {
     @Test func trainingAndHeatRaiseWaterTarget() {
         let rest = Hydration.target(sex: .male, exerciseMinutes: 0, feelsLikeC: 20)
         let hot = Hydration.target(sex: .male, exerciseMinutes: 60, feelsLikeC: 33)
-        #expect(rest.liters == 3.7)
-        #expect(abs(hot.liters - 5.45) < 0.001)
+        // Changed on purpose (numbers audit N15): the base is the adequate intake
+        // from drinks (3.0 L men; National Academies 2005), not total water
+        // including food (3.7 L), because the card is a drinking target.
+        #expect(rest.liters == 3.0)
+        #expect(abs(hot.liters - 4.75) < 0.001)
+        // A log that counts water in food can still ask for the total figure.
+        #expect(Hydration.target(sex: .male, exerciseMinutes: 0, feelsLikeC: 20, includesWaterInFood: true).liters == 3.7)
     }
 
     @Test func behindOnWaterInTheAfternoon() {

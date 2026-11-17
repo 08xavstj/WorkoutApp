@@ -272,7 +272,10 @@ struct EnergyTests {
             heartRate: [], strengthSessions: [session], stepsOutsideWorkouts: 0, intake: nil,
             dayStart: start, now: start.addingTimeInterval(11 * 3600)
         )
-        #expect(abs(result.exercise - 3 * 5 * 74.3) < 0.5)
+        // Changed on purpose (numbers audit N1a): METs rise in a straight line from
+        // 3.5 at session RPE 5 to 6.0 at RPE 9, so RPE 8 is 5.375 METs (it was a
+        // step to 6.0 at RPE 7). Still capped at 3 hours.
+        #expect(abs(result.exercise - 3 * 4.375 * 74.3) < 0.5)
     }
 
     @Test func liftingFloorAppliesWhenHeartRateIsLow() {
@@ -283,7 +286,8 @@ struct EnergyTests {
             heartRate: [], strengthSessions: [session], stepsOutsideWorkouts: 0, intake: nil,
             dayStart: start, now: start.addingTimeInterval(7200)
         )
-        #expect(abs(result.exercise - 5 * 74.3) < 0.5) // (6 - 1) METs × kg × 1 h
+        // Changed on purpose (numbers audit N1a): RPE 8 is 5.375 METs on the line, not the 6.0 step.
+        #expect(abs(result.exercise - 4.375 * 74.3) < 0.5) // (5.375 - 1) METs × kg × 1 h
     }
 }
 

@@ -4,9 +4,16 @@ import Foundation
 
 /// Daily water target and what today's intake means.
 ///
-/// - Baseline total water (food + drinks): 3.7 L men / 2.7 L women (US National
-///   Academies, 2004). About 20% usually comes from food, so drinks ≈ 3.0 / 2.2 L.
-///   Cronometer's "Water" includes water in food, so the full figure is used.
+/// - Baseline: the US adequate intake for total water (food + drinks) is 3.7 L
+///   for men and 2.7 L for women, of which drinks are about 3.0 L and 2.2 L;
+///   the rest comes from food (National Academies, Dietary Reference Intakes
+///   for Water, Potassium, Sodium, Chloride, and Sulfate, 2005). The card is a
+///   drinking target, so the base is the drinks figure. (It was the total
+///   figure, on the grounds that Cronometer's "Water" includes water in food;
+///   a caller that knows its log includes food moisture can still ask for it
+///   with `includesWaterInFood`.) An adequate intake is the median intake of
+///   healthy people, not a requirement, and it isn't scaled to body size, so
+///   the target is a guide and "Behind" is deliberately lenient.
 /// - Exercise: sweat losses are typically 0.5-1 L an hour; ACSM advises
 ///   replacing them (Sawka et al., ACSM position stand, 2007).
 /// - Heat adds roughly another 0.5-1 L.
@@ -39,8 +46,29 @@ public enum Hydration {
         public var effects: [String]
     }
 
+    /// Adequate intake from drinks, litres a day (National Academies 2005).
+    public static func beverageBaseLiters(sex: BiologicalSex) -> Double { sex == .male ? 3.0 : 2.2 }
+    /// Adequate intake of total water, food included, litres a day (National Academies 2005).
+    public static func totalWaterBaseLiters(sex: BiologicalSex) -> Double { sex == .male ? 3.7 : 2.7 }
+    /// "Behind" means under this share of the amount expected by now (app choice).
+    public static let behindShareOfExpected = 0.7
+    /// ...but never more than this share of the day's target, so from early
+    /// evening the bar stops rising (app choice: the target is a median
+    /// intake, not a floor, and a lot of water late in the evening costs
+    /// sleep). With it, 3.2 L by 21:00 on a lifting day is on track; before,
+    /// it read "Behind" against a 4.6 L target.
+    public static let behindCapShareOfTarget = 0.6
+
     public static func target(sex: BiologicalSex, exerciseMinutes: Double, feelsLikeC: Double?) -> Target {
-        let base = sex == .male ? 3.7 : 2.7
+        target(sex: sex, exerciseMinutes: exerciseMinutes, feelsLikeC: feelsLikeC, includesWaterInFood: false)
+    }
+
+    /// - Parameter includesWaterInFood: true when the logged water counts the
+    ///   moisture in food as well as drinks; the base is then the total-water
+    ///   figure (3.7 / 2.7 L) instead of the drinks figure (3.0 / 2.2 L).
+    public static func target(sex: BiologicalSex, exerciseMinutes: Double, feelsLikeC: Double?,
+                              includesWaterInFood: Bool) -> Target {
+        let base = includesWaterInFood ? totalWaterBaseLiters(sex: sex) : beverageBaseLiters(sex: sex)
         let exercise = min(3, exerciseMinutes / 60 * 0.75)
         let heat: Double = {
             guard let feels = feelsLikeC else { return 0 }
@@ -60,7 +88,7 @@ public enum Hydration {
         if drank > max(5.5, target.liters * 1.6) {
             status = .high
             effects.append("That's a lot of water. Spread it out and add salt or electrolytes; more than about 1 L an hour for hours can dilute blood sodium.")
-        } else if drank < expected * 0.7, hour >= 11 {
+        } else if drank < min(expected * behindShareOfExpected, target.liters * behindCapShareOfTarget), hour >= 11 {
             status = .low
             effects.append("Running low raises your heart rate and makes training feel harder; losing 2% of body weight as water cuts endurance.")
             effects.append("Even mild dehydration can dip mood and focus, and can make your resting heart rate read higher tonight.")

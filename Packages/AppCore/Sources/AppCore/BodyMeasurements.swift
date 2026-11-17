@@ -23,10 +23,27 @@ public enum WaistToHeightRatio {
         case high = "High"
     }
 
-    /// Waist divided by height, both in the same unit; nil for bad input.
+    /// Ratios an adult can really have. Outside this the input is a mistake,
+    /// most often a waist typed in inches into a centimetre field: 34 "cm" at
+    /// 180 cm is 0.19, which used to be shown as "Low". The bounds are the
+    /// app's choice, not a published range: 0.30 would be a 54 cm waist at
+    /// 180 cm, well under any adult waist, and above 1.0 the waist would be
+    /// longer than the person is tall.
+    public static let plausibleRatios: ClosedRange<Double> = 0.30...1.0
+
+    /// Waist divided by height, both in the same unit; nil for bad or
+    /// implausible input (`plausibleRatios`; height 100-250 cm).
     public static func ratio(waistCm: Double, heightCm: Double) -> Double? {
-        guard waistCm > 20, heightCm > 100 else { return nil }
-        return waistCm / heightCm
+        guard waistCm > 20, heightCm > 100, heightCm <= 250 else { return nil }
+        let ratio = waistCm / heightCm
+        return plausibleRatios.contains(ratio) ? ratio : nil
+    }
+
+    /// True when a waist that fails `ratio` would pass if it were inches: the
+    /// screen can then ask "did you mean inches?" instead of only refusing it.
+    public static func looksLikeInches(waistCm: Double, heightCm: Double) -> Bool {
+        guard ratio(waistCm: waistCm, heightCm: heightCm) == nil else { return false }
+        return ratio(waistCm: waistCm * LengthUnit.centimetersPerInch, heightCm: heightCm) != nil
     }
 
     /// Ashwell's adult bands (Ashwell 2012; Browning 2010 for the 0.5 line).

@@ -6,6 +6,13 @@ import Foundation
 /// need, 25% efficiency, 10% deep + REM share, 15% interruptions. With bed/wake
 /// regularity known: 45 / 20 / 10 / 10, plus 15% regularity.
 ///
+/// A short sleep can't earn the quality marks in full: everything except
+/// duration is scaled by time asleep ÷ 60% of the need, up to 1
+/// (`shortSleepFactor`; the app's choice, no study sets it). Without it a
+/// clean 3 h and a clean 4 h both scored about 50, and a 20-minute doze 40,
+/// because efficiency, stages and "no interruptions" are easy to max out on
+/// a tiny sleep.
+///
 /// - Need: 8 h by default. Adults need 7 h or more (Watson et al., Sleep 2015,
 ///   AASM/SRS consensus); no study ties extra need to the previous day's
 ///   training load, so strain doesn't change it. Full marks at your need,
@@ -61,6 +68,18 @@ public struct SleepCalculator: Sendable {
         let shortAboveMinimum = max(0, need - max(asleep, minimum)) / 3600
         let shortBelowMinimum = max(0, min(need, minimum) - asleep) / 3600
         return min(1, max(0, 1 - 0.2 * shortAboveMinimum - 0.35 * shortBelowMinimum))
+    }
+
+    /// Share of the need below which the non-duration marks are scaled down
+    /// (`shortSleepFactor`): 60%, 4.8 h for an 8 h need. The app's choice.
+    public static let shortSleepShareOfNeed = 0.6
+
+    /// How much of the efficiency, stage, interruption and regularity marks a
+    /// night keeps: time asleep ÷ (60% of need), at most 1. A night of 60% of
+    /// the need or more is unaffected; 3 h on an 8 h need keeps 62%.
+    public static func shortSleepFactor(asleep: TimeInterval, need: TimeInterval) -> Double {
+        guard need > 0 else { return 1 }
+        return min(1, max(0, asleep / (shortSleepShareOfNeed * need)))
     }
 
     /// Interruption marks: 0-1 awakenings over 5 min is good, 4+ is poor
@@ -184,13 +203,15 @@ public struct SleepCalculator: Sendable {
         let restorative = hasStages && stagedAsleep > 0 ? min(1, (deep + rem) / stagedAsleep / restorativeTarget) : 0.75
         let interruptionScore = Self.interruptionScore(interruptions)
 
+        // Quality marks count in full only on a sleep of 60% of the need or more.
+        let quality = Self.shortSleepFactor(asleep: asleep, need: need)
         let weighted: Double
         if let consistency {
             let regularity = Self.regularityScore(sri: consistency)
-            weighted = 0.45 * durationScore + 0.2 * efficiency + 0.1 * restorative + 0.1 * interruptionScore
-                + 0.15 * regularity
+            weighted = 0.45 * durationScore
+                + quality * (0.2 * efficiency + 0.1 * restorative + 0.1 * interruptionScore + 0.15 * regularity)
         } else {
-            weighted = 0.5 * durationScore + 0.25 * efficiency + 0.1 * restorative + 0.15 * interruptionScore
+            weighted = 0.5 * durationScore + quality * (0.25 * efficiency + 0.1 * restorative + 0.15 * interruptionScore)
         }
         return Result(
             score: Int((weighted * 100).rounded()),

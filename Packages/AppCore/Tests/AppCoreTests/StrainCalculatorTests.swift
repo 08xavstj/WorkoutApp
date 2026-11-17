@@ -101,7 +101,10 @@ struct StrainCalculatorTests {
         #expect(result.zoneMinutes.reduce(0, +) - 30 < 0.001)
     }
 
-    @Test(arguments: [(10, 20.0...45.0), (50, 50.0...70.0), (90, 50.0...70.0)])
+    // Changed on purpose (numbers audit N6): with no history the "train as
+    // planned" band runs to 80, not 70, so an ordinary 70-78% lifting day
+    // isn't called "above" before the app knows the person's usual.
+    @Test(arguments: [(10, 20.0...45.0), (50, 50.0...80.0), (90, 50.0...80.0)])
     func targetStrainFollowsRecovery(recovery: Int, expected: ClosedRange<Double>) {
         #expect(StrainCalculator.targetStrain(forRecovery: recovery) == expected)
     }
@@ -121,8 +124,20 @@ struct StrainCalculatorTests {
 
     @Test func briskWalkIsLight() {
         let samples = steady(bpm: bpm(atReserve: 0.35), minutes: 60, from: start)
-        let result = calculator.dailyStrain(heartRate: samples, strengthSessions: [], profile: profile)
-        #expect((10...30).contains(result.strain))
+        // Changed on purpose (numbers audit N3): a raised heart rate that is
+        // neither a logged workout nor Apple exercise minutes is tapered in
+        // between 30% and 40% of reserve, so at 35% it counts half (about 10%).
+        let unlogged = calculator.dailyStrain(heartRate: samples, strengthSessions: [], profile: profile)
+        #expect((7...13).contains(unlogged.strain))
+        // As a logged workout, or with the watch counting the minutes as
+        // exercise, it counts as before (about 19%).
+        let walk = DateInterval(start: start, end: start.addingTimeInterval(3600))
+        let logged = calculator.dailyStrain(heartRate: samples, strengthSessions: [], profile: profile, workouts: [walk])
+        #expect((10...30).contains(logged.strain))
+        let counted = calculator.dailyStrain(heartRate: samples, strengthSessions: [], profile: profile,
+                                             movementMinutes: exerciseMinutes(60, from: start))
+        #expect(counted.strain == logged.strain)
+        #expect(counted.movementMinutes == 0)
     }
 
     @Test func sparseReadingsDontFillLongGaps() {

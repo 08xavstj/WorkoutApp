@@ -62,10 +62,18 @@ struct BodyAgeTests {
         #expect(waist.detail.contains("0.46"))
         #expect(!result.factors.contains { $0.name == "BMI" || $0.name == "Body fat" })
         // Raised (0.5-0.6) borrows the BMI 27.5-30 hazard; high (0.6+) the 30-35 one.
-        let raised = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, waistToHeightRatio: 0.55)))
-        #expect(abs((raised.factors.first { $0.name == "Waist-to-height" }?.years ?? 0) - BodyAge.gompertzYears(hazard: 1.20)) < 0.001)
-        let high = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, waistToHeightRatio: 0.62)))
-        #expect(abs((high.factors.first { $0.name == "Waist-to-height" }?.years ?? 0) - BodyAge.gompertzYears(hazard: 1.45)) < 0.001)
+        // Changed on purpose (numbers audit N13): each figure now applies at the
+        // middle of its band (0.55, 0.65) with straight lines between, and factor
+        // years are stored to the 0.1 shown, so the tolerance is 0.05.
+        func waistYears(_ ratio: Double) throws -> Double {
+            let result = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, waistToHeightRatio: ratio)))
+            return try #require(result.factors.first { $0.name == "Waist-to-height" }).years
+        }
+        #expect(abs(try waistYears(0.55) - BodyAge.gompertzYears(hazard: 1.20)) < 0.05)
+        #expect(abs(try waistYears(0.65) - BodyAge.gompertzYears(hazard: 1.45)) < 0.05)
+        #expect(abs(try waistYears(0.80) - BodyAge.gompertzYears(hazard: 1.45)) < 0.05)
+        let between = try waistYears(0.62)
+        #expect(between > BodyAge.gompertzYears(hazard: 1.20) && between < BodyAge.gompertzYears(hazard: 1.45))
         // Without a waist reading, BMI is still the fallback.
         let fallback = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, bmi: 31)))
         #expect(fallback.factors.contains { $0.name == "BMI" })
@@ -78,7 +86,8 @@ struct BodyAgeTests {
     @Test func sleepRiskIsAppliedOnceNotPerHour() throws {
         let short = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, sleepHours: 4.5)))
         let sleep = try #require(short.factors.first { $0.name == "Sleep" })
-        #expect(abs(sleep.years - BodyAge.gompertzYears(hazard: 1.12)) < 0.001)
+        // Stored to the 0.1 shown (numbers audit N16), so within 0.05.
+        #expect(abs(sleep.years - BodyAge.gompertzYears(hazard: 1.12)) < 0.05)
         let normal = try #require(BodyAge.estimate(BodyAge.Inputs(age: 30, sex: .male, restingHeartRate: 60, sleepHours: 7.5)))
         #expect(normal.factors.first { $0.name == "Sleep" }?.years == 0)
     }

@@ -73,10 +73,15 @@ public enum ObservedMaxHeartRate {
 // MARK: - Strain target
 
 extension StrainCalculator {
-    /// Strain your training days usually reach: the median of days at 25% or
-    /// more over the last 4 weeks. Nil until there are 6 training days.
+    /// Strain your training days usually reach: the median of days at
+    /// `TrainingDayPlanner.trainingDayStrain` (35%) or more over the last 4
+    /// weeks. Nil until there are 6 training days. The line is the app's
+    /// choice, the same one the planner uses for "a training day"; it was 25,
+    /// which let active rest days in: a three-day-a-week lifter whose rest days
+    /// reach 27% had more "training days" at 27 than at 70, so the median, and
+    /// with it the target, sat at 27 for good and every lifting day read "above".
     public static func usualTrainingStrain(_ dailyStrains: [Double]) -> Double? {
-        let training = dailyStrains.filter { $0 >= 25 }.sorted()
+        let training = dailyStrains.filter { $0 >= TrainingDayPlanner.trainingDayStrain }.sorted()
         guard training.count >= 6 else { return nil }
         let middle = training.count / 2
         return training.count.isMultiple(of: 2) ? (training[middle - 1] + training[middle]) / 2 : training[middle]
@@ -84,6 +89,15 @@ extension StrainCalculator {
 
     /// The strain the fixed bands are built around (a regular trainee).
     public static let referenceUsualStrain = 65.0
+    /// Room above the reference while there is no history yet (`usual` is
+    /// nil): the "train as planned" band runs to 65 + 15 = 80 instead of 70.
+    /// Ordinary sessions span that much (45 min at session RPE 6 is about 51%,
+    /// 70 min at RPE 7 about 72%, an hour at RPE 8 about 72%, before any
+    /// walking is added), and the app doesn't yet know which is this person's
+    /// usual, so it shouldn't call a normal 70-78% lifting day "above". The
+    /// app's choice; once six training days are logged the personal band
+    /// (U − 15 to U + 5) takes over.
+    public static let noHistoryHeadroom = 15.0
 
     /// Today's target, scaled to your fitness, following HRV-guided training.
     ///
@@ -97,7 +111,8 @@ extension StrainCalculator {
     /// doesn't raise the target past your usual training day (U), apart from
     /// a little room to progress gradually (ACSM, Med Sci Sports Exerc 2009).
     ///
-    /// - Normal or high recovery: train as planned, U − 15 to U + 5.
+    /// - Normal or high recovery: train as planned, U − 15 to U + 5 (50 to 80
+    ///   while there is no history: `noHistoryHeadroom`).
     /// - Low recovery: an easy day, U − 45 to U − 20.
     /// The 7-day HRV trend being below normal also caps the target at an easy
     /// day (see `DailyMetricsModel.targetStrain`).
@@ -120,7 +135,7 @@ extension StrainCalculator {
         let u = min(85, max(35, usual ?? referenceUsualStrain))
         switch recovery {
         case ..<34: return max(10, u - 45)...max(25, u - 20)
-        default: return max(25, u - 15)...min(95, u + 5)
+        default: return max(25, u - 15)...min(95, u + (usual == nil ? noHistoryHeadroom : 5))
         }
     }
 }

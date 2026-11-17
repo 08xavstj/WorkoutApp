@@ -19,12 +19,28 @@ import Foundation
 public enum TrainingStatus: String, Codable, Sendable, CaseIterable, Comparable {
     case untrained, novice, intermediate, advanced
 
-    /// Average sessions a week over the last 8 weeks below this: untrained
+    /// Average sessions a week (`recentWeeklySessions`) below this: untrained
     /// (app choice: under one a week isn't regular training).
     public static let minimumWeeklySessions = 1.0
-    /// Sessions a week over the last 8 weeks needed to count as trained
-    /// (app choice; the ten Haaf equation's group averaged 5 a week).
-    public static let trainedWeeklySessions = 2.0
+    /// Sessions a week (`recentWeeklySessions`) needed to count as trained.
+    /// App choice; no study sets the line (the ten Haaf equation's group
+    /// averaged 5 a week). 1.5 rather than 2.0 so that someone lifting twice a
+    /// week, the WHO guideline (Bull et al., Br J Sports Med 2020), isn't
+    /// re-labelled a novice by one missed session: 15 sessions in 8 weeks used
+    /// to fall under a 2.0 line. Training adaptations outlast a dip in
+    /// frequency: after 16 weeks of lifting 3 days a week, a third or less of
+    /// that training dose kept strength for 32 weeks in adults aged 20-35 and
+    /// 60-75, and muscle size in the younger group (Bickel, Cross & Bamman,
+    /// Med Sci Sports Exerc 2011;43:1177-1187).
+    public static let trainedWeeklySessions = 1.5
+    /// The windows `recentWeeklySessions` looks at, in weeks. The status uses
+    /// the better of the two averages, so it falls only after a sustained
+    /// drop: a three-week break lowers the 8-week average at once, but the
+    /// 12-week average carries it, and once training has resumed the 8-week
+    /// one recovers before the 12-week one gives way. A complete stop still
+    /// shows: three sessions a week drops out of "trained" after about 6 weeks
+    /// off and reads untrained after 8. The windows are the app's choice.
+    public static let frequencyWindowsWeeks = [8, 12]
     /// A month counts as consistent with at least this many sessions (about one a week).
     public static let sessionsPerConsistentMonth = 4
     /// Consistent months for intermediate (Helms 2014's "> 6 months").
@@ -55,17 +71,27 @@ public enum TrainingStatus: String, Codable, Sendable, CaseIterable, Comparable 
         }
     }
 
+    /// Sessions a week lately: the higher of the averages over the last 8
+    /// and the last 12 weeks (`frequencyWindowsWeeks`).
+    public static func recentWeeklySessions(sessionDates: [Date], now: Date = .now) -> Double {
+        let past = sessionDates.filter { $0 <= now }
+        return frequencyWindowsWeeks.map { weeks in
+            let start = now.addingTimeInterval(-Double(weeks) * 7 * 86_400)
+            return Double(past.filter { $0 > start }.count) / Double(weeks)
+        }.max() ?? 0
+    }
+
     /// From the start times of finished lifting sessions (any order).
-    /// - Untrained: under 1 session a week over the last 8 weeks.
-    /// - Novice: under 2 a week, or under 6 consistent months.
+    /// - Untrained: under 1 session a week lately (`recentWeeklySessions`:
+    ///   the better of the last 8 and the last 12 weeks).
+    /// - Novice: under 1.5 a week lately, or under 6 consistent months.
     /// - Intermediate: 6-23 consistent months.
     /// - Advanced: 24+ consistent months.
     /// A consistent month is a 30.4-day block, counted back from `now`, with 4+ sessions.
     public static func estimate(sessionDates: [Date], now: Date = .now) -> TrainingStatus {
         let past = sessionDates.filter { $0 <= now }
         guard let first = past.min() else { return .untrained }
-        let eightWeeks = now.addingTimeInterval(-56 * 86_400)
-        let perWeek = Double(past.filter { $0 > eightWeeks }.count) / 8
+        let perWeek = recentWeeklySessions(sessionDates: past, now: now)
         guard perWeek >= minimumWeeklySessions else { return .untrained }
 
         let month = 365.25 / 12 * 86_400
