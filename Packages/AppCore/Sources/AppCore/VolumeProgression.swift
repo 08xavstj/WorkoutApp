@@ -303,6 +303,12 @@ public enum VolumeProgression {
         case fromReport(offset: Int)
         /// "Same volume next block" from the report: held at the last block's highest week.
         case heldReport
+        /// A planned busy week (`BusyWeek`): about a third of the usual sets.
+        /// `Target.previous` keeps the usual target for the week after.
+        case busyWeek
+        /// The first normal week after a busy week: back at the target from
+        /// before it, neither stepped up nor cut.
+        case afterBusyWeek
 
         public var isHeld: Bool {
             switch self {
@@ -360,6 +366,10 @@ public enum VolumeProgression {
         /// "12-14 sets".
         public var bandText: String { "\(band.lowerBound)-\(band.upperBound) sets" }
 
+        /// The target a normal week builds on: `sets`, or in a busy week
+        /// (`Change.busyWeek`) the usual target it kept in `previous`.
+        public var usualSets: Int { change == .busyWeek ? (previous ?? sets) : sets }
+
         /// One line on the change: "Lats held at 14 sets: reps dropped on Barbell Row last week."
         public var note: String {
             let name = muscle.name
@@ -390,6 +400,8 @@ public enum VolumeProgression {
                 let sign = offset > 0 ? "+" : "−"
                 return "\(name) \(sets) sets: \(sign)\(abs(offset)) from the block report."
             case .heldReport: return "\(name) held at \(sets) sets: same volume as last block, from the block report."
+            case .busyWeek: return "\(name) about \(sets) sets: a busy week holds what you have."
+            case .afterBusyWeek: return "\(name) back at \(sets) sets, where it was before the busy week."
             }
         }
     }
@@ -419,7 +431,8 @@ public enum VolumeProgression {
         /// Targets that changed from last week or held, for the notes list
         /// (week 1 and steady weeks have nothing to explain per muscle).
         public var notable: [Target] {
-            targets.filter { $0.change != .start && $0.change != .steady }
+            // A busy week says what it does once, on the week (`BusyWeek.blockNote`), not per muscle.
+            targets.filter { $0.change != .start && $0.change != .steady && $0.change != .busyWeek }
         }
     }
 
@@ -446,7 +459,8 @@ public enum VolumeProgression {
         recent: Double? = nil,
         feedback: MuscleFeedback.Signal? = nil,
         offset: Int = 0,
-        reportCeiling: Int? = nil
+        reportCeiling: Int? = nil,
+        afterBusyWeek: Bool = false
     ) -> Target {
         let top = ceiling(style: style)
         // What the sessions can hold, even under `minimumSets`: a 30-minute upper day holds about
@@ -455,7 +469,8 @@ public enum VolumeProgression {
         let cap = max(1, min(top, timeCap))
         let floor = min(minimumSets, cap)
         let earned = earnedTarget(for: muscle, previous: previous, week: week, style: style, lastWeek: lastWeek,
-                                  state: state, sessions: sessions, cap: cap, top: top, recent: recent, feedback: feedback)
+                                  state: state, sessions: sessions, cap: cap, top: top, recent: recent, feedback: feedback,
+                                  afterBusyWeek: afterBusyWeek)
         // The block report's changes: never on a deload or a steady (stamina) week.
         guard !week.isDeload, style != .endurance else { return earned }
         var result = earned
@@ -475,7 +490,7 @@ public enum VolumeProgression {
     static func earnedTarget(
         for muscle: Muscle, previous: Int?, week: TrainingBlock.WeekState, style: TrainingStyle,
         lastWeek: Performance?, state: MuscleRecovery.State?, sessions: Int, cap: Int, top: Int,
-        recent: Double?, feedback: MuscleFeedback.Signal?
+        recent: Double?, feedback: MuscleFeedback.Signal?, afterBusyWeek: Bool = false
     ) -> Target {
         func make(_ sets: Int, _ change: Change) -> Target {
             if sets > cap { return Target(muscle: muscle, sets: cap, previous: previous, change: cap < top ? .cappedTime : .cappedCeiling) }
@@ -488,6 +503,10 @@ public enum VolumeProgression {
         }
         if style == .endurance { return make(startingSets, .steady) }
         guard week.week > 1, let base = previous else { return make(startingSets(recent: recent, style: style), .start) }
+        // After a busy week the muscle goes back to where it was: the busy week's fewer sets
+        // were the plan, not missed sets or a regression, and a week at a third of the volume
+        // earns no step either (`BusyWeek`).
+        if afterBusyWeek { return make(base, .afterBusyWeek) }
         if week.isHeld { return make(base, .heldHRV) }
         guard let lastWeek, lastWeek.sets >= 0.5 else { return make(base, .heldNotTrained) }
         // Your answers, a pattern first: one set fewer (app choice, RP-style practice).
@@ -696,15 +715,27 @@ public enum VolumeProgression {
         adjustment: Adjustment? = nil,
         gym: GymProfile? = nil
     ) -> WeekTargets {
+        if block.isBusy {
+            // A busy week (`BusyWeek`): every muscle that had a target keeps it for afterwards
+            // (`Target.previous`) and aims at about a third of it meanwhile, whether or not the
+            // week's one or two sessions reach it directly.
+            let carried = (previous?.targets ?? []).map { old in
+                let usual = old.usualSets
+                return Target(muscle: old.muscle, sets: BusyWeek.weeklySets(usual: usual), previous: usual, change: .busyWeek)
+            }
+            return WeekTargets(weekStart: weekStart, targetRIR: block.targetRIR, targets: carried)
+        }
         var targets: [Target] = []
         for muscle in MuscleCoverage.tracked {
             let room = capacity(muscle, days: days, style: style, gym: gym)
             guard room.sessions > 0 else { continue }
+            let old = previous?.target(for: muscle)
             targets.append(target(
-                for: muscle, previous: previous?.target(for: muscle)?.sets, week: block, style: style,
+                for: muscle, previous: old?.usualSets, week: block, style: style,
                 lastWeek: lastWeek[muscle], state: states[muscle], sessions: room.sessions, timeCap: room.timeCap,
                 recent: recentWeeklySets[muscle], feedback: feedback[muscle],
-                offset: adjustment?.offsets[muscle] ?? 0, reportCeiling: adjustment?.ceilings[muscle]
+                offset: adjustment?.offsets[muscle] ?? 0, reportCeiling: adjustment?.ceilings[muscle],
+                afterBusyWeek: old?.change == .busyWeek
             ))
         }
         return WeekTargets(weekStart: weekStart, targetRIR: block.targetRIR, targets: targets)
