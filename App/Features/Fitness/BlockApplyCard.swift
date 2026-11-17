@@ -11,6 +11,8 @@ import AppCore
 struct BlockApplyCard: View {
     let report: BlockReport.Report
     let archive: BlockArchive
+    /// Accessory lifts that could change for variety (`BlockVariety`); none chosen at first.
+    var variety: [BlockVariety.Option] = []
 
     @Environment(WeeklyPlanStore.self) private var plans
     @Environment(MuscleModel.self) private var muscles
@@ -18,6 +20,8 @@ struct BlockApplyCard: View {
     @State private var history = BlockHistoryStore.shared
     /// Suggestions switched off; every one starts on.
     @State private var off: Set<String> = []
+    /// Accessory changes chosen for variety (at most `BlockVariety.maximumChanges`); none at first.
+    @State private var varietyOn: Set<String> = []
 
     /// The block running now, when this report is the latest finished one.
     private var nextBlock: BlockArchive? {
@@ -41,7 +45,7 @@ struct BlockApplyCard: View {
     }
 
     @ViewBuilder private var content: some View {
-        if report.next.isEmpty {
+        if report.next.isEmpty && (variety.isEmpty || nextBlock == nil) {
             Text("Nothing to change: the next block starts as planned.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.primaryText)
@@ -54,6 +58,9 @@ struct BlockApplyCard: View {
                 }
                 .tint(Theme.lifting)
             }
+            if !variety.isEmpty {
+                BlockVarietyPicker(options: variety, chosen: $varietyOn)
+            }
             Button {
                 apply(to: nextBlock)
             } label: {
@@ -65,7 +72,7 @@ struct BlockApplyCard: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(Theme.ink)
-            .disabled(off.count == report.next.count)
+            .disabled(off.count == report.next.count && varietyOn.isEmpty)
             Text("Changes last until Block \(nextNumber) ends. You can undo them in Past blocks.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
@@ -92,6 +99,7 @@ struct BlockApplyCard: View {
         let chosen = Set(report.next.map(\.id)).subtracting(off)
         let value = NextBlockAdjustments.make(report: report, chosen: chosen, sourceStart: archive.start,
                                               blockStart: block.start, finishedTargets: archive.weeklyTargets)
+            .addingVariety(variety.filter { varietyOn.contains($0.id) })
         nextStore.apply(value)
         // This week's set targets take the new sets now.
         plans.redoVolume()

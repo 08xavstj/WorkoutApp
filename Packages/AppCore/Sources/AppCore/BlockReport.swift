@@ -227,8 +227,12 @@ public enum BlockReport {
             .sorted { $0.start < $1.start }
         let weeksRun = max(1, Int((input.end.timeIntervalSince(input.start) / (7 * day)).rounded()))
         let weekStarts = (0..<weeksRun).compactMap { calendar.date(byAdding: .day, value: 7 * $0, to: input.start) }
-        // The deload is the last week, when the block reached it.
-        let workingWeeks = input.hadDeload && weekStarts.count > 1 ? Array(weekStarts.dropLast()) : weekStarts
+        // The deload is the last week, when the block reached it. Planned busy weeks
+        // (`BusyWeek`) held the lifts on about a third of the sets by design, so like the
+        // deload they are not working weeks: they don't pull a muscle's average under its target.
+        let busyWeeks = input.weeks.filter(\.isBusy).map(\.weekStart)
+        let workingWeeks = (input.hadDeload && weekStarts.count > 1 ? Array(weekStarts.dropLast()) : weekStarts)
+            .filter { week in !busyWeeks.contains { calendar.isDate($0, inSameDayAs: week) } }
 
         let records = input.weeks.filter { $0.weekStart >= input.start && $0.weekStart < input.end && $0.planned > 0 }
         let weeksKept = records.filter { Consistency.weekKept(planned: $0.planned, done: $0.done) }.count

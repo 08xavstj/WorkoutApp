@@ -31,7 +31,9 @@ final class MuscleModel {
         MuscleCoverage.suggest(setsThisWeek: weekSets, states: states, sessionsLeft: sessionsLeft, preferred: preferred)
     }
 
-    func refresh(sessions: [WorkoutSession], library: ExerciseLibrary, health: HealthKitClient?, hrvBelowNormal: Bool = false) async {
+    /// `busyWeeks`: Mondays of planned busy weeks (`BusyWeek`), whose sessions the deload check leaves out.
+    func refresh(sessions: [WorkoutSession], library: ExerciseLibrary, health: HealthKitClient?, hrvBelowNormal: Bool = false,
+                 busyWeeks: [Date] = []) async {
         let now = Date.now
         // Best estimated 1RM per exercise per session, for the deload check.
         let sixWeeks = now.addingTimeInterval(-42 * 86_400)
@@ -43,7 +45,7 @@ final class MuscleModel {
                 if best > 0 { lifts.append(.init(exercise: exercise.name, date: session.startedAt, estimatedOneRepMax: best)) }
             }
         }
-        deload = DeloadAdvisor.evaluate(lifts, hrvBelowNormal: hrvBelowNormal, now: now)
+        deload = DeloadAdvisor.evaluate(lifts, hrvBelowNormal: hrvBelowNormal, now: now, busyWeeks: busyWeeks)
         let cutoff = now.addingTimeInterval(-10 * 86_400)
         let thisWeek = WeeklyPlan.weekStart(containing: now)
         let lastWeek = Calendar.current.date(byAdding: .day, value: -7, to: thisWeek) ?? thisWeek

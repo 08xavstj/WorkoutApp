@@ -89,6 +89,11 @@ targets:
           Tensile uses the camera for your front and side progress photos (saved only
           inside the app, not in your Photos library) and, with the flashlight, to measure
           your heart rate variability from your fingertip.
+        # Planned sessions in Apple Calendar (`PlanCalendarSync`), only once that switch is on.
+        # Full access: write-only access can't update or remove the app's own events.
+        NSCalendarsFullAccessUsageDescription: >-
+          Tensile puts your planned sessions in its own "Tensile" calendar and keeps them
+          in step when your plan changes. It reads and changes only that calendar.
         NSLocationWhenInUseUsageDescription: >-
           Tensile uses your location once to get local weather, air quality and
           daylight hours for training advice. You can type your city instead.

@@ -215,8 +215,9 @@ final class WeeklyPlanStore {
     }
 
     /// The most recent plan that started before `weekStart` (the template for a new week).
+    /// A busy week gives its standing week back (`BusyWeek.restored`): it lasts one week.
     func lastPlan(before weekStart: Date) -> WeeklyPlan? {
-        plans.last { $0.weekStart < weekStart }
+        plans.last { $0.weekStart < weekStart }.map(BusyWeek.restored)
     }
 
     /// Saves (or replaces) the plan for its week and drops weeks older than
@@ -249,7 +250,14 @@ final class WeeklyPlanStore {
     /// The block state for the week containing `now` without saving it, for
     /// view bodies that only read (`refreshBlock` persists the same move).
     func projectedBlockWeek(now: Date = .now, hrvBelowNormal: Bool = false) -> TrainingBlock.WeekState? {
-        saved.block?.advanced(to: now, hrvBelowNormal: hrvBelowNormal, style: trainingStyle).week
+        saved.block.map { blockRunning($0, now: now, hrvBelowNormal: hrvBelowNormal).week }
+    }
+
+    /// `block` moved on to the week containing `now`, paused there when that
+    /// week is a planned busy week (`BusyWeek`, also when chosen part-way through it).
+    private func blockRunning(_ block: TrainingBlock, now: Date, hrvBelowNormal: Bool = false) -> TrainingBlock {
+        let busy = plan(containing: now)?.isBusy ?? false
+        return block.advanced(to: now, hrvBelowNormal: hrvBelowNormal, style: trainingStyle, busy: busy).settingBusy(busy)
     }
 
     /// True when the block's planned deload falls in the week starting `weekStart`.
@@ -288,12 +296,31 @@ final class WeeklyPlanStore {
             if plans.contains(where: { !$0.plannedDays.isEmpty }) { startBlockIfNeeded(now: now) }
             return saved.block?.week
         }
-        let advanced = current.advanced(to: now, hrvBelowNormal: hrvBelowNormal, style: trainingStyle)
+        // A planned busy week pauses the block (`BusyWeek`), also when chosen part-way through the week.
+        let advanced = blockRunning(current, now: now, hrvBelowNormal: hrvBelowNormal)
         if advanced != current {
             saved.block = advanced
             write()
         }
         return advanced.week
+    }
+
+    /// Makes this week a planned busy week of `sessions` (one or two) short
+    /// holding sessions, or (nil) gives the week its standing plan back
+    /// (`BusyWeek`). The block pauses or resumes and this week's set targets
+    /// are worked out again.
+    func setBusyWeek(sessions: Int?, now: Date = .now) {
+        reloadIfUnavailable()
+        guard let plan = plan(containing: now) else { return }
+        let updated = sessions.map { BusyWeek.plan(from: plan, sessions: $0) } ?? BusyWeek.restored(plan)
+        guard updated != plan else { return }
+        saved.plans.removeAll { Calendar.current.isDate($0.weekStart, inSameDayAs: plan.weekStart) }
+        saved.plans.append(updated)
+        if let block = saved.block, block.covers(weekStart: plan.weekStart) {
+            saved.block = block.settingBusy(updated.isBusy)
+        }
+        saved.volume?.removeAll { Calendar.current.isDate($0.weekStart, inSameDayAs: plan.weekStart) }
+        write()
     }
 
     private func write() {
@@ -339,8 +366,11 @@ final class WeeklyPlanStore {
     }
 
     /// Whole days since the last training day; nil if there has never been one.
+    /// A planned busy week counts as seen through its last day (`BusyWeek.lastSeen`),
+    /// so its planned gap never reads as time away (no restart card, no "comeback" line).
     func daysOff(sessions: [WorkoutSession], extra: Set<Date> = [], now: Date = .now) -> Int? {
-        RestartPlan.daysOff(lastTrained: Self.trainingDays(sessions: sessions, extra: extra).last, now: now)
+        let last = Self.trainingDays(sessions: sessions, extra: extra).last
+        return RestartPlan.daysOff(lastTrained: BusyWeek.lastSeen(lastTrained: last, plans: plans, now: now), now: now)
     }
 
     // MARK: Per-muscle volume (`VolumeProgression`)
@@ -360,7 +390,7 @@ final class WeeklyPlanStore {
         let thisWeek = WeeklyPlan.weekStart(containing: now)
         if let stored = savedVolume(for: thisWeek) { return stored }
         guard muscles.hasRefreshed, let current = saved.block else { return nil }
-        let running = current.covers(weekStart: thisWeek) ? current : current.advanced(to: now, style: trainingStyle)
+        let running = blockRunning(current, now: now)
         let block = running.week
         let days = (plan(for: thisWeek) ?? lastPlan(before: thisWeek))?.plannedDays ?? []
         guard !days.isEmpty else { return nil }
@@ -421,8 +451,8 @@ final class WeeklyPlanStore {
         // The block report's sets now live in this week's targets: later weeks
         // build on them. A deload week leaves them out, so they wait for the next.
         if let block = saved.block {
-            let running = block.covers(weekStart: thisWeek) ? block : block.advanced(to: now, style: trainingStyle)
-            if !running.week.isDeload {
+            let running = blockRunning(block, now: now)
+            if !running.week.isDeload, !running.week.isBusy {
                 NextBlockStore.shared.markOffsetsApplied(blockStart: running.start, weekStart: thisWeek)
             }
         }

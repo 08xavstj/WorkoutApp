@@ -133,7 +133,15 @@ struct BlockReportView: View {
             weeklyTargets: archive.weeklyTargets, bodyWeightKg: bodyWeight, hrv: hrv,
             alternatives: alternatives, traits: traits
         )
-        return BlockReportData(report: BlockReport.make(input), traits: traits, isComplete: archive.isComplete)
+        let report = BlockReport.make(input)
+        // Chosen variety (`BlockVariety`): accessory lifts the report doesn't already change.
+        let changed = Set(report.next.flatMap { change -> [String] in
+            if case .swapExercise(let fromID, let toID, _) = change.kind { return [fromID, toID] }
+            return []
+        })
+        let variety = BlockVariety.options(sessions: logged, start: archive.start, end: archive.end,
+                                           alternatives: alternatives, excluding: changed)
+        return BlockReportData(report: report, traits: traits, isComplete: archive.isComplete, variety: variety)
     }
 
     /// Daily body weight (kg) from Apple Health since the block began; empty
@@ -151,6 +159,8 @@ struct BlockReportData {
     var report: BlockReport.Report
     var traits: [String: PRHistory.Traits]
     var isComplete: Bool
+    /// Accessory lifts that could change next block (`BlockVariety`).
+    var variety: [BlockVariety.Option] = []
 }
 
 private struct BlockReportContent: View {
@@ -175,7 +185,7 @@ private struct BlockReportContent: View {
             BlockTrendsCard(bodyWeight: report.bodyWeight, hrv: report.hrv, bodyUnit: bodyUnit)
         }
         // Toggles and "Apply to next block" for the latest block (`BlockApplyCard`).
-        BlockApplyCard(report: report, archive: archive)
+        BlockApplyCard(report: report, archive: archive, variety: data.variety)
         BlockEvidence()
     }
 }

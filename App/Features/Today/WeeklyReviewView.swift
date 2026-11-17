@@ -29,6 +29,7 @@ struct WeeklyReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ReviewNumbersCard(lines: lines)
+                    BusyWeekReviewCard(thisWeek: thisWeek) // after three busy weeks in a row: build again?
                     if let identity = identityLine {
                         Text(identity)
                             .font(.subheadline.weight(.semibold))

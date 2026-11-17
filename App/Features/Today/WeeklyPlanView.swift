@@ -22,6 +22,8 @@ struct WeeklyPlanView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(MuscleModel.self) private var muscles
+    @Environment(VitalsModel.self) private var vitals
+    @Environment(GymStore.self) private var gym
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var days: [PlannedDay] = []
@@ -32,6 +34,10 @@ struct WeeklyPlanView: View {
     /// Easy cardio sessions a week (0-2) and their type (`EasyCardio`).
     @State private var cardioCount = 0
     @State private var cardioKind: EasyCardio.Kind = .bike
+    /// A planned busy week's sessions (`BusyWeek`); nil for a normal week.
+    @State private var busySessions: Int?
+    /// The week's one interval session, once taken (`HardCardio`); offered, never set by default.
+    @State private var hardChoice: HardCardio.Choice?
 
     private var weekStart: Date { WeeklyPlan.weekStart(containing: .now) }
 
@@ -53,13 +59,21 @@ struct WeeklyPlanView: View {
         @Bindable var settings = settings
         NavigationStack {
             Form {
-                daysSection
-                ForEach($days) { $day in
-                    PlannedDaySection(day: $day, title: sectionTitle(for: day), flexible: mode == .flexible)
+                BusyWeekSection(sessions: $busySessions, standing: draft,
+                                weeksInARow: BusyWeek.weeksInARow(plans: store.plans, before: weekStart))
+                if busySessions == nil {
+                    daysSection
+                    ForEach($days) { $day in
+                        PlannedDaySection(day: $day, title: sectionTitle(for: day), flexible: mode == .flexible)
+                    }
+                    ifThenSection
+                    cardioSection
+                    HardCardioPlanSection(choice: $hardChoice, draft: draft, offer: hardOffer, blocker: hardBlocker,
+                                          modalities: HardCardio.modalities(gym: gym.profile),
+                                          scheme: HardCardioInputs.scheme(metrics: metrics, settings: settings))
                 }
-                ifThenSection
-                cardioSection
                 blockSection
+                PlanCalendarSection()
                 Section {
                     Toggle("Monday review reminder", isOn: $settings.weeklyReviewOn)
                     if settings.weeklyReviewOn {
@@ -186,6 +200,30 @@ struct WeeklyPlanView: View {
     /// Goals as the planner reads them (nil before they're set).
     private var goals: Goals? { settings.goalsSet ? settings.goals : nil }
 
+    /// The week as edited, without a busy week: what a busy week is made from
+    /// and where the interval session would go.
+    private var draft: WeeklyPlan {
+        WeeklyPlan(weekStart: weekStart, plannedDays: days, mode: mode,
+                   sessionsPerWeek: mode == .flexible ? days.count : nil, cardio: cardioPlan)
+    }
+
+    /// Easy cardio and the interval session as they'll be saved.
+    private var cardioPlan: EasyCardio? {
+        guard cardioCount > 0 || hardChoice != nil else { return nil }
+        let hard = hardChoice.map { HardCardio.supported($0, gym: gym.profile) }
+        return EasyCardio(sessionsPerWeek: cardioCount, kind: cardioKind, hard: hard)
+    }
+
+    /// The interval session's offer (`HardCardio.offer`), from cardio fitness and vigorous minutes.
+    private var hardOffer: HardCardio.Offer? {
+        HardCardioInputs.offer(plan: draft, settings: settings, vitals: vitals, gym: gym.profile, blockLength: blockWeek?.length,
+                               restMode: settings.isRestMode, isDeloadWeek: blockWeek?.isDeload ?? false)
+    }
+
+    private var hardBlocker: HardCardio.Blocker? {
+        HardCardio.blocker(plan: draft, goals: goals, restMode: settings.isRestMode, isDeloadWeek: blockWeek?.isDeload ?? false)
+    }
+
     /// "Easy cardio: none / 1 / 2 a week, ~30 min, bike / row / incline walk",
     /// placed by `CardioPlanner` (Schumann 2022; Lundberg 2022; WHO 2020).
     private var cardioSection: some View {
@@ -217,8 +255,11 @@ struct WeeklyPlanView: View {
     private var cardioPlacement: String {
         let draft = WeeklyPlan(weekStart: weekStart, plannedDays: days, mode: mode,
                                sessionsPerWeek: mode == .flexible ? days.count : nil,
-                               cardio: EasyCardio(sessionsPerWeek: cardioCount, kind: cardioKind))
+                               cardio: EasyCardio(sessionsPerWeek: cardioCount, kind: cardioKind, hard: hardChoice))
         let slots = CardioPlanner.slots(for: draft, goals: goals)
+        if slots.isEmpty, HardCardio.slot(for: draft, goals: goals) != nil {
+            return "The interval session takes this one's place."
+        }
         let length = "About \(EasyCardio.standardMinutes) min at an easy pace"
         if mode == .flexible {
             return "\(length), on any day. It doesn't count toward your \(days.count) lifting sessions."
@@ -269,15 +310,17 @@ struct WeeklyPlanView: View {
     private func load() {
         guard !loaded else { return }
         loaded = true
+        // A busy week edits its standing week underneath (`BusyWeek.restored`).
+        busySessions = store.plan(for: weekStart)?.busy?.sessions
         // Existing plans keep their mode; a first plan is flexible.
-        if let current = store.plan(for: weekStart) {
+        if let current = store.plan(for: weekStart).map(BusyWeek.restored) {
             mode = current.mode
         } else if let last = store.lastPlan(before: weekStart) {
             mode = last.mode
         }
         if let initialDays {
             days = initialDays
-        } else if let current = store.plan(for: weekStart) {
+        } else if let current = store.plan(for: weekStart).map(BusyWeek.restored) {
             days = current.sortedDays
         } else if let last = store.lastPlan(before: weekStart), !last.plannedDays.isEmpty {
             // Last week's days, with the session it didn't get to first.
@@ -291,9 +334,11 @@ struct WeeklyPlanView: View {
         }
         ifThen = days.compactMap(\.ifThen).first ?? ""
         // Easy cardio carries over from this week's or last week's plan; the type defaults to the goal's.
-        let template = store.plan(for: weekStart) ?? store.lastPlan(before: weekStart)
+        let template = store.plan(for: weekStart).map(BusyWeek.restored) ?? store.lastPlan(before: weekStart)
         cardioKind = template?.cardio?.kind ?? CardioPlanner.recommendedKind(goals: goals)
         cardioCount = template?.cardio?.sessionsPerWeek ?? 0
+        // Once taken, the interval session stays until it's switched off.
+        hardChoice = template?.cardio?.hard
     }
 
     /// The focus that has rested longest, so the rotation starts there, unless
@@ -340,7 +385,8 @@ struct WeeklyPlanView: View {
     }
 
     private func save() {
-        var plan = store.plan(for: weekStart) ?? WeeklyPlan(weekStart: weekStart)
+        let wasBusy = store.plan(for: weekStart)?.isBusy ?? false
+        var plan = store.plan(for: weekStart).map(BusyWeek.restored) ?? WeeklyPlan(weekStart: weekStart)
         let text = ifThen.trimmingCharacters(in: .whitespacesAndNewlines)
         plan.plannedDays = days.map { day in
             var copy = day
@@ -349,10 +395,17 @@ struct WeeklyPlanView: View {
         }
         plan.mode = mode
         plan.sessionsPerWeek = mode == .flexible ? days.count : nil
-        plan.cardio = cardioCount > 0 ? EasyCardio(sessionsPerWeek: cardioCount, kind: cardioKind) : nil
+        plan.cardio = cardioPlan
         // The first confirmed plan starts a training block in the goal's style (`WeeklyPlanStore.save`).
         store.trainingStyle = style
         store.save(plan)
+        // A busy week is this week only, made from the plan just saved; the block pauses or resumes with it.
+        if let busySessions {
+            store.setBusyWeek(sessions: busySessions)
+        } else if wasBusy {
+            store.redoVolume()
+        }
+        store.refreshBlock(hrvBelowNormal: metrics.trainEasyToday)
         dismiss()
     }
 }

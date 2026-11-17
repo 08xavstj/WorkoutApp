@@ -249,6 +249,9 @@ public enum CoachCheckIns {
         /// Tonight's sleep window while the insomnia path is on (`SleepWindow`),
         /// "23:45 to 6:30"; `bedByText` is then left nil.
         public var sleepWindowText: String?
+        /// The session follows a planned session that didn't happen, or seven
+        /// or more days off (`FirstSessionBack.applies`).
+        public var firstSessionBack = false
 
         public init(name: String, minutes: Int, workingSets: Int) {
             self.name = name
@@ -392,6 +395,9 @@ public enum CoachCheckIns {
         }
 
         var first = "\(f.workingSets) sets in \(f.minutes) min"
+        // Coming back after a gap is the moment that counts (`FirstSessionBack`): said in
+        // this one sentence, and nothing about the days before it.
+        if f.firstSessionBack { first = FirstSessionBack.lead + first }
         if let volume = f.volumeText { first += ", \(volume) lifted" }
         if let record = f.recordExercises.first {
             first += ", with a new best on \(record)"

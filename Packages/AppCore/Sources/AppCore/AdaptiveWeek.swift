@@ -293,7 +293,9 @@ public enum AdaptiveWeek {
     /// too, where the sessions are the ones still to do.
     /// - Parameter done: logged sessions (any range; that week's are used).
     public static func leftOver(plan: WeeklyPlan, done: [DoneSession], calendar: Calendar = .current) -> [PlannedDay] {
-        guard !plan.plannedDays.isEmpty else { return [] }
+        // A busy week (`BusyWeek`) leaves nothing over: its sessions were stand-ins, and the
+        // next week starts from the standing order.
+        guard !plan.plannedDays.isEmpty, plan.busy == nil else { return [] }
         let weekStart = calendar.startOfDay(for: plan.weekStart)
         let lastDay = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
         var counted = plan

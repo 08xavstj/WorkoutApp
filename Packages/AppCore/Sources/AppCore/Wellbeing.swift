@@ -432,7 +432,15 @@ public enum DeloadAdvisor {
     /// - Parameters:
     ///   - lifts: per-session bests over the last ~6 weeks.
     ///   - hrvBelowNormal: 7-day HRV is below the normal range.
-    public static func evaluate(_ lifts: [LiftPoint], hrvBelowNormal: Bool, now: Date = .now) -> Advice? {
+    ///   - busyWeeks: Mondays of planned busy weeks (`BusyWeek`). Their
+    ///     sessions hold the lifts on purpose, so they are left out: a busy
+    ///     week can neither show a stall nor hide one, and with one inside
+    ///     the last two weeks there are usually too few sessions to say.
+    public static func evaluate(_ lifts: [LiftPoint], hrvBelowNormal: Bool, now: Date = .now,
+                                busyWeeks: [Date] = []) -> Advice? {
+        let lifts = busyWeeks.isEmpty ? lifts : lifts.filter { point in
+            !busyWeeks.contains { point.date >= $0 && point.date < $0.addingTimeInterval(7 * 86_400) }
+        }
         let recentStart = now.addingTimeInterval(-14 * 86_400)
         let previousStart = now.addingTimeInterval(-28 * 86_400)
         var checked = 0

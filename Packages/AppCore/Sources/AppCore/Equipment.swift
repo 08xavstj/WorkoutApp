@@ -42,6 +42,23 @@ public enum EquipmentKind: String, Codable, Sendable, CaseIterable, Identifiable
     }
 }
 
+/// Cardio machines a gym can have, for the weekly plan's hard cardio session
+/// (`HardCardio`). Kept apart from `EquipmentKind`: they carry no load and no
+/// lift needs them.
+public enum CardioMachine: String, Codable, Sendable, CaseIterable, Identifiable {
+    case bike, rower, treadmill
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .bike: "Exercise bike"
+        case .rower: "Rowing machine"
+        case .treadmill: "Treadmill"
+        }
+    }
+}
+
 /// A plate size and how many pairs of it the gym has.
 public struct PlateCount: Codable, Sendable, Equatable, Hashable {
     public var weight: Double
@@ -86,6 +103,10 @@ public struct GymProfile: Codable, Sendable, Equatable {
     public var kettlebells: [Double]
     public var cableStack: WeightStack
     public var machineStack: WeightStack
+    /// Bike, rower and treadmill, for the hard cardio session (`HardCardio`).
+    /// Nil for a gym saved before this existed or never asked: the trainer
+    /// then plans no machine and offers the session outdoors only.
+    public var cardioMachines: Set<CardioMachine>?
 
     public init(
         name: String,
@@ -98,7 +119,8 @@ public struct GymProfile: Codable, Sendable, Equatable {
         dumbbells: [Double],
         kettlebells: [Double],
         cableStack: WeightStack,
-        machineStack: WeightStack
+        machineStack: WeightStack,
+        cardioMachines: Set<CardioMachine>? = nil
     ) {
         self.name = name
         self.unit = unit
@@ -111,6 +133,7 @@ public struct GymProfile: Codable, Sendable, Equatable {
         self.kettlebells = kettlebells
         self.cableStack = cableStack
         self.machineStack = machineStack
+        self.cardioMachines = cardioMachines
     }
 
     public func has(_ kind: EquipmentKind) -> Bool {
@@ -133,7 +156,8 @@ public struct GymProfile: Codable, Sendable, Equatable {
         dumbbells: stride(from: 5.0, through: 100, by: 5).map { $0 },
         kettlebells: [18, 26, 35, 44, 53, 62, 70],
         cableStack: WeightStack(start: 10, step: 10, max: 200),
-        machineStack: WeightStack(start: 10, step: 10, max: 300)
+        machineStack: WeightStack(start: 10, step: 10, max: 300),
+        cardioMachines: Set(CardioMachine.allCases)
     )
 
     public static let commercialKilograms = GymProfile(
@@ -151,7 +175,8 @@ public struct GymProfile: Codable, Sendable, Equatable {
         dumbbells: stride(from: 2.0, through: 50, by: 2).map { $0 },
         kettlebells: [8, 12, 16, 20, 24, 28, 32],
         cableStack: WeightStack(start: 5, step: 5, max: 100),
-        machineStack: WeightStack(start: 5, step: 5, max: 150)
+        machineStack: WeightStack(start: 5, step: 5, max: 150),
+        cardioMachines: Set(CardioMachine.allCases)
     )
 
     public static let homeDumbbells = GymProfile(
@@ -165,7 +190,8 @@ public struct GymProfile: Codable, Sendable, Equatable {
         dumbbells: stride(from: 5.0, through: 52.5, by: 2.5).map { $0 },
         kettlebells: [],
         cableStack: WeightStack(start: 10, step: 10, max: 200),
-        machineStack: WeightStack(start: 10, step: 10, max: 300)
+        machineStack: WeightStack(start: 10, step: 10, max: 300),
+        cardioMachines: []
     )
 }
 
