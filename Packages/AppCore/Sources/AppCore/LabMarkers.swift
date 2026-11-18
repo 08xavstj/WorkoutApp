@@ -115,7 +115,9 @@ public enum LabMarkers {
         Marker(id: "vitaminD", name: "Vitamin D (25-OH)", panel: "Vitamins", aliases: ["vitamin d", "25-oh vitamin d", "25-hydroxyvitamin d", "vitamin d, 25-hydroxy", "25(oh)d"],
                units: [u("ng/mL", 20...50), u("nmol/L", 50...125)],
                about: "20 ng/mL (50 nmol/L) or more covers bone health for nearly everyone; much higher levels have no proven extra benefit (IOM 2011). The Endocrine Society (2024) no longer advises routine testing in healthy adults.",
-               retest: "Once, in winter, if you train indoors; only again if it was low."),
+               // Endocrine Society 2024 (Demay et al., J Clin Endocrinol Metab, doi:10.1210/clinem/dgae290):
+               // against routine 25(OH)D testing; USPSTF 2021: insufficient evidence to screen.
+               retest: "Only when a doctor has a reason (bone health, a condition or a medicine that affects it); again only if it was low."),
         Marker(id: "b12", name: "Vitamin B12", panel: "Vitamins", aliases: ["vitamin b12", "b12", "cobalamin"],
                units: [u("pg/mL", 200...900), u("pmol/L", 148...664)],
                about: "Needed for red blood cells and nerves. Plant-based diets and metformin can lower it. 200-300 pg/mL is borderline; ask about a follow-up test."),
