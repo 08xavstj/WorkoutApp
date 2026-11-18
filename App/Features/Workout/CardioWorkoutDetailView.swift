@@ -46,7 +46,8 @@ struct CardioWorkoutDetailView: View {
                         RouteChartsCard(route: route, showsPace: detail.showsPace)
                     }
                     heartCard(detail)
-                    IntervalBoutsCard(workoutID: detail.uuid, heartRate: detail.heartRate, route: route, showsPace: detail.showsPace)
+                    IntervalBoutsCard(workoutID: detail.uuid, heartRate: detail.heartRate, route: route, showsPace: detail.showsPace,
+                                      hasSplits: route.map { !$0.splits(unitMeters: unitMeters).isEmpty } ?? false)
                     if let vo2 = detail.vo2Max {
                         fitnessCard(vo2)
                     }

@@ -5,11 +5,16 @@ import Foundation
 // (competitor-features-2026-11.md, B10).
 //
 // Where the bouts come from:
-// - Tensile's own interval session (`IntervalSession`): its steps laid out
-//   from the workout's start, pushed back by any pause. The workout says which
-//   session it was in its metadata (`IntervalSession.metadataKey`).
-// - Another app's segments or laps (Apple's custom workouts save segments):
-//   unlabelled, so each is called hard or easy by its own intensity (below).
+// - Tensile's own interval session (`IntervalSession`). The workout says which
+//   session it was in its metadata (`IntervalSession.metadataKey`). The Watch
+//   saves each step it ran as a segment event carrying the step's index
+//   (`IntervalSession.stepMetadataKey`): those are used as they are
+//   (`recorded`), so a skipped step is left out. Workouts without them are
+//   laid out from the plan from the workout's start, pushed back by pauses.
+// - Another app's segments (Apple's custom workouts save segments):
+//   unlabelled, so each is called hard or easy by its own intensity (below),
+//   and kept only when hard and easy really alternate. Laps (a watch's
+//   auto-lap every kilometre) aren't used: the splits table shows them.
 //
 // Evidence: strong for the session (intervals raise VO2max about 5.5
 // mL/kg/min against no exercise and more than steady training; Milanović Z,
@@ -106,6 +111,27 @@ public nonisolated enum IntervalBouts {
         return result
     }
 
+    /// One step the Watch recorded: its index in the session's `steps`.
+    public nonisolated struct RecordedStep: Sendable, Equatable {
+        public var index: Int
+        public var start: Date
+        public var end: Date
+
+        public init(index: Int, start: Date, end: Date) {
+            self.index = index
+            self.start = start
+            self.end = end
+        }
+    }
+
+    /// The steps the Watch recorded, each labelled by its step's phase, in
+    /// time order. Steps with an index the session doesn't have are left out.
+    public static func recorded(_ session: IntervalSession, steps: [RecordedStep]) -> [Segment] {
+        steps.filter { $0.end > $0.start && session.steps.indices.contains($0.index) }
+            .sorted { $0.start < $1.start }
+            .map { Segment(start: $0.start, end: $0.end, kind: kind(of: session.steps[$0.index].phase)) }
+    }
+
     static func kind(of phase: IntervalSession.Phase) -> Kind {
         switch phase {
         case .warmUp: .warmUp
@@ -123,11 +149,17 @@ public nonisolated enum IntervalBouts {
     public static let minimumHeartRateSpread = 10.0
     /// 20% faster than the slowest bout (the app's choice).
     public static let minimumSpeedSpread = 0.2
+    /// Hard and easy must take turns at least this often (hard after easy or
+    /// easy after hard, warm-up and cool-down counting as easy) to be called
+    /// intervals: warm-up, hard, easy, hard is three. Fewer, as in a run with
+    /// a fast finish or a hilly stretch, stay laps. The app's choice.
+    public static let minimumSwitches = 3
 
     /// Calls each of another app's segments hard or easy: above the midpoint
     /// between the easiest and hardest average heart rate (or speed, without
     /// heart rate) is hard. An easy first or last segment is the warm-up or
-    /// cool-down. Fewer than three segments, or too little spread, stay laps.
+    /// cool-down. Fewer than three segments, too little spread, or fewer than
+    /// `minimumSwitches` turns between hard and easy, stay laps.
     public static func labelled(_ segments: [Segment], heartRate: [(date: Date, bpm: Double)], route: CardioRoute?) -> [Segment] {
         let sorted = segments.filter { $0.end > $0.start }.sorted { $0.start < $1.start }
         guard sorted.count >= 3 else { return sorted.map { Segment(start: $0.start, end: $0.end, kind: .lap) } }
@@ -147,9 +179,11 @@ public nonisolated enum IntervalBouts {
         }
         let known = intensity.compactMap { $0 }
         let threshold = ((known.min() ?? 0) + (known.max() ?? 0)) / 2
+        let hard = intensity.map { ($0 ?? 0) >= threshold }
+        let switches = zip(hard, hard.dropFirst()).filter { $0 != $1 }.count
+        guard switches >= minimumSwitches else { return sorted.map { Segment(start: $0.start, end: $0.end, kind: .lap) } }
         return sorted.enumerated().map { index, segment in
-            let hard = (intensity[index] ?? 0) >= threshold
-            let kind: Kind = hard ? .work : (index == 0 ? .warmUp : (index == sorted.count - 1 ? .coolDown : .recovery))
+            let kind: Kind = hard[index] ? .work : (index == 0 ? .warmUp : (index == sorted.count - 1 ? .coolDown : .recovery))
             return Segment(start: segment.start, end: segment.end, kind: kind)
         }
     }
@@ -171,6 +205,19 @@ public nonisolated enum IntervalBouts {
     /// At least two hard bouts: worth a table of its own.
     public static func isIntervalWorkout(_ bouts: [Bout]) -> Bool {
         bouts.filter { $0.kind == .work }.count >= 2
+    }
+
+    /// Whether the bouts card shows: two bouts or more, and not plain laps
+    /// on a workout whose splits table already shows the same distance.
+    public static func showsCard(_ bouts: [Bout], fromSession: Bool, hasSplits: Bool) -> Bool {
+        guard bouts.count >= 2 else { return false }
+        return fromSession || isIntervalWorkout(bouts) || !hasSplits
+    }
+
+    /// The interval evidence line (Milanović 2015) belongs only under real
+    /// intervals: a Tensile session, or hard and easy bouts that alternate.
+    public static func showsIntervalEvidence(_ bouts: [Bout], fromSession: Bool) -> Bool {
+        fromSession || isIntervalWorkout(bouts)
     }
 
     /// Hard bouts' average heart rate, first to last: a rise shows heart rate

@@ -48,6 +48,11 @@ public nonisolated struct IntervalSession: Codable, Sendable, Equatable, Identif
     /// the Watch compiles it (project.yml), so the phone's bout table
     /// (`IntervalBouts`) and the Watch's recording agree on it.
     public static let metadataKey = "TensileIntervalSession"
+    /// Metadata key on each `.segment` workout event the Watch saves for a
+    /// step it ran; its value is the step's `Step.index` in `steps`. So the
+    /// phone's bout table shows the steps that were run, skipped ones left
+    /// out, rather than the plan laid out from the start.
+    public static let stepMetadataKey = "TensileIntervalStep"
 
     /// What it is done on.
     public nonisolated enum Modality: String, Codable, Sendable, CaseIterable, Identifiable {
