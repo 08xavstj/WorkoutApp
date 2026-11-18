@@ -21,7 +21,10 @@ import AppCore
 /// (`workoutapp://plan?entry=<key>`, `PlanCalendar.url(for:)`). Each sync
 /// reads only that calendar, only for this week and next
 /// (`PlanCalendar.window`), and matches events by the tag, not by EventKit's
-/// event identifiers, which can change when a calendar syncs. Nothing in any
+/// event identifiers, which can change when a calendar syncs. It also reads
+/// the week before, only to remove its own planned sessions that passed
+/// (`PlanCalendar.isPassedSession`). After a reinstall it takes back a
+/// "Tensile" calendar it finds instead of making a second. Nothing in any
 /// other calendar is read or touched. Turning the switch off removes the
 /// Tensile calendar.
 @MainActor
@@ -82,7 +85,18 @@ final class PlanCalendarSync {
             existing.append(PlanCalendar.Existing(id: id, key: PlanCalendar.key(from: event.url), title: event.title ?? "",
                                                   start: event.startDate, end: event.endDate, notes: event.notes))
         }
-        let changes = PlanCalendar.changes(desired: desired, existing: existing)
+        var changes = PlanCalendar.changes(desired: desired, existing: existing)
+        // The week before the window: planned sessions there that passed without one go too
+        // (`PlanCalendar.isPassedSession`); finished ones stay.
+        let lookback = PlanCalendar.lookback(before: window.start)
+        let now = Date.now
+        let earlier = store.predicateForEvents(withStart: lookback.start, end: lookback.end, calendars: [calendar])
+        for event in store.events(matching: earlier) {
+            guard let id = event.eventIdentifier, byID[id] == nil,
+                  PlanCalendar.isPassedSession(key: PlanCalendar.key(from: event.url), start: event.startDate, now: now) else { continue }
+            byID[id] = event
+            changes.remove.append(id)
+        }
         guard !changes.isEmpty else { return }
         for id in changes.remove {
             if let event = byID[id] { try? store.remove(event, span: .thisEvent, commit: false) }
@@ -125,6 +139,17 @@ final class PlanCalendarSync {
         var sources: [EKSource] = []
         if let source = store.defaultCalendarForNewEvents?.source { sources.append(source) }
         sources += store.sources.filter { $0.sourceType == .calDAV || $0.sourceType == .local }
+        // After a reinstall the saved identifier is gone but the calendar isn't (iCloud
+        // keeps it): take it back rather than make a second "Tensile".
+        let named = store.calendars(for: .event).filter {
+            $0.title == PlanCalendar.calendarTitle && $0.allowsContentModifications
+        }
+        for source in sources {
+            if let found = named.first(where: { ($0.source as EKSource?)?.sourceIdentifier == source.sourceIdentifier }) {
+                defaults.set(found.calendarIdentifier, forKey: Self.calendarIDKey)
+                return found
+            }
+        }
         for source in sources {
             let calendar = EKCalendar(for: .event, eventStore: store)
             calendar.title = PlanCalendar.calendarTitle

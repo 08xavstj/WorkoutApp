@@ -150,18 +150,31 @@ extension CoachCheckIns {
         !message.body.contains(lowMoodOpening)
     }
 
+    /// Both "worth raising" sentences below end with this.
+    static let lowMoodRaisePhrase = "worth raising with someone you trust or your doctor"
+
+    /// True for a message that says the "worth raising with someone" sentence.
+    /// The app saves the day only then (`LowMoodRule.raiseDue`), so a message
+    /// that ends up without it doesn't use up the week.
+    public static func raisesLowMood(_ message: Message?) -> Bool {
+        message?.body.contains(lowMoodRaisePhrase) ?? false
+    }
+
     /// The morning message under the low-mood rule, or nil when the rule
     /// changes nothing (the caller then builds the usual message).
     ///
     /// - The offer replaces a rest-day line only: not when recovery is low,
     ///   HRV is below normal, the rest day follows an unplanned hard day, or
     ///   illness is reported. Rest mode never reaches here (`morning` returns earlier).
+    /// - No offer before this morning's recovery is in: without it neither a
+    ///   low score nor a 7-day HRV below normal can be ruled out, and a
+    ///   physical reason to rest always wins.
     /// - The offer is one sentence: what was seen, why moving, what is on
     ///   offer. It stops there (the research's risk: sounding glib). The app
     ///   does not let the on-device model reword these (`mayReword`).
     static func lowMoodMorning(_ f: MorningFacts, title: String, easy: Bool) -> Message? {
         guard let mood = f.lowMood, mood.weekApplies, !f.illnessFlagged else { return nil }
-        let offers = f.restDay && !f.restForRecovery && !easy
+        let offers = f.restDay && f.recovery != nil && !f.restForRecovery && !easy
         let raises = mood.fortnightApplies && f.lowMoodRaiseDue
         guard offers || raises else { return nil }
 

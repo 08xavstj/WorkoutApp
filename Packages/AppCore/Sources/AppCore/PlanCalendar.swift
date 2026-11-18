@@ -125,6 +125,27 @@ public enum PlanCalendar {
         return DateInterval(start: start, end: end)
     }
 
+    /// Days before the window the app also reads, only to clear its own
+    /// planned sessions that passed without one (`isPassedSession`): once the
+    /// week turns they are outside `window`, and nothing else would remove them.
+    public static let lookbackDays = 7
+
+    /// The `lookbackDays` before the window that starts at `windowStart`.
+    public static func lookback(before windowStart: Date, calendar: Calendar = .current) -> DateInterval {
+        let start = calendar.date(byAdding: .day, value: -lookbackDays, to: windowStart)
+            ?? windowStart.addingTimeInterval(-Double(lookbackDays) * 86_400)
+        return DateInterval(start: start, end: windowStart)
+    }
+
+    /// True for one of the app's planned-session events ("lift|…") dated
+    /// before today: a planned day that passed without a session has no
+    /// entry, in an earlier week as in this one. Finished sessions ("done|…")
+    /// stay where they are.
+    public static func isPassedSession(key: String?, start: Date, now: Date, calendar: Calendar = .current) -> Bool {
+        guard let key, key.hasPrefix("lift|") else { return false }
+        return start < calendar.startOfDay(for: now)
+    }
+
     /// The entries for this week and next.
     /// - Parameters:
     ///   - plan: this week's plan; nil without one.

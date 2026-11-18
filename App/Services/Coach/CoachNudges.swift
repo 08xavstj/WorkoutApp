@@ -126,18 +126,18 @@ final class CoachNudges {
     private func scheduleMorning(now: Date) async {
         guard let metrics else { return }
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: now)
-        let window = metrics.bedtimeWindow
-        var fire = CoachCheckIns.morningFire(wake: window?.wake, fallbackDay: today, calendar: calendar)
-        if let planned = fire, planned <= now, window == nil, let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) {
-            fire = CoachCheckIns.morningFire(wake: nil, fallbackDay: tomorrow, calendar: calendar)
-        }
-        guard let planned = fire, planned > now,
-              let adjusted = CoachCheckIns.outsideQuietHours(planned, kind: .morning, quiet: quietHours, calendar: calendar) else {
+        // Today's message while it is still to come (the window's wake is already tomorrow's
+        // from four hours before today's), so an early-morning refresh rewrites it with this
+        // morning's numbers instead of replacing it with tomorrow's (`nextMorningFire`).
+        let scheduled = inbox.pending(.morning, now: now).map(\.deliverAt).first { calendar.isDate($0, inSameDayAs: now) }
+        guard let adjusted = CoachCheckIns.nextMorningFire(wake: metrics.bedtimeWindow?.wake, scheduledToday: scheduled,
+                                                          quiet: quietHours, now: now, calendar: calendar) else {
             return
         }
         let facts = morningFacts(for: adjusted, now: now)
-        await deliver(CoachCheckIns.morning(facts), kind: .morning, at: adjusted, now: now)
+        let message = CoachCheckIns.morning(facts)
+        noteLowMoodRaise(message, on: adjusted, calendar: calendar)
+        await deliver(message, kind: .morning, at: adjusted, now: now)
     }
 
     private func scheduleEvening(now: Date) async {
@@ -369,10 +369,12 @@ extension CoachNudges {
         let calendar = Calendar.current
         let isToday = calendar.isDate(fire, inSameDayAs: now)
         f.restMode = settings.isRestMode
+        // Today's message knows the 7-day HRV trend even before last night's recovery is
+        // in (yesterday's then), so nothing on it reads as a day for more than easy.
+        if isToday { f.hrvBelowNormal = metrics.trainEasyToday }
         if isToday, let recovery = metrics.recovery, !metrics.recoveryIsFromYesterday {
             f.recovery = recovery.score
             f.recoveryCalibrated = recovery.isCalibrated
-            f.hrvBelowNormal = metrics.trainEasyToday
             f.recoveryReason = Self.reason(recovery)
             if let sleep = metrics.sleep {
                 f.sleepHours = sleep.asleep / 3600
@@ -399,23 +401,36 @@ extension CoachNudges {
         let bedtime = CaffeineTiming.usualBedtimeMinutes(metrics.recentBedtimes, calendar: calendar)
         let cutoff = CaffeineTiming.cutoffMinutes(bedtimeMinutes: bedtime, mg: CaffeineTiming.referenceDoseMg)
         f.caffeineCutoffText = CaffeineTiming.clockText(cutoff, calendar: calendar)
-        if isToday { addLowMood(to: &f, now: now, calendar: calendar) }
+        addLowMood(to: &f, fire: fire, calendar: calendar)
         return f
     }
 
-    /// The low-mood rule's facts for today's message (`LowMoodRule`, LowMood.swift).
-    /// Today only: a message written ahead knows neither tomorrow's mood nor its rest day.
-    private func addLowMood(to f: inout CoachCheckIns.MorningFacts, now: Date, calendar: Calendar) {
+    /// The low-mood rule's facts for the message due at `fire` (`LowMoodRule`, LowMood.swift).
+    /// A message written the evening before counts the week up to its own morning, whose
+    /// answer isn't in yet (so it errs towards silence), and makes no walk offer: that waits
+    /// for the morning's recovery (`CoachCheckIns.lowMoodMorning`). Today's illness answer
+    /// holds it back either way.
+    private func addLowMood(to f: inout CoachCheckIns.MorningFacts, fire: Date, calendar: Calendar) {
         guard let checkIns else { return }
-        f.lowMood = Self.lowMoodFinding(checkIns: checkIns, now: now, calendar: calendar)
+        f.lowMood = Self.lowMoodFinding(checkIns: checkIns, now: fire, calendar: calendar)
         f.illnessFlagged = checkIns.morning()?.isSick == true
         f.restForRecovery = metrics?.dayGuidance?.kind == .recovery
         guard let finding = f.lowMood, finding.fortnightApplies else { return }
         let last = defaults.object(forKey: Self.lowMoodRaisedKey) as? Date
-        f.lowMoodRaiseDue = LowMoodRule.raiseDue(lastRaised: last, on: now, calendar: calendar)
-        // Said today: the same day's rebuilds keep it, then it waits a week (`LowMoodRule.raiseEveryDays`).
-        if f.lowMoodRaiseDue, !f.illnessFlagged, !f.restMode, last.map({ !calendar.isDate($0, inSameDayAs: now) }) ?? true {
-            defaults.set(now, forKey: Self.lowMoodRaisedKey)
+        f.lowMoodRaiseDue = LowMoodRule.raiseDue(lastRaised: last, on: fire, calendar: calendar)
+    }
+
+    /// Keeps the day of the "worth raising" sentence: saved for the message's day only
+    /// when the message says it, so the same day's rebuilds keep it and then it waits a
+    /// week (`LowMoodRule.raiseEveryDays`). A rebuild of that day's message without it
+    /// gives the week back.
+    private func noteLowMoodRaise(_ message: CoachCheckIns.Message?, on fire: Date, calendar: Calendar) {
+        let last = defaults.object(forKey: Self.lowMoodRaisedKey) as? Date
+        let sameDay = last.map { calendar.isDate($0, inSameDayAs: fire) } ?? false
+        if CoachCheckIns.raisesLowMood(message) {
+            if !sameDay { defaults.set(fire, forKey: Self.lowMoodRaisedKey) }
+        } else if sameDay {
+            defaults.removeObject(forKey: Self.lowMoodRaisedKey)
         }
     }
 

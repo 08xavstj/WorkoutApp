@@ -443,6 +443,12 @@ public enum Consistency {
         planned > 0 && done >= sessionsNeeded(planned: planned)
     }
 
+    /// A planned week that wasn't kept. A planned busy week with no session
+    /// isn't one: it is left out, never counted against him, as in `score`.
+    public static func weekMissed(_ record: WeekRecord) -> Bool {
+        record.planned > 0 && !record.isBusy && !weekKept(planned: record.planned, done: record.done)
+    }
+
     /// Score over the last `windowWeeks` weeks ending with the week that
     /// contains `now`. The current week is still in progress, so it counts
     /// only once it is already kept; it can never pull the score down.

@@ -265,7 +265,8 @@ public enum HealthFloors {
     }
 
     static func sleepRegularityCheck(_ week: Week) -> Check {
-        let target = "\(sleepRegularity), the typical value in one large study"
+        // 87 starts the most regular fifth, where risk was lowest; 81 was typical (Windred 2024).
+        let target = "\(sleepRegularity)+, where risk was lowest in one large study (\(SleepRegularity.typicalIndex) is typical)"
         guard let index = week.sleepRegularity else {
             return Check(floor: .sleepRegularity, valueText: "No data", targetText: target, met: nil,
                          note: "Needs a few nights of sleep from your watch or ring.")

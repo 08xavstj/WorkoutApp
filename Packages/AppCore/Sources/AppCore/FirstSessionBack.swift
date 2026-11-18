@@ -51,7 +51,9 @@ public enum FirstSessionBack {
         // yesterday, so an extra session in an earlier week doesn't hide this week's gap.
         let from = max(lastWeek, WeeklyPlan.weekStart(containing: last, calendar: calendar))
         var planned: [Date] = []
-        for plan in recent where !plan.isFlexible {
+        // A busy week's days are left out: it is kept from its first session (`Consistency.score`),
+        // so its second short session not happening is no gap to come back from.
+        for plan in recent where !plan.isFlexible && !plan.isBusy {
             for day in plan.plannedDays {
                 guard let date = calendar.date(byAdding: .day, value: WeeklyPlan.order(day.weekday), to: calendar.startOfDay(for: plan.weekStart)),
                       date >= from, date < today else { continue }

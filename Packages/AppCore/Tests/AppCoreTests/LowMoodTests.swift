@@ -241,6 +241,60 @@ struct LowMoodTests {
         #expect(!CoachCheckIns.mayReword(try #require(CoachCheckIns.morning(training))))
     }
 
+    // MARK: Before the morning's recovery is in
+
+    @Test func noWalkOfferBeforeRecoveryIsIn() throws {
+        // Early morning: a rest day and a low week, but no recovery yet, so neither a low
+        // score nor HRV below normal can be ruled out. With sleep debt the usual message stands.
+        var f = restDay(week)
+        f.recovery = nil
+        f.sleepDebtHours = 5
+        f.bedByText = "22:00–22:30"
+        let message = try #require(CoachCheckIns.morning(f))
+        #expect(!message.body.contains("instead of full rest"))
+        #expect(!message.body.contains("Mood"))
+        #expect(message.body.contains("Sleep debt is 5 h"))
+        // Without debt there is nothing to say, and nothing about mood either.
+        f.sleepDebtHours = nil
+        #expect(CoachCheckIns.morning(f) == nil)
+        // Recovery in, HRV below normal: still no offer.
+        f.recovery = 70
+        f.hrvBelowNormal = true
+        #expect(try #require(CoachCheckIns.morning(f)).body.contains("Mood") == false)
+    }
+
+    @Test func theTwoWeekSentenceReachesAQuietMorning() throws {
+        // A message written the evening before: no recovery, no session, no debt.
+        var f = CoachCheckIns.MorningFacts()
+        f.lowMood = fortnight
+        f.lowMoodRaiseDue = true
+        let message = try #require(CoachCheckIns.morning(f))
+        checkShape(message)
+        #expect(message.body == "Mood has been low on 9 of your last 14 days, which is worth raising with someone you trust or your doctor.")
+        #expect(CoachCheckIns.raisesLowMood(message))
+        #expect(!message.body.contains("walk"))
+        // The same on a rest day before recovery is in: the sentence, never the offer.
+        f.restDay = true
+        let rest = try #require(CoachCheckIns.morning(f))
+        #expect(CoachCheckIns.raisesLowMood(rest))
+        #expect(!rest.body.contains("walk"))
+        // Not due: nothing to say, so no message (and the app saves no raise day).
+        f.lowMoodRaiseDue = false
+        #expect(CoachCheckIns.morning(f) == nil)
+        #expect(!CoachCheckIns.raisesLowMood(CoachCheckIns.morning(f)))
+    }
+
+    @Test func onlyAMessageThatSaysTheSentenceCountsAsRaised() throws {
+        // The offer alone doesn't use up the week; offer plus sentence does.
+        #expect(!CoachCheckIns.raisesLowMood(try #require(CoachCheckIns.morning(restDay(week)))))
+        var f = restDay(fortnight)
+        f.lowMoodRaiseDue = true
+        #expect(CoachCheckIns.raisesLowMood(try #require(CoachCheckIns.morning(f))))
+        // Illness keeps it out, so it isn't counted.
+        f.illnessFlagged = true
+        #expect(!CoachCheckIns.raisesLowMood(try #require(CoachCheckIns.morning(f))))
+    }
+
     // MARK: A realistic month
 
     @Test func aMonthThatSlidesAndRecovers() {

@@ -158,6 +158,8 @@ struct SleepWindowTests {
         #expect(!SleepWindow.Exclusion.asked(sex: .male).contains(.pregnancy))
         #expect(SleepWindow.Exclusion.asked(sex: .female).contains(.pregnancy))
         #expect(SleepWindow.Exclusion.asked(sex: .male).count == SleepWindow.Exclusion.allCases.count - 1)
+        // Sex not set yet (the app's stand-in is male): asked.
+        #expect(SleepWindow.Exclusion.asked(sex: nil).contains(.pregnancy))
     }
 
     @Test func apnoeaIsScreenedBeforeAnyOffer() {
@@ -528,7 +530,7 @@ struct SleepWindowTests {
         var running = course(windowMinutes: 375)
         running = SleepWindow.tooSleepy(running, regularMinutes: 500, now: day(3, hour: 15), calendar: calendar)
         #expect(running.windowMinutes == 390)
-        #expect(running.sleepyDays == [day(3)])
+        #expect(running.sleepyDays == [day(3, hour: 15)])
         // A poor week (70%) would narrow; it doesn't in a week he was too sleepy.
         let week1 = (1...7).map { night($0, inBedMinutes: 390, efficiency: 0.70) }
         var result = SleepWindow.advance(running, nights: week1, regularMinutes: 500, now: day(7, hour: 13), calendar: calendar)
@@ -863,6 +865,43 @@ struct SleepWindowTests {
             == "6 h 45 min in bed: \(SleepWindow.clock(23 * 60 + 45)) to \(SleepWindow.clock(390))")
         #expect(SleepWindow.duration(360) == "6 h")
         #expect(SleepWindow.duration(405) == "6 h 45 min")
+    }
+
+    @Test func tooSleepyOnTheMorningOfAReviewCountsForTheWeekUnderReview() {
+        // A poor week (70%), and "Too sleepy" tapped at 8:00 on day 7, before the noon review.
+        let week1 = (1...7).map { night($0, inBedMinutes: 390, efficiency: 0.70) }
+        let tapped = SleepWindow.tooSleepy(course(windowMinutes: 375), regularMinutes: 500, now: day(7, hour: 8), calendar: calendar)
+        #expect(tapped.windowMinutes == 390)
+        let result = SleepWindow.advance(tapped, nights: week1, regularMinutes: 500, now: day(7, hour: 13), calendar: calendar)
+        // The step it gave is kept, not undone at noon.
+        #expect(result.course.reviews.map(\.change) == [.heldSleepy])
+        #expect(result.course.windowMinutes == 390)
+        // A file from before held the start of the day: that counts the same way.
+        var old = course(windowMinutes: 390)
+        old.sleepyDays = [day(7)]
+        #expect(SleepWindow.advance(old, nights: week1, regularMinutes: 500, now: day(7, hour: 13), calendar: calendar)
+            .course.reviews.map(\.change) == [.heldSleepy])
+    }
+
+    @Test func tooSleepyAfterTheReviewCountsForTheNextWeek() {
+        let week1 = (1...7).map { night($0, inBedMinutes: 390, efficiency: 0.88) }
+        let poor = week1 + (8...14).map { night($0, inBedMinutes: 405, efficiency: 0.70) }
+        // Week 1 widened at its review; he taps "Too sleepy" that afternoon.
+        var result = SleepWindow.advance(course(windowMinutes: 390), nights: week1, regularMinutes: 500, now: day(7, hour: 13), calendar: calendar)
+        #expect(result.course.reviews.map(\.change) == [.widened])
+        let tapped = SleepWindow.tooSleepy(result.course, regularMinutes: 500, now: day(7, hour: 18), calendar: calendar)
+        result = SleepWindow.advance(tapped, nights: poor, regularMinutes: 500, now: day(14, hour: 13), calendar: calendar)
+        #expect(result.course.reviews.map(\.change) == [.widened, .heldSleepy])
+        #expect(result.course.windowMinutes == 420)
+    }
+
+    @Test func tooSleepyAfterNoonBeforeTheReviewRanCountsForThatReview() {
+        // No refresh between noon and the tap at 15:00 on day 7: week 1's review is still to run.
+        let week1 = (1...7).map { night($0, inBedMinutes: 390, efficiency: 0.70) }
+        let tapped = SleepWindow.tooSleepy(course(windowMinutes: 375), regularMinutes: 500, now: day(7, hour: 15), calendar: calendar)
+        let result = SleepWindow.advance(tapped, nights: week1, regularMinutes: 500, now: day(7, hour: 15), calendar: calendar)
+        #expect(result.course.reviews.map(\.change) == [.heldSleepy])
+        #expect(result.course.windowMinutes == 390)
     }
 
     @Test func theNumbersAreTheCautiousOnes() {

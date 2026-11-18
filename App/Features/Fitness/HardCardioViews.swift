@@ -218,8 +218,15 @@ struct HardCardioWeekRow: View {
         if let blocker, blocker == .restMode || blocker == .deloadWeek {
             return blocker.text + " An easy \(EasyCardio.standardMinutes) minutes instead, if you like."
         }
-        let today = Calendar.current.component(.weekday, from: .now)
-        return HardCardio.dayNote(slot: slot, weekday: today, lowRecovery: HardCardioInputs.lowRecovery(metrics: metrics))
+        let calendar = Calendar.current
+        let now = Date.now
+        let today = calendar.component(.weekday, from: now)
+        // Where the week's queue has the sessions now: a missed leg day moves onto the next free day.
+        let queue = metrics.adaptiveWeek.flatMap { calendar.isDate($0.day, inSameDayAs: now) ? $0 : nil }
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
+        return HardCardio.dayNote(slot: slot, weekday: today, lowRecovery: HardCardioInputs.lowRecovery(metrics: metrics),
+                                  queueToday: queue?.slot(on: now, calendar: calendar)?.focus,
+                                  queueTomorrow: queue?.slot(on: tomorrow, calendar: calendar)?.focus)
     }
 }
 

@@ -609,7 +609,8 @@ final class VitalsModel {
             tone: (currentDebt?.level == .moderate || currentDebt?.level == .high) ? .caution : .good, // the level, not raw hours (`SleepDebt.Level`)
             gauge: currentDebt.map { min(1, $0.hours / 10) },
             series: debtSeries,
-            footnote: currentDebt?.plan
+            // No catch-up advice while the sleep window runs: short nights are its plan.
+            footnote: SleepWindowStore.shared.isActive ? SleepWindow.debtPausedNote : currentDebt?.plan
         )
         debtStat.isHours = true
         debtStat.defaultDays = 30
