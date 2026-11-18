@@ -17,6 +17,7 @@ struct LogView: View {
     @Environment(AppRouter.self) private var router
     @State private var showingSavedWorkouts = false
     @State private var showingLabs = false
+    @State private var showingCardio = false
 
     var body: some View {
         NavigationStack {
@@ -25,7 +26,8 @@ struct LogView: View {
                     StartWorkoutButtons(
                         start: { launcher.openBuilder() },
                         startEmpty: { launcher.startEmpty(in: modelContext) },
-                        openSaved: { showingSavedWorkouts = true }
+                        openSaved: { showingSavedWorkouts = true },
+                        startCardio: { showingCardio = true }
                     )
                 }
                 .listRowBackground(Color.clear)
@@ -45,6 +47,7 @@ struct LogView: View {
             .tabToolbar()
             .navigationDestination(isPresented: $showingSavedWorkouts) { MyWorkoutsView() }
             .sheet(isPresented: $showingLabs) { LabsView() }
+            .sheet(isPresented: $showingCardio) { CardioStartSheet() }
         }
     }
 
@@ -83,11 +86,13 @@ struct LogView: View {
 }
 
 /// Start workout (primary, opens the builder) with Empty workout and Saved
-/// workouts beneath it as smaller secondary buttons (ux-audit 4.4).
+/// workouts beneath it as smaller secondary buttons (ux-audit 4.4), then
+/// Cardio & sports, which starts a recording on the Apple Watch.
 private struct StartWorkoutButtons: View {
     let start: () -> Void
     let startEmpty: () -> Void
     let openSaved: () -> Void
+    let startCardio: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -112,6 +117,9 @@ private struct StartWorkoutButtons: View {
                     .accessibilityHint("Starts now. Add exercises as you go.")
                 SecondaryCapsuleButton(title: "Saved workouts", systemImage: "list.bullet.rectangle.portrait", stacked: stacked, action: openSaved)
             }
+            SecondaryCapsuleButton(title: "Cardio & sports on Watch", systemImage: "applewatch", stacked: stacked, action: startCardio)
+                .accessibilityHint("Pick a run, squash, soccer, skiing and more. It starts recording on your Apple Watch.")
+                .accessibilityIdentifier("log-start-cardio")
         }
     }
 }

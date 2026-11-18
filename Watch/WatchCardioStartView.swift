@@ -8,14 +8,15 @@ nonisolated func watchUsesMiles() -> Bool {
 }
 
 /// Cardio from the start screen: the last activity on top (one tap, or a
-/// double tap), the target, then the rest of the short list.
+/// double tap), the target, then everything else in groups: cardio, sports
+/// and snow. Sports record with no target (`CardioActivity.takesTarget`).
 struct WatchCardioStartView: View {
     @Environment(WatchCardioModel.self) private var cardio
     @Environment(\.dismiss) private var dismiss
     /// The activity started last, offered first.
-    @AppStorage("cardioLastActivity") private var lastRaw = CardioActivity.outdoorRun.rawValue
+    @AppStorage(WatchCardioModel.lastActivityKey) private var lastRaw = CardioActivity.outdoorRun.rawValue
     /// `CardioTarget.storage`; stays as chosen from workout to workout.
-    @AppStorage("cardioTarget") private var targetRaw = CardioTarget.off.storage
+    @AppStorage(WatchCardioModel.targetKey) private var targetRaw = CardioTarget.off.storage
 
     private var last: CardioActivity { CardioActivity(rawValue: lastRaw) ?? .outdoorRun }
     private var target: CardioTarget { CardioTarget(storage: targetRaw) }
@@ -46,18 +47,20 @@ struct WatchCardioStartView: View {
                         }
                     }
                     .accessibilityIdentifier("watch-cardio-target")
-                    Text("Other activities")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                    ForEach(CardioActivity.allCases.filter { $0 != last }) { activity in
-                        Button {
-                            start(activity)
-                        } label: {
-                            Label(activity.title, systemImage: activity.systemImage)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(CardioActivity.Category.allCases) { category in
+                        Text(category.title)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                        ForEach(CardioActivity.all(in: category).filter { $0 != last }) { activity in
+                            Button {
+                                start(activity)
+                            } label: {
+                                Label(activity.title, systemImage: activity.systemImage)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .accessibilityIdentifier("watch-cardio-\(activity.rawValue)")
                         }
-                        .accessibilityIdentifier("watch-cardio-\(activity.rawValue)")
                     }
                     if let zones = cardio.preview {
                         Text(zones.source.caption)
@@ -72,9 +75,9 @@ struct WatchCardioStartView: View {
         .task { await cardio.prepare() }
     }
 
-    /// "Off", "Easy 107–133" or "Zone 2".
+    /// "Off", "Easy 107–133" or "Zone 2"; "Off" for a sport on top.
     private var targetText: String {
-        guard target != .off else { return "Off" }
+        guard target != .off, last.takesTarget else { return "Off" }
         guard target == .easy, let band = cardio.preview.flatMap({ target.band(in: $0.scheme) }) else { return target.title }
         return "Easy \(band.text)"
     }

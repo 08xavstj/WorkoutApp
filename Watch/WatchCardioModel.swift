@@ -2,7 +2,8 @@ import Foundation
 import HealthKit
 import WatchKit
 
-/// A cardio workout on the wrist: a run, a ride, a row. Runs its own
+/// A cardio workout on the wrist: a run, a ride, a row, or a sport (squash,
+/// indoor soccer, cross-country skiing...). Runs its own
 /// HKWorkoutSession (one HKWorkout with the activity's type and
 /// indoor/outdoor), keeps the live heart-rate zone and the time in each zone
 /// (`CardioZoneTracker`), and taps the wrist when heart rate leaves or
@@ -28,6 +29,9 @@ final class WatchCardioModel: NSObject {
     /// Metadata on the saved workout: the `CardioActivity` (the phone's
     /// `HealthKitClient.watchCardioMetadataKey` is the same string).
     static let metadataKey = "TensileCardioActivity"
+    /// UserDefaults keys the start list keeps (`WatchCardioStartView`'s `@AppStorage`).
+    static let lastActivityKey = "cardioLastActivity"
+    static let targetKey = "cardioTarget"
 
     private(set) var phase: Phase = .idle
     private(set) var activity = CardioActivity.outdoorRun
@@ -76,6 +80,7 @@ final class WatchCardioModel: NSObject {
         let read: Set<HKObjectType> = [
             HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned),
             HKQuantityType(.distanceWalkingRunning), HKQuantityType(.distanceCycling),
+            HKQuantityType(.distanceCrossCountrySkiing),
             // For zones from age, when the phone has sent none.
             HKCharacteristicType(.dateOfBirth),
         ]
@@ -166,7 +171,7 @@ final class WatchCardioModel: NSObject {
     // MARK: Recording
 
     /// Starts recording `activity`, holding heart rate to `target` if one is set.
-    func start(_ activity: CardioActivity, target: CardioTarget) async {
+    func start(_ activity: CardioActivity, target chosenTarget: CardioTarget) async {
         guard phase == .idle || phase == .ended else { return }
         // One workout at a time.
         let lifting = WatchWorkoutModel.shared
@@ -178,6 +183,8 @@ final class WatchCardioModel: NSObject {
         problem = nil
         summary = nil
         self.activity = activity
+        // Sports record with no target (`CardioActivity.takesTarget`).
+        let target = activity.takesTarget ? chosenTarget : .off
         self.target = target
         await requestAuthorization()
         let zones = await resolveZones()
@@ -429,8 +436,11 @@ extension WatchCardioModel: HKLiveWorkoutBuilderDelegate {
         if collectedTypes.contains(energyType), let statistics = workoutBuilder.statistics(for: energyType) {
             energy = statistics.sumQuantity()?.doubleValue(for: .kilocalorie())
         }
-        // A workout collects one of the two: on foot, or on a bike.
-        for distanceType in [HKQuantityType(.distanceWalkingRunning), HKQuantityType(.distanceCycling)] {
+        // A workout collects one of these: on foot, on a bike, or on cross-country skis.
+        let distanceTypes = [
+            HKQuantityType(.distanceWalkingRunning), HKQuantityType(.distanceCycling), HKQuantityType(.distanceCrossCountrySkiing),
+        ]
+        for distanceType in distanceTypes {
             if collectedTypes.contains(distanceType), let sum = workoutBuilder.statistics(for: distanceType)?.sumQuantity() {
                 distance = sum.doubleValue(for: .meter())
             }
@@ -442,28 +452,4 @@ extension WatchCardioModel: HKLiveWorkoutBuilderDelegate {
     }
 
     nonisolated func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {}
-}
-
-extension CardioActivity {
-    /// The Apple Health workout type the activity is saved as.
-    var healthType: HKWorkoutActivityType {
-        switch self {
-        case .outdoorRun, .treadmill: .running
-        case .outdoorWalk: .walking
-        case .outdoorCycle, .indoorCycle: .cycling
-        case .rower: .rowing
-        case .elliptical: .elliptical
-        case .stairs: .stairClimbing
-        case .hiit: .highIntensityIntervalTraining
-        case .other: .other
-        }
-    }
-
-    var locationType: HKWorkoutSessionLocationType {
-        switch isOutdoor {
-        case .some(true): .outdoor
-        case .some(false): .indoor
-        case .none: .unknown
-        }
-    }
 }

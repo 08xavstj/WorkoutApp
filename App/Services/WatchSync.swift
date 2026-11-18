@@ -166,6 +166,47 @@ final class WatchSync: NSObject {
         }
     }
 
+    /// Opens the Watch app recording `activity` in its cardio mode (a run,
+    /// squash, cross-country skiing...). Nothing else is sent: the Watch saves
+    /// the workout to Apple Health and the phone reads it from there
+    /// (`HealthKitClient.externalWorkouts`). Returns true once the Watch app
+    /// has been asked; `startProblem` says why not.
+    @discardableResult
+    func startCardioOnWatch(_ activity: CardioActivity) async -> Bool {
+        startProblem = nil
+        guard let health else {
+            startProblem = "Apple Health isn't available."
+            return false
+        }
+        guard let connection, connection.isPaired else {
+            startProblem = "No Apple Watch is paired with this iPhone."
+            return false
+        }
+        guard connection.isWatchAppInstalled else {
+            startProblem = "Install Tensile on your Watch first (Watch app → Available Apps)."
+            return false
+        }
+        let configuration = activity.workoutConfiguration()
+        let store = health.store
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                store.startWatchApp(with: configuration) { started, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if !started {
+                        continuation.resume(throwing: WatchSyncError.notStarted)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+            return true
+        } catch {
+            startProblem = "Couldn't start the Watch app: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     private func send(_ snapshot: WatchSession, force: Bool = false) {
         var previous = lastSnapshot
         previous?.sentAt = snapshot.sentAt

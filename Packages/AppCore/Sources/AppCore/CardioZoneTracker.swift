@@ -5,10 +5,20 @@ import Foundation
 // Needs only Foundation and `HeartRateZoneScheme.swift`, so the Watch app
 // compiles both files on its own (project.yml, `TensileWatch: sources:`).
 
-/// The cardio workouts the Watch app can record. A short list on purpose: the
-/// ones a lifter does between sessions, plus "Other".
+/// The workouts the Watch app's cardio mode can record: steady cardio, court
+/// and field sports, and snow sports. Each saves as its own Apple Health
+/// workout type, so the phone (and Apple Health) shows "Squash", not "Other".
+/// Raw values are stored (`cardioLastActivity`, workout metadata), so cases
+/// can be added but never renamed.
 public nonisolated enum CardioActivity: String, Codable, Sendable, CaseIterable, Identifiable {
-    case outdoorRun, treadmill, outdoorWalk, outdoorCycle, indoorCycle, rower, elliptical, stairs, hiit, other
+    // Steady cardio.
+    case outdoorRun, treadmill, outdoorWalk, hiking, outdoorCycle, indoorCycle, rower, elliptical, stairs, hiit
+    // Court and field sports.
+    case squash, badminton, tennis, pickleball, tableTennis, basketball, volleyball
+    case indoorSoccer, outdoorSoccer, ultimateFrisbee, hockey, climbing
+    // Snow.
+    case crossCountrySkiing, downhillSkiing, snowboarding, skating
+    case other
 
     /// How distance is measured, if at all.
     public nonisolated enum Movement: Sendable, Equatable {
@@ -16,8 +26,28 @@ public nonisolated enum CardioActivity: String, Codable, Sendable, CaseIterable,
         case onFoot
         /// Cycling: distance, shown with a speed.
         case cycling
-        /// Machines and mixed work: the Watch measures no distance.
+        /// Cross-country skiing: distance, shown with a speed.
+        case snow
+        /// Machines, mixed work and court sports: no distance shown.
         case stationary
+
+        /// Distance is shown as a speed rather than a pace.
+        public var showsSpeed: Bool { self == .cycling || self == .snow }
+    }
+
+    /// The groups the pickers show, in order.
+    public nonisolated enum Category: String, Sendable, CaseIterable, Identifiable {
+        case cardio, sport, snow
+
+        public var id: String { rawValue }
+
+        public var title: String {
+            switch self {
+            case .cardio: "Cardio"
+            case .sport: "Sports"
+            case .snow: "Snow"
+            }
+        }
     }
 
     public var id: String { rawValue }
@@ -27,12 +57,29 @@ public nonisolated enum CardioActivity: String, Codable, Sendable, CaseIterable,
         case .outdoorRun: "Outdoor run"
         case .treadmill: "Treadmill"
         case .outdoorWalk: "Outdoor walk"
+        case .hiking: "Hike"
         case .outdoorCycle: "Outdoor cycle"
         case .indoorCycle: "Indoor cycle"
         case .rower: "Rower"
         case .elliptical: "Elliptical"
         case .stairs: "Stairs"
         case .hiit: "HIIT"
+        case .squash: "Squash"
+        case .badminton: "Badminton"
+        case .tennis: "Tennis"
+        case .pickleball: "Pickleball"
+        case .tableTennis: "Table tennis"
+        case .basketball: "Basketball"
+        case .volleyball: "Volleyball"
+        case .indoorSoccer: "Indoor soccer"
+        case .outdoorSoccer: "Soccer"
+        case .ultimateFrisbee: "Ultimate frisbee"
+        case .hockey: "Hockey"
+        case .climbing: "Climbing"
+        case .crossCountrySkiing: "Cross-country ski"
+        case .downhillSkiing: "Downhill ski"
+        case .snowboarding: "Snowboard"
+        case .skating: "Skating"
         case .other: "Other"
         }
     }
@@ -42,31 +89,80 @@ public nonisolated enum CardioActivity: String, Codable, Sendable, CaseIterable,
         case .outdoorRun: "figure.run"
         case .treadmill: "figure.run.treadmill"
         case .outdoorWalk: "figure.walk"
+        case .hiking: "figure.hiking"
         case .outdoorCycle: "figure.outdoor.cycle"
         case .indoorCycle: "figure.indoor.cycle"
         case .rower: "figure.rower"
         case .elliptical: "figure.elliptical"
         case .stairs: "figure.stair.stepper"
         case .hiit: "figure.highintensity.intervaltraining"
+        case .squash: "figure.squash"
+        case .badminton: "figure.badminton"
+        case .tennis: "figure.tennis"
+        case .pickleball: "figure.pickleball"
+        case .tableTennis: "figure.table.tennis"
+        case .basketball: "figure.basketball"
+        case .volleyball: "figure.volleyball"
+        case .indoorSoccer: "figure.indoor.soccer"
+        case .outdoorSoccer: "figure.outdoor.soccer"
+        case .ultimateFrisbee: "figure.disc.sports"
+        case .hockey: "figure.hockey"
+        case .climbing: "figure.climbing"
+        case .crossCountrySkiing: "figure.skiing.crosscountry"
+        case .downhillSkiing: "figure.skiing.downhill"
+        case .snowboarding: "figure.snowboarding"
+        case .skating: "figure.skating"
         case .other: "figure.mixed.cardio"
         }
     }
 
-    /// Outdoors, indoors, or not known ("Other").
+    public var category: Category {
+        switch self {
+        case .outdoorRun, .treadmill, .outdoorWalk, .hiking, .outdoorCycle, .indoorCycle,
+             .rower, .elliptical, .stairs, .hiit, .other:
+            .cardio
+        case .squash, .badminton, .tennis, .pickleball, .tableTennis, .basketball, .volleyball,
+             .indoorSoccer, .outdoorSoccer, .ultimateFrisbee, .hockey, .climbing:
+            .sport
+        case .crossCountrySkiing, .downhillSkiing, .snowboarding, .skating:
+            .snow
+        }
+    }
+
+    /// Every activity in `category`, in menu order.
+    public static func all(in category: Category) -> [CardioActivity] {
+        allCases.filter { $0.category == category }
+    }
+
+    /// Whether a heart-rate target makes sense. Only for steady cardio: in
+    /// stop-and-go sports, heart rate follows the play, not the player's
+    /// choice of pace, so taps to "ease off" or "pick it up" would be noise.
+    /// A sport records with no target and still counts time in each zone.
+    public var takesTarget: Bool { category == .cardio }
+
+    /// Outdoors, indoors, or not known (the Watch then doesn't assume either).
     public var isOutdoor: Bool? {
         switch self {
-        case .outdoorRun, .outdoorWalk, .outdoorCycle: true
-        case .treadmill, .indoorCycle, .rower, .elliptical, .stairs, .hiit: false
-        case .other: nil
+        case .outdoorRun, .outdoorWalk, .hiking, .outdoorCycle, .outdoorSoccer, .ultimateFrisbee,
+             .crossCountrySkiing, .downhillSkiing, .snowboarding:
+            true
+        case .treadmill, .indoorCycle, .rower, .elliptical, .stairs, .hiit,
+             .squash, .badminton, .tableTennis, .basketball, .volleyball, .indoorSoccer, .climbing:
+            false
+        case .tennis, .pickleball, .hockey, .skating, .other:
+            nil
         }
     }
 
     public var movement: Movement {
         switch self {
-        case .outdoorRun, .treadmill, .outdoorWalk: .onFoot
+        case .outdoorRun, .treadmill, .outdoorWalk, .hiking: .onFoot
         // An indoor bike gives the Watch no distance unless the bike itself sends it.
         case .outdoorCycle: .cycling
-        case .indoorCycle, .rower, .elliptical, .stairs, .hiit, .other: .stationary
+        case .crossCountrySkiing: .snow
+        // Downhill: the average speed would include the lift rides. Court and
+        // field sports: distance on a pitch says little about the game.
+        default: .stationary
         }
     }
 }
@@ -436,7 +532,7 @@ public nonisolated struct CardioSummary: Sendable, Equatable {
         switch activity.movement {
         case .onFoot:
             Self.pace(seconds: activeSeconds, meters: distanceMeters, miles: miles).map { Self.paceText($0, miles: miles) }
-        case .cycling:
+        case .cycling, .snow:
             Self.speed(seconds: activeSeconds, meters: distanceMeters, miles: miles).map { Self.speedText($0, miles: miles) }
         case .stationary:
             nil

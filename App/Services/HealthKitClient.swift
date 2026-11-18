@@ -785,8 +785,10 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
                     || workout.metadata?[Self.watchCardioMetadataKey] != nil else { return nil }
             let distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meterUnit(with: .kilo))
             let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
+            // Tensile's own cardio says which activity it was (indoor soccer, treadmill).
+            let tensileActivity = (workout.metadata?[Self.watchCardioMetadataKey] as? String).flatMap(CardioActivity.init(rawValue:))
             return ExternalWorkout(
-                name: Self.name(for: workout.workoutActivityType),
+                name: tensileActivity?.title ?? Self.name(for: workout.workoutActivityType),
                 isStrength: strengthTypes.contains(workout.workoutActivityType),
                 start: workout.startDate,
                 end: workout.endDate,
@@ -984,6 +986,17 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         case .basketball: "Basketball"
         case .tennis: "Tennis"
         case .hockey: "Hockey"
+        case .squash: "Squash"
+        case .badminton: "Badminton"
+        case .pickleball: "Pickleball"
+        case .tableTennis: "Table tennis"
+        case .volleyball: "Volleyball"
+        case .discSports: "Disc sports"
+        case .climbing: "Climbing"
+        case .crossCountrySkiing: "Cross-country ski"
+        case .downhillSkiing: "Downhill ski"
+        case .snowboarding: "Snowboard"
+        case .skatingSports: "Skating"
         default: "Workout"
         }
     }

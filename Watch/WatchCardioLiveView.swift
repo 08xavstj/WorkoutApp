@@ -92,13 +92,13 @@ struct WatchCardioLiveView: View {
             .foregroundStyle(.secondary)
     }
 
-    /// Average pace on foot, average speed on a bike, over the workout so far.
+    /// Average pace on foot, average speed on a bike or skis, over the workout so far.
     private func paceOrSpeed(meters: Double, miles: Bool) -> String? {
         let seconds = cardio.elapsed(at: .now) ?? 0
         switch cardio.activity.movement {
         case .onFoot:
             return CardioSummary.pace(seconds: seconds, meters: meters, miles: miles).map { CardioSummary.paceText($0, miles: miles) }
-        case .cycling:
+        case .cycling, .snow:
             return CardioSummary.speed(seconds: seconds, meters: meters, miles: miles).map { CardioSummary.speedText($0, miles: miles) }
         case .stationary:
             return nil
@@ -375,7 +375,7 @@ struct WatchCardioEndView: View {
         if summary.activity.movement != .stationary, let meters = summary.distanceMeters {
             WatchCardioStatRow(label: "Distance", value: CardioSummary.distanceText(meters: meters, miles: miles))
             if let pace = summary.paceOrSpeedText(miles: miles) {
-                WatchCardioStatRow(label: summary.activity.movement == .cycling ? "Avg speed" : "Avg pace", value: pace)
+                WatchCardioStatRow(label: summary.activity.movement.showsSpeed ? "Avg speed" : "Avg pace", value: pace)
             }
         }
         WatchCardioStatRow(label: "Avg HR", value: bpm(summary.averageBpm))

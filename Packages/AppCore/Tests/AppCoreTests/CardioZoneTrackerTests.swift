@@ -281,7 +281,7 @@ struct CardioZoneTrackerTests {
     }
 
     @Test func everyActivityIsDescribed() {
-        #expect(CardioActivity.allCases.count == 10)
+        #expect(CardioActivity.allCases.count == 27)
         for activity in CardioActivity.allCases {
             #expect(!activity.title.isEmpty)
             #expect(!activity.systemImage.isEmpty)
@@ -291,6 +291,43 @@ struct CardioZoneTrackerTests {
         #expect(CardioActivity.outdoorCycle.movement == .cycling)
         #expect(CardioActivity.indoorCycle.movement == .stationary)
         #expect(CardioActivity.other.isOutdoor == nil)
+    }
+
+    @Test func sportsAndSnowAreGroupedAndTakeNoTarget() {
+        // Every activity sits in exactly one picker group, none twice.
+        let grouped = CardioActivity.Category.allCases.flatMap { CardioActivity.all(in: $0) }
+        #expect(grouped.count == CardioActivity.allCases.count)
+        #expect(Set(grouped).count == grouped.count)
+        for sport in [CardioActivity.squash, .indoorSoccer, .ultimateFrisbee, .crossCountrySkiing] {
+            #expect(!sport.takesTarget)
+        }
+        #expect(CardioActivity.outdoorRun.takesTarget)
+        #expect(CardioActivity.squash.category == .sport)
+        #expect(CardioActivity.squash.isOutdoor == false)
+        #expect(CardioActivity.indoorSoccer.isOutdoor == false)
+        #expect(CardioActivity.outdoorSoccer.isOutdoor == true)
+        #expect(CardioActivity.crossCountrySkiing.category == .snow)
+        #expect(CardioActivity.crossCountrySkiing.movement == .snow)
+        #expect(CardioActivity.crossCountrySkiing.movement.showsSpeed)
+        #expect(CardioActivity.downhillSkiing.movement == .stationary)
+        #expect(CardioActivity.squash.movement == .stationary)
+    }
+
+    @Test func storedActivityNamesNeverChange() {
+        // `cardioLastActivity` and saved workouts' metadata hold these strings.
+        #expect(CardioActivity(rawValue: "outdoorRun") == .outdoorRun)
+        #expect(CardioActivity(rawValue: "hiit") == .hiit)
+        #expect(CardioActivity(rawValue: "other") == .other)
+        #expect(CardioActivity(rawValue: "squash") == .squash)
+    }
+
+    @Test func crossCountrySkiSummaryShowsSpeed() {
+        let tracker = CardioZoneTracker(scheme: scheme, target: .off)
+        let summary = CardioSummary(
+            activity: .crossCountrySkiing, target: .off, tracker: tracker, activeSeconds: 3600,
+            distanceMeters: 12_000, averageBpm: 140, maximumBpm: 170, activeKilocalories: 700, saved: true
+        )
+        #expect(summary.paceOrSpeedText(miles: false) == CardioSummary.speedText(12, miles: false))
     }
 
     // MARK: Summary
