@@ -13,13 +13,26 @@ nonisolated enum KeychainStore {
          kSecAttrAccount as String: account]
     }
 
-    static func data(_ account: String) -> Data? {
+    /// A read that failed for a reason other than "no such item" (the phone
+    /// not yet unlocked since a restart, or a passing Keychain error): the
+    /// item may well be there, so it must not be taken as signed out.
+    nonisolated struct ReadError: LocalizedError {
+        var status: OSStatus
+        var errorDescription: String? { "Keychain error \(status)." }
+    }
+
+    /// The item's data; nil only when there is no such item.
+    static func data(_ account: String) throws -> Data? {
         var request = query(account)
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(request as CFDictionary, &result) == errSecSuccess else { return nil }
-        return result as? Data
+        let status = SecItemCopyMatching(request as CFDictionary, &result)
+        switch status {
+        case errSecSuccess: return result as? Data
+        case errSecItemNotFound: return nil
+        default: throw ReadError(status: status)
+        }
     }
 
     @discardableResult
@@ -37,8 +50,8 @@ nonisolated enum KeychainStore {
         return status == errSecSuccess
     }
 
-    static func string(_ account: String) -> String? {
-        data(account).map { String(decoding: $0, as: UTF8.self) }
+    static func string(_ account: String) throws -> String? {
+        try data(account).map { String(decoding: $0, as: UTF8.self) }
     }
 
     @discardableResult
@@ -46,8 +59,9 @@ nonisolated enum KeychainStore {
         set(string.map { Data($0.utf8) }, for: account)
     }
 
-    static func value<Value: Decodable>(_ type: Value.Type, _ account: String) -> Value? {
-        data(account).flatMap { try? JSONDecoder().decode(type, from: $0) }
+    /// Nil when there is no such item or it doesn't decode; throws `ReadError` when it couldn't be read.
+    static func value<Value: Decodable>(_ type: Value.Type, _ account: String) throws -> Value? {
+        try data(account).flatMap { try? JSONDecoder().decode(type, from: $0) }
     }
 
     @discardableResult

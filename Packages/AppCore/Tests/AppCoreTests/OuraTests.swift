@@ -183,16 +183,59 @@ struct OuraTests {
         let response = try JSONDecoder().decode(Oura.TokenResponse.self, from: Data("""
         {"access_token": "a1", "refresh_token": "r1", "expires_in": 86400}
         """.utf8))
-        // Oura didn't say: the scope asked for is kept.
-        #expect(response.tokens(requestedScope: "daily").scope == "daily")
+        // Oura didn't say: what was asked for is not recorded as granted, and
+        // the sign-in is marked so it isn't asked to reconnect again and again.
+        let fresh = response.tokens()
+        #expect(fresh.scope == nil)
+        #expect(fresh.scopeUnreported == true)
+        #expect(!Oura.needsReconnect(grantedScope: fresh.scope, required: "daily spo2 heart_health",
+                                     scopeUnreported: fresh.scopeUnreported == true))
+        // ...and a refresh that doesn't say either keeps that mark.
+        #expect(response.tokens(keeping: fresh).scopeUnreported == true)
         // A refresh keeps the scope of the tokens it replaces.
         let old = Oura.Tokens(accessToken: "a0", refreshToken: "r0", expiresAt: nil, scope: "personal daily heartrate")
         #expect(response.tokens(keeping: old).scope == "personal daily heartrate")
+        #expect(response.tokens(keeping: old).scopeUnreported == nil)
         // Oura's own answer wins.
         let granted = try JSONDecoder().decode(Oura.TokenResponse.self, from: Data("""
         {"access_token": "a1", "scope": "daily"}
         """.utf8))
         #expect(granted.tokens(keeping: old).scope == "daily")
+        #expect(granted.tokens(keeping: fresh).scopeUnreported == nil)
+        // Tokens from before the scope was recorded still ask once, even after a silent refresh.
+        let legacy = Oura.Tokens(accessToken: "a0", refreshToken: "r0", expiresAt: nil)
+        let refreshed = response.tokens(keeping: legacy)
+        #expect(Oura.needsReconnect(grantedScope: refreshed.scope, scopeUnreported: refreshed.scopeUnreported == true))
+    }
+
+    @Test func missingScopesAreListedInOrder() {
+        #expect(Oura.missingScopes(granted: "daily", required: "daily spo2 heart_health") == ["spo2", "heart_health"])
+        #expect(Oura.missingScopes(granted: "HEART_HEALTH+daily", required: "daily spo2 heart_health") == ["spo2"])
+        #expect(Oura.missingScopes(granted: "personal daily spo2 heart_health", required: "daily spo2 heart_health").isEmpty)
+        #expect(Oura.missingScopes(granted: nil, required: "daily spo2") == ["daily", "spo2"])
+        #expect(Oura.missingScopes(granted: "daily", required: "daily").isEmpty)
+    }
+
+    @Test func theReconnectPromptNamesWhatIsMissing() throws {
+        let all = Oura.requestedScopes(ownNumbers: true)
+        // Nothing missing: no prompt.
+        #expect(Oura.reconnectPrompt(grantedScope: "daily spo2 heart_health", required: all) == nil)
+        #expect(Oura.reconnectPrompt(grantedScope: "daily", required: Oura.requestedScopes(ownNumbers: false)) == nil)
+        // Only the panel's permissions missing: named, and said to be only for Oura's own numbers.
+        let extras = try #require(Oura.reconnectPrompt(grantedScope: "daily", required: all))
+        #expect(extras.contains("spo2 and heart_health"))
+        #expect(extras.contains("only for that panel"))
+        #expect(!extras.contains("Tensile needs"))
+        let one = try #require(Oura.reconnectPrompt(grantedScope: "daily spo2", required: all))
+        #expect(one.contains("heart_health permission,"))
+        #expect(!one.contains("spo2 and"))
+        // The permission Tensile's own scores need.
+        let core = try #require(Oura.reconnectPrompt(grantedScope: "spo2 heart_health", required: all))
+        #expect(core.contains("daily permission Tensile needs"))
+        // An earlier version's tokens: what was granted is unknown.
+        let legacy = try #require(Oura.reconnectPrompt(grantedScope: nil, required: all))
+        #expect(legacy.contains("earlier version"))
+        #expect(Oura.reconnectPrompt(grantedScope: nil, required: all, scopeUnreported: true) == nil)
     }
 
     @Test func tokensSavedBeforeTheScopeWasRecordedStillDecode() throws {
@@ -210,6 +253,80 @@ struct OuraTests {
         #expect(Oura.callback(denied, expectedState: "s1") == .denied("access_denied"))
         let empty = try #require(URL(string: "workoutapp://oura?state=s1"))
         #expect(Oura.callback(empty, expectedState: "s1") == .invalid)
+        // A code without the right state is never used.
+        let noState = try #require(URL(string: "workoutapp://oura?code=abc"))
+        #expect(Oura.callback(noState, expectedState: "s1") == .wrongState)
+    }
+
+    @Test func anErrorIsReadEvenWithoutState() throws {
+        // An error redirect may come back without the state.
+        let bare = try #require(URL(string: "workoutapp://oura?error=invalid_scope"))
+        #expect(Oura.callback(bare, expectedState: "s1") == .denied("invalid_scope"))
+        // One with someone else's state is still ignored.
+        let forged = try #require(URL(string: "workoutapp://oura?error=invalid_scope&state=other"))
+        #expect(Oura.callback(forged, expectedState: "s1") == .wrongState)
+    }
+
+    // MARK: Cache merge
+
+    func period(_ id: String, day: String, hour: Double = 0) -> Oura.SleepPeriod {
+        let start = Date(timeIntervalSince1970: 1_794_265_200 + hour * 3600)
+        return Oura.SleepPeriod(id: id, day: day, bedtimeStart: start, bedtimeEnd: start.addingTimeInterval(8 * 3600))
+    }
+
+    @Test func aCompleteSyncReplacesTheDaysItCovered() {
+        let cutoff = Date(timeIntervalSince1970: 0)
+        let cached = [period("old", day: "2026-11-10"), period("kept", day: "2026-11-01", hour: -200), period("same", day: "2026-11-11", hour: 24)]
+        // Oura re-processed the 10th under a new id.
+        let fresh = [period("new", day: "2026-11-10"), period("same", day: "2026-11-11", hour: 24)]
+        let merged = Oura.mergePeriods(cached: cached, fresh: fresh, coveredDays: "2026-11-05"..."2026-11-11", cutoff: cutoff)
+        #expect(merged.map(\.id) == ["kept", "new", "same"])
+    }
+
+    @Test func anIncompleteSyncOnlyAddsAndReplacesByID() {
+        let cutoff = Date(timeIntervalSince1970: 0)
+        let cached = [period("old", day: "2026-11-10")]
+        let fresh = [period("new", day: "2026-11-10", hour: 1)]
+        let merged = Oura.mergePeriods(cached: cached, fresh: fresh, coveredDays: nil, cutoff: cutoff)
+        #expect(merged.map(\.id) == ["old", "new"])
+    }
+
+    @Test func mergeDropsDeletedAndOldPeriods() {
+        var deleted = period("d", day: "2026-11-10")
+        deleted.type = "deleted"
+        let old = period("o", day: "2026-10-01", hour: -24 * 40)
+        let cutoff = Date(timeIntervalSince1970: 1_794_265_200 - 24 * 3600 * 10)
+        #expect(Oura.mergePeriods(cached: [old], fresh: [deleted], coveredDays: nil, cutoff: cutoff).isEmpty)
+    }
+
+    // MARK: Night dates
+
+    @Test func nightsAreFiledByOurasDay() throws {
+        // Slept in Tokyo: in bed 23:00 +09:00 (14:00 UTC), up 07:00 +09:00 on the 10th.
+        let json = """
+        {"data": [{"id": "t1", "day": "2026-11-10", "bedtime_start": "2026-11-09T23:00:00+09:00",
+                   "bedtime_end": "2026-11-10T07:00:00+09:00", "type": "long_sleep", "average_hrv": 50}]}
+        """
+        let periods = try JSONDecoder().decode(Oura.Page<Oura.SleepPeriod>.self, from: Data(json.utf8)).data
+        // Back home on UTC, the bedtime start alone would file it under the 9th.
+        let tenth = calendar.date(from: DateComponents(year: 2026, month: 11, day: 10))!
+        let ninth = calendar.date(from: DateComponents(year: 2026, month: 11, day: 9))!
+        #expect(Oura.morning(of: periods[0].bedtimeStart, calendar: calendar) == ninth)
+        #expect(Oura.nightlyRMSSD(periods, calendar: calendar) == [tenth: 50])
+        // The same in a phone set to Los Angeles.
+        var losAngeles = Calendar(identifier: .gregorian)
+        losAngeles.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let tenthLA = losAngeles.date(from: DateComponents(year: 2026, month: 11, day: 10))!
+        #expect(Oura.mainSleep(periods, calendar: losAngeles).keys.sorted() == [tenthLA])
+    }
+
+    @Test func anUnreadableDayFallsBackToTheBedtime() {
+        let start = Date(timeIntervalSince1970: 1_794_265_200) // 2026-11-09 23:00 UTC
+        let night = Oura.SleepPeriod(id: "x", day: "10 Nov", bedtimeStart: start, bedtimeEnd: start.addingTimeInterval(8 * 3600), averageHRV: 40)
+        let impossible = Oura.SleepPeriod(id: "y", day: "2026-02-30", bedtimeStart: start, bedtimeEnd: start.addingTimeInterval(8 * 3600))
+        let tenth = calendar.date(from: DateComponents(year: 2026, month: 11, day: 10))!
+        #expect(Oura.nightlyRMSSD([night], calendar: calendar) == [tenth: 40])
+        #expect(Oura.morning(of: impossible, calendar: calendar) == tenth)
     }
 
     @Test func tokenBodyIsFormEncoded() {
@@ -247,6 +364,18 @@ struct SleepSourcePickTests {
         #expect(SleepSource.tracker(bundleID: "com.ouraring.oura", sourceName: "Oura", deviceModel: nil) == .ring)
         #expect(SleepSource.tracker(bundleID: "com.apple.health.ABC", sourceName: "Alex's Apple Watch", deviceModel: "Watch") == .watch)
         #expect(SleepSource.tracker(bundleID: "com.apple.health.DEF", sourceName: "iPhone", deviceModel: "iPhone") == .other)
+    }
+
+    @Test func aWatchWhoseNameContainsOuraIsNotTheRing() {
+        // A name with "oura" inside a word, from a watch with its own bundle ID.
+        #expect(SleepSource.tracker(bundleID: "com.apple.health.ABC", sourceName: "Ana Moura's Apple Watch", deviceModel: "Watch") == .watch)
+        // With a bundle ID, the name doesn't decide, even as a whole word.
+        #expect(SleepSource.tracker(bundleID: "com.apple.health.ABC", sourceName: "Oura fan's Apple Watch", deviceModel: "Watch") == .watch)
+        // Without one, only "Oura" as a whole word is the ring.
+        #expect(SleepSource.tracker(bundleID: nil, sourceName: "Ana Moura's Apple Watch (Health)", deviceModel: nil) == .other)
+        #expect(SleepSource.tracker(bundleID: nil, sourceName: "Oura Ring (Oura)", deviceModel: nil) == .ring)
+        #expect(SleepSource.tracker(bundleID: "", sourceName: "OURA", deviceModel: nil) == .ring)
+        #expect(SleepSource.tracker(bundleID: "COM.OURARING.OURA", sourceName: "Ring", deviceModel: nil) == .ring)
     }
 
     @Test func ringFirstKeepsOnlyTheRingsNight() {

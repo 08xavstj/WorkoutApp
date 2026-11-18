@@ -61,17 +61,16 @@ nonisolated final class OuraCache: @unchecked Sendable {
     }
 
     /// Adds a sync's sleep periods (a newer one replaces an older one with
-    /// the same id) and drops anything older than `keptDays`. A cache from an
-    /// older version that also held Oura's scores decodes without them.
-    func merge(periods: [Oura.SleepPeriod], syncedAt: Date) {
+    /// the same id) and drops anything older than `keptDays`. When the sync
+    /// fetched every page, `coveredDays` ("YYYY-MM-DD", inclusive) are taken
+    /// as Oura has them now: cached periods there that Oura no longer returns
+    /// are dropped (`Oura.mergePeriods`). A cache from an older version that
+    /// also held Oura's scores decodes without them.
+    func merge(periods: [Oura.SleepPeriod], coveredDays: ClosedRange<String>?, syncedAt: Date) {
         lock.lock(); defer { lock.unlock() }
         var contents = loaded()
         let cutoff = Date.now.addingTimeInterval(-Double(Self.keptDays) * 86_400)
-
-        var byID = Dictionary(contents.periods.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for period in periods { byID[period.id] = period }
-        contents.periods = byID.values.filter { $0.bedtimeEnd >= cutoff && $0.type != "deleted" }.sorted { $0.bedtimeStart < $1.bedtimeStart }
-
+        contents.periods = Oura.mergePeriods(cached: contents.periods, fresh: periods, coveredDays: coveredDays, cutoff: cutoff)
         contents.syncedAt = syncedAt
         save(contents)
     }

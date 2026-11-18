@@ -15,13 +15,15 @@ public enum Oura {
     public static let authorizeURL = URL(string: "https://cloud.ouraring.com/oauth/authorize")!
     public static let tokenURL = URL(string: "https://api.ouraring.com/oauth/token")!
     public static let apiBase = URL(string: "https://api.ouraring.com/v2/usercollection/")!
-    /// Only what is used: `daily` covers `/sleep` (stages, overnight HRV and
-    /// heart rate, breathing rate, temperature change). `heartrate` and
-    /// `personal` were requested before but never read, and `spo2` isn't
-    /// asked for because the Watch's SpO2 is the one with independent
-    /// evidence (Oura API spec 1.43 scopes; docs/research/oura-ring-2026-11.md
-    /// §3.2, §4.4, §6). Changing this asks the owner to reconnect once
-    /// (`needsReconnect`).
+    /// What Tensile's own scores need: `daily` covers `/sleep` (stages,
+    /// overnight HRV and heart rate, breathing rate, temperature change).
+    /// `heartrate` and `personal` were requested before but never read. The
+    /// "Oura's own numbers" panel, on by default, adds `spo2` and
+    /// `heart_health` (`ownNumbersScopes`, `requestedScopes`); nothing in
+    /// Tensile's scores reads those, and the Watch's SpO2 is the one with
+    /// independent evidence (Oura API spec 1.43 scopes;
+    /// docs/research/oura-ring-2026-11.md §3.2, §4.4, §6). A sign-in that
+    /// lacks a permission now asked for prompts one reconnect (`needsReconnect`).
     public static let scopes = "daily"
     /// Oura asks every request to carry a User-Agent and says requests
     /// without one "may be rejected" (Oura API spec 1.43). Generic on
@@ -51,20 +53,67 @@ public enum Oura {
         return components?.url
     }
 
+    /// The permissions in a scope string: split on spaces, `+` or commas,
+    /// lowercased, in order, without repeats.
+    static func scopeList(_ text: String) -> [String] {
+        var seen: Set<String> = []
+        return text.lowercased().split(whereSeparator: { $0 == " " || $0 == "+" || $0 == "," })
+            .map(String.init).filter { seen.insert($0).inserted }
+    }
+
+    /// The permissions in `required` that `granted` lacks, in `required`'s
+    /// order. With no granted scope on record, all of them. Order and case
+    /// don't matter.
+    public static func missingScopes(granted: String?, required: String) -> [String] {
+        let have = Set(scopeList(granted ?? ""))
+        return scopeList(required).filter { !have.contains($0) }
+    }
+
     /// True when the owner should sign in to Oura once more:
     /// - tokens saved before the app recorded the scope come from the older,
     ///   wider request (`personal daily heartrate`), so they ask once;
-    /// - a sign-in that lacks a permission the app now needs (the owner
-    ///   unticked it, or `scopes` grew) asks, since those reads would fail.
+    /// - a sign-in that lacks a permission the app now asks for (the owner
+    ///   unticked it, or the request grew) asks, since those reads would fail.
     /// Extra permissions Oura still reports after a fresh sign-in don't ask
     /// again: one more sign-in can't remove them, and nagging would never stop.
-    /// Order and case don't matter.
-    public static func needsReconnect(grantedScope: String?, required: String = scopes) -> Bool {
-        func set(_ text: String) -> Set<String> {
-            Set(text.lowercased().split(whereSeparator: { $0 == " " || $0 == "+" || $0 == "," }).map(String.init))
+    /// A sign-in whose reply didn't say what was granted (`scopeUnreported`)
+    /// doesn't ask either: another sign-in wouldn't tell us more.
+    public static func needsReconnect(grantedScope: String?, required: String = scopes,
+                                      scopeUnreported: Bool = false) -> Bool {
+        guard let grantedScope else { return !scopeUnreported }
+        return !missingScopes(granted: grantedScope, required: required).isEmpty
+    }
+
+    /// Why to reconnect, worded from what is actually missing; nil when
+    /// nothing is (`needsReconnect`). Permissions that only "Oura's own
+    /// numbers" uses (`ownNumbersScopes`) are named and said to be only for
+    /// that panel.
+    public static func reconnectPrompt(grantedScope: String?, required: String = scopes,
+                                       scopeUnreported: Bool = false) -> String? {
+        guard needsReconnect(grantedScope: grantedScope, required: required, scopeUnreported: scopeUnreported) else { return nil }
+        let missing = missingScopes(granted: grantedScope, required: required)
+        let extras = missing.filter { ownNumbersScopes.contains($0) }
+        let core = missing.filter { !ownNumbersScopes.contains($0) }
+        let extrasText = extras.isEmpty ? nil
+            : "Oura's own numbers need the \(list(extras)) permission\(extras.count == 1 ? "" : "s"), used only for that panel and never for Tensile's scores."
+        guard grantedScope != nil else {
+            // Tokens from an earlier version: what they were granted wasn't recorded.
+            return (["This Oura sign-in is from an earlier version of Tensile. Reconnect once so Tensile knows which permissions Oura granted."]
+                    + [extrasText].compactMap { $0 }).joined(separator: " ")
         }
-        guard let grantedScope else { return true }
-        return !set(required).isSubset(of: set(grantedScope))
+        var parts: [String] = []
+        if !core.isEmpty {
+            parts.append("Oura didn't grant the \(list(core)) permission\(core.count == 1 ? "" : "s") Tensile needs for your sleep, HRV and sleeping heart rate.")
+        }
+        if let extrasText { parts.append(extrasText) }
+        parts.append("Reconnect and allow \(missing.count == 1 ? "it" : "them").")
+        return parts.joined(separator: " ")
+    }
+
+    /// "a", "a and b", "a, b and c".
+    static func list(_ items: [String]) -> String {
+        guard let last = items.last else { return "" }
+        return items.count == 1 ? last : items.dropLast().joined(separator: ", ") + " and " + last
     }
 
     /// What Oura sent back to the redirect address.
@@ -77,11 +126,16 @@ public enum Oura {
         case invalid
     }
 
+    /// An error is read before the state: an error redirect may come back
+    /// without one. An error whose state doesn't match is still ignored.
     public static func callback(_ url: URL, expectedState: String) -> Callback {
         guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return .invalid }
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+        if let error = value("error") {
+            if let state = value("state"), state != expectedState { return .wrongState }
+            return .denied(error)
+        }
         guard value("state") == expectedState else { return .wrongState }
-        if let error = value("error") { return .denied(error) }
         guard let code = value("code"), !code.isEmpty else { return .invalid }
         return .code(code)
     }
@@ -130,12 +184,18 @@ public enum Oura {
 
         /// Tokens to keep, with the expiry as a date (a minute early, so a
         /// request never goes out with a token about to lapse). The scope is
-        /// Oura's answer, else the previous tokens', else `requestedScope`.
-        public func tokens(now: Date = .now, keeping previous: Tokens? = nil, requestedScope: String? = nil) -> Tokens {
-            Tokens(accessToken: accessToken,
-                   refreshToken: refreshToken ?? previous?.refreshToken,
-                   expiresAt: expiresIn.map { now.addingTimeInterval(max(0, $0 - 60)) },
-                   scope: scope ?? previous?.scope ?? requestedScope)
+        /// Oura's answer, else the previous tokens'. What was asked for is
+        /// never recorded as granted (the owner can untick a permission on
+        /// Oura's page): a fresh sign-in whose reply doesn't say is marked
+        /// `scopeUnreported` instead, so it isn't asked to reconnect again.
+        public func tokens(now: Date = .now, keeping previous: Tokens? = nil) -> Tokens {
+            let granted = scope ?? previous?.scope
+            let unreported = granted == nil && (previous.map { $0.scopeUnreported == true } ?? true)
+            return Tokens(accessToken: accessToken,
+                          refreshToken: refreshToken ?? previous?.refreshToken,
+                          expiresAt: expiresIn.map { now.addingTimeInterval(max(0, $0 - 60)) },
+                          scope: granted,
+                          scopeUnreported: unreported ? true : nil)
         }
     }
 
@@ -144,14 +204,20 @@ public enum Oura {
         public var refreshToken: String?
         public var expiresAt: Date?
         /// The permissions this sign-in was granted; nil for tokens saved
-        /// before the app recorded it (`needsReconnect`).
+        /// before the app recorded it, or when Oura's reply didn't say
+        /// (`scopeUnreported`; `needsReconnect`).
         public var scope: String?
+        /// True when this sign-in's reply didn't say what was granted; nil
+        /// for tokens with a scope or saved before the app recorded one.
+        public var scopeUnreported: Bool?
 
-        public init(accessToken: String, refreshToken: String?, expiresAt: Date?, scope: String? = nil) {
+        public init(accessToken: String, refreshToken: String?, expiresAt: Date?, scope: String? = nil,
+                    scopeUnreported: Bool? = nil) {
             self.accessToken = accessToken
             self.refreshToken = refreshToken
             self.expiresAt = expiresAt
             self.scope = scope
+            self.scopeUnreported = scopeUnreported
         }
 
         public func isExpired(now: Date = .now) -> Bool {
@@ -319,10 +385,12 @@ public enum Oura {
     }
 
     // Oura's Readiness and Sleep scores (`/daily_readiness`, `/daily_sleep`)
-    // are not downloaded: they are proprietary composites with unpublished
-    // weights and no published validation against an outcome, the same reason
-    // Apple's own scores were removed (docs/research/oura-ring-2026-11.md §5-6,
-    // [R49]; apple-scores-2026-11.md).
+    // never feed Tensile's scores: they are proprietary composites with
+    // unpublished weights and no published validation against an outcome, the
+    // same reason Apple's own scores were removed (docs/research/oura-ring-2026-11.md
+    // §5-6, [R49]; apple-scores-2026-11.md). They are downloaded only for the
+    // display-only "Oura's own numbers" panel (`OuraOwnNumbers`), on the
+    // owner's request.
 
     // MARK: Nights
 
@@ -332,11 +400,31 @@ public enum Oura {
         calendar.startOfDay(for: date.addingTimeInterval(6 * 3600))
     }
 
-    /// The main sleep for each morning: the longest sleep period starting that night.
+    /// The morning a sleep period is filed under: Oura's `day` (the local
+    /// date of the morning it ended, in the time zone the ring was in) as
+    /// that date in `calendar`, so a night slept in another time zone keeps
+    /// its date; the morning of its bedtime start (`morning(of:)`) when `day`
+    /// doesn't read as a date.
+    public static func morning(of period: SleepPeriod, calendar: Calendar = .current) -> Date {
+        day(period.day, calendar: calendar) ?? morning(of: period.bedtimeStart, calendar: calendar)
+    }
+
+    /// "YYYY-MM-DD" as the start of that date in `calendar`; nil when it isn't a real date.
+    static func day(_ text: String, calendar: Calendar) -> Date? {
+        let parts = text.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
+              let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else { return nil }
+        let check = calendar.dateComponents([.year, .month, .day], from: date)
+        guard check.year == year, check.month == month, check.day == day else { return nil }
+        return calendar.startOfDay(for: date)
+    }
+
+    /// The main sleep for each morning (`morning(of:)`): the longest sleep period filed under it.
     public static func mainSleep(_ periods: [SleepPeriod], calendar: Calendar = .current) -> [Date: SleepPeriod] {
         var result: [Date: SleepPeriod] = [:]
         for period in periods where period.isSleep {
-            let morning = morning(of: period.bedtimeStart, calendar: calendar)
+            let morning = morning(of: period, calendar: calendar)
             let length = period.bedtimeEnd.timeIntervalSince(period.bedtimeStart)
             if let current = result[morning], current.bedtimeEnd.timeIntervalSince(current.bedtimeStart) >= length { continue }
             result[morning] = period
@@ -383,6 +471,23 @@ public enum Oura {
             .filter { $0.isSleep && $0.bedtimeStart >= start && $0.bedtimeStart < end }
             .sorted { $0.bedtimeStart < $1.bedtimeStart }
             .flatMap { $0.samples() }
+    }
+
+    /// The cached sleep periods after a sync. A fresh period replaces a cached
+    /// one with the same id. When the sync fetched every page, it is the whole
+    /// truth for the days it covered (`coveredDays`, "YYYY-MM-DD", inclusive):
+    /// a cached period filed on one of those days that Oura no longer returns
+    /// (re-processed under a new id, or deleted) is dropped, so a night never
+    /// counts twice. Pass nil when a page is missing. Deleted periods and
+    /// those that ended before `cutoff` are dropped. Oldest first.
+    public static func mergePeriods(cached: [SleepPeriod], fresh: [SleepPeriod],
+                                    coveredDays: ClosedRange<String>?, cutoff: Date) -> [SleepPeriod] {
+        let kept = coveredDays.map { days in cached.filter { !days.contains($0.day) } } ?? cached
+        var byID = Dictionary(kept.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        for period in fresh { byID[period.id] = period }
+        return byID.values
+            .filter { $0.bedtimeEnd >= cutoff && $0.type != "deleted" }
+            .sorted { ($0.bedtimeStart, $0.id) < ($1.bedtimeStart, $1.id) }
     }
 
     // MARK: Dates

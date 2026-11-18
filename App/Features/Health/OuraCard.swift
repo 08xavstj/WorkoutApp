@@ -15,6 +15,8 @@ import AppCore
 /// Sensors 2024); stages and breathing rate have weaker evidence.
 struct OuraCard: View {
     @State private var link = OuraLink.shared
+    /// Whether "Oura's own numbers" is shown (`OuraOwnNumbersSetting`), for the footnote.
+    @AppStorage(OuraOwnNumbersSetting.key) private var ownNumbers = true
 
     /// The newest main sleep (`Oura.mainSleep`, as the rest of the app files nights).
     private var latest: Oura.SleepPeriod? {
@@ -58,7 +60,8 @@ struct OuraCard: View {
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 if link.needsReconnect {
-                    Text("Reconnect Oura once in Settings › Oura Ring so its permissions match what Tensile now uses.")
+                    // Worded from what is actually missing (`Oura.reconnectPrompt`).
+                    Text("\(link.reconnectPrompt ?? "Oura's permissions don't match what Tensile asks for.") Reconnect in Settings › Data & privacy › Oura Ring.")
                         .font(.caption)
                         .foregroundStyle(Theme.recoveryModerateText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -71,7 +74,9 @@ struct OuraCard: View {
 
     private func footnote(_ night: Oura.SleepPeriod) -> String {
         let lowest = night.lowestHeartRate.map { " Lowest heart rate \(Int($0.rounded())) bpm." } ?? ""
-        return "As the ring measured it. HRV is the night's average RMSSD; stages are estimates; temperature is the change from your usual.\(lowest) Oura's own scores are in their own card below and don't feed Tensile's."
+        // The scores' card exists only while the panel is on (`OuraOwnNumbersCard`).
+        let scores = ownNumbers ? " Oura's own scores are in their own card below and don't feed Tensile's." : " Oura's own scores don't feed Tensile's."
+        return "As the ring measured it. HRV is the night's average RMSSD; stages are estimates; temperature is the change from your usual.\(lowest)\(scores)"
     }
 
     private func stat(_ title: String, _ value: String?) -> some View {
