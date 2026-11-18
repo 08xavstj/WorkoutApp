@@ -225,6 +225,19 @@ Ranked by expected health effect × strength of evidence, with clutter counted a
 
 ---
 
+## 7. Built on 18 Nov (I3, I4, W12)
+
+Checked again at the source before building (PubMed abstracts unless noted):
+
+- **Sitting-rising test** (Araújo 2026, PMID 40569873): 4,282 adults aged 46–75, median 12.3 years; groups 0–4, 4.5–7.5, 8, 8.5–9.5 and 10 with death rates 42.1%, 20.4%, 11.1%, 7.0% and 3.7%; scoring: 1 point off 5 per hand or knee support, 0.5 for unsteadiness. The app uses these groups (`FunctionalTest`).
+- **Push-ups** (Yang 2019, PMID 30768197): men aged 18+, mean 39.6; five count groups, but the abstract gives only the ends (< 10 and > 40), so the app uses only those two and shows no comparison for women.
+- **One-leg stand** (Araujo 2022, PMID 35728834): 1,702 adults aged 51–75, median 7 years; 20.4% couldn't; deaths 17.5% vs 4.6%.
+- **IMST** (Craighead 2021, PMID 34184544): 36 completers aged 50–79, SBP ≥ 120; 30 breaths a day, 6 days a week, 6 weeks at 75% of maximal inspiratory pressure; office SBP 135 → 126, about 75% kept 6 weeks after stopping.
+- **Melatonin** (Herxheimer 2002, PMID 12076414): taken near the target bedtime at the destination (10 pm–midnight); 0.5–5 mg similar, 5 mg faster sleep onset; NNT 2; case reports of harm with epilepsy and warfarin.
+- **Light** (Roach 2019, PMC full text): light in the ~3 h before the body-clock low point (about 3 h before habitual wake) delays the clock, in the ~3 h after it advances it. The review gives no natural re-entrainment rate, so the 1 h a day east and 1.5 h west pace in `TravelShift` is marked the app's choice.
+
+Not built: a Watch counter for IMST (it needs a new Watch screen in the shared navigation and a sync path, in files other work is changing now).
+
 ## References
 
 ### Apple developer documentation [A] (JSON behind developer.apple.com, read 18 Nov 2026)
