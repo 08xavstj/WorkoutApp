@@ -188,7 +188,7 @@ struct AddTravelGymSheet: View {
                 } header: {
                     Text("Name")
                 } footer: {
-                    Text("You can fine-tune the equipment later in Settings › Gym equipment.")
+                    Text("You can fine-tune the equipment later in Settings › Training › Gym equipment.")
                 }
                 TravelEndSection(end: $end, customDate: $customDate)
             }

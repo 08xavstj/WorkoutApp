@@ -45,6 +45,19 @@ struct ActivityCalendarTests {
         #expect(Set(days).count == 31)
     }
 
+    @Test func monthGridAcrossAMidnightDaylightSavingChange() throws {
+        // Santiago skips from 00:00 to 01:00 on the first Sunday of
+        // September, so that day starts at 01:00 and adding a day to it
+        // kept 01:00 for the rest of the month.
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = try #require(TimeZone(identifier: "America/Santiago"))
+        let september = try #require(santiago.date(from: DateComponents(year: 2026, month: 9, day: 15, hour: 12)))
+        let days = ActivityCalendar.monthGrid(containing: september, calendar: santiago).compactMap { $0 }
+        #expect(days.count == 30)
+        #expect(days.allSatisfy { santiago.startOfDay(for: $0) == $0 })
+        #expect(days.contains { santiago.component(.hour, from: $0) == 1 })
+    }
+
     @Test func activitiesGroupByStartDayInTimeOrder() {
         let evening = activity("run", .run, date(2026, 11, 3, 18))
         let morning = activity("lift", .lifting, date(2026, 11, 3, 7))

@@ -4,18 +4,22 @@ import SwiftUI
 /// The hard and easy bouts of an interval workout, one row each: length,
 /// average and peak heart rate, and pace or speed when there is a route
 /// (`IntervalBouts`; competitor-features-2026-11.md, B10). Bouts come from
-/// Tensile's interval session when the workout names one, else from the
-/// segments or laps the recording app saved. Nothing shows for a workout
-/// with neither.
+/// Tensile's interval session when the workout names one (the steps the
+/// Watch recorded, else the plan), else from the segments the recording app
+/// saved. Nothing shows for a workout with neither, or when the bouts are
+/// plain laps the splits table already shows.
 struct IntervalBoutsCard: View {
     let workoutID: UUID
     let heartRate: [HeartRateSample]
     let route: CardioRoute?
     let showsPace: Bool
+    /// The page shows a splits table, so plain laps would repeat it.
+    var hasSplits = false
 
     @Environment(\.healthClient) private var health
     @State private var bouts: [IntervalBouts.Bout] = []
     @State private var fromSession = false
+    @State private var fromRecordedSteps = false
 
     private var miles: Bool {
         let system = Locale.current.measurementSystem
@@ -26,7 +30,7 @@ struct IntervalBoutsCard: View {
 
     var body: some View {
         Group {
-            if bouts.count >= 2 {
+            if IntervalBouts.showsCard(bouts, fromSession: fromSession, hasSplits: hasSplits) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(IntervalBouts.isIntervalWorkout(bouts) ? "Intervals" : "Laps")
                         .font(.headline)
@@ -84,9 +88,16 @@ struct IntervalBoutsCard: View {
 
     private var note: String {
         let source = fromSession
-            ? "Bouts follow the interval session's plan from the start of the workout, moved for pauses."
-            : "Bouts are the segments or laps the recording app saved; hard and easy are told apart by heart rate (or speed)."
-        return source + " Heart rate lags effort by a minute or two, so a hard bout's average reads below where it ended. Intervals like these raise VO₂ max more than steady cardio (Milanović 2015)."
+            ? (fromRecordedSteps
+                ? "Bouts are the interval steps your Watch recorded."
+                : "Bouts follow the interval session's plan from the start of the workout, moved for pauses.")
+            : "Bouts are the segments the recording app saved; hard and easy are told apart by heart rate (or speed)."
+        var text = source + " Heart rate lags effort by a minute or two, so a hard bout's average reads below where it ended."
+        // Only under real intervals (Milanović Z, et al. Sports Med 2015;45(10):1469-1481).
+        if IntervalBouts.showsIntervalEvidence(bouts, fromSession: fromSession) {
+            text += " Intervals like these raise VO₂ max more than steady cardio (Milanović 2015)."
+        }
+        return text
     }
 
     private func load() async {
@@ -94,7 +105,12 @@ struct IntervalBoutsCard: View {
         let readings = heartRate.map { (date: $0.date, bpm: $0.bpm) }
         let segments: [IntervalBouts.Segment]
         if let id = structure.intervalSessionID, let session = IntervalSession.named(id) {
-            segments = IntervalBouts.planned(session, start: structure.start, end: structure.end, pauses: structure.pauses)
+            // The steps the Watch ran, so a skipped step is left out; the plan
+            // only when the workout has none (recorded before they were saved).
+            let recorded = IntervalBouts.recorded(session, steps: structure.steps)
+            fromRecordedSteps = !recorded.isEmpty
+            segments = fromRecordedSteps ? recorded
+                : IntervalBouts.planned(session, start: structure.start, end: structure.end, pauses: structure.pauses)
             fromSession = true
         } else if structure.segments.count >= 2 {
             let raw = structure.segments.map { IntervalBouts.Segment(start: $0.start, end: $0.end, kind: .lap) }

@@ -13,6 +13,9 @@ struct YearInReviewView: View {
     @Query(sort: \WorkoutSession.startedAt) private var sessions: [WorkoutSession]
     @State private var year = Calendar.current.component(.year, from: .now)
     @State private var summary: YearInReview.Summary?
+    /// Cardio bests are counted only once every route has been checked
+    /// (`CardioBestsStore.isBackfillComplete`); until then the tile says "lift records".
+    @State private var countsCardioRecords = false
 
     private var miles: Bool {
         let system = Locale.current.measurementSystem
@@ -41,7 +44,7 @@ struct YearInReviewView: View {
                         .foregroundStyle(Theme.secondaryText)
                         .card()
                 } else {
-                    YearTotalsCard(summary: summary, miles: miles)
+                    YearTotalsCard(summary: summary, miles: miles, countsCardioRecords: countsCardioRecords)
                     YearKindsCard(summary: summary, miles: miles)
                     YearMonthsCard(summary: summary)
                 }
@@ -76,11 +79,16 @@ struct YearInReviewView: View {
                                           distanceMeters: $0.distanceKm.map { $0 * 1000 })
             }
         }
-        // Lift records (`PRHistory`) and new cardio bests (`CardioBests`) set this year.
+        // Lift records (`PRHistory`) and new cardio bests (`CardioBests`) set this
+        // year. Cardio bests only once every route has been read (Fitness ›
+        // Cardio bests does that): a partial cache would undercount them.
         let logged = LiftRecordInputs.sessions(finished)
         let liftRecords = PRHistory.events(logged, traits: LiftRecordInputs.traits(logged, library: library))
             .filter { interval.contains($0.date) }.count
-        let cardioRecords = CardioBests.recordsSet(CardioBestsStore.workouts()).filter { interval.contains($0.date) }.count
+        let cardioComplete = CardioBestsStore.isBackfillComplete
+        let cardioRecords = cardioComplete
+            ? CardioBests.recordsSet(CardioBestsStore.workouts()).filter { interval.contains($0.date) }.count : 0
+        countsCardioRecords = cardioComplete
         summary = YearInReview.summary(year: year, activities: ActivityCalendar.merged(lifting: lifting, health: other),
                                        records: liftRecords + cardioRecords, calendar: calendar)
     }
@@ -90,6 +98,7 @@ struct YearInReviewView: View {
 private struct YearTotalsCard: View {
     let summary: YearInReview.Summary
     let miles: Bool
+    let countsCardioRecords: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -100,11 +109,11 @@ private struct YearTotalsCard: View {
                     tile("\(summary.activeDays)", "active days")
                 }
                 GridRow {
-                    tile(Duration.seconds(summary.seconds).formatted(.units(allowed: [.hours], width: .abbreviated)), "total time")
-                    tile(summary.meters > 0 ? CardioSummary.distanceText(meters: summary.meters, miles: miles) : "–", "distance")
+                    tile(Duration.seconds(summary.seconds).formatted(.units(allowed: [.hours, .minutes], width: .narrow)), "total time")
+                    tile(summary.onFootMeters > 0 ? CardioSummary.distanceText(meters: summary.onFootMeters, miles: miles) : "–", "on foot")
                 }
                 GridRow {
-                    tile("\(summary.records)", "records set")
+                    tile("\(summary.records)", countsCardioRecords ? "records set" : "lift records")
                     tile(summary.busiestMonth.map(monthName) ?? "–", "busiest month")
                 }
             }

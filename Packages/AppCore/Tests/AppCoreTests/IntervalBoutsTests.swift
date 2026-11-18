@@ -114,9 +114,59 @@ struct IntervalBoutsTests {
         let bouts = IntervalBouts.bouts(segments, heartRate: [], route: route)
         #expect(bouts[0].speed.map { abs($0 - 4) < 0.01 } == true)
         #expect(bouts[1].meters.map { abs($0 - 600) < 1 } == true)
-        // Speed alone can call hard and easy.
+        // A fast stretch then a slow one is a single switch: laps, not intervals.
         let three = segments + [IntervalBouts.Segment(start: start.addingTimeInterval(150), end: start.addingTimeInterval(200), kind: .lap)]
-        #expect(IntervalBouts.labelled(three, heartRate: [], route: route).filter { $0.kind == .work }.count == 2)
+        #expect(IntervalBouts.labelled(three, heartRate: [], route: route).allSatisfy { $0.kind == .lap })
+    }
+
+    @Test func speedAloneCallsAlternatingSegments() {
+        // 100 s at 4 m/s and 100 s at 2 m/s, three times over.
+        var latitude = 46.0
+        let points: [RoutePoint] = (0...600).map { second in
+            if second > 0 { latitude += ((second - 1) / 100 % 2 == 0 ? 4 : 2) / metersPerDegree }
+            return RoutePoint(latitude: latitude, longitude: 7, time: start.addingTimeInterval(Double(second)), horizontalAccuracy: 5)
+        }
+        let route = CardioRoute(points: points)
+        let segments = (0..<6).map { index in
+            IntervalBouts.Segment(start: start.addingTimeInterval(Double(index) * 100), end: start.addingTimeInterval(Double(index + 1) * 100), kind: .lap)
+        }
+        #expect(IntervalBouts.labelled(segments, heartRate: [], route: route).map(\.kind) == [.work, .recovery, .work, .recovery, .work, .coolDown])
+    }
+
+    @Test func aFastFinishIsNotIntervals() {
+        // Three easy kilometre laps and a hard last one: one switch.
+        let plan: [Double] = [135, 137, 136, 168]
+        var segments: [IntervalBouts.Segment] = []
+        var readings: [(date: Date, bpm: Double)] = []
+        for (index, bpm) in plan.enumerated() {
+            let from = start.addingTimeInterval(Double(index) * 300)
+            segments.append(.init(start: from, end: from.addingTimeInterval(300), kind: .lap))
+            readings += stride(from: 0, to: 300, by: 5).map { (from.addingTimeInterval(Double($0)), bpm) }
+        }
+        let labelled = IntervalBouts.labelled(segments, heartRate: readings, route: nil)
+        #expect(labelled.allSatisfy { $0.kind == .lap })
+        let bouts = IntervalBouts.bouts(labelled, heartRate: readings, route: nil)
+        // Plain laps repeat the splits table: no card, and no VO2 max line.
+        #expect(!IntervalBouts.showsCard(bouts, fromSession: false, hasSplits: true))
+        #expect(IntervalBouts.showsCard(bouts, fromSession: false, hasSplits: false))
+        #expect(!IntervalBouts.showsIntervalEvidence(bouts, fromSession: false))
+        #expect(IntervalBouts.showsIntervalEvidence(bouts, fromSession: true))
+    }
+
+    @Test func recordedStepsFollowWhatTheWatchRan() {
+        let session = IntervalSession.fourByFour(.outdoorRun)
+        // Warm-up, first hard interval, then the user skipped the first easy
+        // step (index 2) and went straight to the second hard one (index 3).
+        let steps = [
+            IntervalBouts.RecordedStep(index: 3, start: start.addingTimeInterval(840), end: start.addingTimeInterval(1080)),
+            IntervalBouts.RecordedStep(index: 0, start: start, end: start.addingTimeInterval(600)),
+            IntervalBouts.RecordedStep(index: 1, start: start.addingTimeInterval(600), end: start.addingTimeInterval(840)),
+            IntervalBouts.RecordedStep(index: 99, start: start.addingTimeInterval(1080), end: start.addingTimeInterval(1200)),
+        ]
+        let segments = IntervalBouts.recorded(session, steps: steps)
+        #expect(segments.map(\.kind) == [.warmUp, .work, .work])
+        #expect(segments[2].start == start.addingTimeInterval(840))
+        #expect(IntervalSession.stepMetadataKey == "TensileIntervalStep")
     }
 
     @Test func routeDistanceAtATime() {

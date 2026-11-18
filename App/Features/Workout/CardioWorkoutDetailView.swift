@@ -46,9 +46,10 @@ struct CardioWorkoutDetailView: View {
                         RouteChartsCard(route: route, showsPace: detail.showsPace)
                     }
                     heartCard(detail)
-                    IntervalBoutsCard(workoutID: detail.uuid, heartRate: detail.heartRate, route: route, showsPace: detail.showsPace)
+                    IntervalBoutsCard(workoutID: detail.uuid, heartRate: detail.heartRate, route: route, showsPace: detail.showsPace,
+                                      hasSplits: route.map { !$0.splits(unitMeters: unitMeters).isEmpty } ?? false)
                     if let vo2 = detail.vo2Max {
-                        fitnessCard(vo2)
+                        fitnessCard(vo2, detail: detail)
                     }
                     if let route, !route.splits(unitMeters: unitMeters).isEmpty {
                         splitsCard(route, showsPace: detail.showsPace)
@@ -85,7 +86,9 @@ struct CardioWorkoutDetailView: View {
 
     private func load() async {
         defer { loaded = true }
-        guard let health, let found = try? await health.cardioWorkoutDetail(id: workoutID) else { return }
+        guard let health, let read = try? await health.cardioWorkoutDetail(id: workoutID) as CardioWorkoutDetail?? else { return }
+        // Read fine but gone from Health: forget its best efforts too.
+        guard let found = read else { return CardioBestsStore.remove(workoutID) }
         let profile = metrics.heartRateProfile ?? settings.heartRateProfile(restingHeartRate: nil)
         let scheme = await ZonePreferences.current(profile: profile, health: health).scheme
         let readings = found.heartRate.map { (date: $0.date, bpm: $0.bpm) }
@@ -100,6 +103,15 @@ struct CardioWorkoutDetailView: View {
         detail = found
         // A sport with no speed to speak of opens on heart rate.
         if path.range(for: .speed) == nil || found.activity?.movement == .stationary { metric = .heartRate }
+    }
+
+    /// Whose estimate it is, and Apple Watch's measured bias only when it
+    /// came from one (`VO2Source.appleWatchAccuracy`, Lambe 2025).
+    private func vo2Note(_ detail: CardioWorkoutDetail) -> String {
+        let whose = detail.vo2IsAppleWatch ? "Apple Watch's" : (detail.vo2SourceName.map { "\($0)'s" } ?? "Your watch's")
+        var text = "\(whose) estimate from this workout (ml/kg/min)."
+        if detail.vo2IsAppleWatch { text += " " + VO2Source.appleWatchAccuracy }
+        return text + " Higher cardio fitness goes with longer life (Mandsager 2018); the trend is under Fitness › Cardio fitness."
     }
 
     // MARK: Map
@@ -266,7 +278,7 @@ struct CardioWorkoutDetailView: View {
 
     // MARK: Cardio fitness
 
-    private func fitnessCard(_ vo2: Double) -> some View {
+    private func fitnessCard(_ vo2: Double, detail: CardioWorkoutDetail) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Cardio fitness")
@@ -283,7 +295,7 @@ struct CardioWorkoutDetailView: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             // Mandsager 2018 (JAMA Netw Open): fitness is among the strongest predictors of survival.
-            Text("Apple Watch's estimate from this workout (ml/kg/min). Higher cardio fitness goes with longer life (Mandsager 2018); the trend is under Fitness › Cardio fitness.")
+            Text(vo2Note(detail))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

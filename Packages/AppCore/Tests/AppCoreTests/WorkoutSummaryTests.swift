@@ -188,4 +188,22 @@ struct WorkoutSummaryTests {
         #expect(WorkoutSummary.comparison(volumeKg: 4_800)?.text == "About 3 hippos")
         #expect(WorkoutSummary.comparison(volumeKg: 9_000)?.text == "About 2 elephants")
     }
+
+    @Test func bestSetIsRankedOnEverySetsEstimate() throws {
+        // 100 kg × 12 (≈ 140 kg by Epley) beats 90 kg × 9 (≈ 117 kg), though
+        // only the second is short enough to show an estimate for.
+        let result = try #require(WorkoutSummary.result(exercise("bench", [set(90, 9), set(100, 12)]), index: 0))
+        #expect(result.bestSet?.weightKg == 100 && result.bestSet?.reps == 12)
+        // The shown estimate stays gated: none for a 12-rep set.
+        #expect(result.estimatedOneRepMaxKg == 0)
+        #expect(OneRepMax.ranksBelow(weight: 90, reps: 9, rpe: nil, weight: 100, reps: 12, rpe: nil))
+        // Bodyweight work: more reps wins.
+        #expect(OneRepMax.ranksBelow(weight: 0, reps: 8, rpe: nil, weight: 0, reps: 12, rpe: nil))
+        // The lift chart's point: best set 100 × 12, estimate from the 9-rep set.
+        let point = try #require(LiftProgress.points([LiftProgress.LoggedSession(date: start, sets: [
+            LiftProgress.LoggedSet(weight: 90, reps: 9), LiftProgress.LoggedSet(weight: 100, reps: 12),
+        ])]).first)
+        #expect(point.bestWeight == 100 && point.bestReps == 12)
+        #expect(abs(point.estimatedOneRepMax - 117) < 0.01)
+    }
 }

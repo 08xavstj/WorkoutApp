@@ -88,6 +88,55 @@ struct WeeklyIntensityTests {
         #expect(WeeklyIntensity.signature(profile: profile, scheme: scheme) != WeeklyIntensity.signature(profile: profile, scheme: other))
     }
 
+    @Test func zoneMinutesNeedFortyPercentOfReserve() throws {
+        // Apple Health zones with no floor: zone 1 is everything under 120.
+        let noFloor = try #require(HeartRateZoneScheme.appleHealth(floor: nil, boundaries: [120, 135, 150, 165],
+                                                                   easyBand: scheme.easyBand))
+        let start = monday().addingTimeInterval(8 * 3600)
+        // Ten hours at the desk (70 bpm, 8% of reserve), then 30 min at
+        // 115 bpm (43%): only the 30 count.
+        let readings = minutes(600, at: 70, from: start) + minutes(30, at: 115, from: start.addingTimeInterval(600 * 60))
+        let week = WeeklyIntensity.week(start: monday(), end: monday().addingTimeInterval(7 * 86_400),
+                                        heartRate: readings, lifting: [], profile: profile, scheme: noFloor)
+        #expect(abs(week.zoneMinutes[0] - 29) < 1.01)
+        #expect(week.zoneMinutes.reduce(0, +) < 31)
+        #expect(WeeklyIntensity.signature(profile: profile, scheme: scheme).hasPrefix("v\(WeeklyIntensity.countingVersion)|"))
+    }
+
+    @Test func weekStartsStayAtMidnightAcrossADaylightSavingChange() throws {
+        // Santiago moves its clocks from 00:00 to 01:00 in September, so the
+        // Sunday of the change starts at 01:00.
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = try #require(TimeZone(identifier: "America/Santiago"))
+        santiago.firstWeekday = 1
+        let change = try #require(santiago.timeZone.nextDaylightSavingTimeTransition(after: monday().addingTimeInterval(-200 * 86_400)))
+        let changeDay = santiago.startOfDay(for: change)
+        try #require(santiago.component(.hour, from: changeDay) == 1)
+        // From five weeks after the change, back past it, and from its own week.
+        for end in [changeDay.addingTimeInterval(35 * 86_400), changeDay.addingTimeInterval(3600)] {
+            let starts = WeeklyIntensity.weekStarts(endingWith: end, count: 12, calendar: santiago)
+            #expect(starts.count == 12)
+            for start in starts {
+                #expect(start == santiago.dateInterval(of: .weekOfYear, for: start)?.start)
+                #expect(start == santiago.startOfDay(for: start))
+            }
+        }
+    }
+
+    @Test func liftingFingerprintsChangeWhenASessionIsEdited() {
+        let starts = WeeklyIntensity.weekStarts(endingWith: monday(), count: 2, calendar: calendar)
+        let session = DateInterval(start: starts[0].addingTimeInterval(86_400 + 18 * 3600), duration: 3600)
+        let longer = DateInterval(start: session.start, duration: 4200)
+        let before = WeeklyIntensity.liftingFingerprints([session], weekStarts: starts, calendar: calendar)
+        let after = WeeklyIntensity.liftingFingerprints([longer], weekStarts: starts, calendar: calendar)
+        #expect(before[starts[0]] != after[starts[0]])
+        #expect(before[starts[1]] == "" && after[starts[1]] == "")
+        // The same sessions in another order give the same key.
+        let other = DateInterval(start: starts[0].addingTimeInterval(3 * 86_400), duration: 1800)
+        #expect(WeeklyIntensity.liftingFingerprints([session, other], weekStarts: starts, calendar: calendar)
+            == WeeklyIntensity.liftingFingerprints([other, session], weekStarts: starts, calendar: calendar))
+    }
+
     @Test func weekRoundTripsThroughJSON() throws {
         let week = WeeklyIntensity.Week(start: monday(), zoneMinutes: [1, 2, 3, 4, 5], moderate: 10, vigorous: 5, hasHeartRate: true)
         #expect(try JSONDecoder().decode(WeeklyIntensity.Week.self, from: JSONEncoder().encode(week)) == week)

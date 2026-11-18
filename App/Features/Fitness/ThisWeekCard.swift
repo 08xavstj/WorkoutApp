@@ -149,7 +149,7 @@ struct ThisWeekCard: View {
             PlanTextButton(title: "Review", systemImage: "chart.bar.doc.horizontal") {
                 router.showWeeklyReview = true
             }
-            .accessibilityHint("Last week in numbers and three changes for this week")
+            .accessibilityHint("Last week in numbers and one change for the week, up to three")
             Spacer(minLength: 0)
         }
     }

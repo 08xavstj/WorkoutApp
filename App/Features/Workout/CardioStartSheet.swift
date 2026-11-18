@@ -16,6 +16,8 @@ struct CardioStartSheet: View {
     /// Up to three recent activities, newest first, as comma-separated raw values.
     @AppStorage("phoneCardioRecent") private var recentRaw = ""
     @State private var starting: CardioActivity?
+    /// Asked to open on the Watch; the alert says so before the sheet closes.
+    @State private var opened: CardioActivity?
     @ScaledMetric(relativeTo: .body) private var badgeSize: CGFloat = 34
 
     static let recentLimit = 3
@@ -27,12 +29,6 @@ struct CardioStartSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if let problem = watch.startProblem {
-                    Section {
-                        Label(problem, systemImage: "exclamationmark.applewatch")
-                            .foregroundStyle(Theme.heart)
-                    }
-                }
                 if !recent.isEmpty {
                     Section("Recent") {
                         ForEach(recent) { row(for: $0) }
@@ -61,7 +57,28 @@ struct CardioStartSheet: View {
                 }
             }
             .onAppear { watch.startProblem = nil }
+            // At the top of a long list the problem was easy to miss.
+            .alert("Couldn't start on your Watch", isPresented: problemShown) {
+                Button("OK", role: .cancel) { watch.startProblem = nil }
+            } message: {
+                Text(watch.startProblem ?? "")
+            }
+            // The phone can't tell whether a workout is already running on the
+            // Watch (then nothing new starts), so it says what to check.
+            .alert("Opening on your Watch", isPresented: openedShown) {
+                Button("OK", role: .cancel) { finish() }
+            } message: {
+                Text("If a workout is already running there, finish it first.")
+            }
         }
+    }
+
+    private var problemShown: Binding<Bool> {
+        Binding(get: { watch.startProblem != nil }, set: { if !$0 { watch.startProblem = nil } })
+    }
+
+    private var openedShown: Binding<Bool> {
+        Binding(get: { opened != nil }, set: { if !$0 { finish() } })
     }
 
     private func row(for activity: CardioActivity) -> some View {
@@ -95,6 +112,13 @@ struct CardioStartSheet: View {
         let started = await watch.startCardioOnWatch(activity)
         starting = nil
         guard started else { return }
+        opened = activity
+    }
+
+    /// After the "Opening" alert: kept as recent, and the sheet closes.
+    private func finish() {
+        guard let activity = opened else { return }
+        opened = nil
         remember(activity)
         dismiss()
     }

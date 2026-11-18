@@ -26,6 +26,8 @@ struct SettingsView: View {
                     }
                     SettingsPageLink(title: "Notifications", detail: "Daily messages, reminders, doses", icon: "bell.fill", id: "notifications") {
                         CoachCheckInsSettingsSection()
+                        // Offered in the morning check-in, so it sits with the daily messages.
+                        MoodScreenSettingsSection()
                         RemindersSettingsSection()
                     }
                     SettingsPageLink(title: "Sleep & nutrition", detail: "Sleep need, rest mode, calories", icon: "bed.double.fill", id: "sleep-nutrition") {
@@ -35,7 +37,6 @@ struct SettingsView: View {
                     SettingsPageLink(title: "Data & privacy", detail: "Apple Health, Oura, route privacy, export", icon: "lock.fill", id: "data") {
                         DataSourcesSettingsSection()
                         CoachSettingsSection()
-                        MoodScreenSettingsSection()
                         RoutePrivacySettingsSection()
                         DataExportSettingsSection()
                     }
@@ -178,7 +179,7 @@ private struct ProfileSettingsSection: View {
             }
         } footer: {
             // Lambe et al., PLOS ONE 2025 (`VO2Source`).
-            Text("Your fitness level and the coach use this one. Apple Watch read about 6 points low on average against lab tests and only measures on outdoor walks, runs and hikes; Tensile's estimate comes from your resting and max heart rate and your activity, lifting included, and is about ±5. If the one you pick has no value yet, the other is used.")
+            Text("Your fitness level and the coach use this one. Apple Watch only measures on outdoor walks, runs and hikes. \(VO2Source.appleWatchAccuracy) Tensile's estimate comes from your resting and max heart rate and your activity, lifting included, and is about ±5. If the one you pick has no value yet, the other is used.")
         }
     }
 
@@ -530,7 +531,7 @@ private struct RemindersSettingsSection: View {
         // The same setting as This week › Weekly review.
         Toggle(isOn: $settings.weeklyReviewOn) {
             Text("Monday review reminder")
-            Text("Last week in numbers, three changes; skipped once you've opened it")
+            Text("Last week in numbers, one change for the week (up to three); skipped once you've opened it")
         }
         .onChange(of: settings.weeklyReviewOn) {
             // Asks iOS when this is the switch that turns it on (`Reminders.scheduleWeeklyReview`).
@@ -601,7 +602,7 @@ private struct CoachSettingsSection: View {
         } header: {
             Text("Coach")
         } footer: {
-            Text("Chats, health data and photos stay on this iPhone. Only weather (your city, via Open-Meteo) and medication names (FDA drug labels) are looked up online, plus your Oura data if you connect your ring.")
+            Text("Chats, health data and photos stay on this iPhone. Only weather (your city, via Open-Meteo) and medication names (FDA drug labels) are looked up online, plus your Oura data if you connect your ring. Map tiles come from Apple Maps for the routes you view or share.")
         }
     }
 }

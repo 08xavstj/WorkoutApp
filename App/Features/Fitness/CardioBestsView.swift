@@ -4,7 +4,8 @@ import SwiftUI
 /// Fitness › Progress › Cardio bests: the fastest 400 m to 10 km on foot and
 /// 5 to 40 km on a bike, all time or this year (`CardioBests`). Routes are
 /// read once per workout and the efforts cached (`CardioBestsStore`); each
-/// visit works through up to `batch` workouts not seen yet, newest first.
+/// visit works through up to `CardioBestsStore.batch` workouts not seen yet,
+/// newest first.
 struct CardioBestsView: View {
     @Environment(\.healthClient) private var health
     @State private var workouts: [CardioBests.WorkoutEfforts] = CardioBestsStore.workouts()
@@ -12,11 +13,6 @@ struct CardioBestsView: View {
     @State private var thisYear = false
     @State private var remaining = 0
     @State private var checking = false
-
-    /// Routes read per visit (the app's choice: about a minute's work at most).
-    static let batch = 60
-    /// How far back to look for workouts.
-    static let years = 5
 
     private var miles: Bool {
         let system = Locale.current.measurementSystem
@@ -128,36 +124,13 @@ struct CardioBestsView: View {
         return CardioSummary.paceText((miles ? CardioBests.metersPerMile : 1000) / speed, miles: miles)
     }
 
-    /// Reads the routes of workouts not cached yet, newest first, `batch` at a time.
+    /// Reads the routes of workouts not cached yet (`CardioBestsStore.backfill`).
     private func backfill() async {
         guard let health else { return }
         checking = true
         defer { checking = false }
-        let now = Date.now
-        let start = Calendar.current.date(byAdding: .year, value: -Self.years, to: now) ?? now
-        let found = (try? await health.externalWorkouts(from: start, to: now)) ?? []
-        // Runs, walks and rides long enough for the shortest distance (400 m).
-        let candidates = found
-            .filter { CardioBests.Sport.of($0.kind) != nil && ($0.distanceKm ?? 0) >= 0.4 && !CardioBestsStore.isKnown($0.uuid) }
-            .sorted { $0.start > $1.start }
-        remaining = max(0, candidates.count - Self.batch)
-        var updates: [UUID: CardioBests.WorkoutEfforts?] = [:]
-        for workout in candidates.prefix(Self.batch) {
-            if Task.isCancelled { break }
-            let points = (try? await health.workoutRoute(id: workout.uuid)) ?? []
-            let id = workout.uuid, date = workout.start, kind = workout.kind
-            let efforts = await Task.detached(priority: .utility) {
-                CardioBestsStore.efforts(id: id, date: date, kind: kind, route: CardioRoute(points: points))
-            }.value
-            updates.updateValue(efforts, forKey: id)
-            // Save as it goes, so leaving the page keeps what was read.
-            if updates.count >= 10 {
-                CardioBestsStore.store(updates)
-                updates = [:]
-                workouts = CardioBestsStore.workouts()
-            }
-        }
-        CardioBestsStore.store(updates)
+        let left = await CardioBestsStore.backfill(health: health) { workouts = $0 }
+        if let left { remaining = left }
         workouts = CardioBestsStore.workouts()
         pickSport()
     }

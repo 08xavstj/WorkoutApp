@@ -477,8 +477,8 @@ struct CardioFitnessCard: View {
                 .foregroundStyle(Theme.primaryText)
             }
             if result != nil {
-                // Lambe et al., PLOS ONE 2025: 6.1 mL/kg/min low on average against lab tests.
-                Text("Apple Watch VO₂ max ran about 6 points low on average against lab tests; its trend is still useful. Choose which one the app uses in Settings › Profile.")
+                // Lambe et al., PLOS ONE 2025 (`VO2Source.appleWatchAccuracy`).
+                Text("\(VO2Source.appleWatchAccuracy) Its trend is still useful. Choose which one the app uses in Settings › Profile.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }

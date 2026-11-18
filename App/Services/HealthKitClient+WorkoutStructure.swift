@@ -2,21 +2,25 @@ import AppCore
 import Foundation
 import HealthKit
 
-/// How a Health workout was split up: the segments or laps the recording app
-/// saved (Apple's custom workouts save segments), its pauses, and the
-/// interval session it ran if Tensile's Watch recorded one.
+/// How a Health workout was split up: the segments the recording app saved
+/// (Apple's custom workouts save segments), its pauses, and the interval
+/// session it ran if Tensile's Watch recorded one. Lap events are left out:
+/// a watch's auto-lap each kilometre is what the splits table shows already.
 nonisolated struct WorkoutStructure: Sendable {
     var start: Date
     var end: Date
-    /// Segment events, else lap events, in time order.
+    /// Segment events without a step index, in time order.
     var segments: [DateInterval]
+    /// Segment events the Watch saved for interval steps, with the step's
+    /// index (`IntervalSession.stepMetadataKey`), in time order.
+    var steps: [IntervalBouts.RecordedStep] = []
     var pauses: [DateInterval]
     /// `IntervalSession.id` from the workout's metadata (`IntervalSession.metadataKey`).
     var intervalSessionID: String?
 }
 
 nonisolated extension HealthKitClient {
-    /// The workout's segments, laps, pauses and interval session; nil if it is gone.
+    /// The workout's segments, interval steps, pauses and interval session; nil if it is gone.
     @concurrent
     func workoutStructure(id: UUID) async throws -> WorkoutStructure? {
         if let demo = DemoHealth.active { return demo.workoutStructure(id: id) }
@@ -26,14 +30,30 @@ nonisolated extension HealthKitClient {
         ).result(for: store)
         guard let workout = workouts.first else { return nil }
         let events = (workout.workoutEvents ?? []).sorted { $0.dateInterval.start < $1.dateInterval.start }
-        let segments = events.filter { $0.type == .segment }.map(\.dateInterval)
-        let laps = events.filter { $0.type == .lap }.map(\.dateInterval)
+        let segmentEvents = events.filter { $0.type == .segment && $0.dateInterval.duration > 0 }
+        var segments: [DateInterval] = []
+        var steps: [IntervalBouts.RecordedStep] = []
+        for event in segmentEvents {
+            if let index = Self.stepIndex(event.metadata?[IntervalSession.stepMetadataKey]) {
+                steps.append(IntervalBouts.RecordedStep(index: index, start: event.dateInterval.start, end: event.dateInterval.end))
+            } else {
+                segments.append(event.dateInterval)
+            }
+        }
         return WorkoutStructure(
             start: workout.startDate, end: workout.endDate,
-            segments: (segments.isEmpty ? laps : segments).filter { $0.duration > 0 },
+            segments: segments,
+            steps: steps,
             pauses: Self.pauses(events, end: workout.endDate),
             intervalSessionID: workout.metadata?[IntervalSession.metadataKey] as? String
         )
+    }
+
+    /// A step index saved as a number (or, to be safe, as text).
+    static func stepIndex(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber { return number.intValue }
+        if let text = value as? String { return Int(text) }
+        return nil
     }
 
     /// Pause-to-resume spans (a pause with no resume runs to the end).

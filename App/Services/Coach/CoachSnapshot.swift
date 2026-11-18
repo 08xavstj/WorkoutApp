@@ -248,7 +248,7 @@ extension CoachSnapshot {
                     highlights: session.orderedExercises.compactMap { exercise in
                         let best = exercise.sets
                             .filter { $0.isCompleted && !$0.isWarmup }
-                            .max { $0.estimatedOneRepMax < $1.estimatedOneRepMax }
+                            .max { $0.ranksBelow($1) }
                         guard let best else { return nil }
                         return "\(exercise.name): best \(unit.format(best.weightKg)) \(unit.rawValue) x \(best.reps)"
                     }

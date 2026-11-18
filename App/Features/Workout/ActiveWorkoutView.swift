@@ -2538,7 +2538,7 @@ private struct CollapsedExerciseRow: View {
             let seconds = working.map(\.reps).max() ?? target?.repsToday ?? 0
             return "\(working.count) × \(seconds) s hold" + (isDone ? " · done" : "")
         }
-        if isDone, let best = working.max(by: { $0.estimatedOneRepMax < $1.estimatedOneRepMax }) {
+        if isDone, let best = working.max(by: { $0.ranksBelow($1) }) {
             // "Bodyweight × 8" with no weight, not "0 kg × 8" (`LiveSetCoach.setText`).
             let text = LiveSetCoach.setText(weightKg: best.weightKg, reps: best.reps, exerciseID: exercise.exerciseID, unit: unit)
             return "\(working.count) sets · \(text) · done"

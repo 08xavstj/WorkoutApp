@@ -40,7 +40,8 @@ struct LiftingShareSheet: View {
                     if !data.muscles.isEmpty {
                         Toggle("Show muscle map", isOn: $showMuscles)
                     }
-                    if heart != nil {
+                    // Records take strain's place on the card: the toggle would do nothing.
+                    if heart != nil, !data.exercises.contains(where: { !$0.records.isEmpty }) {
                         Toggle("Show strain", isOn: $showHeart)
                     }
                     ShareLink(item: text) {
