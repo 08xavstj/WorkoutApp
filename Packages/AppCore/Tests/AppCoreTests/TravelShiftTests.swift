@@ -201,4 +201,31 @@ struct TravelShiftTests {
         #expect(SleepRegularity.travelAwareScore(asleep: asleep, firstMorning: firstMorning, mornings: 11, timeline: timeline, calendar: paris)
                 == SleepRegularity.score(asleep: asleep, start: start, days: 11, calendar: paris))
     }
+
+    // MARK: Dose reminders
+
+    @Test func doseShiftAppliesOnlyWithinWakingHours() {
+        // No shift: the set time.
+        #expect(TravelShift.doseReminderMinutes(setMinutes: 8 * 60, shiftMinutes: 0) == 8 * 60)
+        // 08:00 dose, 5 h still to go east: 13:00 local, inside waking hours.
+        #expect(TravelShift.doseReminderMinutes(setMinutes: 8 * 60, shiftMinutes: 300) == 13 * 60)
+        // 20:00 dose + 5 h = 01:00: the night, so the set local time.
+        #expect(TravelShift.doseReminderMinutes(setMinutes: 20 * 60, shiftMinutes: 300) == 20 * 60)
+        // 09:00 dose, 4.5 h west = 04:30: before 07:00, so 09:00.
+        #expect(TravelShift.doseReminderMinutes(setMinutes: 9 * 60, shiftMinutes: -270) == 9 * 60)
+        // The edges count as waking hours.
+        #expect(TravelShift.doseReminderMinutes(setMinutes: 21 * 60, shiftMinutes: 60) == 22 * 60)
+        #expect(TravelShift.doseReminderMinutes(setMinutes: 8 * 60, shiftMinutes: -60) == 7 * 60)
+        #expect(TravelShift.doseReminderMinutes(setMinutes: 21 * 60, shiftMinutes: 61) == 21 * 60)
+    }
+
+    @Test func doseReminderNeverLeavesTheDay() {
+        for set in stride(from: 0, to: 1440, by: 15) {
+            for shift in stride(from: -720, through: 720, by: 30) {
+                let minutes = TravelShift.doseReminderMinutes(setMinutes: set, shiftMinutes: shift)
+                #expect((0..<1440).contains(minutes))
+                #expect(minutes == set || (7 * 60...22 * 60).contains(minutes))
+            }
+        }
+    }
 }

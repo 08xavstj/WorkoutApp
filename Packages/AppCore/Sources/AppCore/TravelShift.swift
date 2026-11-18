@@ -18,7 +18,8 @@ import Foundation
 /// 3. After a change, those habitual times start where the body clock is
 ///    (home time, seen on the local clock) and move onto local time at
 ///    `eastHoursPerDay` / `westHoursPerDay` (`Change.remainingHours`). Dose
-///    reminders move the same way (`Reminders.scheduleDoses`).
+///    reminders move the same way, but only within waking hours
+///    (`doseReminderMinutes`, `Reminders.scheduleDoses`).
 /// 4. After a shift of 5 hours or more, one card: melatonin near the local
 ///    bedtime (Herxheimer & Petrie, Cochrane 2002) and when to seek and avoid
 ///    light (Roach & Sargent 2019), with safety lines.
@@ -247,6 +248,33 @@ public enum TravelShift {
                               wake: sameWallClock(night.wake, recordedIn: zone, readIn: current).addingTimeInterval(shift))
         }
     }
+
+    // MARK: Dose reminders
+
+    /// Waking hours a shifted dose reminder may move within, minutes after
+    /// local midnight (app's choice, 07:00-22:00): a reminder is no use while
+    /// you're asleep, so a shift that would land outside them is not applied.
+    public static let doseWakingStartMinutes = 7 * 60
+    public static let doseWakingEndMinutes = 22 * 60
+
+    /// The local time, minutes after midnight, a dose set for `setMinutes`
+    /// is reminded at while `shiftMinutes` of travel shift remain
+    /// (`Change.remainingMinutes`). The shifted time when it falls within
+    /// waking hours, else the set time on the local clock.
+    ///
+    /// The research gives no basis for moving every dose gradually: the
+    /// shift only keeps the gap between doses from jumping, and applies only
+    /// within waking hours. Doses that matter by the clock (contraceptives,
+    /// for example) need a pharmacist's advice for the trip.
+    public static func doseReminderMinutes(setMinutes: Int, shiftMinutes: Int) -> Int {
+        guard shiftMinutes != 0 else { return setMinutes }
+        let shifted = setMinutes + shiftMinutes
+        guard (doseWakingStartMinutes...doseWakingEndMinutes).contains(shifted) else { return setMinutes }
+        return shifted
+    }
+
+    /// One line for the travel card: clock-sensitive doses need a pharmacist.
+    public static let doseTimingAdvice = "Doses that must be taken at the same clock time, such as the contraceptive pill, need a pharmacist's advice before you travel."
 
     // MARK: The jet-lag card
 
