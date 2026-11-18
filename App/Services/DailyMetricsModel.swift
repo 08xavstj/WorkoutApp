@@ -578,15 +578,21 @@ final class DailyMetricsModel {
             let fetchedNights = try? await nightsTask
             let nights = fetchedNights ?? []
             sleepNights = nights
+            // Travel (`TravelZoneStore`, `TravelShift`): each night read on its own zone's
+            // clock, usual times moved onto local time over a few days after a flight,
+            // and regularity without the shift days.
+            let travel = TravelZoneStore.shared
+            travel.noteZone(now: now)
+            let habitualNights = travel.habitualNights(nights, now: now)
             let lastWeek = Array(nights.suffix(8))
-            sleepConsistency = lastWeek.regularityScore
-            sleepSpreadMinutes = SleepConsistency.spreadMinutes(lastWeek.map { SleepConsistency.Night(bedtime: $0.bedtime, wake: $0.wake) })
+            sleepConsistency = travel.regularityScore(lastWeek, now: now)
+            sleepSpreadMinutes = SleepConsistency.spreadMinutes(Array(habitualNights.suffix(8)).map { SleepConsistency.Night(bedtime: $0.bedtime, wake: $0.wake) })
             restMode = settings.isRestMode
             sleepDebt = SleepDebt.compute(nightlyHours: nights.map(\.hoursAsleep), needHours: settings.sleepNeedHours)
-            recentBedtimes = nights.map(\.bedtime)
+            recentBedtimes = habitualNights.map(\.bedtime)
             bedtimeWindow = BedtimeWindow.compute(
                 sleepNeedHours: settings.sleepNeedHours, sleepDebt: sleepDebt,
-                usualWakeMinutes: BedtimeWindow.usualWakeMinutes(nights.suffix(14).map(\.wake)),
+                usualWakeMinutes: BedtimeWindow.usualWakeMinutes(habitualNights.suffix(14).map(\.wake)),
                 regularity: sleepConsistency, plannedSessionStart: plannedSessionTomorrow,
                 // Low efficiency caps tonight's repayment at 30 minutes (evidence audit, should-change 9).
                 sleepEfficiency: BedtimeWindow.averageEfficiency(nights.suffix(14).map {

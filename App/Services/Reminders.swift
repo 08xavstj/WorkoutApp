@@ -630,7 +630,12 @@ nonisolated enum Reminders {
             for dose in MedicationStore.doses(on: day, calendar: calendar) where taken[dose.id] == nil {
                 let isLessOften = schedules[dose.medicationID]?.isLessThanDaily ?? false
                 guard isLessOften || offset < dailyHorizonDays else { continue }
-                guard let fire = fireDate(day: day, minutes: dose.minutes, calendar: calendar), fire > now else { continue }
+                // After a flight the reminder moves onto local time over a few days, about an
+                // hour a day east and 1.5 h west, so the gap between doses never jumps by the
+                // whole time difference (`TravelZoneStore.shiftMinutes`, `TravelShift`).
+                let travel = TimeInterval(TravelZoneStore.shared.shiftMinutes(on: day) * 60)
+                guard let fire = fireDate(day: day, minutes: dose.minutes, calendar: calendar)?.addingTimeInterval(travel),
+                      fire > now else { continue }
                 if isLessOften {
                     lessOften.append((dose, fire))
                 } else {
@@ -655,7 +660,11 @@ nonisolated enum Reminders {
             content.sound = .default
             content.categoryIdentifier = DoseNotifications.category
             content.userInfo = ["link": "workoutapp://meds"]
-            let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+            var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+            // Pinned to the zone it was planned in: if the phone changes zone before the app
+            // next opens, the dose still comes at the planned moment (home time), and the
+            // next open moves it onto local time gradually rather than all at once.
+            components.timeZone = calendar.timeZone
             let request = UNNotificationRequest(identifier: DoseNotifications.identifier(for: dose.id), content: content,
                                                 trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false))
             try? await center.add(request)
