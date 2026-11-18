@@ -232,14 +232,16 @@ final class ScreenshotTests: XCTestCase {
             }
             back(app)
         }
-        // Breathing training, on the blood-pressure page from a home average of 120+ (demo: about 122).
-        openTab(app, "Health")
-        if tap(app, ["metric-Blood pressure", "row-Blood pressure"], name: "Health blood pressure for breathing training") {
+        // Breathing training: on the home-check sheet (Log › Blood pressure) from a
+        // home average of 120+ (demo: about 122). The Health tab's blood-pressure
+        // page is the chart, which doesn't carry it.
+        openTab(app, "Log")
+        if tap(app, ["Blood pressure"], name: "Log blood pressure for breathing training") {
             if tap(app, ["imst-start"], name: "Breathing training start") {
                 capture(app, "breathing-training", pages: 2)
                 back(app)
             }
-            back(app)
+            dismissSheet(app)
         }
     }
 
