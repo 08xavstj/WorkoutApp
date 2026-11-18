@@ -178,9 +178,11 @@ public enum WorkoutSummary {
         public var holdSeconds: Int = 0
         public var volumeKg: Double
         public var groups: [SetGroup]
-        /// Highest estimated 1RM (for a bodyweight lift, the most reps).
+        /// Highest estimated 1RM counting every set (`OneRepMax.ranksBelow`;
+        /// for a bodyweight lift, the most reps).
         public var bestSet: LoggedSet?
-        /// From the best set; 0 for a bodyweight lift.
+        /// From the best set, only when it has 10 reps or fewer
+        /// (`OneRepMax.displayEstimate`); 0 for a bodyweight lift.
         public var estimatedOneRepMaxKg: Double
         public var id: Int { index }
     }
@@ -215,15 +217,18 @@ public enum WorkoutSummary {
         )
     }
 
-    /// Highest e1RM, then heavier, then more reps; most reps when nothing is loaded.
+    /// Highest e1RM counting every set, then heavier, then more reps; most
+    /// reps when nothing is loaded (`OneRepMax.ranksBelow`).
     static func bestSet(_ sets: [LoggedSet]) -> LoggedSet? {
         let usable = sets.filter { $0.reps > 0 }
         return usable.max { a, b in
-            let ea = a.estimatedOneRepMaxKg, eb = b.estimatedOneRepMaxKg
-            if abs(ea - eb) > 0.01 { return ea < eb }
-            if abs(a.weightKg - b.weightKg) > 0.01 { return a.weightKg < b.weightKg }
-            return a.reps < b.reps
+            OneRepMax.ranksBelow(weight: a.weightKg, reps: a.reps, rpe: a.rpe, weight: b.weightKg, reps: b.reps, rpe: b.rpe)
         }
+    }
+
+    /// The highest estimate shown for any set (10 reps or fewer); 0 for none.
+    static func bestEstimate(_ sets: [LoggedSet]) -> Double {
+        sets.map(\.estimatedOneRepMaxKg).max() ?? 0
     }
 
     static func groups(_ sets: [LoggedSet]) -> [SetGroup] {
@@ -279,8 +284,8 @@ public enum WorkoutSummary {
     public static func change(today: LoggedExercise, last: LoggedExercise, lastDate: Date) -> Change? {
         let todayWorking = today.working, lastWorking = last.working
         guard !lastWorking.isEmpty, !todayWorking.isEmpty else { return nil }
-        let todayBest = bestSet(today.effort.isEmpty ? todayWorking : today.effort)?.estimatedOneRepMaxKg ?? 0
-        let lastBest = bestSet(last.effort.isEmpty ? lastWorking : last.effort)?.estimatedOneRepMaxKg ?? 0
+        let todayBest = bestEstimate(today.effort.isEmpty ? todayWorking : today.effort)
+        let lastBest = bestEstimate(last.effort.isEmpty ? lastWorking : last.effort)
         return Change(
             lastDate: lastDate,
             volumeKg: volume(todayWorking) - volume(lastWorking),

@@ -52,9 +52,14 @@ struct LiftProgressView: View {
                 .map { LiftProgress.LoggedSet(weight: loadDisplay($0.weightKg), reps: $0.reps, rpe: $0.rpe) }
             return sets.isEmpty ? nil : LiftProgress.LoggedSession(date: session.startedAt, sets: sets)
         }
+        // No e1RM PRs where body mass is added in: Records (`PRHistory`)
+        // counts reps and added weight for pull-ups, chin-ups and dips, and
+        // a change in body weight alone would move the estimate.
+        let marksPRs = !countsBodyMass
         return LiftProgress.points(logged).map { point in
             var point = point
             point.volume += stageVolume[point.date] ?? 0
+            if !marksPRs { point.isPR = false }
             return point
         }
     }
@@ -161,7 +166,7 @@ struct LiftProgressView: View {
         }
         var text = "Estimated 1RM (≈) is the most you could lift once, worked out from your best set of 10 reps or fewer and how many reps you had left (Epley formula with RPE). Past 10 reps the formulas lose accuracy and differ by lift (LeSuer 1997; Nuzzo 2024), so those sets show no estimate. It's a way to compare sessions, not a test."
         if countsBodyMass {
-            text += " For pull-ups, chin-ups and dips it counts your body weight plus any added weight."
+            text += " For pull-ups, chin-ups and dips it counts your body weight plus any added weight, so it isn't marked as a PR here; Records counts their reps and added weight."
         }
         return text
     }
@@ -199,7 +204,7 @@ struct LiftProgressView: View {
             : item("Best est. 1RM", best.map { estimateText($0.estimatedOneRepMax) } ?? "–", spoken: "Best estimated one-rep max")
         let sessionsItem = item("Sessions", "\(points.count)")
         let changeItem = item("Since first", (repsOnly ? points.count : withEstimate.count) > 1 ? "\(change >= 0 ? "+" : "")\(Int(change.rounded()))%" : "–")
-        let prItem = item("PRs", "\(points.filter(\.isPR).count)", spoken: "Personal records")
+        let prItem = item("PRs", countsBodyMass ? "–" : "\(points.filter(\.isPR).count)", spoken: "Personal records")
         // Four across; two rows of two at accessibility text sizes (ux-audit.md 4.8, P22).
         return Group {
             if dynamicTypeSize.isAccessibilitySize {

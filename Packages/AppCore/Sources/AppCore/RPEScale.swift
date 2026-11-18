@@ -99,6 +99,19 @@ public enum OneRepMax {
         return estimate(weight: weight, reps: reps, rpe: rpe)
     }
 
+    /// Orders sets for "best set": the estimate from every set, high-rep ones
+    /// included, then the heavier, then more reps. Ranking with
+    /// `displayEstimate` would put 90 kg × 9 above 100 kg × 12 only because
+    /// the second is past `maximumReliableReps`; the gated value is still
+    /// what is shown and compared as a record.
+    public static func ranksBelow(weight a: Double, reps aReps: Int, rpe aRPE: Double?,
+                                  weight b: Double, reps bReps: Int, rpe bRPE: Double?) -> Bool {
+        let ea = estimate(weight: a, reps: aReps, rpe: aRPE), eb = estimate(weight: b, reps: bReps, rpe: bRPE)
+        if abs(ea - eb) > 0.01 { return ea < eb }
+        if abs(a - b) > 0.01 { return a < b }
+        return aReps < bReps
+    }
+
     /// Put before every estimated 1RM on screen: "≈ 96 kg".
     public static let symbol = "≈"
 

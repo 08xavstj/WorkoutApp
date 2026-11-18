@@ -133,6 +133,12 @@ final class SetLog {
     var estimatedOneRepMax: Double {
         OneRepMax.displayEstimate(weight: weightKg, reps: reps, rpe: rpe) ?? 0
     }
+
+    /// For picking the best set: every set's estimate, then weight, then reps
+    /// (`OneRepMax.ranksBelow`), so 100 kg × 12 beats 90 kg × 9.
+    func ranksBelow(_ other: SetLog) -> Bool {
+        OneRepMax.ranksBelow(weight: weightKg, reps: reps, rpe: rpe, weight: other.weightKg, reps: other.reps, rpe: other.rpe)
+    }
 }
 
 /// Overnight HRV typed in by the user, for watches (like Garmin) that don't
