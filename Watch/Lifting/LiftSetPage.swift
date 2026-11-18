@@ -87,6 +87,12 @@ private struct SetCard: View {
             syncCrown()
             claimCrown()
         }
+        // Another exercise: the crown starts on its weight (a hold's seconds),
+        // not on the field the last exercise left it on.
+        .onChange(of: set.exerciseID) {
+            focus = nil
+            claimCrown()
+        }
         // The phone changed the plan (a set-by-set change): the crown starts from the new value.
         .onChange(of: set.weightKg) {
             let index = set.stepper.nearestIndex(to: set.weightKg)
@@ -291,10 +297,13 @@ private struct SetCard: View {
             RepCountDetail(setKey: set.id)
                 .padding(.horizontal, 6)
         } else if let line = guideText {
+            // The phone's set-by-set note can run longer than last time's set: two lines.
+            let isNote = !showsMachineNote && snapshotSet.note != nil
             Text(line)
                 .font(.footnote)
                 .foregroundStyle(showsMachineNote || snapshotSet.note != nil ? WatchPalette.lifting : .secondary)
-                .lineLimit(1)
+                .lineLimit(isNote ? 2 : 1)
+                .minimumScaleFactor(isNote ? 0.9 : 1)
                 .padding(.horizontal, 6)
                 .contentShape(Rectangle())
                 .onTapGesture {

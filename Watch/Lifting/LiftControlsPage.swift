@@ -5,6 +5,7 @@ import SwiftUI
 /// of size, two to a row: HIG Layout), and whether the iPhone is in reach.
 struct LiftControlsPage: View {
     @Environment(WatchWorkoutModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var page: LiftPage
     @State private var finishing = false
     @State private var discarding = false
@@ -24,6 +25,30 @@ struct LiftControlsPage: View {
     }
 
     var body: some View {
+        Group {
+            // At the accessibility text sizes the grid and the line under it don't fit: the page scrolls.
+            if dynamicTypeSize.isAccessibilitySize {
+                ScrollView { content }
+            } else {
+                content
+            }
+        }
+        .sheet(isPresented: $finishing) {
+            WatchSessionEffortSheet()
+        }
+        // Under a minute: save it at all? (HIG Workouts asks apps to discard or ask.)
+        .confirmationDialog(briefTitle, isPresented: $confirmingBrief, titleVisibility: .visible) {
+            Button("Save") { finishing = true }
+            Button("Discard", role: .destructive) { model.discard() }
+        }
+        .confirmationDialog("Discard this workout?", isPresented: $discarding, titleVisibility: .visible) {
+            Button("Discard", role: .destructive) { model.discard() }
+        } message: {
+            Text("Nothing is saved to Apple Health. Sets already sent stay on your iPhone.")
+        }
+    }
+
+    private var content: some View {
         VStack(spacing: 6) {
             Grid(horizontalSpacing: 12, verticalSpacing: 6) {
                 GridRow {
@@ -61,19 +86,6 @@ struct LiftControlsPage: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-        }
-        .sheet(isPresented: $finishing) {
-            WatchSessionEffortSheet()
-        }
-        // Under a minute: save it at all? (HIG Workouts asks apps to discard or ask.)
-        .confirmationDialog(briefTitle, isPresented: $confirmingBrief, titleVisibility: .visible) {
-            Button("Save") { finishing = true }
-            Button("Discard", role: .destructive) { model.discard() }
-        }
-        .confirmationDialog("Discard this workout?", isPresented: $discarding, titleVisibility: .visible) {
-            Button("Discard", role: .destructive) { model.discard() }
-        } message: {
-            Text("Nothing is saved to Apple Health. Sets already sent stay on your iPhone.")
         }
     }
 }

@@ -209,7 +209,7 @@ private struct CardioZonesPage: View {
                 MetricBlock(value: (cardio.averageHeartRate ?? tracker.averageBpm).map { "\(Int($0.rounded()))" } ?? "--",
                             label: "Average", role: .tertiary)
             }
-            Text(cardio.zoneSource.caption)
+            Text(cardio.zoneSource.shortCaption)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
