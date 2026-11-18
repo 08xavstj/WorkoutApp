@@ -313,6 +313,7 @@ struct VitalDetailView: View {
         var values = points.map(\.value) + secondaryPoints.map(\.value) + rolling.map(\.value)
         if let band { values += [band.low, band.high] }
         if let goal = stat.goal { values.append(goal) }
+        if let reference = stat.reference { values.append(reference) }
         if stat.chart == .bars {
             let top = (values.max() ?? 1) * 1.1
             return 0...max(top, 1)
@@ -398,6 +399,11 @@ struct VitalDetailView: View {
                             .padding(.vertical, 2)
                             .background(Theme.card.opacity(0.9), in: .capsule)
                     }
+            }
+            if let reference = stat.reference {
+                RuleMark(y: .value(stat.referenceLabel ?? "Reference", reference))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
             }
             if let average {
                 RuleMark(y: .value("Average", average))
@@ -521,6 +527,10 @@ struct VitalDetailView: View {
         }
         if stat.goal != nil {
             items.append(LegendItem(title: "Goal", color: Theme.recoveryHigh, isLine: true))
+        }
+        if let reference = stat.reference {
+            items.append(LegendItem(title: "\(stat.referenceLabel ?? "Reference") \(number(reference))", color: Theme.secondaryText.opacity(0.7),
+                                    isLine: true, isDashed: true))
         }
         if band != nil {
             items.append(LegendItem(title: "Your normal", color: main.opacity(0.35), isLine: false))

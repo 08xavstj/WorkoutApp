@@ -48,6 +48,9 @@ final class VitalsModel {
         /// Typical healthy range, shaded on the chart.
         var normalRange: ClosedRange<Double>?
         var goal: Double?
+        /// A labelled line that isn't a goal (a cut-off from a consensus), drawn neutral and dashed.
+        var reference: Double?
+        var referenceLabel: String?
         /// What this stat is and why it matters, in plain words.
         var about: String?
         /// Days shown when the history opens.

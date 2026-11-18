@@ -59,7 +59,9 @@ struct HealthExtraStats {
             )
             stat.digits = 1
             stat.defaultDays = 730
-            stat.goal = DexaMeasures.lowALMI(sex: settings.sex)
+            // The EWGSOP2 low-muscle cut-off is a floor for spotting sarcopenia, not a goal to aim for.
+            stat.reference = DexaMeasures.lowALMI(sex: settings.sex)
+            stat.referenceLabel = "Low-muscle line (EWGSOP2)"
             stat.about = DexaMeasures.almiText(almi, sex: settings.sex)
             stats.append(stat)
         }
