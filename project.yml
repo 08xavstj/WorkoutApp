@@ -59,6 +59,8 @@ targets:
     dependencies:
       - package: AppCore
       - sdk: HealthKit.framework
+      # Optional "Also add to Apple's Workout app" (App/Services/AppleWorkoutExport.swift).
+      - sdk: WorkoutKit.framework
       - target: WorkoutWidget
       # The Apple Watch app ships inside the iPhone app ("Embed Watch Content").
       - target: TensileWatch

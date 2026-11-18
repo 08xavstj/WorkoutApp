@@ -30,6 +30,19 @@ enum HardCardioInputs {
         ZonePreferences.resolution(profile: metrics.heartRateProfile ?? settings.heartRateProfile(restingHeartRate: nil)).scheme
     }
 
+    /// Today's "it waits" note for the session (`HardCardio.dayNote`): the day
+    /// reads as easy, or the week's queue put heavy legs on it or the next day.
+    static func dayNote(slot: HardCardio.Slot, metrics: DailyMetricsModel, now: Date = .now) -> String? {
+        let calendar = Calendar.current
+        let today = calendar.component(.weekday, from: now)
+        // Where the week's queue has the sessions now: a missed leg day moves onto the next free day.
+        let queue = metrics.adaptiveWeek.flatMap { calendar.isDate($0.day, inSameDayAs: now) ? $0 : nil }
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
+        return HardCardio.dayNote(slot: slot, weekday: today, lowRecovery: lowRecovery(metrics: metrics),
+                                  queueToday: queue?.slot(on: now, calendar: calendar)?.focus,
+                                  queueTomorrow: queue?.slot(on: tomorrow, calendar: calendar)?.focus)
+    }
+
     /// A day that reads as easy: 7-day HRV below normal or recovery in the low band.
     static func lowRecovery(metrics: DailyMetricsModel) -> Bool {
         if metrics.trainEasyToday { return true }
@@ -202,8 +215,12 @@ struct HardCardioWeekRow: View {
                 }
             }
             .sheet(isPresented: $showingSteps) {
+                let scheme = HardCardioInputs.scheme(metrics: metrics, settings: settings)
+                // Optional: also into Apple's Workout app, while it's still to do this week (W1).
+                let apple: AppleWorkoutTarget? = isDone || blocker != nil ? nil
+                    : AppleWorkoutTarget(workout: .interval(slot.session, scheme: scheme), weekday: slot.weekday, plan: plan)
                 NavigationStack {
-                    IntervalSessionView(session: slot.session, scheme: HardCardioInputs.scheme(metrics: metrics, settings: settings))
+                    IntervalSessionView(session: slot.session, scheme: scheme, apple: apple)
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
                                 Button("Done") { showingSteps = false }
@@ -218,15 +235,7 @@ struct HardCardioWeekRow: View {
         if let blocker, blocker == .restMode || blocker == .deloadWeek {
             return blocker.text + " An easy \(EasyCardio.standardMinutes) minutes instead, if you like."
         }
-        let calendar = Calendar.current
-        let now = Date.now
-        let today = calendar.component(.weekday, from: now)
-        // Where the week's queue has the sessions now: a missed leg day moves onto the next free day.
-        let queue = metrics.adaptiveWeek.flatMap { calendar.isDate($0.day, inSameDayAs: now) ? $0 : nil }
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
-        return HardCardio.dayNote(slot: slot, weekday: today, lowRecovery: HardCardioInputs.lowRecovery(metrics: metrics),
-                                  queueToday: queue?.slot(on: now, calendar: calendar)?.focus,
-                                  queueTomorrow: queue?.slot(on: tomorrow, calendar: calendar)?.focus)
+        return HardCardioInputs.dayNote(slot: slot, metrics: metrics)
     }
 }
 
@@ -237,6 +246,8 @@ struct HardCardioWeekRow: View {
 struct IntervalSessionView: View {
     let session: IntervalSession
     let scheme: HeartRateZoneScheme?
+    /// The optional "Also add to Apple's Workout app" section; nil hides it.
+    var apple: AppleWorkoutTarget? = nil
 
     var body: some View {
         List {
@@ -258,6 +269,9 @@ struct IntervalSessionView: View {
             } footer: {
                 // Helgerud 2007 (4 × 4 at 90-95% of max, 3 min at 70%); Wen 2019 (long intervals, 15+ hard minutes).
                 Text("The four-by-four comes from a trial in which it raised VO2 max more than the same work done steadily (Helgerud 2007). Intervals of two minutes or more, with 15 or more hard minutes, did most across 53 trials (Wen 2019).")
+            }
+            if let apple {
+                AppleWorkoutSection(target: apple)
             }
         }
         .navigationTitle(session.title)

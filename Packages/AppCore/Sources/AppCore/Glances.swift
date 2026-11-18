@@ -534,3 +534,182 @@ nonisolated public enum GlanceFreshness {
         return Array(Set(dates.filter { $0 > now })).sorted()
     }
 }
+
+/// The Watch's "Intervals" card: this week's hard cardio session
+/// (`HardCardio`, `IntervalSession`) as the phone last sent it, and when the
+/// Smart Stack should offer it (docs/research/next-features-2026-11.md W4).
+///
+/// Why a card: there is no health evidence for the card itself; the case is
+/// usability, as for `PlanGlance`. It lets the session's day come up on the
+/// wrist instead of a clock reminder: reminders helped people repeat a
+/// behaviour but got in the way of it becoming automatic (Stawarz 2015, see
+/// `PlanGlance`), and predictable gym-goers responded less to prompts
+/// (Buyalskaya A, et al. PNAS 2023;120(17):e2216115120; as read for
+/// docs/research/evidence-audit-2026-11.md). The session itself is the
+/// evidence-backed part (Helgerud 2007, Wen 2019: see `IntervalSession`).
+/// The windows below are the app's choices, not research.
+///
+/// Foundation only, like the rest of this file, so the Watch widget
+/// extension compiles it on its own (project.yml).
+nonisolated public enum IntervalGlance {
+    // MARK: Rules (app's choices)
+
+    /// On its planned day the card is offered from this hour, the hour the
+    /// recovery card's morning window opens (`FaceProvider.morningHours`).
+    public static let relevanceStartHour = 6
+
+    // MARK: Data
+
+    /// The week's hard session as the phone wrote it.
+    nonisolated public struct Session: Codable, Sendable, Equatable {
+        /// When the phone wrote it.
+        public var updated: Date
+        /// "4 × 4 min · Bike".
+        public var title: String
+        /// SF Symbol for the modality.
+        public var symbol: String
+        /// Whole minutes, warm-up and cool-down included.
+        public var minutes: Int
+        /// Start of its planned day; nil in a flexible week (any day).
+        public var day: Date?
+        /// End of the week it was written in (the next Monday 00:00).
+        public var weekEnd: Date
+        /// Apple Health has it this week (`HardCardio.weekDone`).
+        public var done: Bool
+        /// Start of a day the app said it waits (the day reads as easy, or legs
+        /// moved next to it: `HardCardio.dayNote`); nil otherwise.
+        public var waitsOn: Date?
+
+        public init(updated: Date, title: String, symbol: String, minutes: Int, day: Date?, weekEnd: Date,
+                    done: Bool = false, waitsOn: Date? = nil) {
+            self.updated = updated
+            self.title = title
+            self.symbol = symbol
+            self.minutes = minutes
+            self.day = day
+            self.weekEnd = weekEnd
+            self.done = done
+            self.waitsOn = waitsOn
+        }
+    }
+
+    nonisolated public enum State: Sendable, Equatable {
+        /// Its planned day is today.
+        case today(Session)
+        /// Today was its day (or any day would do), but the app said it waits.
+        case waits(Session)
+        /// Planned for a later day this week.
+        case later(Session, day: Date)
+        /// A flexible week: any day that suits.
+        case anyDay(Session)
+        /// Done this week.
+        case done
+        /// None this week, its day has passed, or the phone's data is too old.
+        case none
+    }
+
+    // MARK: What to show
+
+    /// What the card shows at `now`. Trusted on the day the phone wrote it and
+    /// `PlanGlance.carryDays` after, and only inside the week it was written in.
+    public static func state(of session: Session?, at now: Date, calendar: Calendar = .current) -> State {
+        guard let session, isTrusted(session, at: now, calendar: calendar) else { return .none }
+        if session.done { return .done }
+        let today = calendar.startOfDay(for: now)
+        let plannedDay = session.day.map { calendar.startOfDay(for: $0) }
+        if let waitsOn = session.waitsOn, calendar.isDate(waitsOn, inSameDayAs: today), plannedDay == nil || plannedDay == today {
+            return .waits(session)
+        }
+        guard let plannedDay else { return .anyDay(session) }
+        if plannedDay == today { return .today(session) }
+        return plannedDay > today ? .later(session, day: plannedDay) : .none
+    }
+
+    static func isTrusted(_ session: Session, at now: Date, calendar: Calendar) -> Bool {
+        guard now < session.weekEnd else { return false }
+        let written = calendar.startOfDay(for: session.updated)
+        let today = calendar.startOfDay(for: now)
+        guard let days = calendar.dateComponents([.day], from: written, to: today).day else { return false }
+        return (0...PlanGlance.carryDays).contains(days)
+    }
+
+    /// When the Smart Stack should offer the card: its planned day, from
+    /// `relevanceStartHour` to midnight, while it's still to do and the data
+    /// can be trusted then. Nothing in a flexible week (no planned day), once
+    /// done, or on a day it waits.
+    public static func relevantWindows(of session: Session?, after now: Date, calendar: Calendar = .current) -> [DateInterval] {
+        guard let session, !session.done, let planned = session.day else { return [] }
+        let day = calendar.startOfDay(for: planned)
+        if let waitsOn = session.waitsOn, calendar.isDate(waitsOn, inSameDayAs: day) { return [] }
+        guard let start = calendar.date(bySettingHour: relevanceStartHour, minute: 0, second: 0, of: day),
+              let midnight = calendar.date(byAdding: .day, value: 1, to: day) else { return [] }
+        let end = min(midnight, session.weekEnd)
+        guard end > now, end > start, isTrusted(session, at: max(now, start), calendar: calendar) else { return [] }
+        return [DateInterval(start: start, end: end)]
+    }
+
+    /// Moments after `now` when the card changes on its own (within
+    /// `PlanGlance.timelineHorizon`): the planned day's start and end, the
+    /// week's end, and when the data stops being trusted.
+    public static func changeDates(of session: Session?, after now: Date, calendar: Calendar = .current) -> [Date] {
+        guard let session else { return [] }
+        var dates = [session.weekEnd]
+        if let planned = session.day {
+            let day = calendar.startOfDay(for: planned)
+            dates.append(day)
+            if let next = calendar.date(byAdding: .day, value: 1, to: day) { dates.append(next) }
+        }
+        let written = calendar.startOfDay(for: session.updated)
+        if let untrusted = calendar.date(byAdding: .day, value: PlanGlance.carryDays + 1, to: written) { dates.append(untrusted) }
+        let limit = now.addingTimeInterval(PlanGlance.timelineHorizon)
+        return Array(Set(dates.filter { $0 > now && $0 <= limit })).sorted()
+    }
+
+    // MARK: Wording
+
+    nonisolated public struct Lines: Sendable, Equatable {
+        public var symbol: String
+        /// "Intervals today", "Intervals Thu".
+        public var eyebrow: String
+        /// "4 × 4 min · Bike", "Done this week", "--".
+        public var title: String
+        public var detail: String?
+        /// One line: "Intervals today · 4 × 4 min · Bike".
+        public var inline: String
+        /// The sentence VoiceOver reads.
+        public var spoken: String
+    }
+
+    /// The words for `state`.
+    public static func lines(for state: State) -> Lines {
+        switch state {
+        case .today(let session):
+            return Lines(symbol: session.symbol, eyebrow: "Intervals today", title: session.title,
+                         detail: "\(session.minutes) min · start in Tensile",
+                         inline: "Intervals today · \(session.title)",
+                         spoken: "Intervals today: \(session.title), about \(session.minutes) minutes. Start them in Tensile.")
+        case .waits(let session):
+            return Lines(symbol: "figure.cooldown", eyebrow: "Intervals", title: "Not today",
+                         detail: "They keep for another day",
+                         inline: "Intervals: not today",
+                         spoken: "No intervals today: \(session.title) keeps for another day. Tensile on iPhone says why.")
+        case .later(let session, let day):
+            let name = day.formatted(.dateTime.weekday(.abbreviated))
+            let wide = day.formatted(.dateTime.weekday(.wide))
+            return Lines(symbol: session.symbol, eyebrow: "Intervals \(name)", title: session.title,
+                         detail: "\(session.minutes) min", inline: "Intervals \(name) · \(session.title)",
+                         spoken: "Intervals on \(wide): \(session.title), about \(session.minutes) minutes.")
+        case .anyDay(let session):
+            return Lines(symbol: session.symbol, eyebrow: "Intervals this week", title: session.title,
+                         detail: "Any day not before legs", inline: "Intervals this week · \(session.title)",
+                         spoken: "Intervals this week, on any day that isn't before a leg session: \(session.title).")
+        case .done:
+            return Lines(symbol: "checkmark.circle.fill", eyebrow: "Intervals", title: "Done this week",
+                         detail: nil, inline: "Intervals done this week", spoken: "This week's intervals are done.")
+        case .none:
+            return Lines(symbol: "bolt.heart", eyebrow: "Intervals", title: "--",
+                         detail: "None planned this week", inline: "Intervals --",
+                         spoken: "No interval session planned this week, or the plan isn't up to date. Open Tensile on iPhone.")
+        }
+    }
+}

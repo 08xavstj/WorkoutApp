@@ -903,6 +903,8 @@ To check on the Series 12:
 - That Handoff from the Watch summary appears on the iPhone.
 - That `RelevantContext.location(category: .fitnessCenter)` returns non-nil and works without location permission.
 - That double tap on the horizontal pager's Set page fires Done and not a page change.
+- (next-features W4, 18 Nov) That the "Intervals" card rises in the Smart Stack on the hard session's planned day (from 06:00) and not once it's done or the app says it waits; and that "Today's plan" still rises in the hour before bed-by.
+- (next-features W1, 18 Nov) That a session added from Fitness › This week appears in Apple's Workout app under Tensile on its day, that the hard steps alert at Tensile's band (and rest steps stay quiet), and that the finished workout ticks the plan once Health has it.
 
 ---
 

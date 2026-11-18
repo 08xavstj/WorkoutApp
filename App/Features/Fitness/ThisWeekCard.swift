@@ -366,24 +366,100 @@ private struct CardioSlotRow: View {
     let slot: CardioPlanner.Slot
     let isDone: Bool
 
+    @State private var showingSession = false
+
     var body: some View {
         let day = slot.weekday.map { WeeklyPlan.weekdayName($0) } ?? "Any day"
         let status = isDone ? "done" : "planned"
-        HStack(spacing: 10) {
-            Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isDone ? Theme.recoveryHigh : Theme.secondaryText)
-            Label("\(slot.kind.title) · \(slot.minutes) min", systemImage: slot.kind.systemImage)
-                .font(.subheadline)
-                .foregroundStyle(Theme.primaryText)
-            Spacer(minLength: 8)
-            Text(day)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.secondaryText)
+        Button {
+            showingSession = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isDone ? Theme.recoveryHigh : Theme.secondaryText)
+                Label("\(slot.kind.title) · \(slot.minutes) min", systemImage: slot.kind.systemImage)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                Spacer(minLength: 8)
+                Text(day)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .frame(minHeight: 44)
+            .contentShape(.rect)
         }
-        .frame(minHeight: 28)
+        .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(slot.kind.title), \(slot.minutes) minutes, \(day): \(status)")
+        .accessibilityHint("Shows the session")
+        .accessibilityIdentifier("thisWeek.easyCardio.\(slot.index)")
+        .sheet(isPresented: $showingSession) {
+            NavigationStack {
+                EasyCardioSessionView(slot: slot, isDone: isDone)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingSession = false }
+                        }
+                    }
+            }
+        }
+    }
+}
+
+/// One easy cardio session: its length and easy band, and the optional
+/// "Also add to Apple's Workout app" while it's still to do (W1).
+private struct EasyCardioSessionView: View {
+    let slot: CardioPlanner.Slot
+    let isDone: Bool
+
+    @Environment(WeeklyPlanStore.self) private var store
+    @Environment(DailyMetricsModel.self) private var metrics
+    @Environment(UserSettings.self) private var settings
+    @Environment(GymStore.self) private var gym
+
+    var body: some View {
+        let scheme = HardCardioInputs.scheme(metrics: metrics, settings: settings)
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Easy · \(slot.minutes) min")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                    Text(IntervalSession.Band.easy.text(in: scheme))
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                    // The talk test (Reed & Pipe 2014, as in `HeartRateZoneScheme.easyReserveLower`).
+                    Text("You can talk in full sentences. If you can't, you're above easy, whatever the number says.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            } footer: {
+                if let line = CardioPlanner.bandLine(store.current?.cardio, goals: metrics.goals) {
+                    Text(line)
+                }
+            }
+            if !isDone, let plan = store.current {
+                AppleWorkoutSection(target: AppleWorkoutTarget(
+                    workout: .easy(slot.kind, minutes: slot.minutes, indoor: Self.indoor(slot.kind, gym: gym.profile), scheme: scheme),
+                    weekday: slot.weekday, plan: plan))
+            }
+        }
+        .navigationTitle(slot.kind.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// On the gym's machine when it has one (a bike for a ride, a treadmill
+    /// for an incline walk), otherwise outdoors; a row is always indoors.
+    static func indoor(_ kind: EasyCardio.Kind, gym: GymProfile) -> Bool {
+        let machines = gym.cardioMachines ?? []
+        switch kind {
+        case .bike: return machines.contains(.bike)
+        case .row: return true
+        case .inclineWalk: return machines.contains(.treadmill)
+        }
     }
 }
 

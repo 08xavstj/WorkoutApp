@@ -3,7 +3,7 @@ import RelevanceKit
 import SwiftUI
 import WidgetKit
 
-/// Watch face complications: recovery + strain, and today's plan.
+/// Watch face complications: recovery + strain, today's plan, and this week's intervals.
 /// The Watch app writes `WatchFaceData` to the App Group when the phone sends
 /// it; these only read it. What they show and when they go blank follows the
 /// same rules as the iPhone widgets (`PlanGlance`, `GlanceFreshness` in
@@ -13,6 +13,7 @@ struct TensileComplications: WidgetBundle {
     var body: some Widget {
         RecoveryStrainComplication()
         NextSessionComplication()
+        IntervalsComplication()
         // Controls (watchOS 26): Control Center and the Smart Stack.
         StartLiftingControl()
         StartLastCardioControl()
@@ -39,6 +40,7 @@ nonisolated struct FaceProvider: TimelineProvider {
     nonisolated enum Kind: Sendable {
         case recoveryStrain
         case nextSession
+        case intervals
     }
 
     var kind: Kind
@@ -71,6 +73,8 @@ nonisolated struct FaceProvider: TimelineProvider {
             dates += PlanGlance.relevantWindows(of: plan, after: now, alsoDoneAt: doneAt, calendar: calendar)
                 .flatMap { [$0.interval.start, $0.interval.end] }
                 .filter { $0 > now && $0 <= horizon }
+        case .intervals:
+            dates += IntervalGlance.changeDates(of: data?.intervalSession, after: now, calendar: calendar)
         }
         let entries = Array(Set(dates)).sorted().map { FaceEntry(date: $0, data: data, doneAt: doneAt) }
         let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now.addingTimeInterval(86_400)
@@ -104,6 +108,12 @@ nonisolated struct FaceProvider: TimelineProvider {
                 clues.append((interval: window.interval, kind: dateKind))
             }
             trainsToday = windows.contains { $0.reason == .session && calendar.isDateInToday($0.interval.start) }
+        case .intervals:
+            // The hard cardio session's planned day, from the morning to midnight, while
+            // it's still to do and not waiting (`IntervalGlance.relevantWindows`).
+            for interval in IntervalGlance.relevantWindows(of: WatchFaceStore.load()?.intervalSession, after: now, calendar: calendar) {
+                clues.append((interval: interval, kind: RelevantContext.DateKind.scheduled))
+            }
         case .recoveryStrain:
             var day = calendar.startOfDay(for: now)
             for _ in 0..<7 {

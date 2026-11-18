@@ -25,4 +25,14 @@ nonisolated extension WatchFaceData {
             restUntil: restUntil
         )
     }
+
+    /// This week's hard cardio session as the "Intervals" card reads it
+    /// (`IntervalGlance`, in the same Glances.swift); nil when the phone sent none.
+    var intervalSession: IntervalGlance.Session? {
+        intervals.map { intervals in
+            IntervalGlance.Session(updated: updated, title: intervals.title, symbol: intervals.symbol,
+                                   minutes: intervals.minutes, day: intervals.day, weekEnd: intervals.weekEnd,
+                                   done: intervals.done, waitsOn: intervals.waitsOn)
+        }
+    }
 }
