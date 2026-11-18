@@ -23,6 +23,10 @@ final class DailyMetricsModel {
         var minutes: Int = 0
         /// No heart rate during it, so `strainAdded` is unknown, not zero (show "—").
         var noHeartRate = false
+        /// The Apple Health workout, for its summary page (`CardioWorkoutDetailView`); nil for logged gym sessions.
+        var workoutUUID: UUID? = nil
+        /// Symbol for the row (the activity's own, for Tensile's cardio).
+        var systemImage: String? = nil
     }
 
     private(set) var strain: StrainCalculator.Result?
@@ -1106,7 +1110,9 @@ final class DailyMetricsModel {
                 id: "w\(workout.uuid.uuidString)",
                 name: workout.name, detail: detail, start: workout.start,
                 strainAdded: contribution(load), isStrength: workout.isStrength,
-                minutes: workout.minutes, noHeartRate: noHeartRate
+                minutes: workout.minutes, noHeartRate: noHeartRate,
+                workoutUUID: workout.isStrength ? nil : workout.uuid,
+                systemImage: workout.tensileActivity?.systemImage
             ))
         }
         return items.sorted { $0.start < $1.start }

@@ -89,6 +89,12 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.dietaryVitaminA),
             HKQuantityType(.dietarySelenium),
             HKObjectType.workoutType(),
+            // Outdoor workouts' GPS routes and distances, for the route map
+            // (HealthKitClient+CardioDetail).
+            HKSeriesType.workoutRoute(),
+            HKQuantityType(.distanceCycling),
+            HKQuantityType(.distanceCrossCountrySkiing),
+            HKQuantityType(.distanceDownhillSnowSports),
             HKCharacteristicType(.dateOfBirth),
             HKCharacteristicType(.biologicalSex),
             // iOS 17/18 types (see HealthKitClient+iOS26): minutes outdoors from an
@@ -766,6 +772,12 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     /// (`WatchCardioModel.metadataKey`; its value is the `CardioActivity`).
     nonisolated static let watchCardioMetadataKey = "TensileCardioActivity"
 
+    /// The distances a workout can carry, most common first.
+    nonisolated static let workoutDistanceTypes: [HKQuantityType] = [
+        HKQuantityType(.distanceWalkingRunning), HKQuantityType(.distanceCycling),
+        HKQuantityType(.distanceCrossCountrySkiing), HKQuantityType(.distanceDownhillSnowSports),
+    ]
+
     /// Workouts recorded by other apps (Garmin Connect, Strava...) in a time range.
     @concurrent
     func externalWorkouts(from start: Date, to end: Date) async throws -> [ExternalWorkout] {
@@ -783,7 +795,10 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             // files it under the phone app's source: it has no logged session to stand for it.
             guard workout.sourceRevision.source.bundleIdentifier != ownBundle
                     || workout.metadata?[Self.watchCardioMetadataKey] != nil else { return nil }
-            let distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meterUnit(with: .kilo))
+            // On foot, on a bike, or on skis: whichever the workout recorded.
+            let distance = Self.workoutDistanceTypes.lazy
+                .compactMap { workout.statistics(for: $0)?.sumQuantity()?.doubleValue(for: .meterUnit(with: .kilo)) }
+                .first { $0 > 0 }
             let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
             // Tensile's own cardio says which activity it was (indoor soccer, treadmill).
             let tensileActivity = (workout.metadata?[Self.watchCardioMetadataKey] as? String).flatMap(CardioActivity.init(rawValue:))
@@ -796,7 +811,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
                 uuid: workout.uuid,
                 sourceName: workout.device?.name ?? workout.sourceRevision.source.name,
                 activeKcal: energy,
-                isTensileCardio: workout.metadata?[Self.watchCardioMetadataKey] != nil
+                isTensileCardio: workout.metadata?[Self.watchCardioMetadataKey] != nil,
+                tensileActivity: tensileActivity
             )
         }
     }
@@ -969,7 +985,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         for query in queries { store.execute(query) }
     }
 
-    private static func name(for type: HKWorkoutActivityType) -> String {
+    static func name(for type: HKWorkoutActivityType) -> String {
         switch type {
         case .walking: "Walk"
         case .running: "Run"
@@ -1066,6 +1082,8 @@ nonisolated struct ExternalWorkout: Sendable, Identifiable, Equatable {
     /// never the recording of a gym session logged on the phone, so it is
     /// never linked to one (`WorkoutLinker`).
     var isTensileCardio = false
+    /// Which activity, for Tensile's own cardio (its icon and name).
+    var tensileActivity: CardioActivity? = nil
     var id: UUID { uuid }
     var minutes: Int { Int(end.timeIntervalSince(start) / 60) }
 

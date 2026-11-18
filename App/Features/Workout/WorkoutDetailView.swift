@@ -321,7 +321,7 @@ private struct HeartRateSourcesSection: View {
 /// scheme chosen in Settings; by default heart-rate reserve,
 /// `HeartRateProfile.zone`), as small bars, or one line when the heart rate
 /// stayed below zone 1.
-private struct WorkoutZonesRow: View {
+struct WorkoutZonesRow: View {
     let minutes: [Double]
     /// The zones in use; nil counts as Tensile's.
     var scheme: HeartRateZoneScheme?

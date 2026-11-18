@@ -67,6 +67,8 @@ final class WatchCardioModel: NSObject {
     @ObservationIgnored private var isEnding = false
     /// When Pause or Resume was last tapped here (`sessionChanged` ignores older callbacks).
     @ObservationIgnored private var lastLocalPauseChange: Date?
+    /// The GPS route of an outdoor workout (`CardioActivity.isOutdoor`); nil indoors.
+    @ObservationIgnored private var route: WatchRouteRecorder?
 
     var isActive: Bool { phase == .running || phase == .paused }
     /// Starting or recording: the lifting model must not start a workout now.
@@ -76,7 +78,7 @@ final class WatchCardioModel: NSObject {
 
     func requestAuthorization() async {
         guard HKHealthStore.isHealthDataAvailable() else { return }
-        let share: Set<HKSampleType> = [HKObjectType.workoutType()]
+        let share: Set<HKSampleType> = [HKObjectType.workoutType(), HKSeriesType.workoutRoute()]
         let read: Set<HKObjectType> = [
             HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned),
             HKQuantityType(.distanceWalkingRunning), HKQuantityType(.distanceCycling),
@@ -225,6 +227,11 @@ final class WatchCardioModel: NSObject {
             startedAt = start
             runningSince = start
             phase = .running
+            if activity.isOutdoor == true {
+                let recorder = WatchRouteRecorder(store: store)
+                recorder.start()
+                route = recorder
+            }
             WKInterfaceDevice.current().play(.start)
         } catch {
             problem = "Couldn't start the workout: \(error.localizedDescription)"
@@ -257,12 +264,14 @@ final class WatchCardioModel: NSObject {
 
     private func beginPause(at date: Date = .now) {
         guard pausedAt == nil else { return }
+        route?.isPaused = true
         pausedAt = date
         tracker.pause(at: date)
     }
 
     private func endPause(at date: Date = .now) {
         guard let since = pausedAt else { return }
+        route?.isPaused = false
         pausedSeconds += max(0, date.timeIntervalSince(since))
         pausedAt = nil
         runningSince = date
@@ -286,17 +295,31 @@ final class WatchCardioModel: NSObject {
         tracker.end(at: end)
         workoutSession.end()
         var saved = false
+        var workout: HKWorkout?
         do {
             try await builder.endCollection(at: end)
-            saved = try await builder.finishWorkout() != nil
+            workout = try await builder.finishWorkout()
+            saved = workout != nil
         } catch {
             problem = "Couldn't save the workout: \(error.localizedDescription)"
         }
-        summary = CardioSummary(
+        let recorder = route
+        route = nil
+        if let recorder {
+            if let workout { await recorder.finish(with: workout) } else { recorder.discard() }
+        }
+        var summary = CardioSummary(
             activity: activity, target: target, tracker: tracker, activeSeconds: active,
             distanceMeters: distanceMeters, averageBpm: averageHeartRate, maximumBpm: maximumHeartRate,
             activeKilocalories: activeKilocalories, saved: saved
         )
+        if let points = recorder?.points, points.count >= 2 {
+            let path = CardioRoute(points: points)
+            summary.elevationGainMeters = path.elevation?.gain
+            summary.maximumSpeed = path.maximumSpeed
+            summary.hasRoute = true
+        }
+        self.summary = summary
         pausedAt = nil
         pausedSeconds = 0
         self.workoutSession = nil
@@ -309,6 +332,8 @@ final class WatchCardioModel: NSObject {
     /// Stops without saving anything.
     func discard() {
         guard isActive, !isEnding else { return }
+        route?.discard()
+        route = nil
         workoutSession?.end()
         builder?.discardWorkout()
         workoutSession = nil
@@ -363,6 +388,8 @@ final class WatchCardioModel: NSObject {
     private func fail(_ message: String) {
         guard isBusy, !isEnding else { return }
         problem = "Recording stopped: \(message)"
+        route?.discard()
+        route = nil
         builder?.discardWorkout()
         workoutSession?.end()
         workoutSession = nil

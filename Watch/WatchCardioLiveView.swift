@@ -336,7 +336,7 @@ struct WatchCardioControlsView: View {
     }
 }
 
-/// After End: time, distance, heart rate and minutes in each zone.
+/// After End: time, distance, climb, heart rate and minutes in each zone.
 struct WatchCardioEndView: View {
     @Environment(WatchCardioModel.self) private var cardio
 
@@ -347,6 +347,11 @@ struct WatchCardioEndView: View {
                     Text(summary.saved ? "\(summary.activity.title) saved" : "\(summary.activity.title) ended")
                         .font(.headline)
                     rows(for: summary)
+                    if summary.hasRoute {
+                        Label("Map with speed and heart rate on your iPhone", systemImage: "map")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     Text("Workout ended")
                         .font(.headline)
@@ -377,6 +382,12 @@ struct WatchCardioEndView: View {
             if let pace = summary.paceOrSpeedText(miles: miles) {
                 WatchCardioStatRow(label: summary.activity.movement.showsSpeed ? "Avg speed" : "Avg pace", value: pace)
             }
+        }
+        if let gain = summary.elevationGainMeters {
+            WatchCardioStatRow(label: "Climb", value: CardioSummary.elevationText(meters: gain, feet: miles))
+        }
+        if summary.activity.movement.showsSpeed, let top = summary.maximumSpeed {
+            WatchCardioStatRow(label: "Top speed", value: CardioSummary.speedText(metersPerSecond: top, miles: miles))
         }
         WatchCardioStatRow(label: "Avg HR", value: bpm(summary.averageBpm))
         WatchCardioStatRow(label: "Max HR", value: bpm(summary.maximumBpm))

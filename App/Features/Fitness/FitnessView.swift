@@ -200,26 +200,50 @@ private struct TodayActivityRows: View {
                 if index > 0 {
                     Divider().overlay(Theme.separator).padding(.vertical, 10)
                 }
-                HStack(spacing: 12) {
-                    IconBadge(
-                        systemName: item.isStrength ? "dumbbell.fill" : "figure.walk",
-                        color: item.isStrength ? Theme.lifting : Theme.oxygen,
-                        size: badgeSize
-                    )
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name)
-                            .font(.headline)
-                            .foregroundStyle(Theme.primaryText)
-                        Text("\(item.detail) · \(item.start.formatted(date: .omitted, time: .shortened))")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
+                if let id = item.workoutUUID {
+                    // A watch workout opens its summary: map, heart rate, splits.
+                    NavigationLink {
+                        CardioWorkoutDetailView(workoutID: id, title: item.name)
+                    } label: {
+                        row(item)
                     }
-                    Spacer()
-                    Chip(text: item.noHeartRate ? "—" : "+\(strainText(item.strainAdded))")
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows its map, heart rate and splits")
+                } else {
+                    row(item)
                 }
-                .accessibilityElement(children: .combine)
             }
         }
+    }
+}
+
+extension TodayActivityRows {
+    func row(_ item: DailyMetricsModel.ActivityItem) -> some View {
+        HStack(spacing: 12) {
+            IconBadge(
+                systemName: item.systemImage ?? (item.isStrength ? "dumbbell.fill" : "figure.walk"),
+                color: item.isStrength ? Theme.lifting : Theme.oxygen,
+                size: badgeSize
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.headline)
+                    .foregroundStyle(Theme.primaryText)
+                Text("\(item.detail) · \(item.start.formatted(date: .omitted, time: .shortened))")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Spacer()
+            Chip(text: item.noHeartRate ? "—" : "+\(strainText(item.strainAdded))")
+            if item.workoutUUID != nil {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .accessibilityHidden(true)
+            }
+        }
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
     }
 }
 

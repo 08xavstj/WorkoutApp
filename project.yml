@@ -184,6 +184,8 @@ targets:
       # Heart-rate zones and the cardio mode's zone clock (pure Swift).
       - path: Packages/AppCore/Sources/AppCore/HeartRateZoneScheme.swift
       - path: Packages/AppCore/Sources/AppCore/CardioZoneTracker.swift
+      # The route's distance, speed and elevation for the end screen.
+      - path: Packages/AppCore/Sources/AppCore/CardioRoute.swift
       - path: SharedCardio
     dependencies:
       - sdk: HealthKit.framework
@@ -217,6 +219,10 @@ targets:
         WKCompanionAppBundleIdentifier: $(COMPANION_APP_BUNDLE_IDENTIFIER)
         WKBackgroundModes:
           - workout-processing
+        NSLocationWhenInUseUsageDescription: >-
+          Tensile records the route of an outdoor workout (a run, a ride, skiing)
+          while it records, so you can see it on a map with your speed and heart rate.
+          The route is saved to Apple Health.
         NSHealthShareUsageDescription: >-
           Tensile reads your heart rate, active energy and distance during a workout
           to show them on your wrist, and your date of birth to estimate heart-rate

@@ -442,6 +442,12 @@ public nonisolated struct CardioSummary: Sendable, Equatable {
     public var bandSeconds: Double
     /// True when Apple Health saved the workout.
     public var saved: Bool
+    /// Outdoors with GPS: metres climbed (`CardioRoute.elevation`), the top
+    /// averaged speed in m/s (`CardioRoute.maximumSpeed`), and whether a
+    /// route was saved with the workout.
+    public var elevationGainMeters: Double?
+    public var maximumSpeed: Double?
+    public var hasRoute = false
 
     public init(
         activity: CardioActivity, activeSeconds: TimeInterval, distanceMeters: Double? = nil,
@@ -518,6 +524,19 @@ public nonisolated struct CardioSummary: Sendable, Equatable {
     public static func speedText(_ perHour: Double, miles: Bool) -> String {
         let tenths = Int((perHour * 10).rounded())
         return "\(tenths / 10).\(tenths % 10) \(miles ? "mph" : "km/h")"
+    }
+
+    /// "24.6 km/h" or "15.3 mph" from metres per second.
+    public static func speedText(metersPerSecond: Double, miles: Bool) -> String {
+        speedText(metersPerSecond * 3.6 / (miles ? metersPerMile / 1000 : 1), miles: miles)
+    }
+
+    public static let feetPerMeter = 3.280839895
+
+    /// "312 m" or "1,024 ft" (feet where distances are in miles).
+    public static func elevationText(meters: Double, feet: Bool) -> String {
+        let value = Int((max(0, meters) * (feet ? feetPerMeter : 1)).rounded())
+        return "\(value.formatted()) \(feet ? "ft" : "m")"
     }
 
     /// "5.02 km" or "3.12 mi".
