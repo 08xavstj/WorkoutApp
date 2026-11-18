@@ -40,6 +40,10 @@ struct WeeklyReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ReviewNumbersCard(lines: lines, basics: snapshot?.basics)
+                    if let floors = snapshot?.floors {
+                        // Last week as an image (WeeklyShareSheet.swift).
+                        WeeklyShareButton(weekStart: lastWeek, trainingDays: lastWeekRecord.done, floors: floors)
+                    }
                     BusyWeekReviewCard(thisWeek: thisWeek) // after three busy weeks in a row: build again?
                     if let reports = snapshot?.reports, !reports.isEmpty {
                         ChangeReportCard(reports: reports)
@@ -323,6 +327,8 @@ struct WeeklyReviewView: View {
         var suggestions: [WeeklyChange]
         /// Everything the data can check, for the menu.
         var measurable: [WeeklyChange]
+        /// Last week's numbers behind the basics, for the share card.
+        var floors = HealthFloors.Week()
     }
 
     private func makeSnapshot() -> Snapshot {
@@ -338,7 +344,7 @@ struct WeeklyReviewView: View {
         let reports = WeeklyChangeReview.report(changes: store.plan(for: lastWeek)?.changes ?? [], week: week, earlier: earlier)
         return Snapshot(basics: basics, reports: reports,
                         suggestions: WeeklyChangeSuggestions.suggested(basics: basics, context: context),
-                        measurable: WeeklyChangeSuggestions.measurable(context))
+                        measurable: WeeklyChangeSuggestions.measurable(context), floors: floors)
     }
 
     /// What the app knows for this week's suggestions.

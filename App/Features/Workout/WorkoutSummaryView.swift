@@ -77,6 +77,7 @@ struct WorkoutSummaryView: View {
     @State private var data: SummaryData?
     @State private var heart: SummaryHeart?
     @State private var reload = 0
+    @State private var sharing = false
 
     private var unit: WeightUnit { gym.liftingUnit }
 
@@ -103,11 +104,16 @@ struct WorkoutSummaryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if let data {
-                    ShareLink(item: SummaryFormat.shareText(data, heart: heart, unit: unit)) {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                    }
+                if data != nil {
+                    Button("Share", systemImage: "square.and.arrow.up") { sharing = true }
                 }
+            }
+        }
+        // The share image, with the text version as a second choice (`LiftingShareSheet`).
+        .sheet(isPresented: $sharing) {
+            if let data {
+                LiftingShareSheet(data: data, heart: heart, unit: unit,
+                                  text: SummaryFormat.shareText(data, heart: heart, unit: unit))
             }
         }
         // Heart rate from a watch can arrive after its app syncs.
@@ -341,7 +347,7 @@ extension WorkoutSession {
 
 // MARK: - Formatting
 
-private enum SummaryFormat {
+enum SummaryFormat {
     static func weight(_ kilograms: Double, _ unit: WeightUnit) -> String {
         "\(unit.format(kilograms)) \(unit.rawValue)"
     }

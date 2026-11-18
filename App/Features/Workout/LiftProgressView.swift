@@ -251,47 +251,28 @@ struct LiftProgressView: View {
                 }
                 .pickerStyle(.segmented)
             }
-            if let selectedDate, let point = nearest(selectedDate, in: points) {
-                Text(selectedText(point, repsOnly: repsOnly))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.primaryText)
-            } else {
-                Text("Touch the chart to see a session")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            Chart {
-                ForEach(points) { point in
-                    if repsOnly {
-                        LineMark(x: .value("Date", point.date), y: .value("Reps", point.bestReps))
-                            .foregroundStyle(Theme.lifting)
-                            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                        PointMark(x: .value("Date", point.date), y: .value("Reps", point.bestReps))
-                            .foregroundStyle(Theme.lifting)
-                            .symbolSize(30)
-                    } else if volume {
-                        BarMark(x: .value("Date", point.date, unit: .day), y: .value("Volume", point.volume))
-                            .foregroundStyle(Theme.lifting.gradient)
-                            .cornerRadius(4)
-                    } else {
-                        LineMark(x: .value("Date", point.date), y: .value("e1RM", point.estimatedOneRepMax))
-                            .foregroundStyle(Theme.lifting)
-                            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                            .interpolationMethod(.monotone)
-                        PointMark(x: .value("Date", point.date), y: .value("e1RM", point.estimatedOneRepMax))
-                            .foregroundStyle(point.isPR ? Theme.strain : Theme.lifting)
-                            .symbolSize(point.isPR ? 90 : 30)
-                            .symbol(point.isPR ? BasicChartSymbolShape.diamond : BasicChartSymbolShape.circle)
-                    }
-                }
+            HStack(alignment: .top) {
                 if let selectedDate, let point = nearest(selectedDate, in: points) {
-                    RuleMark(x: .value("Selected", point.date))
-                        .foregroundStyle(Theme.secondaryText.opacity(0.35))
+                    Text(selectedText(point, repsOnly: repsOnly))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                } else {
+                    Text("Touch the chart to see a session")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Spacer(minLength: 0)
+                // The chart as an image (ShareableChart.swift). e1RM is marked
+                // as an estimate: reps at a given %1RM vary by lift (Nuzzo et
+                // al., Sports Med 2024), so it is a trend, not a test.
+                ChartShareButton(title: "\(name), \(repsOnly ? "best set reps" : volume ? "volume" : "estimated 1RM")",
+                                 subtitle: shareSubtitle(points),
+                                 caveat: repsOnly || volume ? nil : "Estimated 1RM ≈ from your best set and reps left (Epley); an estimate that varies by lift, not a tested max. Diamonds are records.") {
+                    LiftTrendChart(points: points, repsOnly: repsOnly, volume: volume, selected: nil)
                 }
             }
-            .chartYScale(domain: .automatic(includesZero: volume))
-            // Room at both ends so the last date label isn't clipped.
-            .chartXScale(range: .plotDimension(padding: 12))
+            LiftTrendChart(points: points, repsOnly: repsOnly, volume: volume,
+                           selected: selectedDate.flatMap { nearest($0, in: points) })
             .chartXSelection(value: $selectedDate)
             .frame(height: 220)
             if !volume, !repsOnly {
@@ -307,6 +288,17 @@ struct LiftProgressView: View {
             }
         }
         .card()
+    }
+
+    /// "12 sessions · 3 Jan – 18 Nov · kg".
+    private func shareSubtitle(_ points: [LiftProgress.Point]) -> String {
+        let format = Date.FormatStyle.dateTime.day().month(.abbreviated).year()
+        var parts = ["\(points.count) sessions"]
+        if let first = points.first?.date, let last = points.last?.date {
+            parts.append("\(first.formatted(format)) – \(last.formatted(format))")
+        }
+        if !isRepsOnly(points) { parts.append(unit.rawValue) }
+        return parts.joined(separator: " · ")
     }
 
     private func sessionList(_ points: [LiftProgress.Point]) -> some View {
@@ -357,5 +349,49 @@ struct LiftProgressView: View {
 
     private func nearest(_ date: Date, in points: [LiftProgress.Point]) -> LiftProgress.Point? {
         points.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+    }
+}
+
+/// Estimated 1RM (with records as diamonds), volume bars, or best-set reps
+/// for bodyweight work, per session; used on screen and for the share image.
+private struct LiftTrendChart: View {
+    let points: [LiftProgress.Point]
+    let repsOnly: Bool
+    let volume: Bool
+    let selected: LiftProgress.Point?
+
+    var body: some View {
+        Chart {
+            ForEach(points) { point in
+                if repsOnly {
+                    LineMark(x: .value("Date", point.date), y: .value("Reps", point.bestReps))
+                        .foregroundStyle(Theme.lifting)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    PointMark(x: .value("Date", point.date), y: .value("Reps", point.bestReps))
+                        .foregroundStyle(Theme.lifting)
+                        .symbolSize(30)
+                } else if volume {
+                    BarMark(x: .value("Date", point.date, unit: .day), y: .value("Volume", point.volume))
+                        .foregroundStyle(Theme.lifting.gradient)
+                        .cornerRadius(4)
+                } else {
+                    LineMark(x: .value("Date", point.date), y: .value("e1RM", point.estimatedOneRepMax))
+                        .foregroundStyle(Theme.lifting)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .interpolationMethod(.monotone)
+                    PointMark(x: .value("Date", point.date), y: .value("e1RM", point.estimatedOneRepMax))
+                        .foregroundStyle(point.isPR ? Theme.strain : Theme.lifting)
+                        .symbolSize(point.isPR ? 90 : 30)
+                        .symbol(point.isPR ? BasicChartSymbolShape.diamond : BasicChartSymbolShape.circle)
+                }
+            }
+            if let selected {
+                RuleMark(x: .value("Selected", selected.date))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.35))
+            }
+        }
+        .chartYScale(domain: .automatic(includesZero: volume))
+        // Room at both ends so the last date label isn't clipped.
+        .chartXScale(range: .plotDimension(padding: 12))
     }
 }

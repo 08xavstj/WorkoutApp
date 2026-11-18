@@ -68,6 +68,15 @@ enum SleepScoreLog {
         return result
     }
 
+    /// Every saved morning and its score, oldest first (the daily-scores export).
+    static func allScores() -> [(morning: Date, score: Int)] {
+        let parser = Date.ISO8601FormatStyle(timeZone: .current).year().month().day()
+        return load().scores.compactMap { key, score in
+            (try? parser.parse(key)).map { (morning: Calendar.current.startOfDay(for: $0), score: score) }
+        }
+        .sorted { $0.morning < $1.morning }
+    }
+
     /// Scores from the `days` mornings before `morning` (not including it), oldest first.
     static func recentScores(before morning: Date, days: Int = 30) -> [Int] {
         let scores = load().scores
