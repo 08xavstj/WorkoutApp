@@ -57,6 +57,8 @@ public enum HeartEvents {
         return Counts(high: count(high), low: count(low), irregular: count(irregular))
     }
 
-    /// The plain context under the line.
-    public static let note = "These are Apple Watch's own notifications. Tensile doesn't add alerts. Irregular-rhythm notifications miss about 1 in 5 cases of AF and some are false alarms (Lambe et al. 2026), so talk to a doctor about symptoms whatever the count."
+    /// The plain context under the line. No miss rate: Lambe 2026's 0.79
+    /// sensitivity is for AF detection in general, not for the passive
+    /// notifications, which check only from time to time.
+    public static let note = "These are Apple Watch's own notifications; Tensile adds none. They check only from time to time, so they can miss AF, and some are false alarms (Lambe et al. 2026). Talk to a doctor about symptoms whatever the count."
 }
