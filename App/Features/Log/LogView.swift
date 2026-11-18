@@ -87,7 +87,8 @@ struct LogView: View {
 
 /// Start workout (primary, opens the builder) with Empty workout and Saved
 /// workouts beneath it as smaller secondary buttons (ux-audit 4.4), then
-/// Cardio & sports, which starts a recording on the Apple Watch.
+/// Cardio & sports, which starts a recording on the Apple Watch (shown only
+/// with a paired Watch).
 private struct StartWorkoutButtons: View {
     let start: () -> Void
     let startEmpty: () -> Void
@@ -117,9 +118,12 @@ private struct StartWorkoutButtons: View {
                     .accessibilityHint("Starts now. Add exercises as you go.")
                 SecondaryCapsuleButton(title: "Saved workouts", systemImage: "list.bullet.rectangle.portrait", stacked: stacked, action: openSaved)
             }
-            SecondaryCapsuleButton(title: "Cardio & sports on Watch", systemImage: "applewatch", stacked: stacked, action: startCardio)
-                .accessibilityHint("Pick a run, squash, soccer, skiing and more. It starts recording on your Apple Watch.")
-                .accessibilityIdentifier("log-start-cardio")
+            // Only with a paired Watch: without one the button can only fail.
+            if WatchSync.shared.isPaired {
+                SecondaryCapsuleButton(title: "Cardio & sports on Watch", systemImage: "applewatch", stacked: stacked, action: startCardio)
+                    .accessibilityHint("Pick a run, squash, soccer, skiing and more. It starts recording on your Apple Watch.")
+                    .accessibilityIdentifier("log-start-cardio")
+            }
         }
     }
 }
