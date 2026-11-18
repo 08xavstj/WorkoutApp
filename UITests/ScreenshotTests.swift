@@ -66,7 +66,8 @@ final class ScreenshotTests: XCTestCase {
                 dismissSheet(app)
             }
         }
-        for tile in ["rhr", "sleepingHR", "hrv", "respiration", "sleepLastNight"] {
+        // Today shows sleeping heart rate in place of resting once the watch has it.
+        for tile in ["sleepingHR", "hrv", "respiration", "sleepLastNight"] {
             if tap(app, ["tile-\(tile)"], name: "Today \(tile) tile") {
                 capture(app, "today-tile-\(tile)", pages: 1)
                 dismissSheet(app)
@@ -100,7 +101,7 @@ final class ScreenshotTests: XCTestCase {
         }
         let pages: [(key: String, name: String)] = [
             ("metric-Heart-rate zones", "zones"),
-            ("metric-Cardio fitness (VO₂ max)", "cardio-fitness"),
+            ("metric-Cardio fitness (VO₂ max, estimate)", "cardio-fitness"),
             ("metric-Strength", "strength"),
             ("metric-Muscles", "muscles"),
             ("lift-goal-rings", "lift-goals"),
@@ -115,7 +116,7 @@ final class ScreenshotTests: XCTestCase {
         }
         // The quarterly fitness check, from the cardio fitness page.
         openTab(app, "Fitness")
-        if tap(app, ["metric-Cardio fitness (VO₂ max)", "Cardio fitness (VO₂ max)"], name: "Fitness cardio fitness for the check") {
+        if tap(app, ["metric-Cardio fitness (VO₂ max)", "metric-Cardio fitness (VO₂ max, estimate)", "Cardio fitness (VO₂ max)"], name: "Fitness cardio fitness for the check") {
             if tap(app, ["fitness-check-row"], name: "Fitness check row") {
                 capture(app, "fitness-check", pages: 2)
                 back(app)

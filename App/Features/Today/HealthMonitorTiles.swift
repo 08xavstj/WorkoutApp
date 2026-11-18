@@ -71,7 +71,9 @@ enum HealthMonitorTiles {
 /// A `MetricTile` built from a `VitalsModel.Stat`, with its status as the
 /// pill. The gauge follows the tone, so a "Good" pill never sits on a red
 /// gauge: green for good (and "Normal", as on the fixed tiles), amber for
-/// caution, the stat's category colours otherwise. "°C vs usual" moves
+/// caution, grey otherwise. Grey, not the category colour: on a health
+/// monitor colour reads as a verdict, and the heart category's red made a
+/// walking heart rate with no verdict look like a warning under "All normal". "°C vs usual" moves
 /// into the title so the unit stays on one line.
 struct HealthMonitorStatTile: View {
     let stat: VitalsModel.Stat
@@ -79,7 +81,7 @@ struct HealthMonitorStatTile: View {
     private var toneColors: [Color] {
         if stat.tone == .good || stat.status == "Normal" { return [Theme.recoveryHighLight, Theme.recoveryHigh] }
         if stat.tone == .caution { return [Theme.recoveryModerateLight, Theme.recoveryModerate] }
-        return VitalTile.colors(for: stat.category)
+        return [Theme.bodyNeutral, Theme.neutralIcon]
     }
 
     var body: some View {
