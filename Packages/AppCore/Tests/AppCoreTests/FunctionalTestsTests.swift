@@ -37,6 +37,17 @@ struct FunctionalTestsTests {
         let result = FunctionalTest.interpret(.pushUps, value: 45, age: 34, sex: .female)
         #expect(result.standing == .noComparison)
         #expect(!result.detail.contains("96%"))
+        #expect(FunctionalTest.interpret(.pushUps, value: 45, age: 70, sex: .female).ageNote == nil)
+    }
+
+    @Test func pushUpsCarryAnAgeNoteOutsideTheFirefighterCohort() {
+        // Yang 2019: men aged 21 to 66.
+        #expect(FunctionalTest.pushUps.cohortAges == 21...66)
+        #expect(FunctionalTest.interpret(.pushUps, value: 30, age: 34, sex: .male).ageNote == nil)
+        #expect(FunctionalTest.interpret(.pushUps, value: 30, age: 66, sex: .male).ageNote == nil)
+        let older = FunctionalTest.interpret(.pushUps, value: 30, age: 72, sex: .male)
+        #expect(older.ageNote?.contains("21-66") == true)
+        #expect(FunctionalTest.interpret(.pushUps, value: 30, age: 19, sex: .male).ageNote != nil)
     }
 
     @Test(arguments: [

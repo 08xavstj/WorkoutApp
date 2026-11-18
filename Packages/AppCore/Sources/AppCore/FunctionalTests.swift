@@ -46,11 +46,12 @@ public enum FunctionalTest: String, Codable, Sendable, CaseIterable, Identifiabl
     public static let oneLegStandUnableHR = 1.84
     public static let oneLegStandSeconds = 10
 
-    /// The ages each cohort covered. Nil for push-ups: the abstract gives
-    /// "18 years or older", mean 39.6, without an upper limit.
+    /// The ages each cohort covered. Push-ups: Yang 2019 enrolled men "aged
+    /// 18 years or older" (mean 39.6, SD 9.2), and its Discussion gives the
+    /// men studied as "aged 21 to 66 years" (PMC6484614, read 18 Nov 2026).
     public var cohortAges: ClosedRange<Int>? {
         switch self {
-        case .pushUps: nil
+        case .pushUps: 21...66
         case .sittingRising: 46...75
         case .oneLegStand: 51...75
         }
@@ -259,7 +260,10 @@ public enum FunctionalTest: String, Codable, Sendable, CaseIterable, Identifiabl
         }
         switch test {
         case .pushUps:
-            return pushUps(Int(value.rounded()), sex: sex)
+            var result = pushUps(Int(value.rounded()), sex: sex)
+            // Women get no cohort comparison, so no age caveat on it either.
+            if result.standing != .noComparison { result.ageNote = ageNote }
+            return result
         case .sittingRising:
             var result = sittingRising(value)
             result.ageNote = ageNote
