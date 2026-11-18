@@ -19,8 +19,10 @@ struct RoutePrivacyTests {
     /// Metres along the line to each point.
     func along(_ points: [RoutePoint]) -> [Double] { RoutePrivacy.cumulativeMeters(points) }
 
+    /// A fixed ID, as a saved place has: each zone's extra trim is drawn from its ID.
     var homeZone: PrivacyZone {
-        PrivacyZone(name: "Home", latitude: home.latitude, longitude: home.longitude, radiusMeters: 500)
+        PrivacyZone(id: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!, name: "Home",
+                    latitude: home.latitude, longitude: home.longitude, radiusMeters: 500)
     }
 
     // MARK: Zones
@@ -99,6 +101,28 @@ struct RoutePrivacyTests {
         let result = RoutePrivacy.trim(points, zones: [homeZone], hideEndpoints: false, seed: 9)
         #expect(result.hidesEverything)
         #expect(result.isTrimmed)
+    }
+
+    @Test func removingOrReorderingAPlaceKeepsTheOthersTrim() {
+        // A route through home; "Work" is far off the route, so it hides nothing itself.
+        let points = line(meters: 4000, from: home.latitude - 2000 / metersPerDegree)
+        let work = PrivacyZone(id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+                               name: "Work", latitude: 47, longitude: 8)
+        let homeOnly = homeZone
+        let seed = RoutePrivacy.seed(workoutID: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!, salt: "s")
+        let alone = RoutePrivacy.trim(points, zones: [homeOnly], hideEndpoints: true, seed: seed)
+        let after = RoutePrivacy.trim(points, zones: [work, homeOnly], hideEndpoints: true, seed: seed)
+        let before = RoutePrivacy.trim(points, zones: [homeOnly, work], hideEndpoints: true, seed: seed)
+        #expect(alone == after)
+        #expect(alone == before)
+        let extra = RoutePrivacy.zoneExtra(homeOnly, seed: seed)
+        #expect(RoutePrivacy.zoneExtra(homeOnly, seed: seed) == extra)
+        #expect(RoutePrivacy.extraTrimRange.contains(extra.entry))
+        #expect(RoutePrivacy.extraTrimRange.contains(extra.exit))
+        #expect(extra.entry != extra.exit)
+        // Another place, or another workout, draws its own lengths.
+        #expect(RoutePrivacy.zoneExtra(work, seed: seed) != extra)
+        #expect(RoutePrivacy.zoneExtra(homeOnly, seed: seed &+ 1) != extra)
     }
 
     // MARK: Start and end

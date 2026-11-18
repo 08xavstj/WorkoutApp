@@ -112,7 +112,7 @@ public nonisolated enum RoutePrivacy {
         // Drawn in a fixed order, whatever the route, so the values are stable.
         let startTrim = endpointBaseMeters + generator.next(in: extraTrimRange)
         let endTrim = endpointBaseMeters + generator.next(in: extraTrimRange)
-        let zoneExtras = zones.map { _ in (entry: generator.next(in: extraTrimRange), exit: generator.next(in: extraTrimRange)) }
+        let zoneExtras = zones.map { zoneExtra($0, seed: seed) }
 
         guard points.count >= 2 else {
             return Result(visibleRanges: [], isTrimmed: !points.isEmpty, startTrimMeters: startTrim, endTrimMeters: endTrim)
@@ -158,6 +158,17 @@ public nonisolated enum RoutePrivacy {
         let kept = ranges.filter { $0.count >= 2 && cumulative[$0.upperBound] - cumulative[$0.lowerBound] >= minimumVisibleMeters }
         let trimmed = hidden.contains(true) || kept != [0...(points.count - 1)]
         return Result(visibleRanges: kept, isTrimmed: trimmed, startTrimMeters: startTrim, endTrimMeters: endTrim)
+    }
+
+    /// The extra lengths hidden before and after each pass through `zone` on
+    /// one workout. Drawn from the zone's own ID, not its place in the list,
+    /// so adding, removing or reordering places never changes another
+    /// place's trim on a workout already shared (comparing the two images
+    /// would undo the randomness).
+    static func zoneExtra(_ zone: PrivacyZone, seed: UInt64) -> (entry: Double, exit: Double) {
+        var generator = SeededGenerator(seed: seed ^ Self.seed(workoutID: zone.id, salt: "zone"))
+        let entry = generator.next(in: extraTrimRange)
+        return (entry, generator.next(in: extraTrimRange))
     }
 
     /// The visible pieces as points.

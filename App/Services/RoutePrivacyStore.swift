@@ -36,7 +36,17 @@ final class RoutePrivacyStore {
         guard !isDemo else { return }
         let loaded = file.loadLogged(State.self)
         canSave = loaded.state.canSave
-        if canSave { state = loaded.value ?? State() }
+        guard canSave else { return }
+        if let value = loaded.value {
+            state = value
+        } else {
+            // No file yet (or an unreadable one set aside): save the new salt
+            // now. Otherwise it changes every launch until a setting is
+            // edited, each share of the same workout draws a new trim, and
+            // comparing them reveals more of the route.
+            state = State()
+            write()
+        }
     }
 
     private func write() {
