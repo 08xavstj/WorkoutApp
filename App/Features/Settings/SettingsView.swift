@@ -32,10 +32,12 @@ struct SettingsView: View {
                         SleepSettingsSection()
                         NutritionSettingsSection()
                     }
-                    SettingsPageLink(title: "Data & privacy", detail: "Apple Health, Oura, where the coach runs", icon: "lock.fill", id: "data") {
+                    SettingsPageLink(title: "Data & privacy", detail: "Apple Health, Oura, route privacy, export", icon: "lock.fill", id: "data") {
                         DataSourcesSettingsSection()
                         CoachSettingsSection()
                         MoodScreenSettingsSection()
+                        RoutePrivacySettingsSection()
+                        DataExportSettingsSection()
                     }
                 }
                 AppearanceSettingsSection()
