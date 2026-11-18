@@ -44,7 +44,8 @@ struct FitnessView: View {
             .navigationTitle("Fitness")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Workout history", systemImage: "calendar") {
+                    // History, not the calendar (that's the Calendar row on the page).
+                    Button("Workout history", systemImage: "clock.arrow.circlepath") {
                         showingHistory = true
                     }
                 }

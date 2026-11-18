@@ -24,15 +24,6 @@ struct WorkoutHistoryView: View {
             }
             .listRowBackground(Theme.card)
             .accessibilityHint("Runs, rides and sports with their maps and heart rate")
-            NavigationLink {
-                ActivityCalendarView()
-            } label: {
-                Label("Calendar", systemImage: "calendar")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.primaryText)
-            }
-            .listRowBackground(Theme.card)
-            .accessibilityHint("Lifting, cardio and sports in a month grid")
             if finished.isEmpty {
                 ContentUnavailableView(
                     "No workouts yet",

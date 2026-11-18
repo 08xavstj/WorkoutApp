@@ -28,7 +28,8 @@ struct RouteChartsCard: View {
                 .pickerStyle(.segmented)
                 if RouteSeries.hasSpeed(points) {
                     HStack {
-                        Text(showsPace ? "Pace" : "Speed")
+                        // The y axis has no room for a unit: it goes in the header.
+                        Text(showsPace ? "Pace (\(scale.paceUnit))" : "Speed (\(scale.speedUnit))")
                             .font(.headline)
                             .foregroundStyle(Theme.primaryText)
                         Spacer()
@@ -80,4 +81,9 @@ struct RouteChartScale {
 
     /// Metres per pace unit (km or mile).
     var unitMeters: Double { miles ? CardioBests.metersPerMile : 1000 }
+
+    /// The pace chart's y unit: minutes per km or mile.
+    var paceUnit: String { miles ? "min/mi" : "min/km" }
+    /// The speed chart's y unit.
+    var speedUnit: String { miles ? "mph" : "km/h" }
 }

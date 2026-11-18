@@ -4,7 +4,8 @@ import SwiftUI
 
 /// Pace (faster up) or speed along the route, with heart rate drawn over it
 /// on the same height when asked: its own bpm range is printed beside it, as
-/// a chart has one y axis.
+/// a chart has one y axis. The y unit (min/km, km/h...) is in the card's
+/// header (`RouteChartScale.paceUnit`, `speedUnit`).
 struct PaceChart: View {
     let points: [RouteSeries.Point]
     let scale: RouteChartScale

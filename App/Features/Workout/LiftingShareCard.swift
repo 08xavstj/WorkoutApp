@@ -26,7 +26,8 @@ struct LiftingShareCard: View {
 
     private var footnote: String {
         var parts = ["Best set per exercise; ▲▼ is volume against the last time you did it."]
-        if showHeart, heart != nil { parts.append("Strain is Tensile's own 0–100% scale.") }
+        // Only when strain is drawn: records take its place in the stats.
+        if recordCount == 0, showHeart, heart != nil { parts.append("Strain is Tensile's own 0–100% scale.") }
         return parts.joined(separator: " ")
     }
 
