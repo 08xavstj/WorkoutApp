@@ -64,6 +64,8 @@ struct CircleButton: View {
     var size: CGFloat = 48
     var showsTitle = true
     var role: ButtonRole?
+    /// For UI tests.
+    var identifier: String?
     let action: () -> Void
 
     var body: some View {
@@ -77,6 +79,7 @@ struct CircleButton: View {
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
             .accessibilityLabel(title)
+            .accessibilityIdentifier(identifier ?? "")
             if showsTitle {
                 Text(title)
                     .font(.footnote)
@@ -89,7 +92,7 @@ struct CircleButton: View {
 }
 
 /// One choice in a `ChipGrid`.
-struct WatchChip: Identifiable, Hashable {
+nonisolated struct WatchChip: Identifiable, Hashable, Sendable {
     let id: Int
     let label: String
     var detail: String?

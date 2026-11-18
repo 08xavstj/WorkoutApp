@@ -21,7 +21,7 @@ nonisolated func watchSpokenWeight(_ kilograms: Double, unit: String) -> String 
 }
 
 /// A set about to be ticked off: what was planned, and the loads the gym can make.
-struct PendingSet: Identifiable, Equatable {
+nonisolated struct PendingSet: Identifiable, Equatable, Sendable {
     var exerciseIndex: Int
     var setIndex: Int
     /// Stable ids (`ExerciseSnapshot.id`, `SetSnapshot.order`) for the phone.
@@ -72,7 +72,7 @@ struct PendingSet: Identifiable, Equatable {
 }
 
 /// Reps and weight changed on the wrist before the set is ticked (nil: not changed).
-struct SetEdit: Equatable {
+nonisolated struct SetEdit: Equatable, Sendable {
     var reps: Int?
     var weightKg: Double?
 }

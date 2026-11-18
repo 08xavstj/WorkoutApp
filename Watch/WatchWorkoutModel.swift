@@ -1090,7 +1090,7 @@ extension WatchWorkoutModel: WCSessionDelegate {
 }
 
 /// A set logged on the wrist, for the tick-over ("Set 3 logged") and Undo.
-struct LoggedSet: Equatable {
+nonisolated struct LoggedSet: Equatable, Sendable {
     /// `WatchSession.setKey` of the set.
     var id: String
     var title: String

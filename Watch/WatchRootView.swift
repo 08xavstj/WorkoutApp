@@ -10,7 +10,7 @@ struct WatchRootView: View {
         // A cardio workout (`WatchCardioModel`) has its own pages and end screen;
         // only one of the two models records at a time.
         if cardio.isActive {
-            WatchCardioPagesView()
+            CardioPagesView()
         } else if cardio.phase == .ended {
             WatchCardioEndView()
         } else {
