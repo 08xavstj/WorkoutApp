@@ -116,6 +116,11 @@ final class WatchWorkoutModel: NSObject {
     /// A stop that arrived while the recording was still starting: applied once
     /// it runs, instead of being acknowledged and lost.
     @ObservationIgnored private var stopRequestedWhileStarting: String?
+    /// The save is under way (`end`): a second stop, a discard or a failure
+    /// arriving meanwhile must not end or reset the same workout again.
+    @ObservationIgnored private var isEnding = false
+    /// A workout is being recovered after a relaunch: the crash log waits for it (`recoverLocalLog`).
+    @ObservationIgnored private var isRecoveringWorkout = false
 
     var isRecording: Bool { phase == .running || phase == .paused }
 
@@ -238,7 +243,7 @@ final class WatchWorkoutModel: NSObject {
     /// A log left by a session that never ended (the app was closed or
     /// crashed): its sets go to the phone, so nothing lifted is lost.
     private func recoverLocalLog() {
-        guard phase == .idle, let saved = LocalLiftLog.load() else { return }
+        guard phase == .idle, !isRecoveringWorkout, let saved = LocalLiftLog.load() else { return }
         sendLog(of: saved.session, start: saved.session.startedAt, end: saved.savedAt)
         LocalLiftLog.clear()
     }
@@ -299,22 +304,18 @@ final class WatchWorkoutModel: NSObject {
             let start = Self.recordingStart(for: sessionID ?? snapshot.flatMap { $0.isFinished ? nil : $0.id })
             session.startActivity(with: start)
             try await builder.beginCollection(at: start)
-            heartRate = nil
-            averageHeartRate = nil
-            maximumHeartRate = nil
-            activeKilocalories = nil
-            summary = nil
-            endedAt = nil
-            setsCompletedHere = 0
-            heartSeries = HeartRateSeries()
-            tracker = CardioZoneTracker(scheme: zones.scheme)
-            recordLines = []
-            heartCaptionSeen = false
-            lastLogged = nil
-            finishedSession = nil
-            setEdits = [:]
-            pausedAt = nil
-            pausedSeconds = 0
+            // The session failed while this waited: `fail` has already reset
+            // everything, and a "running" workout with no session could never be ended.
+            guard phase == .starting, workoutSession === session else {
+                session.end()
+                builder.discardWorkout()
+                if let id = stopRequestedWhileStarting {
+                    stopRequestedWhileStarting = nil
+                    send(.recordingStopped, sessionID: id)
+                }
+                return
+            }
+            resetForRecording(scheme: zones.scheme)
             startedAt = start
             displayStart = nil
             phase = .running
@@ -344,6 +345,90 @@ final class WatchWorkoutModel: NSObject {
                 send(.recordingStopped, sessionID: id)
             }
         }
+    }
+
+    /// What a new recording starts from: no numbers, sets or questions left
+    /// from the last one, and the Heart page counting in `scheme`.
+    private func resetForRecording(scheme: HeartRateZoneScheme) {
+        heartRate = nil
+        averageHeartRate = nil
+        maximumHeartRate = nil
+        activeKilocalories = nil
+        summary = nil
+        endedAt = nil
+        setsCompletedHere = 0
+        heartSeries = HeartRateSeries()
+        tracker = CardioZoneTracker(scheme: scheme)
+        recordLines = []
+        heartCaptionSeen = false
+        lastLogged = nil
+        finishedSession = nil
+        setEdits = [:]
+        skipRating()
+        restEndedAt = nil
+        selectedExercise = nil
+        pausedAt = nil
+        pausedSeconds = 0
+    }
+
+    // MARK: Recovery after a relaunch
+
+    /// The app was relaunched mid-workout (`WatchAppDelegate.handleActiveWorkoutRecovery`):
+    /// a log left in the file waits, so its sets can join the recovered workout.
+    func willRecoverWorkout() {
+        isRecoveringWorkout = true
+    }
+
+    /// Recovery is over (the workout was taken over, or there was none).
+    func didRecoverWorkout() {
+        isRecoveringWorkout = false
+        if connection?.activationState == .activated { recoverLocalLog() }
+    }
+
+    /// Takes over a strength workout the system kept recording while the app
+    /// was closed or crashed (`HKHealthStore.recoverActiveWorkoutSession`).
+    /// The clock and totals carry on from the builder; the Watch's own session
+    /// comes back from its log file, and a phone session is attached by the
+    /// next snapshot (`adopt`). False when it can't: another workout is under way.
+    func recover(_ session: HKWorkoutSession) async -> Bool {
+        guard phase == .idle || phase == .ended, workoutSession == nil, !WatchCardioModel.shared.isBusy else { return false }
+        phase = .starting
+        problem = nil
+        WatchCardioModel.shared.clearForLifting()
+        let zones = await WatchCardioModel.shared.resolveZones()
+        let builder = session.associatedWorkoutBuilder()
+        if builder.dataSource == nil {
+            builder.dataSource = HKLiveWorkoutDataSource(healthStore: store, workoutConfiguration: session.workoutConfiguration)
+        }
+        session.delegate = self
+        builder.delegate = self
+        workoutSession = session
+        self.builder = builder
+        let now = Date.now
+        let start = session.startDate ?? builder.startDate ?? now
+        resetForRecording(scheme: zones.scheme)
+        // The Watch's own session, as saved after its last set.
+        if let saved = LocalLiftLog.load(), abs(saved.session.startedAt.timeIntervalSince(start)) < 5 * 60 {
+            snapshot = saved.session
+            isLocal = true
+        }
+        startedAt = start
+        displayStart = nil
+        // The time the builder hasn't counted as active is the pauses so far.
+        pausedSeconds = max(0, now.timeIntervalSince(start) - builder.elapsedTime)
+        phase = .running
+        if session.state == .paused {
+            phase = .paused
+            beginPause(at: now)
+        }
+        if !isLocal, let id = recordingSessionID ?? snapshot.flatMap({ $0.isFinished ? nil : $0.id }) {
+            adopt(id)
+        }
+        if let id = stopRequestedWhileStarting {
+            stopRequestedWhileStarting = nil
+            if stopApplies(to: id) { await end(sessionRPE: nil) }
+        }
+        return true
     }
 
     /// A recording started empty now belongs to the phone's session. The
@@ -429,7 +514,9 @@ final class WatchWorkoutModel: NSObject {
     /// Ends the HKWorkoutSession, saves the workout and sends its summary to the
     /// phone (queued until the phone is reachable).
     func end(sessionRPE: Int?) async {
-        guard isRecording, let workoutSession, let builder else { return }
+        guard isRecording, !isEnding, let workoutSession, let builder else { return }
+        isEnding = true
+        defer { isEnding = false }
         // A set still inside its undo window is logged now.
         flushHeld()
         let end = Date.now
@@ -502,7 +589,7 @@ final class WatchWorkoutModel: NSObject {
 
     /// Stops without saving anything.
     func discard() {
-        guard isRecording else { return }
+        guard isRecording, !isEnding else { return }
         dropHeld()
         let wasLocal = isLocal
         if wasLocal { LocalLiftLog.clear() }
@@ -542,6 +629,7 @@ final class WatchWorkoutModel: NSObject {
     func reset() {
         phase = .idle
         summary = nil
+        problem = nil
         if isLocal {
             snapshot = nil
             isLocal = false
@@ -671,8 +759,8 @@ final class WatchWorkoutModel: NSObject {
         setsCompletedHere = before.setsCompletedHere
         selectedExercise = before.selectedExercise
         setEdits[held.setKey] = before.edit
-        ratingTask?.cancel()
-        pendingRating = before.pendingRating
+        // The question that was open before comes back with its own fold-away timer.
+        if let pending = before.pendingRating { askRating(pending) } else { skipRating() }
         if let ends = before.restEndsAt, ends > .now {
             startRest(until: ends, length: before.restLength, startedAt: before.restStartedAt)
         } else {
@@ -1007,6 +1095,10 @@ final class WatchWorkoutModel: NSObject {
     // MARK: Phone → Watch
 
     private func apply(_ incoming: WatchSession) {
+        // A finished snapshot from before this recording began (an old one sent
+        // again with the application context) is about an earlier session: it
+        // must not end this one.
+        if incoming.isFinished, isRecording, let startedAt, incoming.sentAt < startedAt { return }
         // Running the Watch's own session: the phone's snapshots are for its own
         // session, not this one. (A plan arrives under its own key, `plan`.)
         if isLocal, isRecording || phase == .starting { return }
@@ -1158,17 +1250,33 @@ final class WatchWorkoutModel: NSObject {
         if let local = lastLocalPauseChange, date < local, state == .paused || state == .running, phase != .starting { return }
         switch state {
         case .running:
-            if phase == .paused || phase == .starting { phase = .running }
+            // Only a resume: `start` moves `.starting` on once collection has begun,
+            // so a failure or discard meanwhile isn't overwritten.
+            if phase == .paused { phase = .running }
             // Resumed by the system: the clock runs again (nothing to do unless paused).
             if phase == .running { endPause() }
         case .paused:
+            guard isRecording else { return }
             phase = .paused
             beginPause()
         default: break
         }
     }
 
+    /// Both side buttons pressed together (`HKWorkoutEventType.pauseOrResumeRequest`):
+    /// pause or resume, as in Apple's Workout app.
+    private func pauseOrResume() {
+        guard !isEnding else { return }
+        switch phase {
+        case .running: pause()
+        case .paused: resume()
+        default: break
+        }
+    }
+
     private func fail(_ message: String) {
+        // Not recording (a late callback), or the save under way handles it.
+        guard phase == .starting || isRecording, !isEnding else { return }
         problem = "Recording stopped: \(message)"
         // The sets themselves are the phone's: what was held still goes.
         flushHeld()
@@ -1184,6 +1292,7 @@ final class WatchWorkoutModel: NSObject {
                 isLocal = false
             }
         }
+        workoutSession?.end()
         builder?.discardWorkout()
         workoutSession = nil
         builder = nil
@@ -1191,6 +1300,10 @@ final class WatchWorkoutModel: NSObject {
         pausedAt = nil
         pausedSeconds = 0
         clearRest()
+        restEndedAt = nil
+        skipRating()
+        setEdits = [:]
+        selectedExercise = nil
         RepCounter.shared.reset()
         send(.recordingStopped, sessionID: recordingSessionID)
         recordingSessionID = nil
@@ -1223,6 +1336,11 @@ extension WatchWorkoutModel: HKWorkoutSessionDelegate {
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: any Error) {
         let message = error.localizedDescription
         Task { @MainActor in self.fail(message) }
+    }
+
+    nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didGenerate event: HKWorkoutEvent) {
+        guard event.type == .pauseOrResumeRequest else { return }
+        Task { @MainActor in self.pauseOrResume() }
     }
 }
 
