@@ -89,6 +89,9 @@ final class VitalsModel {
     static var vo2Source: VO2Source {
         UserDefaults.standard.string(forKey: vo2SourceKey).flatMap(VO2Source.init(rawValue:)) ?? .standard
     }
+    /// Nights of breathing rate read for the chart and the illness watch
+    /// (`HealthKitClient.nightlyBreathingRate`, one device per baseline).
+    nonisolated static let breathingRateDays = 90
     @ObservationIgnored private var respirationHistory: [DatedValue] = []
     @ObservationIgnored private var wristTemperatureHistory: [DatedValue] = []
     /// Daily resting heart rate (HealthKit) and the app's own sleeping heart
@@ -220,7 +223,8 @@ final class VitalsModel {
         async let rhr = health.dailySeries(.restingHeartRate, unit: bpm, days: 90, cumulative: false)
         async let walkingHR = health.dailySeries(.walkingHeartRateAverage, unit: bpm, days: 90, cumulative: false)
         async let spo2 = health.dailySeries(.oxygenSaturation, unit: .percent(), days: 90, cumulative: false)
-        async let respiration = health.dailySeries(.respiratoryRate, unit: bpm, days: 90, cumulative: false)
+        // By night and from one device: the Oura ring's nightly value and the watch's are never averaged together.
+        async let respiration = health.nightlyBreathingRate(days: Self.breathingRateDays, today: today)
         async let wristTemp = health.dailySeries(.appleSleepingWristTemperature, unit: .degreeCelsius(), days: 90, cumulative: false)
         async let bodyTemp = health.dailySeries(.bodyTemperature, unit: .degreeCelsius(), days: 90, cumulative: false)
         async let steps = health.dailySeries(.stepCount, unit: .count(), days: 90, cumulative: true)
@@ -301,12 +305,11 @@ final class VitalsModel {
         intensitySplitByDay = derived.intensitySplitByDay
         cardioVigorousByDay = derived.cardioVigorousByDay
         restingHeartRateHistory = rhrSeries
-        // 30 nights of sleeping heart rate from the nightly cache the recovery
-        // baseline also fills (`nightlySleepingHeartRate`), so the history isn't
-        // cut to the 14 days of per-minute heart rate read here; this refresh's
-        // own nights win where both have one.
-        var sleepingByNight = await health.nightlySleepingHeartRate(nights: Array(nights.suffix(30)))
-        for night in derived.sleepingHeartRateByNight { sleepingByNight[night.date] = night.value }
+        // 30 nights of sleeping heart rate from the same device the recovery
+        // baseline uses (`sleepingHeartRate(nights:today:)`: the Oura ring's
+        // nights or the watch's, never both), so the illness watch compares
+        // yesterday and today from one device.
+        let sleepingByNight = await health.sleepingHeartRate(nights: Array(nights.suffix(30)), today: today).nights
         let sleepingSeries = sleepingByNight.map { DatedValue(date: $0.key, value: $0.value) }.sorted { $0.date < $1.date }
         sleepingHeartRateHistory = sleepingSeries
 
@@ -326,7 +329,8 @@ final class VitalsModel {
         if let sleeping = derived.sleepingHeartRate {
             result.append(Stat(
                 id: "sleepingHR", category: .heart, title: "Sleeping heart rate", icon: "bed.double.fill",
-                value: fmt(sleeping.average), unit: "bpm",
+                // Last night's value from the series' device when it has one, so the number matches the chart.
+                value: fmt(sleepingByNight[today] ?? sleeping.average), unit: "bpm",
                 status: "Lowest last night \(fmt(sleeping.lowest))", tone: .neutral,
                 series: sleepingSeries,
                 footnote: "Average while asleep last night"
@@ -410,7 +414,7 @@ final class VitalsModel {
         let daylightSeries = get(try? await daylight)
         daylightMinutesToday = daylightSeries.isEmpty ? nil : (latestToday(daylightSeries)?.value ?? 0)
         result.append(Self.daylightStat(series: daylightSeries, today: today))
-        let respirationSeries = get(try? await respiration)
+        let respirationSeries = await respiration.nights.map { DatedValue(date: $0.key, value: $0.value) }.sorted { $0.date < $1.date }
         respirationHistory = Array(respirationSeries.suffix(31))
         result.append(makeStat(
             "respiration", .breathing, "Breathing rate", "wind", series: respirationSeries, unit: "/min", digits: 1,
@@ -945,7 +949,6 @@ final class VitalsModel {
         var aerobic = IntensityMinutes.Result(moderate: 0, vigorous: 0)
         var aerobicDays = 7
         var sleepingHeartRate: SleepingHeartRate.Result?
-        var sleepingHeartRateByNight: [DatedValue] = []
         var intensityByDay: [DatedValue] = []
         /// Moderate and vigorous minutes per day (start of day), and the most
         /// vigorous minutes inside one recorded cardio workout that day, for
@@ -1001,12 +1004,6 @@ final class VitalsModel {
                     }
                 }
                 day = next
-            }
-        }
-        for night in nights {
-            let asleep = sorted.filter { $0.date >= night.bedtime && $0.date <= night.wake }.map(\.bpm)
-            if asleep.count >= 60 {
-                derived.sleepingHeartRateByNight.append(DatedValue(date: night.date, value: asleep.reduce(0, +) / Double(asleep.count)))
             }
         }
         derived.sleepingHeartRate = SleepingHeartRate.measure(sorted.filter { $0.date >= today.addingTimeInterval(-8 * 3600) }, during: sleep)

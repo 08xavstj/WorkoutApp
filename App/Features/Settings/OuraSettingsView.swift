@@ -45,6 +45,14 @@ struct OuraSettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.recoveryModerateText)
             }
+            if link.status == .connected, link.needsReconnect {
+                // The scopes were trimmed to what's used (`Oura.scopes`); syncing keeps working meanwhile.
+                Text("Tensile now asks Oura only for your daily and sleep data. Reconnect once so the permission matches.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.recoveryModerateText)
+                Button(signingIn ? "Opening Oura…" : "Reconnect to Oura") { connect() }
+                    .disabled(signingIn)
+            }
             switch link.status {
             case .connected:
                 Button(link.isSyncing ? "Syncing…" : "Sync now") {
@@ -60,7 +68,8 @@ struct OuraSettingsView: View {
                 EmptyView()
             }
         } footer: {
-            Text("Tensile downloads your Oura sleep, sleep score, readiness, overnight HRV and temperature change for the last 90 days, then keeps the last week up to date. It's kept on this iPhone; nothing is sent to Oura except the sign-in. Oura needs an active membership to share data with other apps.")
+            // What's used and left out: docs/research/oura-ring-2026-11.md §6 ([R49] for the scores).
+            Text("Tensile downloads your Oura sleep, overnight HRV, sleeping heart rate, breathing rate and temperature change for the last 90 days, then keeps the last week up to date. It's kept on this iPhone; nothing is sent to Oura except the sign-in. Oura's Readiness and Sleep scores aren't used: their formulas aren't published and no study has validated them. Oura needs an active membership to share data with other apps.")
         }
     }
 
@@ -125,6 +134,7 @@ struct OuraSettingsView: View {
 
     // MARK: Sleep
 
+    @ViewBuilder
     private var sleepSection: some View {
         Section {
             Picker("Sleep from", selection: $sleepSource) {
@@ -135,8 +145,18 @@ struct OuraSettingsView: View {
         } header: {
             Text("Sleep")
         } footer: {
-            // Robbins et al., Sensors 2024 (see `SleepSourcePreference`).
-            Text("\(sleepSource.detail) One device's whole night is used, so the stages come from one tracker. In a lab study the ring staged sleep a little more consistently than Apple Watch, though both got total sleep about right. With the ring first, its overnight HRV is used for recovery on the nights it has.")
+            // Robbins et al., Sensors 2024 (see `SleepSourcePreference`); HRV and heart rate:
+            // Dial et al., Physiol Rep 2025 vs O'Grady et al., Sensors 2024 (`OneDeviceBaseline`).
+            Text("\(sleepSource.detail) One device's whole night is used, so the stages come from one tracker. In a lab study the ring staged sleep a little more consistently than Apple Watch, though both got total sleep about right. Whatever you pick here, recovery uses the ring's overnight HRV and sleeping heart rate when it has them: against ECG they were more accurate than the watch's. Each baseline uses one device, never both.")
+        }
+        Section {
+            Text("In the Health app, open Browse › Activity › Steps › Data Sources & Access, tap Edit and drag Apple Watch above Oura. Do the same for Active Energy. Health then counts the watch's steps and energy and doesn't add the ring's on top.")
+                .font(.footnote)
+        } header: {
+            Text("Steps and energy")
+        } footer: {
+            // Watch steps and HR validated better than the ring's (Fuller et al., JMIR mHealth 2020; docs/research/oura-ring-2026-11.md §5-6).
+            Text("The watch is the better-tested device for steps and energy. Tensile reads Health's totals, which follow that order.")
         }
     }
 

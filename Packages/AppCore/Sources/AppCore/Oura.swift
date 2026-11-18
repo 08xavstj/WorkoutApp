@@ -4,17 +4,29 @@ import Foundation
 /// URLs, the JSON it returns, and turning a night into `SleepSample`s.
 /// Networking and token storage live in the app (`OuraLink`).
 ///
-/// Sign-in is OAuth 2 with the authorization-code flow. Oura stopped issuing
-/// personal access tokens in December 2025, and API access on current rings
-/// needs an Oura membership. Refresh tokens are single use: every refresh
-/// returns a new one that must be saved.
+/// Sign-in is OAuth 2 with the authorization-code flow and PKCE (`PKCE`).
+/// Oura stopped issuing personal access tokens in December 2025, and API
+/// access on current rings needs an Oura membership. Refresh tokens are
+/// single use: every refresh returns a new one that must be saved.
+///
+/// What Tensile uses from the ring, and what it leaves out and why:
+/// docs/research/oura-ring-2026-11.md §6.
 public enum Oura {
     public static let authorizeURL = URL(string: "https://cloud.ouraring.com/oauth/authorize")!
     public static let tokenURL = URL(string: "https://api.ouraring.com/oauth/token")!
     public static let apiBase = URL(string: "https://api.ouraring.com/v2/usercollection/")!
-    /// `daily` covers sleep, readiness and activity; `heartrate` the
-    /// per-minute heart rate; `personal` age and sex.
-    public static let scopes = "personal daily heartrate"
+    /// Only what is used: `daily` covers `/sleep` (stages, overnight HRV and
+    /// heart rate, breathing rate, temperature change). `heartrate` and
+    /// `personal` were requested before but never read, and `spo2` isn't
+    /// asked for because the Watch's SpO2 is the one with independent
+    /// evidence (Oura API spec 1.43 scopes; docs/research/oura-ring-2026-11.md
+    /// §3.2, §4.4, §6). Changing this asks the owner to reconnect once
+    /// (`needsReconnect`).
+    public static let scopes = "daily"
+    /// Oura asks every request to carry a User-Agent and says requests
+    /// without one "may be rejected" (Oura API spec 1.43). Generic on
+    /// purpose: nothing about the user or the device.
+    public static let userAgent = "Tensile/1.0"
     /// The app's URL scheme (project.yml) and the redirect address to give
     /// Oura's developer portal.
     public static let callbackScheme = "workoutapp"
@@ -22,8 +34,9 @@ public enum Oura {
 
     // MARK: Sign-in
 
-    /// The page that asks the user to allow access.
-    public static func authorizationURL(clientID: String, redirectURI: String, state: String) -> URL? {
+    /// The page that asks the user to allow access, with the PKCE S256
+    /// challenge for `codeVerifier` (`PKCE.challenge(for:)`).
+    public static func authorizationURL(clientID: String, redirectURI: String, state: String, codeVerifier: String) -> URL? {
         var components = URLComponents(url: authorizeURL, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
@@ -31,8 +44,26 @@ public enum Oura {
             URLQueryItem(name: "redirect_uri", value: redirectURI),
             URLQueryItem(name: "scope", value: scopes),
             URLQueryItem(name: "state", value: state),
+            URLQueryItem(name: "code_challenge", value: PKCE.challenge(for: codeVerifier)),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
         ]
         return components?.url
+    }
+
+    /// True when the owner should sign in to Oura once more:
+    /// - tokens saved before the app recorded the scope come from the older,
+    ///   wider request (`personal daily heartrate`), so they ask once;
+    /// - a sign-in that lacks a permission the app now needs (the owner
+    ///   unticked it, or `scopes` grew) asks, since those reads would fail.
+    /// Extra permissions Oura still reports after a fresh sign-in don't ask
+    /// again: one more sign-in can't remove them, and nagging would never stop.
+    /// Order and case don't matter.
+    public static func needsReconnect(grantedScope: String?) -> Bool {
+        func set(_ text: String) -> Set<String> {
+            Set(text.lowercased().split(whereSeparator: { $0 == " " || $0 == "+" || $0 == "," }).map(String.init))
+        }
+        guard let grantedScope else { return true }
+        return !set(scopes).isSubset(of: set(grantedScope))
     }
 
     /// What Oura sent back to the redirect address.
@@ -55,11 +86,13 @@ public enum Oura {
     }
 
     /// Form body for the token endpoint (`application/x-www-form-urlencoded`).
+    /// Oura still needs the client secret when PKCE is used (Oura API, "Authentication").
     public static func tokenRequestBody(_ grant: Grant, clientID: String, clientSecret: String) -> Data {
         var fields: [(String, String)]
         switch grant {
-        case let .code(code, redirectURI):
-            fields = [("grant_type", "authorization_code"), ("code", code), ("redirect_uri", redirectURI)]
+        case let .code(code, redirectURI, codeVerifier):
+            fields = [("grant_type", "authorization_code"), ("code", code), ("redirect_uri", redirectURI),
+                      ("code_verifier", codeVerifier)]
         case let .refresh(token):
             fields = [("grant_type", "refresh_token"), ("refresh_token", token)]
         }
@@ -68,7 +101,8 @@ public enum Oura {
     }
 
     public enum Grant: Sendable, Equatable {
-        case code(String, redirectURI: String)
+        /// The sign-in code, the redirect address sent with it, and the PKCE verifier.
+        case code(String, redirectURI: String, codeVerifier: String)
         case refresh(String)
     }
 
@@ -83,19 +117,24 @@ public enum Oura {
         public var accessToken: String
         public var refreshToken: String?
         public var expiresIn: Double?
+        /// The permissions granted, when Oura says (OAuth 2, RFC 6749 §5.1).
+        public var scope: String?
 
         enum CodingKeys: String, CodingKey {
             case accessToken = "access_token"
             case refreshToken = "refresh_token"
             case expiresIn = "expires_in"
+            case scope
         }
 
         /// Tokens to keep, with the expiry as a date (a minute early, so a
-        /// request never goes out with a token about to lapse).
-        public func tokens(now: Date = .now, keeping previous: Tokens? = nil) -> Tokens {
+        /// request never goes out with a token about to lapse). The scope is
+        /// Oura's answer, else the previous tokens', else `requestedScope`.
+        public func tokens(now: Date = .now, keeping previous: Tokens? = nil, requestedScope: String? = nil) -> Tokens {
             Tokens(accessToken: accessToken,
                    refreshToken: refreshToken ?? previous?.refreshToken,
-                   expiresAt: expiresIn.map { now.addingTimeInterval(max(0, $0 - 60)) })
+                   expiresAt: expiresIn.map { now.addingTimeInterval(max(0, $0 - 60)) },
+                   scope: scope ?? previous?.scope ?? requestedScope)
         }
     }
 
@@ -103,11 +142,15 @@ public enum Oura {
         public var accessToken: String
         public var refreshToken: String?
         public var expiresAt: Date?
+        /// The permissions this sign-in was granted; nil for tokens saved
+        /// before the app recorded it (`needsReconnect`).
+        public var scope: String?
 
-        public init(accessToken: String, refreshToken: String?, expiresAt: Date?) {
+        public init(accessToken: String, refreshToken: String?, expiresAt: Date?, scope: String? = nil) {
             self.accessToken = accessToken
             self.refreshToken = refreshToken
             self.expiresAt = expiresAt
+            self.scope = scope
         }
 
         public func isExpired(now: Date = .now) -> Bool {
@@ -149,10 +192,19 @@ public enum Oura {
         public var efficiency: Double?
         /// Average overnight HRV, RMSSD in ms.
         public var averageHRV: Double?
+        /// Average and lowest heart rate while asleep (bpm), from 30-second
+        /// samples, so they can differ a little from the Oura app (spec 1.43).
         public var averageHeartRate: Double?
         public var lowestHeartRate: Double?
         /// Breaths a minute.
         public var averageBreath: Double?
+        /// °C from the user's usual skin temperature (the sleep's
+        /// `readiness.temperature_deviation`; only this one field of Oura's
+        /// readiness is read, never its score).
+        public var temperatureDeviation: Double?
+        /// Oura flagged that the ring's battery ran low during this period,
+        /// so the night may be incomplete.
+        public var lowBatteryAlert: Bool?
 
         enum CodingKeys: String, CodingKey {
             case id, day, type, efficiency
@@ -168,11 +220,23 @@ public enum Oura {
             case averageHeartRate = "average_heart_rate"
             case lowestHeartRate = "lowest_heart_rate"
             case averageBreath = "average_breath"
+            /// Top level in this app's cache; inside `readiness` in Oura's answer.
+            case temperatureDeviation = "temperature_deviation"
+            case lowBatteryAlert = "low_battery_alert"
+        }
+
+        private enum NestedKeys: String, CodingKey {
+            case readiness
+        }
+
+        private enum ReadinessKeys: String, CodingKey {
+            case temperatureDeviation = "temperature_deviation"
         }
 
         public init(id: String, day: String, bedtimeStart: Date, bedtimeEnd: Date, type: String? = "long_sleep",
                     sleepPhase5Min: String? = nil, totalSleepDuration: Double? = nil, averageHRV: Double? = nil,
-                    lowestHeartRate: Double? = nil, efficiency: Double? = nil) {
+                    lowestHeartRate: Double? = nil, efficiency: Double? = nil, averageHeartRate: Double? = nil,
+                    averageBreath: Double? = nil, temperatureDeviation: Double? = nil, lowBatteryAlert: Bool? = nil) {
             self.id = id
             self.day = day
             self.bedtimeStart = bedtimeStart
@@ -183,6 +247,10 @@ public enum Oura {
             self.averageHRV = averageHRV
             self.lowestHeartRate = lowestHeartRate
             self.efficiency = efficiency
+            self.averageHeartRate = averageHeartRate
+            self.averageBreath = averageBreath
+            self.temperatureDeviation = temperatureDeviation
+            self.lowBatteryAlert = lowBatteryAlert
         }
 
         public init(from decoder: Decoder) throws {
@@ -203,6 +271,14 @@ public enum Oura {
             averageHeartRate = try c.decodeIfPresent(Double.self, forKey: .averageHeartRate)
             lowestHeartRate = try c.decodeIfPresent(Double.self, forKey: .lowestHeartRate)
             averageBreath = try c.decodeIfPresent(Double.self, forKey: .averageBreath)
+            lowBatteryAlert = try c.decodeIfPresent(Bool.self, forKey: .lowBatteryAlert)
+            if let cached = try c.decodeIfPresent(Double.self, forKey: .temperatureDeviation) {
+                temperatureDeviation = cached
+            } else {
+                let nested = try decoder.container(keyedBy: NestedKeys.self)
+                let readiness = try? nested.nestedContainer(keyedBy: ReadinessKeys.self, forKey: .readiness)
+                temperatureDeviation = try readiness?.decodeIfPresent(Double.self, forKey: .temperatureDeviation)
+            }
         }
 
         /// The main sleep or a shorter sleep; naps, rests and deleted periods are left out.
@@ -241,36 +317,11 @@ public enum Oura {
         }
     }
 
-    /// Oura's readiness for a day (`/daily_readiness`).
-    public struct DailyReadiness: Codable, Sendable, Equatable {
-        public var day: String
-        /// 0-100, Oura's own score.
-        public var score: Int?
-        /// °C from the user's usual skin temperature.
-        public var temperatureDeviation: Double?
-
-        enum CodingKeys: String, CodingKey {
-            case day, score
-            case temperatureDeviation = "temperature_deviation"
-        }
-
-        public init(day: String, score: Int?, temperatureDeviation: Double?) {
-            self.day = day
-            self.score = score
-            self.temperatureDeviation = temperatureDeviation
-        }
-    }
-
-    /// Oura's sleep score for a day (`/daily_sleep`).
-    public struct DailySleep: Codable, Sendable, Equatable {
-        public var day: String
-        public var score: Int?
-
-        public init(day: String, score: Int?) {
-            self.day = day
-            self.score = score
-        }
-    }
+    // Oura's Readiness and Sleep scores (`/daily_readiness`, `/daily_sleep`)
+    // are not downloaded: they are proprietary composites with unpublished
+    // weights and no published validation against an outcome, the same reason
+    // Apple's own scores were removed (docs/research/oura-ring-2026-11.md §5-6,
+    // [R49]; apple-scores-2026-11.md).
 
     // MARK: Nights
 
@@ -292,11 +343,37 @@ public enum Oura {
         return result
     }
 
-    /// Overnight HRV (RMSSD, ms) by morning, from each main sleep.
-    public static func nightlyRMSSD(_ periods: [SleepPeriod], calendar: Calendar = .current) -> [Date: Double] {
+    /// One value per morning from each main sleep; missing or zero values are left out.
+    public static func nightly(_ periods: [SleepPeriod], _ value: (SleepPeriod) -> Double?,
+                               calendar: Calendar = .current) -> [Date: Double] {
         mainSleep(periods, calendar: calendar).compactMapValues { period in
-            period.averageHRV.flatMap { $0 > 0 ? $0 : nil }
+            value(period).flatMap { $0 > 0 && $0.isFinite ? $0 : nil }
         }
+    }
+
+    /// Overnight HRV (RMSSD, ms) by morning, from each main sleep. Oura Gen 4
+    /// agreed with ECG at CCC 0.99, MAPE 6.0% (Dial et al., Physiol Rep 2025).
+    public static func nightlyRMSSD(_ periods: [SleepPeriod], calendar: Calendar = .current) -> [Date: Double] {
+        nightly(periods, { $0.averageHRV }, calendar: calendar)
+    }
+
+    /// Average sleeping heart rate (bpm) by morning, from each main sleep:
+    /// the same quantity as the watch's sleeping heart rate (the mean while
+    /// asleep), so the two can stand in for each other night by night but are
+    /// never mixed in one baseline (`OneDeviceBaseline`). Oura Gen 4 nocturnal
+    /// heart rate agreed with ECG at CCC 0.98, MAPE 1.9% (Dial et al., Physiol
+    /// Rep 2025). The lowest heart rate is a different quantity (the night's
+    /// minimum) and isn't used for the baseline.
+    public static func nightlySleepingHeartRate(_ periods: [SleepPeriod], calendar: Calendar = .current) -> [Date: Double] {
+        nightly(periods, { $0.averageHeartRate }, calendar: calendar)
+    }
+
+    /// Average breathing rate (breaths a minute) by morning. Weak evidence:
+    /// only a company comparison with ECG-derived rate (0.71 breaths/min mean
+    /// error), no PSG study (docs/research/oura-ring-2026-11.md §5), so it's
+    /// used only as a change-from-baseline flag.
+    public static func nightlyBreathingRate(_ periods: [SleepPeriod], calendar: Calendar = .current) -> [Date: Double] {
+        nightly(periods, { $0.averageBreath }, calendar: calendar)
     }
 
     /// Sleep samples from every sleep period that starts between `start` and `end`.

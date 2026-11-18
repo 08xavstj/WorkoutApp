@@ -1,60 +1,77 @@
 import SwiftUI
 import AppCore
 
-/// Oura's own numbers for the latest night, from the direct link
-/// (`OuraLink`): readiness, sleep score, overnight HRV and temperature
-/// change. Shown as Oura reports them; Tensile's recovery and sleep scores
-/// use their own math. Hidden until the ring is connected and synced.
+/// The latest night as the Oura ring measured it, from the direct link
+/// (`OuraLink`): sleep time and stages, overnight HRV, sleeping heart rate,
+/// breathing rate and temperature change, each labelled as Oura's.
+/// Hidden until the ring is connected and synced.
+///
+/// Oura's Readiness and Sleep scores are not shown (or downloaded): they are
+/// proprietary composites with unpublished weights and no published
+/// validation, the same reason Apple's scores were removed
+/// (docs/research/oura-ring-2026-11.md §5-6, [R49]). The measurements below
+/// are the validated parts: HRV and heart rate against ECG (Dial et al.,
+/// Physiol Rep 2025), total sleep against polysomnography (Robbins et al.,
+/// Sensors 2024); stages and breathing rate have weaker evidence.
 struct OuraCard: View {
     @State private var link = OuraLink.shared
 
-    private struct Night {
-        var day: String
-        var readiness: Int?
-        var sleepScore: Int?
-        var hrv: Double?
-        var temperature: Double?
-    }
-
-    /// The newest day with a readiness or sleep score, plus that morning's HRV.
-    private var latest: Night? {
+    /// The newest main sleep (`Oura.mainSleep`, as the rest of the app files nights).
+    private var latest: Oura.SleepPeriod? {
         _ = link.syncedAt // re-read after each sync
-        let contents = OuraCache.shared.contents
-        let days = Set(contents.readiness.map(\.day)).union(contents.dailySleep.map(\.day))
-        guard let day = days.max() else { return nil }
-        let readiness = contents.readiness.first { $0.day == day }
-        // The day's longest sleep, whatever Oura typed it, as the rest of the app does (`Oura.mainSleep`).
-        let main = contents.periods.filter { $0.day == day && $0.isSleep }
-            .max { $0.bedtimeEnd.timeIntervalSince($0.bedtimeStart) < $1.bedtimeEnd.timeIntervalSince($1.bedtimeStart) }
-        return Night(day: day, readiness: readiness?.score, sleepScore: contents.dailySleep.first { $0.day == day }?.score,
-                     hrv: main?.averageHRV, temperature: readiness?.temperatureDeviation)
+        let nights = Oura.mainSleep(OuraCache.shared.contents.periods)
+        return nights.keys.max().flatMap { nights[$0] }
     }
 
     var body: some View {
         if link.status == .connected, let night = latest {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    CardLabel(text: "Oura ring")
+                    CardLabel(text: "From Oura")
                     Spacer()
                     Text(dayText(night.day))
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
                 HStack(alignment: .top, spacing: 12) {
-                    stat("Readiness", night.readiness.map(String.init))
-                    stat("Sleep score", night.sleepScore.map(String.init))
-                    stat("HRV", night.hrv.map { "\(Int($0.rounded())) ms" })
-                    stat("Temp.", night.temperature.map(temperatureText))
+                    stat("Asleep", night.totalSleepDuration.map(durationText))
+                    stat("Deep", night.deepSleepDuration.map(durationText))
+                    stat("Light", night.lightSleepDuration.map(durationText))
+                    stat("REM", night.remSleepDuration.map(durationText))
                 }
-                // HRV is RMSSD (Shaffer & Ginsberg, Front Public Health 2017: not interchangeable with SDNN).
-                Text("Oura's own scores, as Oura reports them. HRV is the night's average RMSSD; temperature is the change from your usual. Tensile's recovery uses its own math.")
+                HStack(alignment: .top, spacing: 12) {
+                    // HRV is RMSSD (Shaffer & Ginsberg, Front Public Health 2017: not interchangeable with SDNN).
+                    stat("HRV", night.averageHRV.map { "\(Int($0.rounded())) ms" })
+                    stat("Sleeping HR", night.averageHeartRate.map { "\(Int($0.rounded())) bpm" })
+                    stat("Breathing", night.averageBreath.map { "\($0.formatted(.number.precision(.fractionLength(1))))/min" })
+                    stat("Temp.", night.temperatureDeviation.map(temperatureText))
+                }
+                if night.lowBatteryAlert == true {
+                    // Oura's `low_battery_alert` on the sleep period (Oura API spec 1.43).
+                    Label("The ring's battery ran low, so this night may be incomplete.", systemImage: "battery.25percent")
+                        .font(.caption)
+                        .foregroundStyle(Theme.recoveryModerateText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(footnote(night))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                if link.needsReconnect {
+                    Text("Reconnect Oura once in Settings › Oura Ring so its permission matches what Tensile now uses.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.recoveryModerateText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .card()
             .accessibilityElement(children: .combine)
         }
+    }
+
+    private func footnote(_ night: Oura.SleepPeriod) -> String {
+        let lowest = night.lowestHeartRate.map { " Lowest heart rate \(Int($0.rounded())) bpm." } ?? ""
+        return "As the ring measured it. HRV is the night's average RMSSD; stages are estimates; temperature is the change from your usual.\(lowest) Oura's Readiness and Sleep scores aren't shown: their formulas aren't published and no study has validated them."
     }
 
     private func stat(_ title: String, _ value: String?) -> some View {
@@ -63,7 +80,7 @@ struct OuraCard: View {
                 .font(.title3.weight(.semibold).monospacedDigit())
                 .foregroundStyle(Theme.primaryText)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.6)
             Text(title)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
@@ -71,6 +88,12 @@ struct OuraCard: View {
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "7h 12m" or "48m", from Oura's seconds.
+    private func durationText(_ seconds: Double) -> String {
+        let minutes = Int((seconds / 60).rounded())
+        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
     }
 
     /// "+0.3 °C", or °F where the phone uses them (a change, so ×1.8 without the offset).

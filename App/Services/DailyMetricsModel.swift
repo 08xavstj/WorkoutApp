@@ -122,13 +122,8 @@ final class DailyMetricsModel {
     /// `RecoveryCalculator.preferSleepingHeartRate`).
     private static let rhrSourceKey = "recoveryRestingHeartRateSource"
 
-    /// Oura's overnight RMSSD by morning (direct link) when the ring comes
-    /// first for sleep; empty otherwise. Oura averages the whole sleep, the
-    /// watch a few minute-long recordings, so the two differ in level and are
-    /// put on one scale before use (`DailyVitals.mergingOvernightRMSSD`).
-    nonisolated static func ouraRMSSD() -> [Date: Double] {
-        SleepSourceSetting.current == .ring ? OuraCache.shared.nightlyRMSSD() : [:]
-    }
+    /// Whose overnight HRV the recovery baseline uses today (`OneDeviceBaseline`).
+    private(set) var hrvDevice: BaselineDevice?
 
     /// A short label for the recovery ring instead of the usual one, when it
     /// needs explaining: yesterday's score before you wake, or sleep only.
@@ -143,7 +138,10 @@ final class DailyMetricsModel {
     /// One line on which HRV measure recovery uses (`DailyVitals.resolvingHRV`).
     var hrvMetricNote: String? {
         switch hrvSelection {
-        case .rmssd: "HRV is overnight RMSSD, measured while you sleep (your Oura ring, your Apple Watch, or the value you typed in). Nights without it use Apple Health's SDNN, scaled to your own RMSSD."
+        case .rmssd where hrvDevice == .ring:
+            // Dial et al., Physiol Rep 2025 (ring vs ECG); O'Grady et al., Sensors 2024 (watch vs chest strap).
+            "HRV is your Oura ring's overnight RMSSD, the closest of your devices to ECG in published tests. A night without the ring is scored against your watch's own nights instead: the two are never mixed in one baseline."
+        case .rmssd: "HRV is overnight RMSSD, measured while you sleep (your Apple Watch, or the value you typed in). Nights without it use Apple Health's SDNN, scaled to your own RMSSD."
         case .sdnn: "HRV is Apple Health's SDNN. Once overnight RMSSD covers 14 of the last 30 nights, the app switches to it."
         case .morningRMSSD: "HRV is your morning camera reading. It isn't mixed with overnight HRV, which is measured asleep."
         case nil: nil
@@ -616,22 +614,26 @@ final class DailyMetricsModel {
             // night) once it covers 14 of the last 30 nights, else Apple Health's SDNN,
             // with gaps filled from the other via your own ratio. Camera readings are
             // taken awake in the morning, so they only stand in when there's no overnight HRV.
-            // With the Oura ring first (`SleepSourceSetting`), Oura's overnight RMSSD
-            // (the direct link's average over the whole sleep) is used for the nights it has.
-            // The ring and the watch read the same night differently, so the watch's nights are
-            // scaled to the ring's by your own ratio, or one device is used alone until enough
-            // nights have both (`DailyVitals.mergingOvernightRMSSD`).
-            let beatToBeat = DailyVitals.mergingOvernightRMSSD(preferred: Self.ouraRMSSD(), other: await health.nightlyRMSSD(nights: nights),
-                                                               today: today, calendar: calendar).nights
-            let rmssd = beatToBeat.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
-            let selection = DailyVitals.resolvingHRV(healthVitals, overnightRMSSD: rmssd, morningHRV: morningHRV,
+            // Oura's overnight RMSSD (direct link) is used whenever the ring carries the
+            // baseline, whatever the sleep-source setting; one device per baseline, never the
+            // ring's and the watch's nights mixed (`OneDeviceBaseline`; Dial et al., Physiol
+            // Rep 2025; O'Grady et al., Sensors 2024). With the ring's baseline, Apple Health's
+            // SDNN is left out too, so it can't fill the ring's gaps scaled by a ratio.
+            let hrvChoice = await health.overnightRMSSD(nights: nights, today: today)
+            hrvDevice = hrvChoice.device
+            let rmssd = hrvChoice.nights.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+            let ringHRV = hrvChoice.device == .ring && hrvChoice.isEstablished
+            let selection = DailyVitals.resolvingHRV(ringHRV ? DailyVitals.removingHRV(healthVitals) : healthVitals,
+                                                     overnightRMSSD: rmssd, morningHRV: morningHRV,
                                                      today: today, calendar: calendar)
             hrvSelection = selection.metric
             hrvMetric = selection.metric.map { $0 == .sdnn ? "SDNN" : "RMSSD" }
             // [Recovery research] Sleeping heart rate as the resting heart rate, all nights or none
             // (HealthKit RHR as the fallback); see RecoveryCalculator.preferSleepingHeartRate.
             // Once in use it stays until fewer than 10 nights have it, so the baseline doesn't flip.
-            let sleepingHeartRate = await health.nightlySleepingHeartRate(nights: nights)
+            // The Oura ring's sleeping heart rate when it carries the baseline, else the watch's;
+            // never both in one baseline (`OneDeviceBaseline`).
+            let sleepingHeartRate = await health.sleepingHeartRate(nights: nights, today: today).nights
             let previousSource = UserDefaults.standard.string(forKey: Self.rhrSourceKey).flatMap(RestingHeartRateSource.init(rawValue:))
             let (vitals, rhrSource) = RecoveryCalculator.preferSleepingHeartRate(
                 selection.vitals,
@@ -846,7 +848,8 @@ final class DailyMetricsModel {
             async let height = health.latest(.height, unit: .meterUnit(with: .centi))
             async let bodyFat = health.latest(.bodyFatPercentage, unit: .percent())
             // The night the other readings are from (yesterday's until last night is scored).
-            async let respiratory = health.overnightRespiratoryRate(forNightEnding: scoredDay)
+            // One device's breathing rate, the same choice the illness watch's baseline uses (`nightlyBreathingRate`).
+            async let respiratory = health.nightlyBreathingRate(days: VitalsModel.breathingRateDays, today: today)
             async let measuredResting = health.restingEnergyPerDay()
             async let deviceEnergy = health.deviceEnergy(from: today, to: now)
             let windows = todaysSessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
@@ -863,7 +866,7 @@ final class DailyMetricsModel {
             self.heightCm = heightCm
             // The night's average only. A single older sample used to stand in when the watch
             // was off, was shown undated as last night's and could raise an illness sign.
-            respiratoryRate = try? await respiratory
+            respiratoryRate = await respiratory.nights[calendar.startOfDay(for: scoredDay)]
             let device = try? await deviceEnergy
             deviceRestingToday = device?.resting
             deviceActiveToday = device?.active

@@ -9,8 +9,6 @@ nonisolated final class OuraCache: @unchecked Sendable {
 
     nonisolated struct Contents: Codable, Sendable, Equatable {
         var periods: [Oura.SleepPeriod] = []
-        var readiness: [Oura.DailyReadiness] = []
-        var dailySleep: [Oura.DailySleep] = []
         var syncedAt: Date?
     }
 
@@ -52,25 +50,27 @@ nonisolated final class OuraCache: @unchecked Sendable {
         Oura.nightlyRMSSD(contents.periods)
     }
 
-    /// Adds a sync's downloads (newer entries replace older ones with the
-    /// same id or day) and drops anything older than `keptDays`.
-    func merge(periods: [Oura.SleepPeriod], readiness: [Oura.DailyReadiness], dailySleep: [Oura.DailySleep], syncedAt: Date) {
+    /// Average sleeping heart rate by morning, from Oura's main sleeps.
+    func nightlySleepingHeartRate() -> [Date: Double] {
+        Oura.nightlySleepingHeartRate(contents.periods)
+    }
+
+    /// Average breathing rate by morning, from Oura's main sleeps.
+    func nightlyBreathingRate() -> [Date: Double] {
+        Oura.nightlyBreathingRate(contents.periods)
+    }
+
+    /// Adds a sync's sleep periods (a newer one replaces an older one with
+    /// the same id) and drops anything older than `keptDays`. A cache from an
+    /// older version that also held Oura's scores decodes without them.
+    func merge(periods: [Oura.SleepPeriod], syncedAt: Date) {
         lock.lock(); defer { lock.unlock() }
         var contents = loaded()
         let cutoff = Date.now.addingTimeInterval(-Double(Self.keptDays) * 86_400)
-        let cutoffDay = cutoff.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
 
         var byID = Dictionary(contents.periods.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         for period in periods { byID[period.id] = period }
         contents.periods = byID.values.filter { $0.bedtimeEnd >= cutoff && $0.type != "deleted" }.sorted { $0.bedtimeStart < $1.bedtimeStart }
-
-        var readinessByDay = Dictionary(contents.readiness.map { ($0.day, $0) }, uniquingKeysWith: { _, new in new })
-        for day in readiness { readinessByDay[day.day] = day }
-        contents.readiness = readinessByDay.values.filter { $0.day >= cutoffDay }.sorted { $0.day < $1.day }
-
-        var sleepByDay = Dictionary(contents.dailySleep.map { ($0.day, $0) }, uniquingKeysWith: { _, new in new })
-        for day in dailySleep { sleepByDay[day.day] = day }
-        contents.dailySleep = sleepByDay.values.filter { $0.day >= cutoffDay }.sorted { $0.day < $1.day }
 
         contents.syncedAt = syncedAt
         save(contents)

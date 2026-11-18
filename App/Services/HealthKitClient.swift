@@ -27,7 +27,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: HKQuantityTypeIdentifier(rawValue: "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD"))
     }
     /// Average sleeping heart rate for finished nights (`nightlySleepingHeartRate`).
-    let sleepingHeartRateCache = NightlyValueCache(fileName: "sleeping-hr-nights.json")
+    /// v2: the watch's own minutes only; v1 nights also averaged in Oura's.
+    let sleepingHeartRateCache = NightlyValueCache(fileName: "sleeping-hr-nights-v2.json")
     /// The running observer queries and what they call (`observeChanges`).
     private let observers = ObserverRegistry()
 
@@ -752,22 +753,6 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// Average breathing rate during the night ending on the morning of `day`.
-    @concurrent
-    func overnightRespiratoryRate(forNightEnding day: Date) async throws -> Double? {
-        if let demo = DemoHealth.active { return demo.overnightRespiratoryRate(forNightEnding: day) }
-        let morning = Calendar.current.startOfDay(for: day)
-        let predicate = HKQuery.predicateForSamples(withStart: morning.addingTimeInterval(-6 * 3600), end: morning.addingTimeInterval(12 * 3600))
-        let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: HKQuantityType(.respiratoryRate), predicate: predicate)],
-            sortDescriptors: []
-        )
-        let unit = HKUnit.count().unitDivided(by: .minute())
-        let values = try await descriptor.result(for: store).map { $0.quantity.doubleValue(for: unit) }
-        guard !values.isEmpty else { return nil }
-        return values.reduce(0, +) / Double(values.count)
-    }
-
     /// Metadata key on a cardio workout saved by Tensile's Watch app
     /// (`WatchCardioModel.metadataKey`; its value is the `CardioActivity`).
     nonisolated static let watchCardioMetadataKey = "TensileCardioActivity"
@@ -789,12 +774,17 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         )
         let ownBundle = Bundle.main.bundleIdentifier
         let strengthTypes: [HKWorkoutActivityType] = [.traditionalStrengthTraining, .functionalStrengthTraining]
-        return try await descriptor.result(for: store).compactMap { workout in
+        var ringWorkouts: Set<UUID> = []
+        let found = try await descriptor.result(for: store).compactMap { workout -> ExternalWorkout? in
             // The phone's own saved gym sessions are left out (they are logged sessions
             // already). A cardio workout from Tensile's Watch app is kept even if Health
             // files it under the phone app's source: it has no logged session to stand for it.
             guard workout.sourceRevision.source.bundleIdentifier != ownBundle
                     || workout.metadata?[Self.watchCardioMetadataKey] != nil else { return nil }
+            let source = workout.sourceRevision.source
+            if SleepSource.tracker(bundleID: source.bundleIdentifier, sourceName: source.name, deviceModel: workout.device?.model) == .ring {
+                ringWorkouts.insert(workout.uuid)
+            }
             // On foot, on a bike, or on skis: whichever the workout recorded.
             let distance = Self.workoutDistanceTypes.lazy
                 .compactMap { workout.statistics(for: $0)?.sumQuantity()?.doubleValue(for: .meterUnit(with: .kilo)) }
@@ -815,6 +805,10 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
                 tensileActivity: tensileActivity
             )
         }
+        // An Oura auto-detected workout over a watch workout is the same exercise:
+        // keep the watch's, so its calories aren't counted twice (`WorkoutOverlap`).
+        return WorkoutOverlap.removingRingDuplicates(found, isRing: { ringWorkouts.contains($0.uuid) },
+                                                     interval: { DateInterval(start: $0.start, end: max($0.start, $0.end)) })
     }
 
     /// Start and end of every workout in a range, from any app (used for

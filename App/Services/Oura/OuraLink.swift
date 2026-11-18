@@ -17,9 +17,11 @@ nonisolated enum SleepSourceSetting {
 /// Sign-in uses the user's own Oura developer app: they create one at
 /// developer.ouraring.com (free) and type its client ID and secret here, so
 /// no secret ships in the app. The sign-in itself happens on Oura's page
-/// (`OuraSettingsView` opens it), and the tokens are kept in the Keychain.
-/// Syncing downloads sleep, sleep score and readiness for recent days into
-/// `OuraCache`; nothing about the user is sent to Oura beyond the sign-in.
+/// (`OuraSettingsView` opens it) with PKCE (`PKCE`), and the tokens are kept
+/// in the Keychain. Syncing downloads the sleep periods for recent days into
+/// `OuraCache`; Oura's Readiness and Sleep scores aren't downloaded (`Oura`).
+/// Nothing about the user is sent to Oura beyond the sign-in, and requests
+/// carry a generic User-Agent (`Oura.userAgent`).
 @Observable
 final class OuraLink {
     static let shared = OuraLink()
@@ -43,6 +45,10 @@ final class OuraLink {
     /// The last sync or sign-in problem, in plain words; nil once one works.
     private(set) var lastError: String?
     private(set) var syncedAt: Date?
+    /// Connected, but the saved sign-in predates the trimmed permissions or
+    /// lacks one the app needs (`Oura.needsReconnect`): Settings and the Oura
+    /// card ask for one reconnect instead of syncs failing unexplained.
+    private(set) var needsReconnect = false
 
     var clientID: String { KeychainStore.string(Account.clientID) ?? "" }
     var redirectURI: String { KeychainStore.string(Account.redirectURI) ?? Oura.defaultRedirectURI }
@@ -55,6 +61,8 @@ final class OuraLink {
     static let minimumInterval: TimeInterval = 30 * 60
 
     @ObservationIgnored private var pendingState: String?
+    /// The PKCE verifier for the sign-in in progress; only its hash leaves the phone before the token request.
+    @ObservationIgnored private var pendingVerifier: String?
     @ObservationIgnored private var refreshTask: Task<Oura.Tokens, Error>?
 
     private static let log = Logger(subsystem: "com.lontraindustries.workoutapp", category: "oura")
@@ -65,10 +73,12 @@ final class OuraLink {
     }
 
     private func updateStatus() {
-        if KeychainStore.value(Oura.Tokens.self, Account.tokens) != nil {
+        if let tokens = KeychainStore.value(Oura.Tokens.self, Account.tokens) {
             status = .connected
+            needsReconnect = Oura.needsReconnect(grantedScope: tokens.scope)
         } else {
             status = hasCredentials ? .disconnected : .needsSetup
+            needsReconnect = false
         }
     }
 
@@ -89,23 +99,27 @@ final class OuraLink {
 
     // MARK: Sign-in
 
-    /// The Oura page to open for sign-in, with a fresh state value to check on return.
+    /// The Oura page to open for sign-in, with a fresh state value to check on
+    /// return and a fresh PKCE verifier (S256 challenge in the URL).
     func authorizationURL() -> URL? {
         guard hasCredentials else { return nil }
         let state = UUID().uuidString
+        let verifier = PKCE.makeVerifier()
         pendingState = state
-        return Oura.authorizationURL(clientID: clientID, redirectURI: redirectURI, state: state)
+        pendingVerifier = verifier
+        return Oura.authorizationURL(clientID: clientID, redirectURI: redirectURI, state: state, codeVerifier: verifier)
     }
 
     /// Finishes sign-in with the address Oura sent the browser back to, then syncs.
     func finishSignIn(callbackURL: URL) async {
-        guard let state = pendingState else { return }
+        guard let state = pendingState, let verifier = pendingVerifier else { return }
         pendingState = nil
+        pendingVerifier = nil
         switch Oura.callback(callbackURL, expectedState: state) {
         case let .code(code):
             do {
-                let response = try await tokenRequest(.code(code, redirectURI: redirectURI))
-                KeychainStore.set(value: response.tokens(), for: Account.tokens)
+                let response = try await tokenRequest(.code(code, redirectURI: redirectURI, codeVerifier: verifier))
+                KeychainStore.set(value: response.tokens(requestedScope: Oura.scopes), for: Account.tokens)
                 lastError = nil
                 updateStatus()
                 await sync(force: true)
@@ -121,6 +135,7 @@ final class OuraLink {
 
     func signInFailed(_ error: Error) {
         pendingState = nil
+        pendingVerifier = nil
         fail("Couldn't open Oura's sign-in", error)
     }
 
@@ -142,7 +157,9 @@ final class OuraLink {
         await sync()
     }
 
-    /// Downloads recent sleep periods, sleep scores and readiness.
+    /// Downloads recent sleep periods (stages, overnight HRV and heart rate,
+    /// breathing rate, temperature change). Oura's Readiness and Sleep scores
+    /// are left out (docs/research/oura-ring-2026-11.md §6).
     func sync(force: Bool = false) async {
         guard status == .connected, !isSyncing else { return }
         isSyncing = true
@@ -154,12 +171,9 @@ final class OuraLink {
         guard let start = calendar.date(byAdding: .day, value: -days, to: today),
               let end = calendar.date(byAdding: .day, value: 1, to: today) else { return }
         do {
-            async let periods = fetch(Oura.SleepPeriod.self, "sleep", from: start, to: end)
-            async let readiness = fetch(Oura.DailyReadiness.self, "daily_readiness", from: start, to: end)
-            async let dailySleep = fetch(Oura.DailySleep.self, "daily_sleep", from: start, to: end)
+            let periods = try await fetch(Oura.SleepPeriod.self, "sleep", from: start, to: end)
             let now = Date.now
-            OuraCache.shared.merge(periods: try await periods, readiness: try await readiness,
-                                   dailySleep: try await dailySleep, syncedAt: now)
+            OuraCache.shared.merge(periods: periods, syncedAt: now)
             syncedAt = now
             lastError = nil
         } catch OuraError.signedOut {
@@ -186,7 +200,8 @@ final class OuraLink {
             switch self {
             case .signedOut: "Signed out of Oura."
             case let .http(code): "Oura answered with error \(code)."
-            case .membership: "Oura needs an active membership to share data with other apps."
+            // Oura answers 403 for an expired membership or a missing permission (Oura API spec 1.43).
+            case .membership: "Oura refused access. It needs an active membership to share data with other apps; if yours is active, reconnect Oura in Settings."
             case .wrongCredentials: "Oura didn't accept the client ID or secret. Check both against your app at developer.ouraring.com."
             case .codeRefused: "Oura didn't accept the sign-in. Check that the redirect address here matches your Oura app's, then try again."
             }
@@ -219,6 +234,7 @@ final class OuraLink {
         for attempt in 0..<2 {
             var request = URLRequest(url: url, timeoutInterval: 20)
             request.setValue("Bearer \(tokens.accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue(Oura.userAgent, forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             switch code {
@@ -267,6 +283,7 @@ final class OuraLink {
         var request = URLRequest(url: Oura.tokenURL, timeoutInterval: 20)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue(Oura.userAgent, forHTTPHeaderField: "User-Agent")
         request.httpBody = Oura.tokenRequestBody(grant, clientID: clientID, clientSecret: secret)
         let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
