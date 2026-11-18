@@ -74,6 +74,8 @@ final class WatchCardioModel: NSObject {
     private(set) var autoPauseSeen = false
     /// The fastest current speed so far (m/s, the 20 s window), for the Speed page.
     private(set) var topSpeed: Double?
+    /// The saved workout's UUID, for Handoff from the summary.
+    private(set) var savedWorkoutID: UUID?
     /// Clears a timed banner.
     @ObservationIgnored private var bannerTask: Task<Void, Never>?
 
@@ -204,6 +206,7 @@ final class WatchCardioModel: NSObject {
         phase = .starting
         problem = nil
         summary = nil
+        savedWorkoutID = nil
         self.activity = activity
         // Sports record with no target (`CardioActivity.takesTarget`).
         let target = activity.takesTarget ? chosenTarget : .off
@@ -473,6 +476,7 @@ final class WatchCardioModel: NSObject {
             try await builder.endCollection(at: end)
             workout = try await builder.finishWorkout()
             saved = workout != nil
+            savedWorkoutID = workout?.uuid
         } catch {
             problem = "Couldn't save the workout: \(error.localizedDescription)"
         }
@@ -531,6 +535,12 @@ final class WatchCardioModel: NSObject {
             summary = nil
         }
         if !isBusy { problem = nil }
+    }
+
+    /// Workouts shorter than this ask before they're saved (HIG Workouts; the
+    /// 60 s is the app's choice, the same as lifting's).
+    var isBrief: Bool {
+        (elapsed(at: .now) ?? 0) < WatchWorkoutModel.briefSeconds
     }
 
     /// Back to the start screen after the end screen.

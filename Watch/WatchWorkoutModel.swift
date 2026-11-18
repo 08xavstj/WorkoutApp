@@ -72,6 +72,9 @@ final class WatchWorkoutModel: NSObject {
     private(set) var recordLines: [String] = []
     /// The Heart page's note on wrist accuracy has been shown this workout.
     var heartCaptionSeen = false
+    /// The session as it stood when the workout ended (the phone's finished
+    /// snapshot, or the Watch's own), for the summary's sets.
+    private(set) var finishedSession: WatchSession?
     /// Record notes already shown (each rides along in a minute of snapshots).
     @ObservationIgnored private var shownRecordIDs: Set<String> = []
     @ObservationIgnored private var recordTask: Task<Void, Never>?
@@ -169,6 +172,7 @@ final class WatchWorkoutModel: NSObject {
             recordLines = []
             heartCaptionSeen = false
             lastLogged = nil
+            finishedSession = nil
             setEdits = [:]
             pausedAt = nil
             pausedSeconds = 0
@@ -315,6 +319,7 @@ final class WatchWorkoutModel: NSObject {
         pausedAt = nil
         pausedSeconds = 0
         self.summary = summary
+        if let snapshot { finishedSession = snapshot }
         endedAt = end
         phase = .ended
         // Today's planned session is done: the "next session" complication moves on.
@@ -354,6 +359,15 @@ final class WatchWorkoutModel: NSObject {
         send(.recordingStopped, sessionID: recordingSessionID)
         recordingSessionID = nil
         selectedExercise = nil
+    }
+
+    /// Workouts shorter than this ask before they're saved (HIG Workouts:
+    /// "discard extremely brief workout sessions" or ask; 60 s is the app's choice).
+    static let briefSeconds: TimeInterval = 60
+
+    /// True while the workout is still under `briefSeconds` long.
+    var isBrief: Bool {
+        (elapsed(at: .now) ?? 0) < Self.briefSeconds
     }
 
     /// Back to the start screen after the end screen.
@@ -825,6 +839,8 @@ final class WatchWorkoutModel: NSObject {
         if let current = snapshot, current.id == incoming.id, incoming.sentAt < current.sentAt { return }
         let previous = snapshot
         if incoming.isFinished {
+            // Kept for the summary: the phone's final word on the sets.
+            if isRecording, previous?.id == incoming.id || belongsToRecording(incoming.id) { finishedSession = incoming }
             if previous?.id == incoming.id || previous == nil { snapshot = nil }
             selectedExercise = nil
             // Finished on the phone: the Watch's recording of it ends too (no

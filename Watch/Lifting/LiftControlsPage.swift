@@ -8,8 +8,14 @@ struct LiftControlsPage: View {
     @Binding var page: LiftPage
     @State private var finishing = false
     @State private var discarding = false
+    @State private var confirmingBrief = false
 
     private static let size: CGFloat = 64
+
+    /// "Save this 0:42 workout?"
+    private var briefTitle: String {
+        "Save this \(workoutElapsedText(model.elapsed(at: .now) ?? 0)) workout?"
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -26,7 +32,7 @@ struct LiftControlsPage: View {
                         }
                     }
                     CircleButton(title: "Finish", systemImage: "flag.checkered", tint: WatchPalette.lifting, size: Self.size) {
-                        finishing = true
+                        if model.isBrief { confirmingBrief = true } else { finishing = true }
                     }
                 }
                 GridRow {
@@ -53,6 +59,11 @@ struct LiftControlsPage: View {
         }
         .sheet(isPresented: $finishing) {
             WatchSessionEffortSheet()
+        }
+        // Under a minute: save it at all? (HIG Workouts asks apps to discard or ask.)
+        .confirmationDialog(briefTitle, isPresented: $confirmingBrief, titleVisibility: .visible) {
+            Button("Save") { finishing = true }
+            Button("Discard", role: .destructive) { model.discard() }
         }
         .confirmationDialog("Discard this workout?", isPresented: $discarding, titleVisibility: .visible) {
             Button("Discard", role: .destructive) { model.discard() }

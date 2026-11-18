@@ -8,6 +8,7 @@ struct CardioControlsPage: View {
     @Binding var page: CardioPage
     @State private var ending = false
     @State private var discarding = false
+    @State private var confirmingBrief = false
 
     private static let size: CGFloat = 64
 
@@ -28,7 +29,7 @@ struct CardioControlsPage: View {
                         }
                         CircleButton(title: "End", systemImage: "flag.checkered", tint: WatchPalette.lifting, size: Self.size,
                                      identifier: "watch-cardio-end") {
-                            ending = true
+                            if cardio.isBrief { confirmingBrief = true } else { ending = true }
                         }
                     }
                     GridRow {
@@ -69,6 +70,14 @@ struct CardioControlsPage: View {
             Button("End and save") {
                 Task { await cardio.end() }
             }
+        }
+        // Under a minute: save it at all? (HIG Workouts asks apps to discard or ask.)
+        .confirmationDialog("Save this \(workoutElapsedText(cardio.elapsed(at: .now) ?? 0)) workout?",
+                            isPresented: $confirmingBrief, titleVisibility: .visible) {
+            Button("Save") {
+                Task { await cardio.end() }
+            }
+            Button("Discard", role: .destructive) { cardio.discard() }
         }
         .confirmationDialog("Discard this workout?", isPresented: $discarding, titleVisibility: .visible) {
             Button("Discard", role: .destructive) { cardio.discard() }
