@@ -352,7 +352,7 @@ nonisolated enum Reminders {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["stretch|0"])
     }
 
-    private static func add(_ content: UNMutableNotificationContent, identifier: String, at fire: Date,
+    static func add(_ content: UNMutableNotificationContent, identifier: String, at fire: Date,
                             center: UNUserNotificationCenter, calendar: Calendar) async {
         let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
         let request = UNNotificationRequest(identifier: identifier, content: content,
@@ -918,9 +918,9 @@ nonisolated enum Reminders {
         return measurementFireDate(due: day, now: now, calendar: calendar)
     }
 
-    private static func lastReminderKey(_ identifier: String) -> String { "lastReminder|" + identifier }
+    static func lastReminderKey(_ identifier: String) -> String { "lastReminder|" + identifier }
 
-    private static func noteReminder(_ identifier: String, firesAt fire: Date) {
+    static func noteReminder(_ identifier: String, firesAt fire: Date) {
         UserDefaults.standard.set(fire, forKey: lastReminderKey(identifier))
     }
 

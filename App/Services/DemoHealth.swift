@@ -55,6 +55,7 @@ nonisolated final class DemoHealth: Sendable {
         case bodyMass, bodyFat, bmi, leanMass, height, systolic, diastolic
         case dietaryEnergy, protein, carbs, fat, fiber, water, caffeine, alcoholicDrinks
         case vitaminC, vitaminD, zinc, iron, magnesium, potassium, sodium, calcium, vitaminB12, folate, vitaminA, selenium
+        case saturatedFat
 
         /// A different noise stream per metric (stable across runs, unlike `hashValue`).
         var hashSalt: Int {
@@ -464,7 +465,8 @@ nonisolated final class DemoHealth: Sendable {
         case .steps, .distanceKm, .flights, .activeEnergy, .daylightMinutes, .exerciseMinutes: .waking
         case .basalEnergy: .allDay
         case .dietaryEnergy, .protein, .carbs, .fat, .fiber, .water, .caffeine, .alcoholicDrinks,
-             .vitaminC, .vitaminD, .zinc, .iron, .magnesium, .potassium, .sodium, .calcium, .vitaminB12, .folate, .vitaminA, .selenium:
+             .vitaminC, .vitaminD, .zinc, .iron, .magnesium, .potassium, .sodium, .calcium, .vitaminB12, .folate, .vitaminA, .selenium,
+             .saturatedFat:
             .meals
         default: .single
         }
@@ -625,6 +627,8 @@ nonisolated final class DemoHealth: Sendable {
         case .folate: 410
         case .vitaminA: 760
         case .selenium: 72
+        // About 9% of the day's ~2,450 kcal: just under WHO's 10% line (`SaturatedFat`).
+        case .saturatedFat: 24
         default: nil
         }
     }

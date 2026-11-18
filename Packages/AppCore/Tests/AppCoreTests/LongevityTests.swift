@@ -104,7 +104,7 @@ struct LongevityTests {
         var inputs = Longevity.Inputs(age: 41, sex: .male)
         inputs.dailySteps = 6_400
         let result = Longevity.assess(inputs)
-        #expect(result.count(.noData) == Longevity.MeasureID.allCases.count - 1)
+        #expect(result.count(.noData) == Longevity.MeasureID.allCases.count - Longevity.conditionalMeasures.count - 1)
         #expect(result.measure(.steps)?.status == .close)
         #expect(result.focus?.id == .steps)
         #expect(result.summary == "1 close")
@@ -123,8 +123,10 @@ struct LongevityTests {
 
     @Test func everyMeasureHasAnAreaASourceAndAGradeNote() {
         let result = Longevity.assess(lifter)
-        #expect(result.measures.count == Longevity.MeasureID.allCases.count)
-        #expect(Set(result.measures.map(\.id)).count == Longevity.MeasureID.allCases.count)
+        // The conditional ones (blood tests due, saturated fat) only appear when they apply.
+        let always = Longevity.MeasureID.allCases.count - Longevity.conditionalMeasures.count
+        #expect(result.measures.count == always)
+        #expect(Set(result.measures.map(\.id)).count == always)
         #expect(result.areas.map(\.area) == Longevity.Area.allCases)
         for area in result.areas {
             #expect((1...3).contains(area.measures.count), "\(area.area)")

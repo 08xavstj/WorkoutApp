@@ -465,6 +465,8 @@ struct MicronutrientsCard: View {
         } else {
             WhatToFixCard(findings: Micronutrients.toFix(findings), sex: settings.sex, focuses: settings.goals.focuses)
             TooHighNutrientsCard(findings: Micronutrients.tooHigh(findings), age: settings.age)
+            // Weekly share of energy beside sodium and fibre; absent without data (`SaturatedFat`).
+            SaturatedFatCard()
             FineNutrientsCard(findings: findings.filter { $0.kind == .ok })
             MicronutrientsFooter()
         }

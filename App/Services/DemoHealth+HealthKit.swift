@@ -34,6 +34,7 @@ nonisolated extension DemoHealth {
         case .dietaryProtein: .protein
         case .dietaryCarbohydrates: .carbs
         case .dietaryFatTotal: .fat
+        case .dietaryFatSaturated: .saturatedFat
         case .dietaryFiber: .fiber
         case .dietaryWater: .water
         case .dietaryCaffeine: .caffeine

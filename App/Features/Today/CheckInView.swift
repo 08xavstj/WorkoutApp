@@ -90,6 +90,8 @@ struct CheckInView: View {
 
     @ViewBuilder
     private var morningQuestions: some View {
+        // PHQ-9 and GAD-7, only after two weeks of low mornings (`MoodQuestionnaires`).
+        MoodScreenOfferSection()
         if !hrvFromHealth {
             Section {
                 TextField("e.g. 52", value: $hrv, format: .number.precision(.fractionLength(0)))

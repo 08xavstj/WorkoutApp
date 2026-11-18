@@ -15,6 +15,8 @@ enum LongevityAssembler {
         let settings: UserSettings
         let checkIns: CheckInStore
         let measurements: BodyMeasurementsStore
+        /// For the "Blood tests due" row (`BloodTestSchedule`); nil leaves it out.
+        var labs: LabsModel? = nil
     }
 
     static func assessment(_ models: Models, sessionDates: [Date], now: Date = .now) -> Longevity.Assessment {
@@ -72,6 +74,8 @@ enum LongevityAssembler {
         inputs.waistToHeight = m.measurements.waistToHeightRatio(heightCm: height)
 
         inputs.fiberGrams = fiberAverage(m)
+        // The week's saturated fat (`SaturatedFat`); nil when the food app sends none.
+        inputs.saturatedFat = m.metrics.saturatedFat
         let protein = proteinSeries(m).filter { $0.date < today && $0.date >= today.addingTimeInterval(-7 * 86_400) && $0.value > 0 }
         if protein.count >= 3 { inputs.proteinGrams = average(protein) }
         inputs.proteinTargetGrams = m.metrics.proteinTarget
@@ -85,6 +89,9 @@ enum LongevityAssembler {
         inputs.drinkNightsLogged = week.nightsLogged
 
         inputs.headphoneBudgetPercent = headphonePercent(m)
+        if let labs = m.labs, m.settings.ageIsSet {
+            inputs.bloodTests = labs.bloodTestSchedule(age: m.settings.age, now: now)
+        }
 
         let moods = m.checkIns.moods.filter { $0.date >= now.addingTimeInterval(-14 * 86_400) }
         if !moods.isEmpty {
