@@ -44,6 +44,10 @@ final class LabsModel {
     /// while the phone was locked): nothing is saved over it until it loads.
     @ObservationIgnored private var canSave = false
     @ObservationIgnored private let file = SafeJSONFile.appSupport("lab-results.json")
+    /// Test dates typed in without results ("had a cholesterol panel in
+    /// March"), keyed by `BloodTestSchedule.Check` raw value; used for due
+    /// dates only (`LabsModel+BloodTests.swift`). Tiny, so UserDefaults.
+    private(set) var testedOn: [String: Date] = UserDefaults.standard.dictionary(forKey: LabsModel.testedOnKey) as? [String: Date] ?? [:]
 
     init() {
         reload()
@@ -76,6 +80,12 @@ final class LabsModel {
         reloadIfUnavailable()
         results.removeAll { $0.id == result.id }
         save()
+    }
+
+    /// Sets or clears (nil) a typed-in test date for one blood-test check.
+    func setTested(_ key: String, on date: Date?) {
+        testedOn[key] = date
+        UserDefaults.standard.set(testedOn, forKey: Self.testedOnKey)
     }
 
     /// Lines for the coach: the latest of each test, flagged when out of range.

@@ -18,8 +18,11 @@ import Foundation
 ///   major depression (Kroenke, Spitzer & Williams, J Gen Intern Med
 ///   2001;16:606, PMID 11556941). GAD-7: sensitivity 89%, specificity 82% at
 ///   its cut point (Spitzer et al., Arch Intern Med 2006;166:1092, PMID 16717171).
-/// - Licence: "no permission is required to reproduce, translate, display or
-///   distribute them" (phqscreeners.com).
+/// - Licence: the forms carry "No permission required to reproduce,
+///   translate, display or distribute" in their footer. In November 2026
+///   phqscreeners.com's home page showed only a "Terms of Use" link, so this
+///   wording was seen in copies of the forms (search results), not re-read
+///   on the site: not re-verified at the source.
 /// - Why offer it: USPSTF 2023 recommends screening adults for depression
 ///   (B; JAMA 2023;329:2057, PMID 37338872) and for anxiety disorders (B)
 ///   with insufficient evidence from 65 (I; JAMA 2023;329:2163, PMID

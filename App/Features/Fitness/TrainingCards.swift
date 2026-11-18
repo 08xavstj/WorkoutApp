@@ -413,6 +413,8 @@ struct CardioFitnessCard: View {
                 trendChart(history)
             }
             tips(category ?? .average)
+            // The quarterly walking test, on the same trend (`FitnessCheck`).
+            FitnessCheckRow()
             DisclosureGroup("Details") {
                 details(result, history: history, estimates: estimates)
                     .padding(.top, 8)

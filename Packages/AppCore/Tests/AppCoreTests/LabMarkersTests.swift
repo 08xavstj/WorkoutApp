@@ -76,8 +76,10 @@ struct LabMarkersTests {
     }
 
     @Test func retestCadence() {
-        // ApoB every 1-2 years and after a bulk (Johannesen 2021); others as the research round says.
-        #expect(LabMarkers.marker(id: "apoB")?.retest?.contains("1-2 years") == true)
+        // ApoB with each cholesterol panel (every 5 years when normal: ACC/AHA 2019 via
+        // `BloodTestSchedule`) and after a bulk (Johannesen 2021); others as the research round says.
+        #expect(LabMarkers.marker(id: "apoB")?.retest?.contains("every 5 years") == true)
+        #expect(LabMarkers.marker(id: "hba1c")?.retest?.contains("every 3 years") == true)
         #expect(LabMarkers.marker(id: "apoB")?.retest?.contains("bulk") == true)
         #expect(LabMarkers.marker(id: "ferritin")?.retest?.contains("Yearly") == true)
         #expect(LabMarkers.marker(id: "crp")?.retest?.contains("2 weeks") == true)

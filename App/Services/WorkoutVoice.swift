@@ -72,7 +72,9 @@ enum WorkoutVoice {
         if weeks >= 2 { ahead.weeksInARow = weeks }
         // Three or more low-mood mornings this week: plain words, no jokes (`MoodCare`, `Caution.keepPlain`).
         // Later days too: a line written ahead is rewritten on its own day with that day's mornings.
-        ahead.keepPlain = MoodCare.keepPlain(lowMood: CoachNudges.lowMoodFinding(checkIns: sources.checkIns, now: now))
+        // A positive PHQ-9 or GAD-7 in the last 4 weeks does the same (`MoodQuestionnaires.keepPlainDays`).
+        ahead.keepPlain = MoodCare.keepPlain(lowMood: CoachNudges.lowMoodFinding(checkIns: sources.checkIns, now: now),
+                                             screens: MoodScreenStore.shared.results, now: now)
 
         var today = ahead
         today.daysSinceLastSession = sources.plans.daysOff(sessions: sources.sessions, extra: extra, now: now)
@@ -143,7 +145,7 @@ enum WorkoutVoice {
         case .illness: note = "Illness is flagged today, so the reminder stays plain."
         case .pain: note = "Pain is logged, so the reminder stays plain."
         case .lowRecovery: note = "Recovery is low today, so the reminder stays plain."
-        case .keepPlain: note = "Several low-mood mornings this week, so reminders stay plain for now. The reminder itself never says why."
+        case .keepPlain: note = "Mood has been low lately, so reminders stay plain for now. The reminder itself never says why."
         case .restDay, nil: break
         }
         var history = WorkoutVoiceStore.shared.history()

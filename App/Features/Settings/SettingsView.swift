@@ -35,6 +35,7 @@ struct SettingsView: View {
                     SettingsPageLink(title: "Data & privacy", detail: "Apple Health, Oura, where the coach runs", icon: "lock.fill", id: "data") {
                         DataSourcesSettingsSection()
                         CoachSettingsSection()
+                        MoodScreenSettingsSection()
                     }
                 }
                 AppearanceSettingsSection()

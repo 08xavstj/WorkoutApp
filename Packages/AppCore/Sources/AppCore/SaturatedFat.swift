@@ -60,7 +60,15 @@ public enum SaturatedFat {
         public var status: Status
 
         /// "9% of energy"
-        public var shareText: String { "\(Int(share.rounded()))% of energy" }
+        public var shareText: String { "\(percentText)% of energy" }
+
+        /// "9", or "9.8" near the line, so a share just under 10% never
+        /// rounds up to read "10" beside "under the line" (cut, not rounded).
+        public var percentText: String {
+            guard (9.5..<10.5).contains(share) else { return "\(Int(share.rounded()))" }
+            let tenths = Int((share * 10).rounded(.down))
+            return "\(tenths / 10).\(tenths % 10)"
+        }
 
         /// One plain line: where it sits and, if over, what to swap.
         public var line: String {

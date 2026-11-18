@@ -15,11 +15,12 @@ struct HealthHighlightsSection: View {
     @Environment(UserSettings.self) private var settings
     @Environment(CheckInStore.self) private var checkIns
     @Environment(BodyMeasurementsStore.self) private var measurements
+    @Environment(LabsModel.self) private var labs
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     private var models: LongevityAssembler.Models {
         LongevityAssembler.Models(vitals: vitals, biology: biology, metrics: metrics, settings: settings,
-                                  checkIns: checkIns, measurements: measurements)
+                                  checkIns: checkIns, measurements: measurements, labs: labs)
     }
 
     /// What the feed is worked out from, in a few numbers: when one changes
@@ -88,11 +89,12 @@ struct LongevityPage: View {
     @Environment(UserSettings.self) private var settings
     @Environment(CheckInStore.self) private var checkIns
     @Environment(BodyMeasurementsStore.self) private var measurements
+    @Environment(LabsModel.self) private var labs
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
     private var current: Longevity.Assessment {
         let models = LongevityAssembler.Models(vitals: vitals, biology: biology, metrics: metrics, settings: settings,
-                                               checkIns: checkIns, measurements: measurements)
+                                               checkIns: checkIns, measurements: measurements, labs: labs)
         return LongevityAssembler.assessment(models, sessionDates: LongevitySessions.dates(sessions))
     }
 

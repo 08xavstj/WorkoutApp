@@ -69,6 +69,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.dietaryProtein),
             HKQuantityType(.dietaryCarbohydrates),
             HKQuantityType(.dietaryFatTotal),
+            // Saturated fat, as a weekly share of energy (`SaturatedFat`, HealthKitClient+SaturatedFat).
+            HKQuantityType(.dietaryFatSaturated),
             HKQuantityType(.dietaryFiber),
             HKQuantityType(.dietaryWater),
             HKQuantityType(.dietaryCaffeine),

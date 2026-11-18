@@ -38,6 +38,15 @@ struct HealthGapsTests {
         #expect(SaturatedFat.week(week(kcal: 2700, grams: 35.9))?.status == .close)
     }
 
+    @Test func aShareJustUnderTheLineNeverReadsAsTen() {
+        // 29.9 g of 2,700 kcal = 9.97%: under, shown as 9.9, not 10.
+        let under = SaturatedFat.week(week(kcal: 2700, grams: 29.9))
+        #expect(under?.status == .under)
+        #expect(under?.percentText == "9.9")
+        #expect(SaturatedFat.week(week(kcal: 2700, grams: 30))?.percentText == "10.0")
+        #expect(SaturatedFat.week(week(kcal: 2700, grams: 33))?.percentText == "11")
+    }
+
     @Test func noSaturatedFatFromTheFoodAppShowsNothingNotZero() {
         #expect(SaturatedFat.week(week(kcal: 2500, grams: nil)) == nil)
     }
@@ -78,8 +87,9 @@ struct HealthGapsTests {
 
     @Test func mileWalkMatchesKlineEquation() {
         // 80 kg (176.4 lb) man, 35, 15:00 min, HR 140.
-        let pounds = 80 * 2.20462
-        let litres = 6.9652 + 0.0091 * pounds - 0.0257 * 35 + 0.5955 - 0.2240 * 15 - 0.0115 * 140
+        let pounds: Double = 80 * 2.20462
+        let partial: Double = 6.9652 + 0.0091 * pounds - 0.0257 * 35
+        let litres: Double = partial + 0.5955 - 0.2240 * 15 - 0.0115 * 140
         let value = FitnessCheck.mileWalk(minutes: 15, heartRate: 140, age: 35, sex: .male, weightKg: 80)
         #expect(value.map { abs($0 - litres * 1000 / 80) < 0.001 } == true)
         // About 42 mL/kg/min: a plausible value for a fit 35-year-old.
@@ -89,7 +99,9 @@ struct HealthGapsTests {
     }
 
     @Test func treadmillWalkMatchesEbbelingEquation() {
-        let expected = 15.1 + 21.8 * 3.5 - 0.327 * 130 - 0.263 * 3.5 * 30 + 0.00504 * 130 * 30 + 5.98
+        let speed: Double = 3.5, heartRate: Double = 130, age: Double = 30
+        let base: Double = 15.1 + 21.8 * speed - 0.327 * heartRate
+        let expected: Double = base - 0.263 * speed * age + 0.00504 * heartRate * age + 5.98
         let value = FitnessCheck.treadmillWalk(speedMph: 3.5, heartRate: 130, age: 30, sex: .male)
         #expect(value.map { abs($0 - expected) < 0.0001 } == true)
         // Outside the tested speeds: no estimate.

@@ -47,6 +47,8 @@ struct LabsView: View {
                     if labs.results.isEmpty {
                         emptyState
                     }
+                    // What's due for heart and blood sugar risk (`BloodTestSchedule`).
+                    BloodTestsCard()
                     ForEach(reportDays) { report in
                         // The report's date goes in its header, so rows don't truncate.
                         SectionTitle(text: LabsView.dayText(report.date))

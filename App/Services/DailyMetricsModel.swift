@@ -89,6 +89,8 @@ final class DailyMetricsModel {
     private(set) var goals: Goals?
     private(set) var sex: BiologicalSex = .male
     private(set) var micronutrients: [Micronutrients.Finding] = []
+    /// The week's saturated fat as a share of energy (`SaturatedFat`); nil when the food app sends none.
+    private(set) var saturatedFat: SaturatedFat.Week?
     /// Sleep Regularity Index (0-100) over the last week.
     private(set) var sleepConsistency: Int?
     private(set) var sleepSpreadMinutes: Double?
@@ -928,6 +930,7 @@ final class DailyMetricsModel {
                 micronutrients = Micronutrients.assess(averages: nutrients.averages, supplements: SupplementNutrients.dailyAverages(now: now),
                                                        daysLogged: nutrients.daysLogged, sex: settings.sex, age: settings.age)
             }
+            saturatedFat = try? await health.saturatedFatWeek()
             let stepResult = try? await stepCounts
             steps = stepResult?.total
 
