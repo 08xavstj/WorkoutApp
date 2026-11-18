@@ -91,3 +91,8 @@ extension View {
         font(.footnote)
     }
 }
+
+/// "12:34" from seconds (minutes past 60 keep counting: "75:10").
+nonisolated func watchClock(_ seconds: TimeInterval) -> String {
+    Duration.seconds(max(0, seconds.isFinite ? seconds : 0)).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2)))
+}

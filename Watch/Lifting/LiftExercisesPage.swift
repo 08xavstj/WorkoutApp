@@ -95,7 +95,6 @@ private struct ExerciseRow: View {
                 } else if let label = exercise.supersetLabel {
                     Text(label)
                         .font(.footnote.weight(.bold))
-                        .minimumScaleFactor(0.9)
                 }
             }
             .frame(width: 28, height: 28)

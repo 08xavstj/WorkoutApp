@@ -96,7 +96,6 @@ private struct MiniRestRing: View {
                 Text(timerInterval: min(start, ends)...ends, countsDown: true)
                     .font(.footnote.weight(.semibold))
                     .monospacedDigit()
-                    .minimumScaleFactor(0.9)
             }
             .frame(width: 44, height: 44)
         }

@@ -397,7 +397,7 @@ private struct QuickStartTiles: View {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .lineLimit(1)
-                .minimumScaleFactor(0.9)
+                .multilineTextAlignment(.center)
         }
         .foregroundStyle(WatchPalette.onTint)
         .frame(maxWidth: .infinity, minHeight: Self.height)

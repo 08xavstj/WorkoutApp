@@ -132,23 +132,6 @@ nonisolated struct FaceProvider: TimelineProvider {
     }
 }
 
-/// Forwards to the shared `WatchPalette` (Shared/WatchPalette.swift), which
-/// the Watch app uses too. Kept until every complication reads `WatchPalette`
-/// directly (C9 of the Watch redesign).
-nonisolated enum FacePalette {
-    static let strain = WatchPalette.strain
-    static let lifting = WatchPalette.lifting
-    static let sleep = WatchPalette.sleep
-    static let easy = WatchPalette.easy
-    static let normal = WatchPalette.normal
-    static let recovered = WatchPalette.recovered
-    static let track = WatchPalette.track
-
-    static func band(_ band: String?) -> Color {
-        WatchPalette.band(band)
-    }
-}
-
 /// e.g. "34%" (whole numbers; never crashes on NaN).
 nonisolated func facePercent(_ value: Double) -> String {
     "\(faceWhole(value))%"

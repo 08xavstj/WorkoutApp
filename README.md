@@ -64,7 +64,14 @@ Run the score tests any time: `swift test --package-path Packages/AppCore`.
 
 ## Apple Watch
 
-Tensile has a Watch app for lifting days. It shows the session running on your iPhone (exercise, set x of y, target reps and weight, superset partner as A1/A2), ticks sets off with a quick "how hard?" step (effort 6–10 as reps left, plus reps and weight you can adjust by your gym's real plate jumps), runs the rest timer with a tap at the end, and records heart rate and calories with its own workout session. Pause, resume, skip the exercise, and finish (with a 1–10 rating for the whole session) all work from the wrist; the iPhone's finish sheet opens pre-filled.
+Tensile has a Watch app for lifting, cardio and sports (redesigned in November 2026; the plan and evidence are in `docs/research/watch-app-redesign-2026-11.md`).
+
+- **Home**: today's recovery and strain (the same numbers and "--" rules as the complications), today's plan with Start (or the iPhone's live session to join), 64 pt Lift and last-cardio tiles, this week's hard cardio session, every activity grouped as Cardio, Sports and Snow, your last workout, and Settings (pages per activity, taps, distance units).
+- **Lifting** pages sideways: Controls | **Set** | Rest | Heart | Exercises. The Set page doesn't scroll: the weight big, the Digital Crown stepping through the loads your gym can make (tap the reps to move the crown to them), last time's set, and a 60 pt **Done** that double tap presses. **Undo** stays in the toolbar for 4 s. Done moves to the Rest page: "Reps left?" 0–4+ chips, then a ring with −15/+15, the next set and **Next set**, a light tap 10 s before the end and a strong one at the end. The Heart page shows zones and the last 10 minutes; Exercises lists every exercise with its progress.
+- **Without the phone**: the iPhone sends today's planned session ahead and your recent exercises, so a plan or a **Quick lift** runs on the wrist alone; the sets go to the iPhone, which makes the session, when it's back in reach.
+- **Cardio and sports** page Controls | Metrics | Now Playing, with the Metrics pages you choose per activity (Main, Heart zones, Pace, Speed, Elevation, Splits, Target) moved through with the crown. Auto laps every km or mile with a tap and a banner, a Lap button, the system's auto-pause for runs, and Water Lock for runs and snow. This week's 4 × 4 hard session runs step by step with a tap at each change.
+- **Summaries** after every workout: time in zones, the heart-rate line, sets or splits, records.
+- **Always On** dims and outlines instead of redrawing; the timers keep counting.
 
 The Watch's workout is the single record. Tap **Start on Apple Watch** from the workout's menu on the phone (or start the session from the Watch) and the Watch saves the one `HKWorkout` for that session with its heart rate and calories; the phone then doesn't save a second one. AirPods heart rate still streams into Apple Health as before and is merged with the watch's. If the Watch starts a workout with no session on the phone, the phone creates one ("Watch workout, N min") when the summary arrives, and if the phone is out of reach the Watch keeps recording and queues what you did until it reconnects.
 
@@ -72,7 +79,7 @@ Watch face complications: long-press the watch face → **Edit** → swipe to **
 
 Installing: the Watch app ships inside the iPhone app, so it installs with it when "Automatic app install" is on in the Watch app on your iPhone; otherwise open the Watch app → **Available Apps** → Tensile. Signing: it uses the same team and the bundle ID `<your app id>.watchkitapp` (set by `scripts/set-signing.sh`; if you set signing before the Watch app existed, run the script again so `COMPANION_APP_BUNDLE_IDENTIFIER` is written). Xcode's automatic signing creates the Watch provisioning profile the first time you run on a device.
 
-Hands-free: double tap (finger and thumb, Series 9 and later) presses **Complete** on the live page and **Start** on the first screen, and "Start a workout in Tensile" works from Siri and the Shortcuts app on the Watch.
+Hands-free: double tap (finger and thumb, Series 9 and later) presses **Done** on the Set page, **Next set** on the Rest page and **Start** on the session preview; it isn't used on pages that scroll. "Start a workout in Tensile" and "Start cardio in Tensile" work from Siri and the Shortcuts app, and two controls (Start lifting, Start last cardio) can go in Control Center or the Smart Stack.
 
 Apple Watch Series 12 and Ultra 4: the watch reads HRV every five minutes and heart rate every five seconds. Tensile uses Health's own overnight RMSSD readings (iOS 27) when the watch writes them, and averages HRV over the sleep itself instead of an evening-to-noon window, so the denser readings don't move your baseline. Apple's Readiness score, sleep score and Health Age have no interface for apps; see `docs/research/watch-features.md` §6 for the full list.
 

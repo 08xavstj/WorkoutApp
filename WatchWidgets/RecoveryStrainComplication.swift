@@ -40,11 +40,11 @@ struct RecoveryStrainView: View {
     private var fullColor: Bool { renderingMode == .fullColor }
 
     private var recoveryColor: Color {
-        fullColor ? FacePalette.band(data?.band) : Color.primary
+        fullColor ? WatchPalette.band(data?.band) : Color.primary
     }
 
     private var strainColor: Color {
-        fullColor ? FacePalette.strain : Color.primary
+        fullColor ? WatchPalette.strain : Color.primary
     }
 
     private var recoveryNumber: String {
