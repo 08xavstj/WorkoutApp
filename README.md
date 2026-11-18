@@ -13,12 +13,12 @@ Five tabs: **Today**, **Fitness**, **Coach**, **Health** and **Log**. Settings o
 | Area | What it does |
 |---|---|
 | **Today** | Strain, Recovery and Sleep rings with a coaching line and one suggested next step; tap the Strain ring for today's range and the workouts that would reach it, or Recovery and Sleep for what drove them. **Up next** lists what's due (morning check-in, doses, bedtime window, habits); **Nutrition** shows energy balance (Cronometer intake vs. estimated calories burned), macros and water; a weather row appears when the weather affects training or sleep (tap it for the full forecast); four health tiles (RHR, HRV, breathing rate, sleep) link to Health |
-| **Fitness** | A week strip of daily strain, then **This week**: the weekly plan with today's session and Start, consistency and the weekly Review. Below it, today's strain gauge with today's range, activities (logged lifts plus Garmin/other workouts) and heart-rate zones; cardio and muscular **training load** (7-day vs 28-day); Progress (muscles and hard sets, cardio fitness, strength); and Workouts (**Saved workouts** and **History**) |
+| **Fitness** | A week strip of daily strain, then **This week**: the weekly plan with today's session and Start, consistency and the weekly Review. Below it, today's strain gauge with today's range, activities (logged lifts plus Garmin/other workouts) and heart-rate zones; cardio and muscular **training load** (7-day vs 28-day); Progress (muscles and hard sets, cardio fitness, strength, **Lift goals**, **Personal records**, **Past blocks**, **Cardio bests** and **Year in review**); and Workouts (**Saved workouts**, **History**, **Calendar** and a 5-minute **Stretch**) |
 | **Trainer** | **Start workout** (Log tab, or Start on Fitness › This week) builds a session from your **gym equipment** (bar weights, plate pairs, dumbbell/kettlebell sets and machine/cable increments; set up in Settings, or from the builder's toolbar). It picks exercises you can do there, sets reps and effort from your recovery, and suggests weights from your lift history **rounded to what you can actually load**, progressing by your gym's smallest jump. Swap any exercise; see plate loading per side. **Empty workout** and **Saved workouts** sit under Start workout on the Log tab |
 | **Live workout** | Timer, live strain added, rest pill (−15s/+15s/Skip), previous sets, "New PR" badges, plate-loading hints, finished and upcoming exercises collapsed. While it runs, a bar above the tabs shows it so you can go back in |
 | **Coach** | Chat that knows your scores, food, calories, gym and lifts; training questions come back with a ready-to-start workout card. Runs on the iPhone with Apple Intelligence; nothing leaves the device |
 | **Health** | 90-day HRV baseline chart, key measures, a **Longevity** page (the measures most strongly linked with living longer, each against its published target and graded for evidence), an **Insights** feed, and every stat Apple Health has, grouped by category under All measures: resting, sleeping and walking heart rate, heart-rate recovery (after hard cardio), VO₂ max, blood oxygen, respiration, temperature, steps, distance, floors, intensity minutes, active/resting energy, weight, body fat, BMI, lean mass, blood pressure, water and protein. **Records** (lab results, blood pressure, body measurements, progress photos, medications) and **Patterns** (what affects you, alcohol and your sleep, vitamins and minerals) |
-| **Log** | Start workout at the top, with Empty workout and Saved workouts under it; then overnight HRV, drinks, blood pressure, progress photos, waist and grip, and lab results (typed in) |
+| **Log** | Start workout at the top, with Empty workout and Saved workouts under it, and **Cardio & sports on Watch** when a Watch is paired; then **Medications & supplements**, overnight HRV, drinks, blood pressure, progress photos, waist and grip, and lab results (typed in) |
 | **Progress photos** | Front and side photos (Log › Progress photo; history in Health › Records) kept only inside the app (encrypted, never in the Photos library), a before/after slider and timeline. They never leave the iPhone |
 
 ### Calories burned (`EnergyCalculator`)
@@ -146,6 +146,10 @@ App/                        iPhone app (SwiftUI + SwiftData)
 Watch/                      Apple Watch app (SwiftUI + HealthKit + WatchConnectivity)
 WatchWidgets/               Apple Watch complications (WidgetKit)
 Shared/                     Code the app, widget and Watch share (WatchSession is the wrist's session model)
+SharedCardio/               Cardio activities' HealthKit types, shared by the app and the Watch
+Widget/                     Home Screen widgets and Live Activities (WidgetKit)
+Privacy/                    Privacy manifests for the app, widget, Watch and Watch widgets
+UITests/                    UI tests: the screenshot tour and notification taps
 Packages/AppCore/           Strain/recovery/sleep math + tests (no UI, no HealthKit)
 .claude/skills/             Claude Code skills for this project
 .github/workflows/ios.yml   CI: runs tests and builds the app on macOS
@@ -154,10 +158,7 @@ Packages/AppCore/           Strain/recovery/sleep math + tests (no UI, no Health
 ## Roadmap
 
 1. **Automatic HRV for Garmin**: Garmin's Health API (requires approved business access), or a 1-minute morning reading with a Bluetooth chest strap or the iPhone camera.
-2. Widgets and Live Activity for the rest timer and today's rings.
-3. Templates/routines, PRs and progress charts per exercise (Swift Charts).
-4. Nutrition trends and calorie balance (intake vs. burn), and trends (7/30-day charts).
-5. Coach upgrades: weekly review, auto-generated plans saved as templates, App Intents so Siri can answer "what's my recovery?".
-6. Sign in with Apple + per-user rate limits on the coach function.
+2. Nutrition trends and calorie balance (intake vs. burn), and trends (7/30-day charts).
+3. Coach upgrades: auto-generated plans saved as templates.
 
 See [docs/REFERENCES.md](docs/REFERENCES.md) for the open-source projects and skills this builds on.
