@@ -17,6 +17,11 @@ nonisolated enum DemoMode {
         return false
         #endif
     }()
+
+    /// Demo mode with `-demoTravel YES` too: the made-up flight 6 h east
+    /// (`TravelZoneStore`), for the screenshot tour's travel step only, so
+    /// the jet-lag card doesn't sit on top of every other demo screen.
+    static let showsTravel: Bool = isOn && UserDefaults.standard.bool(forKey: "demoTravel")
 }
 
 /// Made-up Apple Health data for demo mode, standing in for the HealthKit

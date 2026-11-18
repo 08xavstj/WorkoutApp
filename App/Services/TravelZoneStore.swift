@@ -15,8 +15,10 @@ import AppCore
 /// - `jetLagCard`: the melatonin and light card after a shift of 5 h or more.
 ///
 /// The zone is noted on every metrics refresh and when iOS says the zone
-/// changed. Kept as JSON in Application Support; demo mode shows a made-up
-/// flight 6 h east yesterday for the card only and saves nothing.
+/// changed. Kept as JSON in Application Support. Demo mode saves nothing
+/// and has no travel, unless launched with `-demoTravel YES`
+/// (`DemoMode.showsTravel`, the screenshot tour's travel step): then a
+/// made-up flight 6 h east yesterday, for the card only.
 @Observable
 final class TravelZoneStore {
     static let shared = TravelZoneStore()
@@ -40,7 +42,7 @@ final class TravelZoneStore {
     private init() {
         timeline = TravelShift.Timeline(zone: Self.currentZone.identifier, at: .now)
         if isDemo {
-            timeline = Self.demoTimeline()
+            if DemoMode.showsTravel { timeline = Self.demoTimeline() }
             return
         }
         reload()

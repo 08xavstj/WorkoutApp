@@ -48,6 +48,11 @@ final class ScreenshotTests: XCTestCase {
         tourOnboarding(fresh)
         fresh.terminate()
 
+        // The jet-lag card shows only with `-demoTravel YES` (`DemoMode.showsTravel`).
+        let travel = launch(appearance: "light", extraArguments: ["-demoTravel", "YES"])
+        tourTravel(travel)
+        travel.terminate()
+
         let note = XCTAttachment(string: missing.isEmpty ? "Nothing missing." : missing.joined(separator: "\n"))
         note.name = "zz-missing"
         note.lifetime = .keepAlways
@@ -385,6 +390,14 @@ final class ScreenshotTests: XCTestCase {
         }
     }
 
+    private func tourTravel(_ app: XCUIApplication) {
+        openTab(app, "Today")
+        if !app.descendants(matching: .any)["travel-card"].waitForExistence(timeout: 5) {
+            note("MISSING travel card")
+        }
+        capture(app, "today-travel", pages: 1)
+    }
+
     private func tourOnboarding(_ app: XCUIApplication) {
         sleep(1)
         capture(app, "onboarding-welcome", pages: 1)
@@ -395,14 +408,14 @@ final class ScreenshotTests: XCTestCase {
 
     // MARK: - Launch and navigation
 
-    private func launch(appearance: String, onboarded: Bool = true) -> XCUIApplication {
+    private func launch(appearance: String, onboarded: Bool = true, extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "-demoData", "YES",
             "-hasOnboarded", onboarded ? "YES" : "NO",
             "-skipHealthPrompt", "YES",
             "-appearance", appearance,
-        ]
+        ] + extraArguments
         app.launch()
         sleep(4)
         dismissSystemAlerts()
