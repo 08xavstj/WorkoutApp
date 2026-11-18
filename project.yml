@@ -81,6 +81,9 @@ targets:
               - workoutapp
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Uses only Apple's standard encryption (HTTPS), so TestFlight and App
+        # Store uploads skip the export-compliance question.
+        ITSAppUsesNonExemptEncryption: false
         NSHealthShareUsageDescription: >-
           Tensile reads your heart rate, HRV, resting heart rate, sleep, workouts,
           body weight and food log (for example from Cronometer) to calculate your
