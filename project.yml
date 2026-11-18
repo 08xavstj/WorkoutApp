@@ -113,7 +113,14 @@ targets:
           in step when your plan changes. It reads and changes only that calendar.
         NSLocationWhenInUseUsageDescription: >-
           Tensile uses your location once to get local weather, air quality and
-          daylight hours for training advice. You can type your city instead.
+          daylight hours for training advice, and, when you ask, to place a private
+          place such as home that Tensile hides on routes you share. You can type
+          your city instead.
+        # "Save Image" in the share sheet for share cards and charts; without
+        # this key iOS ends the app when the image is saved.
+        NSPhotoLibraryAddUsageDescription: >-
+          Tensile saves the workout and chart images you choose to share to your
+          Photos library.
         NSHealthUpdateUsageDescription: >-
           Tensile saves the gym workouts (with your effort rating), blood pressure
           readings, check-in mood and quick meal estimates you log to
