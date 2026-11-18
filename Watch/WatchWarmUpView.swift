@@ -1,181 +1,197 @@
 import SwiftUI
 import WatchKit
 
-/// The warm-up on the wrist, one screen per step: first the overview (steps,
-/// minutes, Start / Skip to lifting), then each step's name, dose, cue and
-/// why. Rep steps advance on tap or a Digital Crown turn; the one timed step
-/// counts down and auto-advances, with a tap at 5 s and at 0. Back is a
-/// button or a swipe right. The phone owns the steps; taps here go to it as
-/// `WatchCommand`s and show at once.
+/// The movement warm-up on the Set page, one card per step that doesn't
+/// scroll: first the overview (steps, minutes, Start / Skip to lifting), then
+/// each step's name and dose with a 60 pt Done. The cue and why sit behind an
+/// info button, with Back and Skip. The one timed step counts down with a `Text` timer (kept
+/// current in Always On) and moves on by itself, with a tap at 5 s and at 0.
+/// The Digital Crown isn't used here: the pages swipe
+/// sideways and nothing on the card needs adjusting. The phone owns the
+/// steps; taps here go to it as `WatchCommand`s and show at once.
 struct WatchWarmUpView: View {
-    @Environment(WatchWorkoutModel.self) private var model
     let session: WatchSession
     let step: WatchWarmUpStep
+    var isFront = true
 
     var body: some View {
         if session.isWarmUpOverview {
-            WatchWarmUpOverview(session: session)
+            WatchWarmUpOverview(session: session, isFront: isFront)
         } else {
-            WatchWarmUpStepView(session: session, step: step)
+            WatchWarmUpStepCard(session: session, step: step, isFront: isFront)
         }
     }
 }
 
-/// Every step with its dose, then Start and Skip.
+/// How long the warm-up is and how many steps, then Start and Skip.
 private struct WatchWarmUpOverview: View {
     @Environment(WatchWorkoutModel.self) private var model
     let session: WatchSession
+    let isFront: Bool
+    @State private var showingSteps = false
 
     private var steps: [WatchWarmUpStep] { session.warmUp ?? [] }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(session.warmUpMinutes.map { "Warm-up · \($0) min" } ?? "Warm-up")
-                    .font(.headline)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(session.warmUpMinutes.map { "Warm-up · \($0) min" } ?? "Warm-up")
+                .font(.headline)
+            Button {
+                showingSteps = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text("\(steps.count) steps, first \(steps.first?.name ?? "")")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(WatchPalette.lifting)
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(steps.count) warm-up steps")
+            .accessibilityHint("Lists them")
+            Spacer(minLength: 0)
+            PrimaryWideButton(title: "Start warm-up", systemImage: "play.fill", tint: WatchPalette.lifting,
+                              primaryAction: isFront) {
+                model.warmUpNext()
+            }
+            Button("Skip to lifting") { model.warmUpFinish() }
+                .font(.footnote.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+        }
+        .sheet(isPresented: $showingSteps) {
+            List {
                 ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
-                    HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(step.name)
-                            .font(.caption2)
-                            .lineLimit(2)
-                        Spacer(minLength: 4)
-                        Text(step.dose ?? "")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .font(.headline)
+                        if let dose = step.dose {
+                            Text(dose)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-                Button {
-                    model.warmUpNext()
-                } label: {
-                    Label("Start warm-up", systemImage: "play.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 40)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(WatchTheme.lifting)
-                Button("Skip to lifting") { model.warmUpFinish() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity)
             }
         }
     }
 }
 
-/// One step. The Digital Crown forward = Done, back = Back.
-private struct WatchWarmUpStepView: View {
+/// One step: "Warm-up 2 of 6", the name, the dose (or the countdown) and
+/// Done. The cue, why, Back and Skip are behind the info button.
+private struct WatchWarmUpStepCard: View {
     @Environment(WatchWorkoutModel.self) private var model
     let session: WatchSession
     let step: WatchWarmUpStep
-    @State private var crown = 0.0
+    let isFront: Bool
+    @State private var showingCue = false
 
     private var stepIndex: Int { session.warmUpStepIndex ?? 0 }
     private var stepCount: Int { session.warmUp?.count ?? 0 }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
                 Text("Warm-up \(stepIndex + 1) of \(stepCount)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text(step.name)
-                    .font(.headline)
-                    .lineLimit(2)
-                if let dose = step.dose {
-                    Text(dose)
-                        .font(.title3.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(WatchTheme.lifting)
-                }
-                if let seconds = step.seconds, let ends = session.warmUpStepEndsAt {
-                    WatchWarmUpCountdown(ends: ends, seconds: seconds) { model.warmUpTimedStepEnded(at: stepIndex) }
-                }
-                Text(step.cue)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(4)
-                if let why = step.why {
-                    Text(why)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(3)
-                }
-                buttons
-            }
-        }
-        .focusable()
-        .digitalCrownRotation($crown, from: -1, through: 1, by: 1, sensitivity: .low,
-                              isContinuous: false, isHapticFeedbackEnabled: true)
-        .onChange(of: crown) { _, value in
-            if value >= 1 {
-                model.warmUpNext()
-            } else if value <= -1 {
-                model.warmUpBack()
-            } else {
-                return
-            }
-            crown = 0
-        }
-        .gesture(
-            DragGesture(minimumDistance: 30).onEnded { value in
-                if value.translation.width > 60 { model.warmUpBack() }
-            }
-        )
-    }
-
-    private var buttons: some View {
-        VStack(spacing: 6) {
-            Button {
-                model.warmUpNext()
-            } label: {
-                Label(step.isTimed ? "Done early" : "Done", systemImage: "checkmark")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 40)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(WatchTheme.lifting)
-            HStack(spacing: 6) {
+                Spacer(minLength: 0)
                 Button {
-                    model.warmUpBack()
+                    showingCue = true
                 } label: {
-                    Label("Back", systemImage: "chevron.left")
-                        .frame(maxWidth: .infinity)
+                    Image(systemName: "info.circle")
+                        .font(.headline)
+                        .foregroundStyle(WatchPalette.lifting)
+                        .frame(width: 44, height: 32)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                Button("Skip to lifting") { model.warmUpFinish() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity)
+                .buttonStyle(.plain)
+                .accessibilityLabel("How to do it")
+            }
+            Text(step.name)
+                .font(.headline)
+                .lineLimit(2)
+            if let seconds = step.seconds, let ends = session.warmUpStepEndsAt {
+                WatchWarmUpCountdown(ends: ends, seconds: seconds) { model.warmUpTimedStepEnded(at: stepIndex) }
+            } else if let dose = step.dose {
+                Text(dose)
+                    .numeral(.secondary)
+                    .alwaysOnPrimary(WatchPalette.lifting)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            Spacer(minLength: 0)
+            PrimaryWideButton(title: step.isTimed ? "Done early" : "Done", systemImage: "checkmark",
+                              tint: WatchPalette.lifting, primaryAction: isFront) {
+                model.warmUpNext()
+            }
+        }
+        // The cue, why, Back and Skip: one tap away, so the card itself never scrolls.
+        .sheet(isPresented: $showingCue) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(step.name)
+                        .font(.headline)
+                    Text(step.cue)
+                        .font(.body)
+                    if let why = step.why {
+                        Text(why)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button {
+                        showingCue = false
+                        model.warmUpBack()
+                    } label: {
+                        Label("Back a step", systemImage: "chevron.left")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    Button {
+                        showingCue = false
+                        model.warmUpFinish()
+                    } label: {
+                        Label("Skip to lifting", systemImage: "forward.end.fill")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                }
             }
         }
     }
 }
 
 /// Seconds left on the timed step. Tap at 5 s and at 0; at 0 the step ends.
+/// The digits are a `Text` timer; the taps come from a task, not the redraw,
+/// so they land on time with the wrist down.
 private struct WatchWarmUpCountdown: View {
     let ends: Date
     let seconds: Int
     let onEnded: () -> Void
 
+    /// The tap before the end (the existing app's choice).
+    private static let warningSeconds = 5.0
+
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let remaining = max(0, ends.timeIntervalSince(context.date))
-            let left = Int(remaining.rounded(.up))
-            VStack(spacing: 4) {
-                Text(watchClock(Double(left)))
-                    .font(.title2.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(WatchTheme.lifting)
-                ProgressView(value: min(1, Double(left) / Double(max(1, seconds))))
-                    .tint(WatchTheme.lifting)
-            }
-            .accessibilityElement(children: .combine)
+        Text(timerInterval: min(ends.addingTimeInterval(-Double(seconds)), ends)...ends, countsDown: true)
+            .numeral(.primary)
+            .alwaysOnPrimary(WatchPalette.lifting)
             .accessibilityLabel("Time left")
-            .onChange(of: left, initial: true) { _, value in
-                if value == 5 || value == 0 { WKInterfaceDevice.current().play(.notification) }
-                if value == 0 { onEnded() }
+            .task(id: ends) {
+                let warning = ends.addingTimeInterval(-Self.warningSeconds)
+                if warning > .now {
+                    try? await Task.sleep(for: .seconds(warning.timeIntervalSinceNow))
+                    guard !Task.isCancelled else { return }
+                    WKInterfaceDevice.current().play(.notification)
+                }
+                try? await Task.sleep(for: .seconds(max(0, ends.timeIntervalSinceNow)))
+                guard !Task.isCancelled else { return }
+                WKInterfaceDevice.current().play(.notification)
+                onEnded()
             }
-        }
     }
 }
