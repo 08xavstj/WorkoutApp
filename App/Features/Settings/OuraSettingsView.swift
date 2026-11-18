@@ -3,7 +3,7 @@ import UIKit
 import AuthenticationServices
 import AppCore
 
-/// Settings › Data sources › Oura Ring: the direct link to an Oura account
+/// Settings › Data & privacy › Oura Ring: the direct link to an Oura account
 /// (`OuraLink`) and which device's sleep comes first (`SleepSourceSetting`).
 struct OuraSettingsView: View {
     @State private var link = OuraLink.shared
@@ -21,7 +21,8 @@ struct OuraSettingsView: View {
     var body: some View {
         Form {
             statusSection
-            if link.status == .needsSetup || editingApp {
+            // A Keychain that can't be read just now isn't a missing setup.
+            if (link.status == .needsSetup && !link.keychainUnavailable) || editingApp {
                 developerAppSection
             }
             sleepSection
@@ -48,12 +49,12 @@ struct OuraSettingsView: View {
                     .foregroundStyle(Theme.recoveryModerateText)
             }
             if link.status == .connected, link.needsReconnect {
-                // The scopes were trimmed to what's used (`Oura.scopes`); syncing keeps working meanwhile.
-                Text("Tensile now asks Oura only for your daily and sleep data. Reconnect once so the permission matches.")
+                // Worded from the permissions actually missing (`Oura.reconnectPrompt`); syncing keeps working meanwhile.
+                Text(link.reconnectPrompt ?? "Reconnect once so Oura's permissions match what Tensile asks for.")
                     .font(.footnote)
                     .foregroundStyle(Theme.recoveryModerateText)
                 Button(signingIn ? "Opening Oura…" : "Reconnect to Oura") { connect() }
-                    .disabled(signingIn)
+                    .disabled(signingIn || link.isSyncing)
             }
             switch link.status {
             case .connected:
@@ -61,8 +62,16 @@ struct OuraSettingsView: View {
                     Task { await link.sync(force: true) }
                 }
                 .disabled(link.isSyncing)
+                // Not mid-sync, so nothing the sync downloads lands after the data is forgotten.
                 Button("Disconnect", role: .destructive) { link.disconnect() }
+                    .disabled(link.isSyncing || signingIn)
             case .disconnected:
+                if ownNumbers, let note = link.signInPermissionsNote {
+                    // Said before sign-in: the panel adds permissions Tensile's scores don't use.
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.secondaryText)
+                }
                 Button(signingIn ? "Opening Oura…" : "Connect to Oura") { connect() }
                     .disabled(signingIn)
                 Button("Change developer app details") { editingApp = true }
@@ -71,7 +80,7 @@ struct OuraSettingsView: View {
             }
         } footer: {
             // What's used and left out: docs/research/oura-ring-2026-11.md §6 ([R49] for the scores).
-            Text("Tensile downloads your Oura sleep, overnight HRV, sleeping heart rate, breathing rate and temperature change for the last 90 days, then keeps the last week up to date. It's kept on this iPhone; nothing is sent to Oura except the sign-in. Oura's Readiness and Sleep scores aren't used: their formulas aren't published and no study has validated them. Oura needs an active membership to share data with other apps.")
+            Text("Tensile downloads your Oura sleep, overnight HRV, sleeping heart rate, breathing rate and temperature change for the last 90 days, then keeps the last week up to date; these feed Tensile's own scores. With \"Oura's own numbers\" on (below), it also downloads Oura's Readiness and Sleep scores and other estimates, shown only in that panel as Oura reports them and never used in Tensile's scores: their formulas aren't published and no study has validated them. All of it stays on this iPhone; nothing is sent to Oura except the sign-in. Oura needs an active membership to share data with other apps.")
         }
     }
 
@@ -158,7 +167,7 @@ struct OuraSettingsView: View {
             Text("Oura's own numbers")
         } footer: {
             // Owner's request, 18 Nov 2026; evidence: docs/research/oura-ring-2026-11.md §5-6.
-            Text("Readiness and Sleep scores, stress, resilience, cardiovascular age, Cardio Capacity (VO₂ max) and the breathing disturbance index, in their own card on the Health tab. None has been validated in a published study, so Tensile's scores and advice never use them. Needs the extra Oura permissions: reconnect after turning this on. Chronotype and Health Radar aren't in Oura's API.")
+            Text("Readiness and Sleep scores, stress, resilience, cardiovascular age, Cardio Capacity (VO₂ max) and the breathing disturbance index, in their own card on the Health tab. None has been validated in a published study, so Tensile's scores and advice never use them. While this is on, sign-in also asks Oura for the spo2 and heart_health permissions, only for this panel. Turning it off deletes the numbers downloaded so far; the wider permission stays with Oura until you reconnect or disconnect. Chronotype and Health Radar aren't in Oura's API.")
         }
         Section {
             Text("In the Health app, open Browse › Activity › Steps › Data Sources & Access, tap Edit and drag Apple Watch above Oura. Do the same for Active Energy. Health then counts the watch's steps and energy and doesn't add the ring's on top.")

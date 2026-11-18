@@ -99,10 +99,16 @@ public enum OneDeviceBaseline {
         return Choice(device: pick.nights.isEmpty ? nil : pick.device, nights: pick.nights, isEstablished: false)
     }
 
+    /// A night's readings run from 6 pm to noon on the morning they are
+    /// filed under; later ones (an afternoon reading) aren't the night's.
+    /// The window is the app's choice, the one used before the ring was split out.
+    public static let nightEndHour = 12
+
     /// The mean of each night's readings, split by device, for sources that
     /// write many readings a night (the watch's breathing rate) and the
     /// ring's one nightly value. Readings are filed under the morning the
-    /// app files nights under (`Oura.morning(of:)`).
+    /// app files nights under (`Oura.morning(of:)`), from 6 pm to noon
+    /// (`nightEndHour`).
     public static func nightlyMeans(
         _ readings: [(date: Date, value: Double, device: BaselineDevice)],
         calendar: Calendar = .current
@@ -110,6 +116,8 @@ public enum OneDeviceBaseline {
         var sums: [BaselineDevice: [Date: (total: Double, count: Int)]] = [:]
         for reading in readings where reading.value.isFinite && reading.value > 0 {
             let morning = Oura.morning(of: reading.date, calendar: calendar)
+            let nightEnd = calendar.date(byAdding: .hour, value: nightEndHour, to: morning) ?? morning.addingTimeInterval(Double(nightEndHour) * 3600)
+            guard reading.date < nightEnd else { continue }
             let current = sums[reading.device]?[morning] ?? (0, 0)
             sums[reading.device, default: [:]][morning] = (current.total + reading.value, current.count + 1)
         }
@@ -119,30 +127,115 @@ public enum OneDeviceBaseline {
         return (means(.ring), means(.watch))
     }
 
+    /// `nightlyMeans` with the source each reading came from (its Apple
+    /// Health bundle ID, say). The watch side is one device too: only the
+    /// non-ring source with the most nights is kept (`dominantSource`), so
+    /// two watches, or a watch and a phone app, are never averaged.
+    public static func nightlyMeans(
+        _ readings: [(date: Date, value: Double, device: BaselineDevice, source: String)],
+        calendar: Calendar = .current
+    ) -> (ring: [Date: Double], watch: [Date: Double]) {
+        let ring = nightlyMeans(readings.filter { $0.device == .ring }.map { (date: $0.date, value: $0.value, device: $0.device) },
+                                calendar: calendar).ring
+        var bySource: [String: [Date: Double]] = [:]
+        for (source, group) in Dictionary(grouping: readings.filter { $0.device == .watch }, by: { $0.source }) {
+            bySource[source] = nightlyMeans(group.map { (date: $0.date, value: $0.value, device: $0.device) }, calendar: calendar).watch
+        }
+        return (ring, dominantSource(bySource)?.nights ?? [:])
+    }
+
+    /// The one source with the most nights, and its nights (ties: the
+    /// alphabetically first source, so the pick is the same every time).
+    public static func dominantSource(_ bySource: [String: [Date: Double]]) -> (source: String, nights: [Date: Double])? {
+        bySource.filter { !$0.value.isEmpty }
+            .min { a, b in a.value.count != b.value.count ? a.value.count > b.value.count : a.key < b.key }
+            .map { (source: $0.key, nights: $0.value) }
+    }
+
     /// Per-minute readings a night needs before its sleeping heart rate
     /// counts (the Biology tab's rule; the app's choice).
     public static let minimumSleepingReadings = 60
 
-    /// The watch's sleeping heart rate for one night: the mean of the
-    /// per-minute readings between `start` and `end` from the one source,
-    /// other than the ring, with the most readings there, once it has
-    /// `minimumReadings`. Oura writes its own 1-minute heart rate to Apple
-    /// Health (docs/research/oura-ring-2026-11.md §2); averaging its minutes
-    /// with the watch's would mix two devices in one value, so ring sources
+    /// Each non-ring source's sleeping heart rate for one night: the mean of
+    /// its per-minute readings between `start` and `end`, once it has
+    /// `minimumReadings`, keyed by `HeartRateMerge.Source.identity`. Oura
+    /// writes its own 1-minute heart rate to Apple Health
+    /// (docs/research/oura-ring-2026-11.md §2); averaging its minutes with
+    /// the watch's would mix two devices in one value, so ring sources
     /// (`SleepSource.tracker`) are skipped and the ring's night comes from
     /// its own sleep average instead (`Oura.nightlySleepingHeartRate`).
-    public static func watchSleepingHeartRate(
+    /// `oneWatchSource` then keeps one source for the whole window.
+    public static func watchSleepingHeartRates(
         _ sources: [HeartRateMerge.Source],
         from start: Date,
         to end: Date,
         minimumReadings: Int = OneDeviceBaseline.minimumSleepingReadings
-    ) -> Double? {
-        let candidates = sources
-            .filter { SleepSource.tracker(bundleID: nil, sourceName: $0.name, deviceModel: nil) != .ring }
-            .map { source in source.samples.filter { $0.date >= start && $0.date <= end && $0.bpm > 0 }.map(\.bpm) }
-            .filter { $0.count >= max(1, minimumReadings) }
-        guard let best = candidates.max(by: { $0.count < $1.count }) else { return nil }
-        return best.reduce(0, +) / Double(best.count)
+    ) -> [String: Double] {
+        var result: [String: (mean: Double, count: Int)] = [:]
+        for source in sources where SleepSource.tracker(bundleID: source.bundleID, sourceName: source.name, deviceModel: nil) != .ring {
+            let minutes = source.samples.filter { $0.date >= start && $0.date <= end && $0.bpm > 0 }.map(\.bpm)
+            guard minutes.count >= max(1, minimumReadings) else { continue }
+            // Two series with one identity (rare) keep the longer one.
+            if let current = result[source.identity], current.count >= minutes.count { continue }
+            result[source.identity] = (minutes.reduce(0, +) / Double(minutes.count), minutes.count)
+        }
+        return result.mapValues(\.mean)
+    }
+
+    /// One watch source for every night in the window: the source with the
+    /// most nights (`dominantSource`), so a night where another source had
+    /// more minutes doesn't bring a second device into the baseline.
+    public static func oneWatchSource(_ nights: [Date: [String: Double]]) -> [Date: Double] {
+        var bySource: [String: [Date: Double]] = [:]
+        for (night, values) in nights {
+            for (source, value) in values where value.isFinite && value > 0 { bySource[source, default: [:]][night] = value }
+        }
+        return dominantSource(bySource)?.nights ?? [:]
+    }
+
+    /// Only the nights from the `days` mornings ending on `today`, so a
+    /// baseline meant to cover 30 nights doesn't reach back into the 120 days
+    /// the Oura download keeps.
+    public static func recent(_ nights: [Date: Double], days: Int, today: Date, calendar: Calendar = .current) -> [Date: Double] {
+        let anchor = calendar.startOfDay(for: today)
+        let start = calendar.date(byAdding: .day, value: -(max(1, days) - 1), to: anchor) ?? anchor
+        return nights.filter { calendar.startOfDay(for: $0.key) >= start && calendar.startOfDay(for: $0.key) <= anchor }
+    }
+
+    /// What `DailyVitals.resolvingHRV` gets, from one device.
+    public struct HRVInputs: Sendable, Equatable {
+        /// Apple Health's vitals, with their HRV (SDNN) taken out when the ring is used.
+        public var vitals: [DailyVitals]
+        /// The chosen device's overnight RMSSD by morning.
+        public var overnightRMSSD: [Date: Double]
+        /// The device whose HRV this is; nil when neither has any.
+        public var device: BaselineDevice?
+    }
+
+    /// The HRV inputs for `resolvingHRV` from one device. `resolvingHRV`
+    /// converts between RMSSD and SDNN to fill gaps, so it must never see
+    /// the ring's RMSSD and the watch's SDNN together:
+    /// - the watch chosen: Health's vitals as they are, and the watch's RMSSD;
+    /// - the ring chosen: the ring's RMSSD with Health's SDNN taken out, unless
+    ///   the ring isn't established (`Choice.isEstablished`) and the watch's
+    ///   SDNN has more nights in the window (`DailyVitals.hrvWindowNights`),
+    ///   in which case only the watch's SDNN is used.
+    public static func hrvInputs(_ vitals: [DailyVitals], choice: Choice, today: Date,
+                                 calendar: Calendar = .current) -> HRVInputs {
+        guard choice.device == .ring else {
+            return HRVInputs(vitals: vitals, overnightRMSSD: choice.nights, device: choice.device ?? (vitals.contains { ($0.hrvMilliseconds ?? 0) > 0 } ? .watch : nil))
+        }
+        let ringOnly = HRVInputs(vitals: DailyVitals.removingHRV(vitals), overnightRMSSD: choice.nights, device: .ring)
+        guard !choice.isEstablished else { return ringOnly }
+        let anchor = calendar.startOfDay(for: today)
+        let start = calendar.date(byAdding: .day, value: -(DailyVitals.hrvWindowNights - 1), to: anchor) ?? anchor
+        func inWindow(_ date: Date) -> Bool {
+            let night = calendar.startOfDay(for: date)
+            return night >= start && night <= anchor
+        }
+        let ringNights = Set(choice.nights.filter { $0.value > 0 }.keys.filter(inWindow).map { calendar.startOfDay(for: $0) }).count
+        let watchNights = Set(vitals.filter { ($0.hrvMilliseconds ?? 0) > 0 && inWindow($0.date) }.map { calendar.startOfDay(for: $0.date) }).count
+        return watchNights > ringNights ? HRVInputs(vitals: vitals, overnightRMSSD: [:], device: .watch) : ringOnly
     }
 }
 

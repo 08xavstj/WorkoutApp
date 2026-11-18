@@ -33,7 +33,7 @@ struct OuraOwnNumbersCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if rows.isEmpty {
                     Text(link.needsReconnect
-                         ? "Reconnect Oura in Settings › Oura Ring and allow the extra permissions to load these."
+                         ? "\(link.reconnectPrompt ?? "Oura's permissions don't match what Tensile asks for.") Reconnect in Settings › Data & privacy › Oura Ring to load these."
                          : "Nothing yet. They appear after the next sync, once Oura has worked them out.")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)

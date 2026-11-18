@@ -48,13 +48,15 @@ final class BiologyModel {
         // RMSSD first (typed, camera, Apple Watch beat-to-beat), never mixed with SDNN.
         let nights = (try? await health.sleepHistory(nights: 90)) ?? []
         // The Oura ring's nights or the watch's, never both, as Recovery uses them (`OneDeviceBaseline`).
-        let hrvChoice = await health.overnightRMSSD(nights: nights, today: today)
-        let rmssd = hrvChoice.nights.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+        // Ring nights from the same 90 days; a ring with under 14 nights gives way to the
+        // watch's SDNN when that has more (`OneDeviceBaseline.hrvInputs`).
+        let hrvChoice = await health.overnightRMSSD(nights: nights, today: today, days: 90)
         let healthVitals = (try? await vitalsTask) ?? []
+        let hrvInputs = OneDeviceBaseline.hrvInputs(healthVitals, choice: hrvChoice, today: today)
+        let rmssd = hrvInputs.overnightRMSSD.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
         // Evening readings are filed under the next morning (`nightlyVitals`): a night that
         // hasn't happened yet isn't shown, or Health read "Last reading tomorrow" after 6 pm.
-        let vitals = DailyVitals.merging(hrvChoice.device == .ring && hrvChoice.isEstablished ? DailyVitals.removingHRV(healthVitals) : healthVitals,
-                                         manualHRV: rmssd, manualOnlyHRV: true)
+        let vitals = DailyVitals.merging(hrvInputs.vitals, manualHRV: rmssd, manualOnlyHRV: true)
             .filter { Calendar.current.startOfDay(for: $0.date) <= today }
             .sorted { $0.date < $1.date }
         hrvSeries = vitals.compactMap { v in v.hrvMilliseconds.map { DatedValue(date: v.date, value: $0) } }

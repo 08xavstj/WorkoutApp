@@ -65,14 +65,20 @@ public enum SleepSource {
     public static let ouraBundlePrefix = "com.ouraring"
 
     /// What recorded a sample, from its Apple Health source and device.
+    /// The ring is recognised by Oura's bundle identifier; only when there
+    /// is none is the name used, and then only "Oura" as a whole word, so a
+    /// watch called "Ana Moura's Apple Watch" isn't taken for the ring.
     /// - Parameters:
     ///   - bundleID: the writing app's bundle identifier.
     ///   - sourceName: the source's display name.
     ///   - deviceModel: the device's model ("Watch"), if the sample names one.
     public static func tracker(bundleID: String?, sourceName: String?, deviceModel: String?) -> SleepTracker {
         let bundle = bundleID?.lowercased() ?? ""
-        let name = sourceName?.lowercased() ?? ""
-        if bundle.hasPrefix(ouraBundlePrefix) || name.contains("oura") { return .ring }
+        if bundle.hasPrefix(ouraBundlePrefix) { return .ring }
+        if bundle.isEmpty {
+            let words = (sourceName ?? "").lowercased().split { !$0.isLetter && !$0.isNumber }
+            if words.contains("oura") { return .ring }
+        }
         if deviceModel?.lowercased().contains("watch") == true { return .watch }
         return .other
     }

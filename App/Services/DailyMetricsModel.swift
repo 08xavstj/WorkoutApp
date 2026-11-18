@@ -618,12 +618,14 @@ final class DailyMetricsModel {
             // baseline, whatever the sleep-source setting; one device per baseline, never the
             // ring's and the watch's nights mixed (`OneDeviceBaseline`; Dial et al., Physiol
             // Rep 2025; O'Grady et al., Sensors 2024). With the ring's baseline, Apple Health's
-            // SDNN is left out too, so it can't fill the ring's gaps scaled by a ratio.
-            let hrvChoice = await health.overnightRMSSD(nights: nights, today: today)
-            hrvDevice = hrvChoice.device
-            let rmssd = hrvChoice.nights.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
-            let ringHRV = hrvChoice.device == .ring && hrvChoice.isEstablished
-            let selection = DailyVitals.resolvingHRV(ringHRV ? DailyVitals.removingHRV(healthVitals) : healthVitals,
+            // SDNN is left out too, so it can't fill the ring's gaps scaled by a ratio; a ring
+            // with under 14 nights gives way to the watch's SDNN when that has more
+            // (`OneDeviceBaseline.hrvInputs`). Ring nights only from the 31 this reads.
+            let hrvChoice = await health.overnightRMSSD(nights: nights, today: today, days: 31)
+            let hrvInputs = OneDeviceBaseline.hrvInputs(healthVitals, choice: hrvChoice, today: today, calendar: calendar)
+            hrvDevice = hrvInputs.device
+            let rmssd = hrvInputs.overnightRMSSD.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+            let selection = DailyVitals.resolvingHRV(hrvInputs.vitals,
                                                      overnightRMSSD: rmssd, morningHRV: morningHRV,
                                                      today: today, calendar: calendar)
             hrvSelection = selection.metric
@@ -632,8 +634,9 @@ final class DailyMetricsModel {
             // (HealthKit RHR as the fallback); see RecoveryCalculator.preferSleepingHeartRate.
             // Once in use it stays until fewer than 10 nights have it, so the baseline doesn't flip.
             // The Oura ring's sleeping heart rate when it carries the baseline, else the watch's;
-            // never both in one baseline (`OneDeviceBaseline`).
-            let sleepingHeartRate = await health.sleepingHeartRate(nights: nights, today: today).nights
+            // never both in one baseline (`OneDeviceBaseline`). Ring nights from the same 31 days,
+            // so old ones don't meet the 15-night threshold.
+            let sleepingHeartRate = await health.sleepingHeartRate(nights: nights, today: today, days: 31).nights
             let previousSource = UserDefaults.standard.string(forKey: Self.rhrSourceKey).flatMap(RestingHeartRateSource.init(rawValue:))
             let (vitals, rhrSource) = RecoveryCalculator.preferSleepingHeartRate(
                 selection.vitals,

@@ -133,24 +133,124 @@ struct OneDeviceBaselineTests {
             HeartRateMerge.Source(name: "Oura Ring (Oura)", samples: minutes(50)),
             HeartRateMerge.Source(name: "Alex's Apple Watch (Health)", samples: minutes(56)),
         ]
-        let value = OneDeviceBaseline.watchSleepingHeartRate(sources, from: start, to: today)
-        #expect(value == 56)
+        let value = OneDeviceBaseline.watchSleepingHeartRates(sources, from: start, to: today)
+        #expect(value == ["Alex's Apple Watch (Health)": 56])
+        // By bundle ID too, and a watch whose name only contains "oura" is kept.
+        let tagged = [
+            HeartRateMerge.Source(name: "Ring", samples: minutes(50), bundleID: "com.ouraring.oura"),
+            HeartRateMerge.Source(name: "Ana Moura's Apple Watch (Health)", samples: minutes(57), bundleID: "com.apple.health.A1"),
+        ]
+        #expect(OneDeviceBaseline.watchSleepingHeartRates(tagged, from: start, to: today) == ["com.apple.health.A1": 57])
     }
 
-    @Test func watchSleepingHeartRateUsesOneSourceWithEnoughMinutes() {
+    @Test func watchSleepingHeartRateNeedsEnoughMinutesPerSource() {
         let start = today.addingTimeInterval(-7 * 3600)
         func minutes(_ bpm: Double, count: Int) -> [HeartRateSample] {
             (0..<count).map { HeartRateSample(date: start.addingTimeInterval(Double($0) * 60), bpm: bpm) }
         }
-        // Two non-ring sources aren't averaged: the one with the most minutes is used.
+        // Each source on its own, never averaged together.
         let two = [HeartRateMerge.Source(name: "Apple Watch", samples: minutes(56, count: 300)),
                    HeartRateMerge.Source(name: "iPhone", samples: minutes(70, count: 80))]
-        #expect(OneDeviceBaseline.watchSleepingHeartRate(two, from: start, to: today) == 56)
+        #expect(OneDeviceBaseline.watchSleepingHeartRates(two, from: start, to: today) == ["Apple Watch": 56, "iPhone": 70])
         // Under 60 minutes: no value.
         let short = [HeartRateMerge.Source(name: "Apple Watch", samples: minutes(56, count: 59))]
-        #expect(OneDeviceBaseline.watchSleepingHeartRate(short, from: start, to: today) == nil)
+        #expect(OneDeviceBaseline.watchSleepingHeartRates(short, from: start, to: today).isEmpty)
         // Minutes outside the sleep don't count.
-        #expect(OneDeviceBaseline.watchSleepingHeartRate(two, from: today, to: today.addingTimeInterval(3600)) == nil)
+        #expect(OneDeviceBaseline.watchSleepingHeartRates(two, from: today, to: today.addingTimeInterval(3600)).isEmpty)
+    }
+
+    @Test func oneWatchSourceForTheWholeWindow() {
+        // The second watch had more minutes on one night, but the first has more nights:
+        // every night comes from the first, never one from each.
+        let nightsBySource: [Date: [String: Double]] = [
+            day(0): ["watch-a": 55, "watch-b": 62],
+            day(-1): ["watch-a": 54],
+            day(-2): ["watch-a": 56, "watch-b": 61],
+            day(-3): ["watch-b": 60],
+        ]
+        #expect(OneDeviceBaseline.oneWatchSource(nightsBySource) == [day(0): 55, day(-1): 54, day(-2): 56])
+        #expect(OneDeviceBaseline.oneWatchSource([:]).isEmpty)
+        // A tie is settled the same way every time.
+        #expect(OneDeviceBaseline.dominantSource(["b": [today: 1], "a": [today: 2]])?.source == "a")
+    }
+
+    @Test func breathingRateUsesOneWatchSource() {
+        let readings: [(date: Date, value: Double, device: BaselineDevice, source: String)] = [
+            (today.addingTimeInterval(3 * 3600), 14, .watch, "watch-a"),
+            (day(-1).addingTimeInterval(3 * 3600), 15, .watch, "watch-a"),
+            (today.addingTimeInterval(3 * 3600), 18, .watch, "phone-app"),
+            (today.addingTimeInterval(4 * 3600), 13.5, .ring, "com.ouraring.oura"),
+        ]
+        let means = OneDeviceBaseline.nightlyMeans(readings, calendar: calendar)
+        #expect(means.watch == [today: 14, day(-1): 15])
+        #expect(means.ring == [today: 13.5])
+    }
+
+    @Test func breathingReadingsAfterNoonArentTheNights() {
+        let readings: [(date: Date, value: Double, device: BaselineDevice)] = [
+            (today.addingTimeInterval(3 * 3600), 14, .watch),
+            (today.addingTimeInterval(11.9 * 3600), 16, .watch),
+            (today.addingTimeInterval(13 * 3600), 30, .watch), // 1 pm: an afternoon reading
+            (today.addingTimeInterval(-5 * 3600), 15, .watch), // 7 pm the evening before
+        ]
+        let means = OneDeviceBaseline.nightlyMeans(readings, calendar: calendar)
+        #expect(means.watch == [today: 15])
+    }
+
+    // MARK: Ring nights in the baseline window
+
+    @Test func recentKeepsOnlyTheWindow() {
+        let all = nights(-119...0, value: 50)
+        let recent = OneDeviceBaseline.recent(all, days: 31, today: today, calendar: calendar)
+        #expect(recent.count == 31)
+        #expect(recent.keys.min() == day(-30))
+        #expect(OneDeviceBaseline.recent([day(1): 50], days: 31, today: today, calendar: calendar).isEmpty)
+    }
+
+    // MARK: HRV inputs from one device
+
+    func vitals(_ offsets: some Sequence<Int>, sdnn: Double) -> [DailyVitals] {
+        offsets.map { DailyVitals(date: day($0), hrvMilliseconds: sdnn, restingHeartRate: 55) }
+    }
+
+    @Test func anEstablishedRingKeepsOnlyTheRing() {
+        let choice = OneDeviceBaseline.Choice(device: .ring, nights: nights(-20...0, value: 60), isEstablished: true)
+        let inputs = OneDeviceBaseline.hrvInputs(vitals(-29...0, sdnn: 40), choice: choice, today: today, calendar: calendar)
+        #expect(inputs.device == .ring)
+        #expect(inputs.vitals.allSatisfy { $0.hrvMilliseconds == nil && $0.restingHeartRate == 55 })
+        #expect(inputs.overnightRMSSD.count == 21)
+    }
+
+    @Test func aNewRingIsNotMixedWithTheWatchsSDNN() {
+        // Under 14 nights: the ring was picked, but the watch's SDNN has more nights,
+        // so only the watch is used (no ring RMSSD for resolvingHRV to convert).
+        let ring = OneDeviceBaseline.Choice(device: .ring, nights: nights(-5...0, value: 60), isEstablished: false)
+        let watchWins = OneDeviceBaseline.hrvInputs(vitals(-29...0, sdnn: 40), choice: ring, today: today, calendar: calendar)
+        #expect(watchWins.device == .watch)
+        #expect(watchWins.overnightRMSSD.isEmpty)
+        #expect(watchWins.vitals.compactMap(\.hrvMilliseconds).count == 30)
+        // The ring has more nights than the watch's SDNN: only the ring.
+        let ringWins = OneDeviceBaseline.hrvInputs(vitals(-3...0, sdnn: 40), choice: ring, today: today, calendar: calendar)
+        #expect(ringWins.device == .ring)
+        #expect(ringWins.vitals.allSatisfy { $0.hrvMilliseconds == nil })
+        #expect(ringWins.overnightRMSSD.count == 6)
+        // Watch nights outside the window don't count.
+        let old = OneDeviceBaseline.hrvInputs(vitals(-80 ... -40, sdnn: 40), choice: ring, today: today, calendar: calendar)
+        #expect(old.device == .ring)
+        // Either way, resolvingHRV sees one device only.
+        for inputs in [watchWins, ringWins] {
+            let selection = DailyVitals.resolvingHRV(inputs.vitals, overnightRMSSD: inputs.overnightRMSSD, today: today, calendar: calendar)
+            let values = Set(selection.vitals.compactMap(\.hrvMilliseconds))
+            #expect(values == [40] || values == [60])
+        }
+    }
+
+    @Test func theWatchsChoiceKeepsHealthsVitals() {
+        let choice = OneDeviceBaseline.Choice(device: .watch, nights: nights(-20...0, value: 45), isEstablished: true)
+        let inputs = OneDeviceBaseline.hrvInputs(vitals(-29...0, sdnn: 40), choice: choice, today: today, calendar: calendar)
+        #expect(inputs.device == .watch)
+        #expect(inputs.vitals == vitals(-29...0, sdnn: 40))
+        #expect(inputs.overnightRMSSD == choice.nights)
     }
 
     // MARK: SDNN out when the ring carries the HRV baseline
