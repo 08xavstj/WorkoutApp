@@ -3,8 +3,9 @@ import WidgetKit
 
 /// Recovery in the middle, today's strain as the ring around it, with
 /// today's strain target marked as an arc outside the ring. Made for a
-/// circular subdial (e.g. Wayfinder's bottom right); corner and rectangular
-/// slots get the same numbers.
+/// circular subdial (e.g. Wayfinder's bottom right). A corner shows recovery
+/// as a segmented ring with strain as its curved label; the rectangular slot
+/// gets the same numbers in words.
 struct RecoveryStrainComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "RecoveryStrain", provider: FaceProvider(kind: .recoveryStrain)) { entry in
@@ -111,28 +112,26 @@ struct RecoveryStrainView: View {
 
     // MARK: Corner
 
-    /// Recovery as "R 72%" in the corner and strain as the curved bar along
-    /// the edge, labelled "S" at its start and with its value at the end.
-    /// Unlabelled, a corner read as one bar and one number with nothing to
-    /// say which score was which (the bar is strain, the number recovery).
+    /// Recovery as a ring of ten segments with the number inside, and
+    /// strain as the curved label along the edge ("STRAIN 5%"). watchOS
+    /// centres the circle over the label, so the two line up in any corner.
+    /// Segments, not a smooth fill: recovery is read in bands, and a lit
+    /// segment count reads at a glance where a thin arc doesn't (HIG,
+    /// Complications: the segmented gauge style is for app-defined ranges).
     private var corner: some View {
-        Text(data?.recovery == nil ? "R --" : "R \(recoveryPercent)")
-            .font(.system(size: 16, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(recoveryColor)
-            .widgetCurvesContent()
-            .widgetLabel {
-                Gauge(value: faceFraction(strain ?? 0)) {
-                    Text("Strain")
-                } currentValueLabel: {
-                    Text(strainPercent)
-                } minimumValueLabel: {
-                    Text("S")
-                } maximumValueLabel: {
-                    Text(strainPercent)
-                }
-                .tint(strainColor)
-            }
+        ZStack {
+            SegmentedRing(fraction: data?.recovery.map { Double($0) / 100 }, color: recoveryColor)
+            Text(recoveryNumber)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .padding(.horizontal, 7)
+        }
+        .widgetLabel {
+            Text("STRAIN \(strainPercent)")
+                .foregroundStyle(strainColor)
+        }
     }
 
     // MARK: Rectangular
@@ -167,6 +166,45 @@ struct RecoveryStrainView: View {
         .lineLimit(1)
         .minimumScaleFactor(0.7)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A ring of `segments` equal pieces with the first `fraction` of them lit,
+/// starting at 12 o'clock. Unlit pieces stay as a faint track, so in a
+/// tinted face the count still reads by brightness, not colour alone.
+struct SegmentedRing: View {
+    let fraction: Double?
+    let color: Color
+    var segments = 10
+
+    private let width: CGFloat = 3.5
+    /// Share of each segment left as a gap between pieces.
+    private let gap = 0.18
+
+    private var lit: Int {
+        guard let fraction, fraction.isFinite else { return 0 }
+        return min(segments, max(0, Int((fraction * Double(segments)).rounded())))
+    }
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<segments, id: \.self) { index in
+                let from = (Double(index) + gap / 2) / Double(segments)
+                let to = (Double(index + 1) - gap / 2) / Double(segments)
+                if index < lit {
+                    Circle()
+                        .trim(from: from, to: to)
+                        .stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .butt))
+                        .widgetAccentable()
+                } else {
+                    Circle()
+                        .trim(from: from, to: to)
+                        .stroke(FacePalette.track, style: StrokeStyle(lineWidth: width, lineCap: .butt))
+                }
+            }
+        }
+        .rotationEffect(.degrees(-90))
+        .padding(width / 2)
     }
 }
 
