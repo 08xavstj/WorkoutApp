@@ -124,7 +124,7 @@ public enum SetFeedback {
         public func message(unit: String) -> String {
             switch self {
             case let .estimatedOneRepMax(value):
-                return "Best estimated 1RM: \(Autoregulation.format(value.rounded())) \(unit)"
+                return "Best estimated 1RM: \(OneRepMax.symbol) \(Autoregulation.format(value.rounded())) \(unit)"
             case let .reps(weight, reps):
                 if weight <= 0 { return "Most reps in a set: \(reps)" }
                 return "Most reps at \(Autoregulation.format(weight)) \(unit): \(reps)"
@@ -143,9 +143,10 @@ public enum SetFeedback {
         guard !sets.isEmpty, !past.isEmpty else { return [] }
         var result: [Record] = []
 
-        let bestToday = sets.map { OneRepMax.estimate(weight: $0.weight, reps: $0.reps, rpe: $0.rpe) }.max() ?? 0
-        let bestBefore = past.map { OneRepMax.estimate(weight: $0.weight, reps: $0.reps, rpe: $0.rpe) }.max() ?? 0
-        if bestToday > bestBefore + 0.01 {
+        // Only sets of `OneRepMax.maximumReliableReps` or fewer give an estimate worth a record.
+        let bestToday = sets.compactMap { OneRepMax.displayEstimate(weight: $0.weight, reps: $0.reps, rpe: $0.rpe) }.max() ?? 0
+        let bestBefore = past.compactMap { OneRepMax.displayEstimate(weight: $0.weight, reps: $0.reps, rpe: $0.rpe) }.max() ?? 0
+        if bestToday > 0, bestBefore > 0, bestToday > bestBefore + 0.01 {
             result.append(.estimatedOneRepMax(bestToday))
         }
 

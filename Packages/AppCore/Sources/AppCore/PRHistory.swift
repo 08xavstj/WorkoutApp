@@ -182,7 +182,7 @@ public enum PRHistory {
         var best: Best?
         for session in sessions {
             for set in session.sets {
-                let e1RM = OneRepMax.estimate(weight: set.weight, reps: set.reps, rpe: set.rpe)
+                guard let e1RM = OneRepMax.displayEstimate(weight: set.weight, reps: set.reps, rpe: set.rpe) else { continue }
                 if e1RM > (best?.value ?? 0) + 0.01 {
                     best = Best(value: e1RM, weightKg: set.weight, reps: set.reps, date: session.date)
                 }

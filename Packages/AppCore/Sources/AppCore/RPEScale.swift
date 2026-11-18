@@ -68,7 +68,8 @@ public enum RPEScale {
 /// (Zourdos et al., J Strength Cond Res 2016). Ignoring RPE would make a set
 /// of 8 at RPE 8 look like a max effort and under-prescribe the next session.
 /// Rep-max equations lose accuracy past ~10-12 reps, so effective reps are
-/// capped at 15. Lifters misjudge reps left by about one on average, and
+/// capped at 15, and what is shown comes only from sets of 10 reps or fewer
+/// (`displayEstimate`). Lifters misjudge reps left by about one on average, and
 /// guesses get worse further from failure and on high-rep sets (Halperin et
 /// al., Sports Med 2022), so at most 4 reps left are counted.
 public enum OneRepMax {
@@ -78,4 +79,29 @@ public enum OneRepMax {
         let toFailure = min(15, Double(reps) + repsLeft)
         return toFailure <= 1 ? weight : weight * (1 + toFailure / 30)
     }
+
+    /// Estimates are shown, and records set, only from sets of this many
+    /// reps or fewer. Rep-max equations are most accurate from 10 reps or
+    /// fewer and differ by lift (LeSuer DA, et al. J Strength Cond Res
+    /// 1997;11(4):211-213), and the reps people manage at a given share of
+    /// their 1RM vary by exercise, more so at lighter loads (Nuzzo JL, et al.
+    /// Sports Med 2024;54(2):303-321; meta-regression of 952 tests). The
+    /// research doc allows 10-12; the lower end is used so every screen and
+    /// the lift-goal trend (`LiftGoalProjection.maximumReps`) share one rule.
+    /// The planner still uses `estimate` for higher-rep sets: it only needs a
+    /// relative load, not a number to show.
+    public static let maximumReliableReps = 10
+
+    /// The estimate to show or to compare as a record; nil for a set of more
+    /// than `maximumReliableReps` reps, or with no weight.
+    public static func displayEstimate(weight: Double, reps: Int, rpe: Double?) -> Double? {
+        guard reps > 0, reps <= maximumReliableReps, weight > 0 else { return nil }
+        return estimate(weight: weight, reps: reps, rpe: rpe)
+    }
+
+    /// Put before every estimated 1RM on screen: "≈ 96 kg".
+    public static let symbol = "≈"
+
+    /// The caveat wherever an estimate is shown or shared.
+    public static let caveat = "Estimated 1RM (≈) comes from your sets of 10 reps or fewer and the reps you had left; it's an estimate and varies by lift (LeSuer 1997; Nuzzo 2024)."
 }

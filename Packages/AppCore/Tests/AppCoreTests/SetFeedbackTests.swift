@@ -74,7 +74,7 @@ struct SetFeedbackTests {
         ]
         #expect(records == expected)
         #expect(SetFeedback.Record.reps(weight: 60, reps: 9).message(unit: "kg") == "Most reps at 60 kg: 9")
-        #expect(SetFeedback.Record.estimatedOneRepMax(83.3).message(unit: "kg") == "Best estimated 1RM: 83 kg")
+        #expect(SetFeedback.Record.estimatedOneRepMax(83.3).message(unit: "kg") == "Best estimated 1RM: ≈ 83 kg")
     }
 
     @Test func noRecordsOnTheFirstSessionOrWithoutABest() {

@@ -272,7 +272,8 @@ public enum LiftProgress {
 
     public struct Point: Sendable, Equatable, Identifiable {
         public var date: Date
-        /// Estimated one-rep max of the best set (reps left counted from RPE).
+        /// Estimated one-rep max of the best set (reps left counted from RPE);
+        /// 0 when no set had 10 reps or fewer, or none was loaded.
         public var estimatedOneRepMax: Double
         public var bestWeight: Double
         public var bestReps: Int
@@ -291,15 +292,20 @@ public enum LiftProgress {
             let sets = session.sets.filter { $0.reps > 0 }
             var top: LoggedSet?
             var e1RM = 0.0
+            // The estimate comes only from sets of 10 reps or fewer (`OneRepMax.displayEstimate`).
             for set in sets {
-                let estimate = OneRepMax.estimate(weight: set.weight, reps: set.reps, rpe: set.rpe)
+                guard let estimate = OneRepMax.displayEstimate(weight: set.weight, reps: set.reps, rpe: set.rpe) else { continue }
                 if top == nil || estimate > e1RM {
                     top = set
                     e1RM = estimate
                 }
             }
+            // No set short enough to estimate from: the heaviest set (then most reps) stands for the session.
+            if top == nil {
+                top = sets.max { $0.weight != $1.weight ? $0.weight < $1.weight : $0.reps < $1.reps }
+            }
             guard let top else { continue }
-            let isPR = !result.isEmpty && e1RM > best + 0.01
+            let isPR = best > 0 && e1RM > best + 0.01
             best = max(best, e1RM)
             var volume = 0.0
             for set in sets { volume += set.weight * Double(set.reps) }
