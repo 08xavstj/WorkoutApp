@@ -324,3 +324,10 @@ Lang 2024 (CRF and mortality), Garcia 2023 (activity dose-response), Ahmadi 2022
 ### From memory [M], not checked this round
 
 EventKit cannot add attendees to an event; Screen Time data is shown only through a sandboxed DeviceActivity report extension; Strava reads Apple Health workouts; Dexcom's token exchange is server-side; the G7 is a cleared device; validatebp.org lists validated home cuffs; Polar H10 as a reference strap; hs-CRP as an ACC/AHA 2019 risk enhancer. Check each before building on it.
+
+## Owner's answers and choices, 18 Nov 2026
+
+- **Health Records:** his clinic or lab is not connected yet. The import (I1) is built anyway and stays empty until one connects.
+- **Who runs the weekly intervals:** Tensile's own Watch app. WorkoutKit (W1) is an optional extra ("Also add to Apple's Workout app"), not the default.
+- **Chosen to build:** W1, I1, I4, W4, I3, W12, and the metrics bundle (walking speed, Apple's heart events line, DEXA fields, the social connection check, mindful minutes as a factor, waist and hip synced with Health).
+- **Not chosen:** the brisk-walk mode (W3), spoken cues (W2) and sending the weekly card to one person (I5).
