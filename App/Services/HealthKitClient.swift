@@ -96,6 +96,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
             HKQuantityType(.distanceCycling),
             HKQuantityType(.distanceCrossCountrySkiing),
             HKQuantityType(.distanceDownhillSnowSports),
+            HKQuantityType(.distanceSwimming),
             HKCharacteristicType(.dateOfBirth),
             HKCharacteristicType(.biologicalSex),
             // iOS 17/18 types (see HealthKitClient+iOS26): minutes outdoors from an
@@ -761,6 +762,7 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     nonisolated static let workoutDistanceTypes: [HKQuantityType] = [
         HKQuantityType(.distanceWalkingRunning), HKQuantityType(.distanceCycling),
         HKQuantityType(.distanceCrossCountrySkiing), HKQuantityType(.distanceDownhillSnowSports),
+        HKQuantityType(.distanceSwimming),
     ]
 
     /// Workouts recorded by other apps (Garmin Connect, Strava...) in a time range.

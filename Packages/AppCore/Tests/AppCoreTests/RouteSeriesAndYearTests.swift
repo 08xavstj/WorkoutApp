@@ -82,7 +82,9 @@ struct YearInReviewTests {
         #expect(summary.byKind.map(\.kind) == [.lifting, .run, .ride])
         #expect(summary.byKind.first { $0.kind == .run }?.meters == 13_000)
         #expect(summary.byKind.first { $0.kind == .lifting }?.meters == nil)
-        #expect(summary.meters == 43_000)
+        // On foot only: the 30 km ride shows under rides, not in the total.
+        #expect(summary.onFootMeters == 13_000)
+        #expect(summary.byKind.first { $0.kind == .ride }?.meters == 30_000)
         #expect(summary.seconds == (30 + 30 + 60 + 90 + 60) * 60)
         #expect(summary.records == 4)
         #expect(YearInReview.years(all, calendar: calendar) == [2026, 2025])

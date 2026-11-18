@@ -169,7 +169,8 @@ nonisolated final class DemoHealth: Sendable {
             let startMinutes: Double = kind == 1 ? 430 : (kind == 4 ? 540 : 1050)
             let minutes: Double = kind == 1 ? 34 : (kind == 4 ? 48 : 45)
             let baseKm: Double = kind == 1 ? 5.6 : 8.0
-            let km: Double? = kind == 6 ? nil : baseKm + 0.3 * Self.noise(daysAgo, 4)
+            // Rides are 18 km, as their detail page's route (`cardioWorkoutDetail`).
+            let km: Double? = kind == 6 ? 18 : baseKm + 0.3 * Self.noise(daysAgo, 4)
             let start = at(daysAgo, startMinutes)
             cardio.append(Cardio(daysAgo: daysAgo, name: kind == 6 ? "Ride" : "Run", start: start,
                                  end: start.addingTimeInterval(minutes * 60), km: km,
@@ -480,7 +481,8 @@ nonisolated final class DemoHealth: Sendable {
     func dayValue(_ metric: Metric, _ daysAgo: Int) -> Double? {
         guard daysAgo >= 0, daysAgo <= historyDays else { return nil }
         let n = Self.noise(daysAgo, 50 + metric.hashSalt)
-        let ran = cardioByDay[daysAgo]?.compactMap(\.km).reduce(0, +) ?? 0
+        // On foot only: a ride's kilometres aren't steps.
+        let ran = cardioByDay[daysAgo]?.filter { $0.name == "Run" }.compactMap(\.km).reduce(0, +) ?? 0
         let lifted = sessionsByDay[daysAgo] != nil
         switch metric {
         case .restingHeartRate: return restingHeartRate(daysAgo)

@@ -60,7 +60,7 @@ struct HeartZonesSettingsView: View {
             } header: {
                 Text("Zones to show")
             } footer: {
-                Text("Day strain and the Fitness tab's daily zone minutes always use heart-rate reserve, whatever you pick. The strain formula was built on reserve, and changing its scale would change every past score. Your choice sets the zones in workouts and on the Watch.")
+                Text("Day strain and the Fitness tab's daily and weekly zone minutes always use heart-rate reserve, whatever you pick. The strain formula was built on reserve, and changing its scale would change every past score. Your choice sets the zones in workouts and on the Watch.")
             }
             if kind == .custom {
                 customSection

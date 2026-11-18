@@ -78,6 +78,52 @@ struct CardioBestsTests {
         #expect(efforts.map(\.distanceMeters) == [5000, 10_000])
     }
 
+    @Test func theEndIsInterpolatedToo() {
+        // 400 m from the first fix ends three quarters of the way to the
+        // third: 10 s + 75 s = 85 s, faster than any window ending at a fix.
+        let effort = CardioBests.fastest(distance: 400, meters: [0, 100, 500], seconds: [0, 10, 110])
+        #expect(effort.map { abs($0.seconds - 85) < 0.001 } == true)
+        #expect(effort?.startMeters == 0)
+    }
+
+    @Test func movingMetersSkipGapsAndImpossibleSpeeds() {
+        // A 10 s stretch, a 40 s gap, a 30 m/s jump, then a normal stretch.
+        let meters: [Double] = [0, 40, 400, 430, 460]
+        let seconds: [Double] = [0, 10, 50, 51, 61]
+        let moving = CardioBests.movingMeters(meters: meters, seconds: seconds, maximumSpeed: CardioBests.Sport.run.maximumSpeed)
+        #expect(moving == [0, 40, 40, 40, 70])
+        // A stretch exactly `maximumFixGap` long still counts.
+        #expect(CardioBests.movingMeters(meters: [0, 90], seconds: [0, CardioBests.maximumFixGap], maximumSpeed: 10.5) == [0, 90])
+        #expect(CardioBests.movingMeters(meters: [], seconds: [], maximumSpeed: 10.5).isEmpty)
+    }
+
+    @Test func aTrainRideWhilePausedIsNotABest() {
+        // 600 s at 3 m/s, then the watch paused for 5 minutes on a train
+        // that covered 3 km (10 m/s, under both the route's and the run's
+        // limits), then 600 s more at 3 m/s.
+        var latitude = 46.0
+        var points: [RoutePoint] = []
+        func add(_ second: Double) {
+            points.append(RoutePoint(latitude: latitude, longitude: 7, time: start.addingTimeInterval(second), horizontalAccuracy: 5))
+        }
+        for second in 0...600 {
+            if second > 0 { latitude += 3 / metersPerDegree }
+            add(Double(second))
+        }
+        latitude += 3000 / metersPerDegree
+        for second in 900...1500 {
+            if second > 900 { latitude += 3 / metersPerDegree }
+            add(Double(second))
+        }
+        let route = CardioRoute(points: points)
+        #expect(route.distanceMeters > 6500)
+        let efforts = CardioBests.efforts(route: route, sport: .run)
+        let kilometre = efforts.first { $0.distanceMeters == 1000 }
+        #expect(kilometre.map { abs($0.seconds - 1000.0 / 3) < 1 } == true)
+        // 3.6 km of running: no 5 km.
+        #expect(!efforts.contains { $0.distanceMeters == 5000 })
+    }
+
     func workout(_ id: String, daysAgo: Double, _ efforts: [(Double, Double)], sport: CardioBests.Sport = .run) -> CardioBests.WorkoutEfforts {
         CardioBests.WorkoutEfforts(workoutID: id, date: start.addingTimeInterval(-daysAgo * 86_400), sport: sport,
                                    efforts: efforts.map { CardioBests.Effort(distanceMeters: $0.0, seconds: $0.1, startMeters: 0) })

@@ -6,7 +6,10 @@ import SwiftUI
 /// The last 12 weeks of cardio minutes: stacked minutes per heart-rate zone,
 /// moderate-equivalent minutes (vigorous counted double) as a line, and WHO's
 /// 150 and 300 as dashed lines (`WeeklyIntensity`; competitor-features-2026-11.md, B8).
-/// Lifting is left out, as everywhere cardio minutes are counted.
+/// Zones are on heart-rate reserve, as the Today card above and day strain,
+/// whatever scheme the user picked for workouts (HeartZonesSettingsView).
+/// Lifting is left out, as everywhere cardio minutes are counted: logged
+/// sessions and strength workouts from Health, as `VitalsModel` does.
 struct WeeklyZonesCard: View {
     @Environment(\.healthClient) private var health
     @Environment(DailyMetricsModel.self) private var metrics
@@ -40,9 +43,10 @@ struct WeeklyZonesCard: View {
         .task { await load() }
     }
 
-    /// "Last week: 186 min · 8 of 12 weeks at 150 or more".
+    /// "Last week: 186 min · 8 of 11 finished weeks at 150 or more".
     private var headline: some View {
-        let met = WeeklyIntensity.weeksMet(weeks)
+        // The current week is still filling up: finished weeks only.
+        let met = WeeklyIntensity.weeksMet(Array(weeks.dropLast()))
         let last = weeks.dropLast().last
         return VStack(alignment: .leading, spacing: 2) {
             if let last {
@@ -50,7 +54,7 @@ struct WeeklyZonesCard: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
             }
-            Text("\(met.met) of \(met.of) weeks at 150 or more · this week so far \(weeks.last?.moderateEquivalent ?? 0) min")
+            Text("\(met.met) of \(met.of) finished weeks at 150 or more · this week so far \(weeks.last?.moderateEquivalent ?? 0) min")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -72,7 +76,7 @@ struct WeeklyZonesCard: View {
             ForEach(0..<5, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 2).fill(Theme.zoneColors[index]).frame(width: 8, height: 8)
             }
-            Text("Zones 1–5")
+            Text("Reserve zones 1–5")
         }
         HStack(spacing: 4) {
             Circle().fill(Theme.primaryText).frame(width: 7, height: 7)
@@ -89,16 +93,29 @@ struct WeeklyZonesCard: View {
         let calendar = Calendar.current
         let starts = WeeklyIntensity.weekStarts(endingWith: .now, calendar: calendar)
         guard let first = starts.first, let current = starts.last else { return }
-        let profile = metrics.heartRateProfile ?? settings.heartRateProfile(restingHeartRate: nil)
-        let scheme = await ZonePreferences.current(profile: profile, health: health).scheme
+        // Weeks counted with the stand-in profile (no resting heart rate yet)
+        // are shown but not kept.
+        let measured = metrics.heartRateProfile
+        let profile = measured ?? settings.heartRateProfile(restingHeartRate: nil)
+        let scheme = HeartRateZoneScheme.reserve(resting: profile.restingHeartRate, maximum: profile.maxHeartRate)
         let signature = WeeklyIntensity.signature(profile: profile, scheme: scheme)
+        // Logged gym sessions plus strength workouts from the watch or other
+        // apps (evidence audit M1, as VitalsModel). A failed read isn't kept.
+        var strength: [DateInterval] = []
+        var strengthRead = health != nil
+        if let health {
+            do {
+                strength = try await health.externalWorkouts(from: first, to: .now).filter(\.isStrength)
+                    .map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+            } catch {
+                strengthRead = false
+            }
+        }
         let lifting = sessions.filter { !$0.isActive && $0.startedAt >= first }
             .map { DateInterval(start: $0.startedAt, end: max($0.startedAt, $0.endedAt ?? $0.startedAt)) }
-        var perWeek: [Date: Int] = [:]
-        for interval in lifting {
-            if let start = calendar.dateInterval(of: .weekOfYear, for: interval.start)?.start { perWeek[start, default: 0] += 1 }
-        }
-        let cached = WeeklyIntensityCache.weeks(signature: signature, liftingSessions: perWeek)
+            + strength
+        let fingerprints = WeeklyIntensity.liftingFingerprints(lifting, weekStarts: starts, calendar: calendar)
+        let cached = WeeklyIntensityCache.weeks(signature: signature, lifting: fingerprints)
         // Heart rate from the first week not cached (the current week is always read).
         let missing = starts.filter { $0 == current || cached[$0] == nil }
         var counted: [Date: WeeklyIntensity.Week] = [:]
@@ -114,12 +131,13 @@ struct WeeklyZonesCard: View {
             counted[start] ?? cached[start]
                 ?? WeeklyIntensity.Week(start: start, zoneMinutes: [0, 0, 0, 0, 0], moderate: 0, vigorous: 0, hasHeartRate: false)
         }
+        guard measured != nil, strengthRead else { return }
         // Only weeks with heart rate that ended 3+ days ago are kept: a watch
         // can sync a day or two late (the app's choice), and a failed read
         // mustn't be kept as an empty week.
         let settled = calendar.date(byAdding: .day, value: -10, to: .now) ?? current
         WeeklyIntensityCache.store(weeks.filter { $0.start < min(current, settled) && $0.hasHeartRate },
-                                   signature: signature, liftingSessions: perWeek)
+                                   signature: signature, lifting: fingerprints)
     }
 }
 

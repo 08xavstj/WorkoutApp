@@ -3,8 +3,9 @@ import SwiftUI
 
 /// The workout's fastest 400 m, 1 km, mile, 5 km and 10 km (or ride
 /// distances), with a "Best" chip where it beats every other workout of its
-/// kind (`CardioBests`, cached in `CardioBestsStore`). Nothing shows for a
-/// workout without a route or of a kind without bests.
+/// kind (`CardioBests`, cached in `CardioBestsStore`) once all of them have
+/// been checked. Nothing shows for a workout without a route or of a kind
+/// without bests.
 struct CardioBestsCard: View {
     let workoutID: UUID
     let date: Date
@@ -63,9 +64,10 @@ struct CardioBestsCard: View {
         let found = await Task.detached(priority: .utility) {
             CardioBestsStore.efforts(id: id, date: date, kind: kind, route: route)
         }.value
-        CardioBestsStore.store([id: found])
+        CardioBestsStore.store([id: found], dates: [id: date])
         efforts = found
-        if let found {
+        // Until every earlier workout is checked, "Best" could be beaten by one not read yet.
+        if let found, CardioBestsStore.isBackfillComplete {
             newBests = Set(CardioBests.newBests(for: found, among: CardioBestsStore.workouts()))
         }
     }

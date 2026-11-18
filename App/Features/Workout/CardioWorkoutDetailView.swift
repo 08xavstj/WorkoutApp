@@ -85,7 +85,9 @@ struct CardioWorkoutDetailView: View {
 
     private func load() async {
         defer { loaded = true }
-        guard let health, let found = try? await health.cardioWorkoutDetail(id: workoutID) else { return }
+        guard let health, let read = try? await health.cardioWorkoutDetail(id: workoutID) as CardioWorkoutDetail?? else { return }
+        // Read fine but gone from Health: forget its best efforts too.
+        guard let found = read else { return CardioBestsStore.remove(workoutID) }
         let profile = metrics.heartRateProfile ?? settings.heartRateProfile(restingHeartRate: nil)
         let scheme = await ZonePreferences.current(profile: profile, health: health).scheme
         let readings = found.heartRate.map { (date: $0.date, bpm: $0.bpm) }

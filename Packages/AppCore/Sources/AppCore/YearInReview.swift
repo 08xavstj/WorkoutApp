@@ -23,7 +23,10 @@ public nonisolated enum YearInReview {
         public var sessions: Int
         public var activeDays: Int
         public var seconds: TimeInterval
-        public var meters: Double
+        /// Distance on foot (runs, walks and hikes). Rides, swims and snow
+        /// sports aren't added in: a kilometre means a different effort in
+        /// each, so their distance shows per kind (`byKind`).
+        public var onFootMeters: Double
         /// Most sessions first.
         public var byKind: [KindTotal]
         /// Sessions in each month, January first (12 values).
@@ -55,7 +58,8 @@ public nonisolated enum YearInReview {
         let days = Set(inYear.map { calendar.startOfDay(for: $0.start) })
         return Summary(year: year, sessions: inYear.count, activeDays: days.count,
                        seconds: inYear.reduce(0) { $0 + $1.seconds },
-                       meters: inYear.compactMap(\.distanceMeters).filter { $0 > 0 }.reduce(0, +),
+                       onFootMeters: inYear.filter { $0.kind == .run || $0.kind == .walk }
+                           .compactMap(\.distanceMeters).filter { $0 > 0 }.reduce(0, +),
                        byKind: byKind, sessionsPerMonth: perMonth, busiestMonth: busiest, records: records)
     }
 
@@ -64,5 +68,5 @@ public nonisolated enum YearInReview {
         Set(activities.map { calendar.component(.year, from: $0.start) }).sorted(by: >)
     }
 
-    public static let evidenceNote = "Evidence: weak. Looking back at what you did can help you keep going (Harkin 2016), but no study has tested a yearly recap. Records count lift records and new cardio bests; times include every logged session and Health workout."
+    public static let evidenceNote = "Evidence: weak. Looking back at what you did can help you keep going (Harkin 2016), but no study has tested a yearly recap. Records count lift records and, once every route has been checked, new cardio bests; times include every logged session and Health workout."
 }

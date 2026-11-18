@@ -161,7 +161,9 @@ public nonisolated enum ActivityCalendar {
         while day < interval.end {
             days.append(day)
             guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-            day = next
+            // Where midnight is skipped for daylight saving, that day starts
+            // at 01:00 and adding a day keeps 01:00: back to the day's start.
+            day = calendar.startOfDay(for: next)
         }
         guard let first = days.first else { return [] }
         let weekday = calendar.component(.weekday, from: first)

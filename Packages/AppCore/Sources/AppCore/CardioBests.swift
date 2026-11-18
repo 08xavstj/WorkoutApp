@@ -15,10 +15,14 @@ import Foundation
 // et al. JMIR mHealth uHealth 2020;8(6):e17118). So a best effort, above all
 // a short one, is approximate; the UI says so.
 //
-// Method: a window slides along the route's cumulative distance; for each
-// fix, the start is the point exactly `distance` metres earlier, its time
-// interpolated between the two fixes around it. Time is elapsed time,
-// pauses included, as the doc's spec says.
+// Method: first the route's distance is added up again, counting a stretch
+// between two fixes only when they are at most `maximumFixGap` apart and
+// the speed between them is possible for the sport (`movingMeters`), so a
+// GPS jump or a train ride while paused can't become a best. Then a window
+// slides along that distance twice: once ending at each fix, the start
+// exactly `distance` metres earlier with its time interpolated between the
+// two fixes around it, and once starting at each fix with the end
+// interpolated. Time is elapsed time, pauses included, as the doc's spec says.
 
 public nonisolated enum CardioBests {
     /// Which bests a workout counts toward.
@@ -89,13 +93,37 @@ public nonisolated enum CardioBests {
         public var speed: Double { seconds > 0 ? distanceMeters / seconds : 0 }
     }
 
+    /// Fixes further apart than this don't add distance: the watch was
+    /// paused or lost GPS, and the straight line between them says nothing
+    /// about how fast the user moved. 30 s is the app's choice; the Watch
+    /// saves a fix every few seconds while it is recording.
+    public static let maximumFixGap: Double = 30
+
     /// The fastest effort at each of the sport's distances the route covers.
     public static func efforts(route: CardioRoute, sport: Sport) -> [Effort] {
         guard let first = route.points.first else { return [] }
         let seconds = route.points.map { $0.time.timeIntervalSince(first.time) }
+        let meters = movingMeters(meters: route.cumulativeMeters, seconds: seconds, maximumSpeed: sport.maximumSpeed)
         return sport.distances.compactMap {
-            fastest(distance: $0, meters: route.cumulativeMeters, seconds: seconds, maximumSpeed: sport.maximumSpeed)
+            fastest(distance: $0, meters: meters, seconds: seconds, maximumSpeed: sport.maximumSpeed)
         }
+    }
+
+    /// Cumulative metres again, adding a stretch between two fixes only when
+    /// time moved forward, by at most `maximumFixGap`, and at no more than
+    /// `maximumSpeed`. Same length as the input; never decreases.
+    public static func movingMeters(meters: [Double], seconds: [Double], maximumSpeed: Double) -> [Double] {
+        let count = min(meters.count, seconds.count)
+        guard count > 0 else { return [] }
+        var result = [meters[0]]
+        result.reserveCapacity(count)
+        for index in 1..<count {
+            let step = meters[index] - meters[index - 1]
+            let dt = seconds[index] - seconds[index - 1]
+            let counts = dt > 0 && dt <= maximumFixGap && step >= 0 && step / dt <= maximumSpeed
+            result.append(result[index - 1] + (counts ? step : 0))
+        }
+        return result
     }
 
     /// The fastest `distance` metres along a route given as cumulative metres
@@ -105,6 +133,13 @@ public nonisolated enum CardioBests {
         let count = min(meters.count, seconds.count)
         guard distance > 0, count >= 2, meters[count - 1] - meters[0] >= distance - 0.001 else { return nil }
         var best: Effort?
+        func consider(elapsed: Double, startMeters: Double) {
+            guard elapsed > 0, distance / elapsed <= maximumSpeed else { return }
+            if elapsed < best?.seconds ?? .infinity {
+                best = Effort(distanceMeters: distance, seconds: elapsed, startMeters: max(0, startMeters - meters[0]))
+            }
+        }
+        // Each fix as the end; the start interpolated.
         var low = 0
         for end in 1..<count {
             let target = meters[end] - distance
@@ -114,11 +149,20 @@ public nonisolated enum CardioBests {
             let span = meters[low + 1] - meters[low]
             let fraction = span > 0 ? min(1, max(0, (target - meters[low]) / span)) : 0
             let startTime = seconds[low] + fraction * (seconds[low + 1] - seconds[low])
-            let elapsed = seconds[end] - startTime
-            guard elapsed > 0, distance / elapsed <= maximumSpeed else { continue }
-            if elapsed < best?.seconds ?? .infinity {
-                best = Effort(distanceMeters: distance, seconds: elapsed, startMeters: max(0, target - meters[0]))
-            }
+            consider(elapsed: seconds[end] - startTime, startMeters: target)
+        }
+        // Each fix as the start; the end interpolated.
+        var high = 1
+        for start in 0..<(count - 1) {
+            let target = meters[start] + distance
+            guard target <= meters[count - 1] + 0.001 else { break }
+            // The first fix at or past the end point.
+            if high <= start { high = start + 1 }
+            while high < count - 1, meters[high] < target { high += 1 }
+            let span = meters[high] - meters[high - 1]
+            let fraction = span > 0 ? min(1, max(0, (target - meters[high - 1]) / span)) : 1
+            let endTime = seconds[high - 1] + fraction * (seconds[high] - seconds[high - 1])
+            consider(elapsed: endTime - seconds[start], startMeters: meters[start])
         }
         return best
     }
