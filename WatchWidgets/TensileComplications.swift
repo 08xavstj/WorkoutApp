@@ -43,14 +43,12 @@ nonisolated struct FaceProvider: TimelineProvider {
         FaceEntry(date: .now, data: WatchFaceData.sample(), doneAt: nil)
     }
 
+    /// The face editor and the complication gallery show what the Watch
+    /// really has: "--" until the phone has sent today's numbers. Example
+    /// numbers here (recovery 72%) were taken for a real reading.
     func getSnapshot(in context: Context, completion: @escaping (FaceEntry) -> Void) {
-        // The face editor shows sample data until the phone has sent real data.
         let data = WatchFaceStore.load()
-        if context.isPreview && data == nil {
-            completion(placeholder(in: context))
-        } else {
-            completion(FaceEntry(date: .now, data: data, doneAt: WatchFaceStore.lastWorkoutEnd(data)))
-        }
+        completion(FaceEntry(date: .now, data: data, doneAt: WatchFaceStore.lastWorkoutEnd(data)))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<FaceEntry>) -> Void) {
