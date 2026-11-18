@@ -274,7 +274,9 @@ public enum BlockReport {
         guard !sets.isEmpty else { return nil }
         let loaded = sets.filter { $0.weightKg > 0 }
         if loaded.isEmpty { return (Double(sets.map(\.reps).max() ?? 0), true) }
-        return (loaded.map(\.estimatedOneRepMaxKg).max() ?? 0, false)
+        // Only sets of 10 reps or fewer give an estimate (`OneRepMax.displayEstimate`).
+        let best = loaded.map(\.estimatedOneRepMaxKg).max() ?? 0
+        return best > 0 ? (best, false) : nil
     }
 
     static func liftChanges(_ sessions: [WorkoutSummary.LoggedSession], weekStarts: [Date], workingWeeks: [Date],

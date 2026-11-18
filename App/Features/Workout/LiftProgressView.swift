@@ -67,7 +67,18 @@ struct LiftProgressView: View {
 
     /// No weight to estimate a 1RM from (push-ups, bodyweight squats): progress in reps.
     private func isRepsOnly(_ points: [LiftProgress.Point]) -> Bool {
-        points.allSatisfy { $0.estimatedOneRepMax <= 0 }
+        points.allSatisfy { $0.bestWeight <= 0 }
+    }
+
+    /// Sessions with an estimated 1RM: only sets of 10 reps or fewer give one
+    /// (`OneRepMax.displayEstimate`).
+    private func estimated(_ points: [LiftProgress.Point]) -> [LiftProgress.Point] {
+        points.filter { $0.estimatedOneRepMax > 0 }
+    }
+
+    /// "≈ 96 kg".
+    private func estimateText(_ value: Double) -> String {
+        "\(OneRepMax.symbol) \(wholeText(value)) \(unit.rawValue)"
     }
 
     /// "82.5 kg × 6", "BW + 10 kg × 8" for a weighted pull-up, "15 reps" for bodyweight work.
@@ -148,7 +159,7 @@ struct LiftProgressView: View {
         if isRepsOnly(points) {
             return "Bodyweight work is tracked by your best set's reps: there's no weight to work out an estimated 1RM from."
         }
-        var text = "Estimated 1RM is the most you could lift once, worked out from your best set and how many reps you had left (Epley formula with RPE). It's a way to compare sessions, not a test."
+        var text = "Estimated 1RM (≈) is the most you could lift once, worked out from your best set of 10 reps or fewer and how many reps you had left (Epley formula with RPE). Past 10 reps the formulas lose accuracy and differ by lift (LeSuer 1997; Nuzzo 2024), so those sets show no estimate. It's a way to compare sessions, not a test."
         if countsBodyMass {
             text += " For pull-ups, chin-ups and dips it counts your body weight plus any added weight."
         }
@@ -176,17 +187,18 @@ struct LiftProgressView: View {
 
     private func summary(_ points: [LiftProgress.Point]) -> some View {
         let repsOnly = isRepsOnly(points)
-        let best = points.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax }
+        let withEstimate = estimated(points)
+        let best = withEstimate.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax }
         // Bodyweight work: the best set's reps instead of an estimated 1RM of 0.
-        let first = repsOnly ? Double(points.first?.bestReps ?? 0) : (points.first?.estimatedOneRepMax ?? 0)
-        let last = repsOnly ? Double(points.last?.bestReps ?? 0) : (points.last?.estimatedOneRepMax ?? 0)
+        let first = repsOnly ? Double(points.first?.bestReps ?? 0) : (withEstimate.first?.estimatedOneRepMax ?? 0)
+        let last = repsOnly ? Double(points.last?.bestReps ?? 0) : (withEstimate.last?.estimatedOneRepMax ?? 0)
         let change = first > 0 ? (last / first - 1) * 100 : 0
         let mostReps = points.map(\.bestReps).max() ?? 0
         let bestItem = repsOnly
             ? item("Most reps", "\(mostReps)", spoken: "Most reps in a set")
-            : item("Best est. 1RM", best.map { "\(wholeText($0.estimatedOneRepMax)) \(unit.rawValue)" } ?? "–", spoken: "Best estimated one-rep max")
+            : item("Best est. 1RM", best.map { estimateText($0.estimatedOneRepMax) } ?? "–", spoken: "Best estimated one-rep max")
         let sessionsItem = item("Sessions", "\(points.count)")
-        let changeItem = item("Since first", points.count > 1 ? "\(change >= 0 ? "+" : "")\(Int(change.rounded()))%" : "–")
+        let changeItem = item("Since first", (repsOnly ? points.count : withEstimate.count) > 1 ? "\(change >= 0 ? "+" : "")\(Int(change.rounded()))%" : "–")
         let prItem = item("PRs", "\(points.filter(\.isPR).count)", spoken: "Personal records")
         // Four across; two rows of two at accessibility text sizes (ux-audit.md 4.8, P22).
         return Group {
@@ -236,15 +248,17 @@ struct LiftProgressView: View {
     private func selectedText(_ point: LiftProgress.Point, repsOnly: Bool) -> String {
         let date = point.date.formatted(date: .abbreviated, time: .omitted)
         if repsOnly { return "\(date): best set \(point.bestReps) reps" }
-        let estimate = wholeText(point.estimatedOneRepMax)
-        return "\(date): \(bestSetText(point)) · est. 1RM \(estimate) \(unit.rawValue) · volume \(wholeText(point.volume))"
+        let estimate = point.estimatedOneRepMax > 0 ? " · est. 1RM \(estimateText(point.estimatedOneRepMax))" : ""
+        return "\(date): \(bestSetText(point))\(estimate) · volume \(wholeText(point.volume))"
     }
 
     private func chartCard(_ points: [LiftProgress.Point]) -> some View {
         let repsOnly = isRepsOnly(points)
-        let volume = showVolume && !repsOnly
+        // Only sets of more than 10 reps: no estimate to chart, so volume.
+        let noEstimate = !repsOnly && estimated(points).isEmpty
+        let volume = (showVolume || noEstimate) && !repsOnly
         return VStack(alignment: .leading, spacing: 10) {
-            if !repsOnly {
+            if !repsOnly, !noEstimate {
                 Picker("Show", selection: $showVolume) {
                     Text("Estimated 1RM").tag(false)
                     Text("Volume").tag(true)
@@ -267,7 +281,7 @@ struct LiftProgressView: View {
                 // al., Sports Med 2024), so it is a trend, not a test.
                 ChartShareButton(title: "\(name), \(repsOnly ? "best set reps" : volume ? "volume" : "estimated 1RM")",
                                  subtitle: shareSubtitle(points),
-                                 caveat: repsOnly || volume ? nil : "Estimated 1RM ≈ from your best set and reps left (Epley); an estimate that varies by lift, not a tested max. Diamonds are records.") {
+                                 caveat: repsOnly || volume ? nil : "Estimated 1RM ≈ from your best set of 10 reps or fewer and reps left (Epley); an estimate that varies by lift, not a tested max. Diamonds are records.") {
                     LiftTrendChart(points: points, repsOnly: repsOnly, volume: volume, selected: nil)
                 }
             }
@@ -335,7 +349,7 @@ struct LiftProgressView: View {
 
     private func estimateColumn(_ point: LiftProgress.Point) -> some View {
         VStack(alignment: .trailing, spacing: 1) {
-            Text("\(wholeText(point.estimatedOneRepMax)) \(unit.rawValue)")
+            Text(point.estimatedOneRepMax > 0 ? estimateText(point.estimatedOneRepMax) : "–")
                 .font(.headline)
                 .monospacedDigit()
                 .foregroundStyle(Theme.primaryText)
@@ -344,7 +358,9 @@ struct LiftProgressView: View {
                 .foregroundStyle(Theme.secondaryText)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Estimated one rep max \(wholeText(point.estimatedOneRepMax)) \(unit.rawValue)")
+        .accessibilityLabel(point.estimatedOneRepMax > 0
+            ? "Estimated one rep max about \(wholeText(point.estimatedOneRepMax)) \(unit.rawValue)"
+            : "No estimated one rep max: no set of 10 reps or fewer")
     }
 
     private func nearest(_ date: Date, in points: [LiftProgress.Point]) -> LiftProgress.Point? {
@@ -374,7 +390,8 @@ private struct LiftTrendChart: View {
                     BarMark(x: .value("Date", point.date, unit: .day), y: .value("Volume", point.volume))
                         .foregroundStyle(Theme.lifting.gradient)
                         .cornerRadius(4)
-                } else {
+                } else if point.estimatedOneRepMax > 0 {
+                    // Only sessions with a set of 10 reps or fewer have an estimate (`OneRepMax.displayEstimate`).
                     LineMark(x: .value("Date", point.date), y: .value("e1RM", point.estimatedOneRepMax))
                         .foregroundStyle(Theme.lifting)
                         .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))

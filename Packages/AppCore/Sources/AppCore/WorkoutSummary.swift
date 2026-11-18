@@ -47,8 +47,9 @@ public enum WorkoutSummary {
         /// A ticked set that isn't a warm-up (drop stages included).
         public var isWorking: Bool { completedAt != nil && !isWarmup }
 
+        /// 0 for a set of more than `OneRepMax.maximumReliableReps` reps (`OneRepMax.displayEstimate`).
         public var estimatedOneRepMaxKg: Double {
-            OneRepMax.estimate(weight: weightKg, reps: reps, rpe: rpe)
+            OneRepMax.displayEstimate(weight: weightKg, reps: reps, rpe: rpe) ?? 0
         }
     }
 

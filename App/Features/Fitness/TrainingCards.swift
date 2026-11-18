@@ -687,7 +687,7 @@ struct StrengthForHealthCard: View {
                 Text(result.lift.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
-                Text("e1RM \(e1RM) \(unit.rawValue) · \(result.ratio.formatted(.number.precision(.fractionLength(2)))) × body weight")
+                Text("e1RM \(OneRepMax.symbol) \(e1RM) \(unit.rawValue) · \(result.ratio.formatted(.number.precision(.fractionLength(2)))) × body weight")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }

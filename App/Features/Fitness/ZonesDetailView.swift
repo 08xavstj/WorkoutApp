@@ -8,6 +8,8 @@ struct ZonesDetailView: View {
     var body: some View {
         FitnessDetailPage(title: "Heart-rate zones") {
             ZonesCard()
+            // The last 12 weeks against WHO's 150-300 (`WeeklyIntensity`).
+            WeeklyZonesCard()
             ZonesAboutCard()
         }
     }

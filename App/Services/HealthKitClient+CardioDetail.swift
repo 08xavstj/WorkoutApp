@@ -29,6 +29,8 @@ nonisolated struct CardioWorkoutDetail: Sendable {
     /// VO₂ max (ml/kg/min) Apple Health estimated from this workout.
     var vo2Max: Double?
     var sourceName: String?
+    /// Run, ride, sport... (`ActivityKind`), for best efforts.
+    var kind: ActivityKind = .other
 }
 
 nonisolated extension HealthKitClient {
@@ -96,12 +98,13 @@ nonisolated extension HealthKitClient {
             route: points,
             heartRate: heartRate,
             vo2Max: vo2?.quantity.doubleValue(for: vo2Unit),
-            sourceName: workout.device?.name ?? workout.sourceRevision.source.name
+            sourceName: workout.device?.name ?? workout.sourceRevision.source.name,
+            kind: Self.activityKind(for: workout.workoutActivityType, tensile: activity)
         )
     }
 
     /// Every fix of one route sample (HKWorkoutRouteQuery delivers them in batches).
-    private func routePoints(_ route: HKWorkoutRoute) async throws -> [RoutePoint] {
+    func routePoints(_ route: HKWorkoutRoute) async throws -> [RoutePoint] {
         let collected = OSAllocatedUnfairLock(initialState: [RoutePoint]())
         return try await withCheckedThrowingContinuation { continuation in
             let query = HKWorkoutRouteQuery(route: route) { _, locations, done, error in
@@ -158,7 +161,8 @@ nonisolated extension DemoHealth {
             uuid: workout.id, name: workout.name, activity: nil, showsPace: workout.name == "Run",
             start: workout.start, end: workout.end, activeSeconds: duration, distanceMeters: meters,
             activeKcal: workout.kcal, elevationAscended: nil, route: points, heartRate: heart,
-            vo2Max: workout.name == "Run" ? 47.2 : nil, sourceName: "Apple Watch"
+            vo2Max: workout.name == "Run" ? 47.2 : nil, sourceName: "Apple Watch",
+            kind: workout.name == "Ride" ? .ride : .run
         )
     }
 }

@@ -55,7 +55,7 @@ public enum LiftGoalProjection {
     /// Only sets of 10 reps or fewer feed the trend: Epley/Brzycki predict
     /// within about 3 kg from 3–5RM, and accuracy falls past 10 reps
     /// (watch-features.md 3.6 [B22]).
-    public static let maximumReps = 10
+    public static let maximumReps = OneRepMax.maximumReliableReps
     /// The trend window (app choice: about one training block of 4 weeks × 3,
     /// recent enough to reflect current training).
     public static let fitWeeks = 12.0
