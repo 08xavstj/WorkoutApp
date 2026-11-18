@@ -117,36 +117,20 @@ nonisolated struct FaceProvider: TimelineProvider {
     }
 }
 
-/// The app's score colours (dark variants from `App/Design/Theme.swift` and
-/// `RecoveryWording`), copied here because `Theme` needs UIKit.
+/// Forwards to the shared `WatchPalette` (Shared/WatchPalette.swift), which
+/// the Watch app uses too. Kept until every complication reads `WatchPalette`
+/// directly (C9 of the Watch redesign).
 nonisolated enum FacePalette {
-    static let strain = color(0xFF8E3C)
-    static let lifting = color(0xFF6B97)
-    /// The bed-by window (`Theme.sleep`, dark).
-    static let sleep = color(0x9692FF)
-    /// "Easy day" band (`Theme.oxygen`).
-    static let easy = color(0x5C9DFF)
-    /// "Normal" band (`Theme.recoveryModerate`).
-    static let normal = color(0xFFC53D)
-    /// "Recovered" band (`Theme.recoveryHigh`).
-    static let recovered = color(0x3EDB84)
-    static let track = Color.white.opacity(0.18)
+    static let strain = WatchPalette.strain
+    static let lifting = WatchPalette.lifting
+    static let sleep = WatchPalette.sleep
+    static let easy = WatchPalette.easy
+    static let normal = WatchPalette.normal
+    static let recovered = WatchPalette.recovered
+    static let track = WatchPalette.track
 
     static func band(_ band: String?) -> Color {
-        switch band {
-        case "low": easy
-        case "moderate": normal
-        case "high": recovered
-        default: .secondary
-        }
-    }
-
-    static func color(_ hex: UInt32) -> Color {
-        Color(
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255
-        )
+        WatchPalette.band(band)
     }
 }
 
@@ -157,11 +141,6 @@ nonisolated func facePercent(_ value: Double) -> String {
 
 nonisolated func faceWhole(_ value: Double) -> Int {
     value.isFinite ? Int(value.rounded()) : 0
-}
-
-/// A 0-100 score as a 0-1 fraction for rings and bars.
-nonisolated func faceFraction(_ value: Double) -> Double {
-    value.isFinite ? min(max(value / 100, 0), 1) : 0
 }
 
 /// e.g. "50–70%".
