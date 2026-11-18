@@ -35,7 +35,7 @@ These are our own formulas from published sports-science methods, not Whoop's or
 
 ## Run it on your iPhone (Mac + Xcode)
 
-You need Xcode 26 or later, an iPhone on iOS 26+, and your Apple Developer account.
+You need an iPhone on iOS 26+ and your Apple Developer account. Use the Xcode that matches your devices: an iPhone on iOS 27 or an Apple Watch on watchOS 27.2 (Series 12) needs **Xcode 27.2 or later** to install from the Mac; Xcode 26 builds the app but can't install it on those. In Xcode › Settings › Components, make sure the watchOS 27.2 platform is installed. On the Watch, turn on Settings › Privacy & Security › Developer Mode once (the Watch restarts), and keep it unlocked and on the charger near the Mac while it installs.
 
 ```bash
 git clone https://github.com/08xavstj/WorkoutApp.git

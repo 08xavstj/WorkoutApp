@@ -56,20 +56,23 @@ jobs:
             | tee build.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" build.log
 
-  # The same two builds with Xcode 27 (the iOS 27 and watchOS 27 SDKs), which
-  # an iPhone on iOS 27 or an Apple Watch Series 12 is normally built with.
-  # Runs by hand, or when the commit message contains [xcode27]: the image is
-  # a preview and the job doubles the macOS minutes.
+  # The owner's iPhone runs iOS 27 and his Apple Watch Series 12 runs
+  # watchOS 27.2.x, which need Xcode 27.2 (its iOS 27.2 / watchOS 27.2 SDKs
+  # and device support) to install from the Mac. This job builds with that
+  # Xcode on every push, for the simulators and for real devices (arm64
+  # iPhone and Watch, signing off), so a device-only compile error shows here
+  # before he tries to install.
   build-xcode-27:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[xcode27]')
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show Xcode and Swift versions
+      - name: Use Xcode 27.2
         run: |
+          sudo xcode-select -s /Applications/Xcode_27.2.app
           xcodebuild -version
+          xcodebuild -showsdks | grep -E "watchos|iphoneos" || true
           swift --version
 
       - name: Generate Xcode project
@@ -102,3 +105,27 @@ jobs:
             SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG' \
             | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" build.log
+
+      - name: Build the Watch app for a real Watch
+        timeout-minutes: 15
+        run: |
+          xcodebuild build \
+            -project WorkoutApp.xcodeproj \
+            -target TensileWatch \
+            -sdk watchos \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee watch-device.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" watch-device.log
+
+      - name: Build the app (with its Watch app) for a real iPhone
+        timeout-minutes: 20
+        run: |
+          xcodebuild build \
+            -project WorkoutApp.xcodeproj \
+            -scheme WorkoutApp \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee device.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" device.log
