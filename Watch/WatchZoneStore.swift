@@ -25,6 +25,16 @@ nonisolated enum WatchZoneStore {
             case .standIn: "Rough zones: no age in Health yet. Open Tensile on your iPhone to set them."
             }
         }
+
+        /// The same in a few words, for one line under the live zone.
+        var shortCaption: String {
+            switch self {
+            case .phone: "Zones: iPhone"
+            case .health: "Zones: Apple Health"
+            case .ageEstimate: "Zones: from age"
+            case .standIn: "Zones: rough estimate"
+            }
+        }
     }
 
     /// The zones in use and where they came from.

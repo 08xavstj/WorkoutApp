@@ -34,6 +34,9 @@ struct TensileWatchApp: App {
 }
 
 final class WatchAppDelegate: NSObject, WKApplicationDelegate {
+    /// Workouts the lifting mode records; anything else is cardio or a sport.
+    private static let strengthTypes: [HKWorkoutActivityType] = [.traditionalStrengthTraining, .functionalStrengthTraining]
+
     /// Activates WatchConnectivity on every launch, including background ones
     /// (complication data from the phone wakes the app without its UI).
     func applicationDidFinishLaunching() {
@@ -70,11 +73,14 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
     func handle(_ workoutConfiguration: HKWorkoutConfiguration) {
         let model = WatchWorkoutModel.shared
         model.activate()
-        let strength: [HKWorkoutActivityType] = [.traditionalStrengthTraining, .functionalStrengthTraining]
-        if !strength.contains(workoutConfiguration.activityType),
+        if !Self.strengthTypes.contains(workoutConfiguration.activityType),
            let activity = CardioActivity.matching(workoutConfiguration.activityType, location: workoutConfiguration.locationType) {
             let cardio = WatchCardioModel.shared
-            guard !cardio.isBusy else { return }
+            // Already recording here: say so on the Watch rather than ignore the phone.
+            guard !cardio.isBusy else {
+                cardio.refuseStartWhileRecording()
+                return
+            }
             if cardio.phase == .ended { cardio.reset() }
             let defaults = UserDefaults.standard
             defaults.set(activity.rawValue, forKey: WatchCardioModel.lastActivityKey)
@@ -83,5 +89,35 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
             return
         }
         Task { await model.start(with: workoutConfiguration, sessionID: nil) }
+    }
+
+    /// The app was relaunched while a workout was recording (it crashed, or
+    /// the system closed it). The session the system kept running goes back to
+    /// the mode that records its kind: lifting for strength, else cardio. If
+    /// neither can take it, it's ended and saved, so the workout isn't lost.
+    func handleActiveWorkoutRecovery() {
+        let lifting = WatchWorkoutModel.shared
+        lifting.activate()
+        lifting.willRecoverWorkout()
+        Task {
+            defer { lifting.didRecoverWorkout() }
+            guard let recovered = try? await HKHealthStore().recoverActiveWorkoutSession() else { return }
+            let taken: Bool
+            if Self.strengthTypes.contains(recovered.workoutConfiguration.activityType) {
+                taken = await lifting.recover(recovered)
+            } else {
+                taken = await WatchCardioModel.shared.recover(recovered)
+            }
+            if !taken { await Self.endAndSave(recovered) }
+        }
+    }
+
+    /// Ends a recovered workout and saves what its builder recorded.
+    private static func endAndSave(_ session: HKWorkoutSession) async {
+        let builder = session.associatedWorkoutBuilder()
+        let end = Date.now
+        session.end()
+        try? await builder.endCollection(at: end)
+        _ = try? await builder.finishWorkout()
     }
 }

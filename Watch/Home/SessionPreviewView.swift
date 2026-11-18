@@ -15,8 +15,21 @@ struct SessionPreviewView: View {
     var minutes: Int?
 
     private var isStarting: Bool { model.phase == .starting || cardio.phase == .starting }
+    /// At the accessibility text sizes the page scrolls, so double tap is off (HIG Gestures).
+    private var scrolls: Bool { dynamicTypeSize.isAccessibilitySize }
 
     var body: some View {
+        Group {
+            if scrolls {
+                ScrollView { content }
+            } else {
+                content
+            }
+        }
+        .navigationTitle("Lift")
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(isPlan ? "Planned" : "On your iPhone")
                 .font(.footnote.weight(.semibold))
@@ -36,13 +49,12 @@ struct SessionPreviewView: View {
                 ProgressView("Starting…")
             } else {
                 PrimaryWideButton(title: "Start", systemImage: "play.fill", tint: WatchPalette.recovery,
-                                  primaryAction: !dynamicTypeSize.isAccessibilitySize,
+                                  primaryAction: !scrolls,
                                   accessibilityLabel: "Start \(session.name)") {
                     start()
                 }
             }
         }
-        .navigationTitle("Lift")
     }
 
     /// "6 exercises · 18 sets · 55 min".
@@ -55,7 +67,8 @@ struct SessionPreviewView: View {
     }
 
     private var phoneLine: String {
-        if isPlan { return model.phoneReachable ? "Sets go to your iPhone as you log them" : "Sets are kept on your Watch" }
+        // A plan runs on the Watch alone: its sets go with the summary (`WatchWorkoutModel.isLocal`).
+        if isPlan { return "Logged on Watch · sent to iPhone at the end" }
         return model.phoneReachable ? "iPhone connected" : "iPhone out of reach · sets wait on Watch"
     }
 

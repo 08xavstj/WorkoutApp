@@ -394,9 +394,11 @@ private struct QuickStartTiles: View {
         VStack(spacing: 2) {
             Image(systemName: systemImage)
                 .font(.title3.weight(.semibold))
+            // "Cross-country ski", "Ultimate frisbee": two lines rather than cut off.
             Text(title)
                 .font(.footnote.weight(.semibold))
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
                 .multilineTextAlignment(.center)
         }
         .foregroundStyle(WatchPalette.onTint)
@@ -484,7 +486,8 @@ private struct LastActivityView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 SummaryRow(label: "Time", value: "\(record.minutes) min")
-                SummaryRow(label: record.kind == .lift ? "Sets" : "Distance", value: record.detail)
+                // Cardio's detail is distance and pace, or calories, or zones (`WatchCardioModel.historyDetail`).
+                SummaryRow(label: record.kind == .lift ? "Sets" : "Result", value: record.detail)
                 if let average = record.averageBpm {
                     SummaryRow(label: "Avg HR", value: "\(average) bpm")
                 }
