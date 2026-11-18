@@ -112,6 +112,10 @@ struct CategoryView: View {
                 if category == .breathing {
                     StopBangSummaryCard { showingStopBang = true }
                 }
+                // Apple's own heart notifications, one line, hidden at zero (W5; `HeartEvents`).
+                if category == .heart, let line = vitals.heartEvents?.line {
+                    HeartEventsLine(line: line)
+                }
             }
             .padding()
             .lockedToScreenWidth()
@@ -121,6 +125,34 @@ struct CategoryView: View {
         .navigationTitle(category.rawValue)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingStopBang) { StopBangView() }
+    }
+}
+
+/// "Apple flagged 1 high alert in the last 30 days; see the Health app."
+/// Tensile adds no alert of its own.
+private struct HeartEventsLine: View {
+    let line: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(line)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "applewatch")
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Text(HeartEvents.note)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("heart-events-line")
     }
 }
 

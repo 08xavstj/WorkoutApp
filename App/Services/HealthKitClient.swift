@@ -119,6 +119,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         // hypertension notification (HealthKitClient+Hypertension; empty until its flag is on).
         types.formUnion(Self.symptomReadTypes as [HKObjectType])
         types.formUnion(Self.hypertensionReadTypes)
+        // Apple's heart events, walking speed, mindful minutes, waist (HealthKitClient+HeartEventsAndMobility).
+        types.formUnion(Self.heartEventAndMobilityReadTypes)
         if let recoveryHRV = Self.recoveryHRVType { types.insert(recoveryHRV) }
         return types
     }
@@ -135,6 +137,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
          HKQuantityType(.dietaryFatTotal), HKQuantityType(.dietaryFiber)]
         // The morning check-in's symptoms (HealthKitClient+Symptoms).
         types.formUnion(Self.symptomTypes as [HKSampleType])
+        // Waist you type in (HealthKitClient+HeartEventsAndMobility).
+        types.formUnion(Self.bodyMeasurementShareTypes)
         return types
     }
 

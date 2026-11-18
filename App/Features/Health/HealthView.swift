@@ -15,6 +15,7 @@ struct HealthView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(VitalsModel.self) private var vitals
     @Environment(CheckInStore.self) private var checkIns
+    @Environment(BodyMeasurementsStore.self) private var measurements
     @Environment(\.healthClient) private var health
     @Query(sort: \HRVReading.date, order: .reverse) private var hrvReadings: [HRVReading]
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
@@ -74,6 +75,8 @@ struct HealthView: View {
                                   scoredVO2: vitals.vo2ForScores)
         }
         vitals.setHRVSeries(biology.hrvSeries)
+        // Waist readings other apps saved to Health (I10), for waist-to-height.
+        await measurements.refreshFromHealth(health)
     }
 }
 

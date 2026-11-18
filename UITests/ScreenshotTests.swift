@@ -213,6 +213,15 @@ final class ScreenshotTests: XCTestCase {
                 back(app)
             }
         }
+        // Labs › Import from Health Records (demo records; no Health sheet in demo mode).
+        openTab(app, "Health")
+        if tap(app, ["row-Lab results", "Lab results"], name: "Health labs for import") {
+            if tap(app, ["labs-import-health-records", "Import from Health Records"], name: "Labs import from Health Records") {
+                sleep(1)
+                capture(app, "health-labs-import", pages: 2)
+            }
+            back(app)
+        }
     }
 
     private func tourLog(_ app: XCUIApplication) {

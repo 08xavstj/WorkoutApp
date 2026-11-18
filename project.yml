@@ -69,7 +69,11 @@ targets:
       path: App/WorkoutApp.entitlements
       properties:
         com.apple.developer.healthkit: true
-        com.apple.developer.healthkit.access: []
+        # Clinical Health Records (read-only lab results, asked for only from
+        # Labs' "Import from Health Records"; HealthKitClient+HealthRecords).
+        # The App ID needs the HealthKit capability with Clinical Health Records on.
+        com.apple.developer.healthkit.access:
+          - health-records
         # Lets HealthKit wake the app after new data (e.g. a Garmin sync).
         com.apple.developer.healthkit.background-delivery: true
         com.apple.security.application-groups:
@@ -104,6 +108,11 @@ targets:
           Tensile reads your heart rate, HRV, resting heart rate, sleep, workouts,
           body weight and food log (for example from Cronometer) to calculate your
           daily scores and give coaching advice.
+        # Asked for only when you tap "Import from Health Records" in Labs.
+        NSHealthClinicalHealthRecordsShareUsageDescription: >-
+          Tensile reads the lab results your clinic or lab sends to Health Records
+          (cholesterol, HbA1c, ferritin and other blood tests) to show them in Labs
+          and keep your blood-test schedule up to date. They stay on your iPhone.
         NSCameraUsageDescription: >-
           Tensile uses the camera for your front and side progress photos (saved only
           inside the app, not in your Photos library) and, with the flashlight, to measure
@@ -125,8 +134,8 @@ targets:
           Photos library.
         NSHealthUpdateUsageDescription: >-
           Tensile saves the gym workouts (with your effort rating), blood pressure
-          readings, check-in mood and quick meal estimates you log to
-          Apple Health.
+          readings, waist measurements, check-in mood and quick meal estimates you
+          log to Apple Health.
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

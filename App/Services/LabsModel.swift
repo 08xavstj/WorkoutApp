@@ -16,6 +16,14 @@ nonisolated struct LabResult: Codable, Sendable, Identifiable, Equatable, Hashab
     var date: Date
     var panel: String?
     var notes: String = ""
+    /// Set for results imported from Apple Health Records
+    /// (`LabsModel+HealthRecords`); nil for typed ones. Optional, so files
+    /// saved before the import existed still load.
+    var source: LabResultSource?
+    /// The FHIR resource's identifier, so a second import skips it.
+    var recordID: String?
+
+    var isFromHealthRecords: Bool { source == .healthRecords }
 
     var status: LabMarkers.Status? {
         LabMarkers.status(value: value, low: referenceLow, high: referenceHigh)
@@ -33,6 +41,11 @@ nonisolated struct LabResult: Codable, Sendable, Identifiable, Equatable, Hashab
         default: return nil
         }
     }
+}
+
+/// Where a result came from.
+nonisolated enum LabResultSource: String, Codable, Sendable, Hashable {
+    case healthRecords
 }
 
 /// Your lab results, typed in by hand and stored as a file inside the app

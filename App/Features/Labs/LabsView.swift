@@ -49,6 +49,8 @@ struct LabsView: View {
                     }
                     // What's due for heart and blood sugar risk (`BloodTestSchedule`).
                     BloodTestsCard()
+                    // Lab results from Apple Health Records, only when asked (LabsModel+HealthRecords).
+                    HealthRecordsImportCard()
                     ForEach(reportDays) { report in
                         // The report's date goes in its header, so rows don't truncate.
                         SectionTitle(text: LabsView.dayText(report.date))
@@ -92,7 +94,7 @@ struct LabsView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Track blood tests over time: cholesterol, HbA1c, ferritin, vitamin D, thyroid, testosterone, kidney and liver markers. Type results in from your report.")
+            Text("Track blood tests over time: cholesterol, HbA1c, ferritin, vitamin D, thyroid, testosterone, kidney and liver markers. Type results in from your report, or bring them in from Health Records below if your clinic or lab is connected.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -147,7 +149,8 @@ private struct LabRow: View {
                 Text(result.name)
                     .font(.headline)
                     .foregroundStyle(Theme.primaryText)
-                Text([result.rangeText.map { "Range \($0)" }, showsDate ? LabsView.dayText(result.date) : nil]
+                Text([result.rangeText.map { "Range \($0)" }, showsDate ? LabsView.dayText(result.date) : nil,
+                      result.isFromHealthRecords ? "From Health Records" : nil]
                     .compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
@@ -261,9 +264,22 @@ struct LabMarkerDetailView: View {
                     CardLabel(text: "Results", color: Theme.sleep).padding(.bottom, 8)
                     ForEach(history.reversed()) { result in
                         HStack {
-                            Text(result.date.formatted(date: .abbreviated, time: .omitted))
-                                .font(.subheadline)
-                                .foregroundStyle(Theme.secondaryText)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.date.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.subheadline)
+                                    .foregroundStyle(Theme.secondaryText)
+                                if result.isFromHealthRecords {
+                                    Text("From Health Records")
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.secondaryText)
+                                }
+                                if !result.notes.isEmpty {
+                                    Text(result.notes)
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
                             Spacer()
                             Text("\(result.value.formatted(.number.precision(.fractionLength(0...2)))) \(result.unit)")
                                 .font(.subheadline.weight(.semibold))

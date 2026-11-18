@@ -310,10 +310,13 @@ struct MoodScreenSettingsSection: View {
         Section {
             Toggle("Offer mood questionnaires", isOn: Binding(get: { !store.turnedOff }, set: { store.setTurnedOff(!$0) }))
                 .accessibilityIdentifier("settings-mood-screens")
+            // I6: off by default (SocialConnectionCheck).
+            Toggle("Social connection check", isOn: Binding(get: { store.socialCheckOn }, set: { store.setSocialCheckOn($0) }))
+                .accessibilityIdentifier("settings-social-check")
         } header: {
             Text("Mood")
         } footer: {
-            Text("After two weeks of mostly low mornings, the check-in offers the PHQ-9 and GAD-7, at most every 4 weeks. Off means they're never offered. Answers stay on this iPhone.")
+            Text("After two weeks of mostly low mornings, the check-in offers the PHQ-9 and GAD-7, at most every 4 weeks. Off means they're never offered. The social connection check asks three questions about feeling connected every 3 months, on the Mood page; loneliness is linked with poorer long-term health, though what helps is less certain. Answers stay on this iPhone.")
         }
     }
 }
