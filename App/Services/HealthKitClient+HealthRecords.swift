@@ -23,7 +23,7 @@ nonisolated extension HealthKitClient {
     /// where Apple doesn't offer them). Demo mode says yes, so the button shows.
     var supportsHealthRecords: Bool {
         if DemoHealth.active != nil { return true }
-        return isAvailable && HKHealthStore.supportsHealthRecords()
+        return isAvailable && store.supportsHealthRecords()
     }
 
     /// Shows the clinical-records permission sheet (lab results only). It
