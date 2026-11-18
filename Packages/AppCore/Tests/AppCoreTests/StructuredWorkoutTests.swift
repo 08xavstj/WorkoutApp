@@ -27,17 +27,29 @@ struct StructuredWorkoutTests {
         #expect(coolDown.kind == .coolDown && coolDown.seconds == 300 && coolDown.heartRate == nil)
         #expect(workout.blocks.count == 2)
         #expect(workout.blocks[0].iterations == 3)
-        #expect(workout.blocks[0].steps.map(\.kind) == [.work, .recovery])
-        #expect(workout.blocks[0].steps.map(\.seconds) == [240, 180])
+        // Each 4-minute work step: a 90 s ramp with no alert, then 150 s with it.
+        #expect(workout.blocks[0].steps.map(\.kind) == [.work, .work, .recovery])
+        #expect(workout.blocks[0].steps.map(\.seconds) == [90, 150, 180])
+        #expect(workout.blocks[0].steps.map { $0.heartRate != nil } == [false, true, false])
         #expect(workout.blocks[1].iterations == 1)
-        #expect(workout.blocks[1].steps.map(\.kind) == [.work])
+        #expect(workout.blocks[1].steps.map(\.kind) == [.work, .work])
+        #expect(workout.blocks[1].steps.map(\.seconds) == [90, 150])
     }
 
     @Test func unrolledStepsMatchTheSessionStepForStep() {
         for session in [IntervalSession.fourByFour(.rower), .threeByFour(.outdoorRun)] {
             let workout = StructuredWorkout.interval(session, scheme: scheme)
-            #expect(workout.unrolledSteps.map(\.seconds) == session.steps.map(\.seconds))
-            #expect(workout.unrolledSteps.map(\.kind.rawValue) == session.steps.map(\.phase.rawValue))
+            // Each ramp joined back to its work step gives the session's steps.
+            var merged: [StructuredWorkout.Step] = []
+            for step in workout.unrolledSteps {
+                if let last = merged.last, last.kind == .work, last.heartRate == nil, step.kind == .work, step.heartRate != nil {
+                    merged[merged.count - 1].seconds += step.seconds
+                } else {
+                    merged.append(step)
+                }
+            }
+            #expect(merged.map(\.seconds) == session.steps.map(\.seconds))
+            #expect(merged.map(\.kind.rawValue) == session.steps.map(\.phase.rawValue))
             #expect(workout.totalSeconds == session.totalSeconds)
             #expect(workout.workSeconds == session.hardSeconds)
         }
@@ -46,9 +58,13 @@ struct StructuredWorkoutTests {
     @Test func onlyWorkStepsCarryTheZoneFourToFiveBandUpToMaximum() throws {
         let workout = StructuredWorkout.interval(.fourByFour(.treadmill), scheme: scheme)
         // Zone 4 starts at 80% of reserve: 55 + 0.8 × 130 = 159. Zone 5 has no top, so the alert stops at the maximum.
-        for step in workout.unrolledSteps {
-            if step.kind == .work {
+        for (index, step) in workout.unrolledSteps.enumerated() {
+            let previous = index > 0 ? workout.unrolledSteps[index - 1] : nil
+            if step.kind == .work, previous?.kind == .work {
                 #expect(step.heartRate == StructuredWorkout.HeartRateRange(lower: 159, upper: 185))
+            } else if step.kind == .work {
+                // The ramp: heart rate is still climbing, so no alert.
+                #expect(step.heartRate == nil && step.seconds == 90)
             } else {
                 #expect(step.heartRate == nil)
             }
@@ -86,9 +102,11 @@ struct StructuredWorkoutTests {
         #expect(workout.activity == .walking)
         #expect(workout.location == .indoor)
         #expect(workout.warmUp == nil && workout.coolDown == nil)
-        let step = try #require(workout.blocks.first?.steps.first)
         #expect(workout.blocks.count == 1 && workout.blocks[0].iterations == 1)
-        #expect(step.seconds == 30 * 60)
+        #expect(workout.blocks[0].steps.map(\.seconds) == [90, 30 * 60 - 90])
+        #expect(workout.totalSeconds == 30 * 60)
+        #expect(workout.blocks[0].steps.first?.heartRate == nil)
+        let step = try #require(workout.blocks.first?.steps.last)
         // 40-60% of reserve: 55 + 52 = 107, 55 + 78 = 133.
         #expect(step.heartRate == StructuredWorkout.HeartRateRange(lower: 107, upper: 133))
         #expect(StructuredWorkout.easy(.bike, minutes: 30, indoor: false, scheme: scheme).location == .outdoor)
@@ -152,5 +170,52 @@ struct StructuredWorkoutTests {
         #expect(StructuredWorkout.startMinutes(plan: plan, weekday: 2) == 7 * 60)
         let empty = WeeklyPlan(weekStart: monday, plannedDays: [], mode: .flexible, sessionsPerWeek: 3, cardio: nil)
         #expect(StructuredWorkout.startMinutes(plan: empty, weekday: nil) == StructuredWorkout.fallbackStartMinutes)
+    }
+
+    @Test func aSecondAddReplacesTheWeekWhenAnyDayElseTheDay() {
+        // Flexible week: added Tuesday, then again for Thursday: the Tuesday copy goes.
+        let week = StructuredWorkout.replaceWindow(anyDay: true, day: at(3), weekStart: monday, calendar: calendar)
+        #expect(week.start == at(0, 0) && week.end == at(7, 0))
+        #expect(StructuredWorkout.isInReplaceWindow(at(1, 18), window: week))
+        #expect(StructuredWorkout.isInReplaceWindow(at(6, 23), window: week))
+        #expect(!StructuredWorkout.isInReplaceWindow(at(7, 9), window: week))
+        #expect(!StructuredWorkout.isInReplaceWindow(at(-1, 18), window: week))
+        // A fixed day: only that day.
+        let day = StructuredWorkout.replaceWindow(anyDay: false, day: at(3, 0), weekStart: monday, calendar: calendar)
+        #expect(day.start == at(3, 0) && day.end == at(4, 0))
+        #expect(StructuredWorkout.isInReplaceWindow(at(3, 18), window: day))
+        #expect(!StructuredWorkout.isInReplaceWindow(at(1, 18), window: day))
+    }
+}
+
+@Suite("Ramp before a work step's heart-rate alert")
+struct StructuredWorkoutRampTests {
+    let range = StructuredWorkout.HeartRateRange(lower: 150, upper: 170)
+
+    @Test func rampIsNinetySecondsOrHalfTheStep() {
+        #expect(StructuredWorkout.rampSeconds(forWorkSeconds: 240) == 90)
+        #expect(StructuredWorkout.rampSeconds(forWorkSeconds: 180) == 90)
+        #expect(StructuredWorkout.rampSeconds(forWorkSeconds: 120) == 60)
+        #expect(StructuredWorkout.rampSeconds(forWorkSeconds: 30) == 15)
+    }
+
+    @Test func splitKeepsTheLengthAndMovesTheAlertAfterTheRamp() {
+        for seconds in [1, 2, 30, 61, 120, 179, 240, 1800] {
+            let step = StructuredWorkout.Step(kind: .work, seconds: seconds, heartRate: range, name: "Hard")
+            let split = StructuredWorkout.withRamp(step)
+            #expect(split.reduce(0) { $0 + $1.seconds } == seconds)
+            #expect(split.last?.heartRate == range)
+            #expect(split.allSatisfy { $0.seconds > 0 && $0.kind == .work })
+            if split.count == 2 { #expect(split[0].heartRate == nil) }
+        }
+        // A one-second step can't be split.
+        #expect(StructuredWorkout.withRamp(.init(kind: .work, seconds: 1, heartRate: range, name: "Hard")).count == 1)
+    }
+
+    @Test func stepsWithoutAnAlertAreLeftAlone() {
+        let recovery = StructuredWorkout.Step(kind: .recovery, seconds: 180, name: "Easy")
+        #expect(StructuredWorkout.withRamp(recovery) == [recovery])
+        let noAlert = StructuredWorkout.Step(kind: .work, seconds: 240, name: "Hard")
+        #expect(StructuredWorkout.withRamp(noAlert) == [noAlert])
     }
 }

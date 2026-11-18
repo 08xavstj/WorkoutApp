@@ -13,6 +13,7 @@ struct AppleWorkoutTarget {
     var day: Date?
     /// A flexible week: any day left this week will do.
     var anyDay: Bool
+    var weekStart: Date
     var weekEnd: Date
     /// Minutes after midnight to start from (`StructuredWorkout.startMinutes`).
     var startMinutes: Int
@@ -21,6 +22,7 @@ struct AppleWorkoutTarget {
         self.workout = workout
         day = StructuredWorkout.day(weekday: weekday, weekStart: plan.weekStart, now: now, calendar: calendar)
         anyDay = weekday == nil
+        weekStart = plan.weekStart
         weekEnd = calendar.date(byAdding: .day, value: 7, to: plan.weekStart) ?? plan.weekStart.addingTimeInterval(7 * 86_400)
         startMinutes = StructuredWorkout.startMinutes(plan: plan, weekday: weekday)
     }
@@ -42,7 +44,8 @@ struct AppleWorkoutSection: View {
 
     init(target: AppleWorkoutTarget) {
         self.target = target
-        _date = State(initialValue: target.defaultDate())
+        // Never a time that has passed (the planned time today may be over).
+        _date = State(initialValue: max(target.defaultDate(), .now))
     }
 
     var body: some View {
@@ -81,11 +84,15 @@ struct AppleWorkoutSection: View {
 
     @ViewBuilder
     private func picker(day: Date) -> some View {
+        // From now at the earliest: Apple's app can't run a workout scheduled in the past.
+        let start = max(day, .now)
         if target.anyDay {
             let end = target.weekEnd.addingTimeInterval(-60)
-            DatePicker("Day and time", selection: $date, in: day...max(day, end), displayedComponents: [.date, .hourAndMinute])
+            DatePicker("Day and time", selection: $date, in: start...max(start, end), displayedComponents: [.date, .hourAndMinute])
         } else {
-            DatePicker("Time on \(day.formatted(.dateTime.weekday(.wide)))", selection: $date, displayedComponents: .hourAndMinute)
+            let end = (Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)).addingTimeInterval(-60)
+            DatePicker("Time on \(day.formatted(.dateTime.weekday(.wide)))", selection: $date, in: start...max(start, end),
+                       displayedComponents: .hourAndMinute)
         }
     }
 
@@ -114,7 +121,12 @@ struct AppleWorkoutSection: View {
             let parts = calendar.dateComponents([.hour, .minute], from: date)
             when = calendar.date(bySettingHour: parts.hour ?? 0, minute: parts.minute ?? 0, second: 0, of: day) ?? date
         }
-        outcome = await AppleWorkoutExport.add(target.workout, at: when)
+        guard when > .now, let day = target.day else {
+            outcome = .failed("That time has passed. Pick a later time.")
+            return
+        }
+        let window = StructuredWorkout.replaceWindow(anyDay: target.anyDay, day: day, weekStart: target.weekStart)
+        outcome = await AppleWorkoutExport.add(target.workout, at: when, replacing: window)
     }
 }
 

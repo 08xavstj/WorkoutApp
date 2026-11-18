@@ -81,8 +81,14 @@ enum AppleWorkoutExport {
     // MARK: Scheduling
 
     /// Asks for permission if needed, replaces a copy of the same session
-    /// already scheduled that day, and schedules it at `date`.
-    static func add(_ workout: StructuredWorkout, at date: Date, calendar: Calendar = .current) async -> Outcome {
+    /// already scheduled within `window` (`StructuredWorkout.replaceWindow`:
+    /// the week in a flexible week, else the day), and schedules it at `date`.
+    /// A time that has passed is refused.
+    static func add(_ workout: StructuredWorkout, at date: Date, replacing window: DateInterval,
+                    calendar: Calendar = .current) async -> Outcome {
+        guard date > .now else {
+            return .failed("That time has passed. Pick a later time.")
+        }
         if DemoHealth.active != nil {
             return .failed("Demo mode: nothing was sent to Apple's Workout app.")
         }
@@ -110,10 +116,12 @@ enum AppleWorkoutExport {
         @unknown default:
             return .failed("Apple's Workout app didn't allow it. Try again later.")
         }
-        // The same session already on that day (added before): replace it, so it isn't there twice.
+        // The same session already in the window (added before, maybe on another day of a
+        // flexible week): replace it, so it isn't there twice.
         for scheduled in await scheduler.scheduledWorkouts {
             guard case .custom(let existing) = scheduled.plan.workout, existing.displayName == custom.displayName,
-                  let day = calendar.date(from: scheduled.date), calendar.isDate(day, inSameDayAs: date) else { continue }
+                  let when = calendar.date(from: scheduled.date),
+                  StructuredWorkout.isInReplaceWindow(when, window: window) else { continue }
             await scheduler.remove(scheduled.plan, at: scheduled.date)
         }
         if await scheduler.scheduledWorkouts.count >= WorkoutScheduler.maxAllowedScheduledWorkoutCount {

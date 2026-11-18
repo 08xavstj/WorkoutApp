@@ -16,6 +16,9 @@ import Foundation
 ///   2019: see that file), so the wrist runs the same session either way.
 /// - Each work step carries the session's own bpm band (`IntervalSession+Zones`),
 ///   so Apple's alerts match Tensile's zones and the Watch's cardio mode.
+/// - Each work step starts with a ramp with no alert (`rampSeconds`): heart
+///   rate takes a minute or two to climb into the band, so an alert from the
+///   first second would fire for the lag. The rest of the step carries it.
 /// - Warm-up, recovery and cool-down get no alert. Heart rate lags effort by a
 ///   minute or two in each round (see `IntervalSession`), so an easy-band alert
 ///   in a three-minute recovery would mostly fire for the lag, not for going
@@ -146,6 +149,31 @@ public nonisolated struct StructuredWorkout: Sendable, Equatable {
     /// where it shouldn't fire. App's choice.
     public static let openBandTop = Int(HeartRateZoneScheme.plausibleRange.upperBound)
 
+    /// Longest ramp at the start of a work step, seconds. Heart rate lags
+    /// effort by a minute or two (see `IntervalSession`); 90 s is the app's
+    /// choice within that.
+    public static let maxRampSeconds = 90
+
+    /// The ramp for a work step of `seconds`: `maxRampSeconds`, at most half the step.
+    public static func rampSeconds(forWorkSeconds seconds: Int) -> Int {
+        min(maxRampSeconds, seconds / 2)
+    }
+
+    /// A work step with an alert, split into a ramp with no alert and the rest
+    /// of the step with it; the total length is kept. Any other step, or one
+    /// too short to split, is returned as it is.
+    public static func withRamp(_ step: Step) -> [Step] {
+        guard step.kind == .work, step.heartRate != nil else { return [step] }
+        let ramp = rampSeconds(forWorkSeconds: step.seconds)
+        guard ramp > 0, step.seconds - ramp > 0 else { return [step] }
+        var rest = step
+        rest.seconds = step.seconds - ramp
+        var start = step
+        start.seconds = ramp
+        start.heartRate = nil
+        return [start, rest]
+    }
+
     /// The alert range for `band` in `scheme`; nil without a band or a scheme.
     public static func heartRateRange(_ band: IntervalSession.Band, scheme: HeartRateZoneScheme?) -> HeartRateRange? {
         guard let scheme, let bpm = band.heartRateBand(in: scheme) else { return nil }
@@ -157,7 +185,7 @@ public nonisolated struct StructuredWorkout: Sendable, Equatable {
     }
 
     /// The interval session, with the bpm bands of the zones the user picked.
-    /// Work steps get their band as an alert; the rest none (see the type).
+    /// Work steps get their band as an alert after a ramp (`withRamp`); the rest none (see the type).
     /// A work step with the recovery after it is one unit; equal units in a
     /// row become one block (4 × 4: three rounds of hard + easy, then the last
     /// hard minutes on their own, since the cool-down follows them directly).
@@ -187,6 +215,8 @@ public nonisolated struct StructuredWorkout: Sendable, Equatable {
                 index += 1
             }
         }
+        // Ramps go in after grouping, so a work step and its ramp stay one unit.
+        units = units.map { $0.flatMap(withRamp) }
         var blocks: [Block] = []
         for unit in units {
             if let last = blocks.last, last.steps == unit {
@@ -200,7 +230,7 @@ public nonisolated struct StructuredWorkout: Sendable, Equatable {
                                  warmUp: warmUp, blocks: blocks, coolDown: coolDown)
     }
 
-    /// An easy session: one step of `minutes` at the easy band.
+    /// An easy session: one step of `minutes` at the easy band, after a ramp (`withRamp`).
     /// - Parameter indoor: on a gym machine (the gym has a bike for an easy
     ///   ride, a treadmill for an incline walk); a row is always indoors.
     public static func easy(_ kind: EasyCardio.Kind, minutes: Int, indoor: Bool, scheme: HeartRateZoneScheme?) -> StructuredWorkout {
@@ -209,7 +239,7 @@ public nonisolated struct StructuredWorkout: Sendable, Equatable {
                         name: "Easy · you can talk in full sentences")
         return StructuredWorkout(name: "\(kind.title) · \(minutes) min", activity: kind.structuredActivity,
                                  location: kind == .row || indoor ? .indoor : .outdoor,
-                                 warmUp: nil, blocks: [Block(steps: [step], iterations: 1)], coolDown: nil)
+                                 warmUp: nil, blocks: [Block(steps: withRamp(step), iterations: 1)], coolDown: nil)
     }
 
     // MARK: When
@@ -226,6 +256,20 @@ public nonisolated struct StructuredWorkout: Sendable, Equatable {
         guard let day = calendar.date(byAdding: .day, value: WeeklyPlan.order(weekday), to: weekStart) else { return nil }
         let start = calendar.startOfDay(for: day)
         return start >= today ? start : nil
+    }
+
+    /// Where an earlier copy of the same session is replaced when it's added
+    /// again: the whole week in a flexible week (it may have gone on another
+    /// day), else its own day. So a second add never leaves two copies.
+    public static func replaceWindow(anyDay: Bool, day: Date, weekStart: Date, calendar: Calendar = .current) -> DateInterval {
+        let start = calendar.startOfDay(for: anyDay ? weekStart : day)
+        let end = calendar.date(byAdding: .day, value: anyDay ? 7 : 1, to: start) ?? start.addingTimeInterval(anyDay ? 7 * 86_400 : 86_400)
+        return DateInterval(start: start, end: end)
+    }
+
+    /// Whether a copy scheduled at `scheduled` falls in `window` (end not included).
+    public static func isInReplaceWindow(_ scheduled: Date, window: DateInterval) -> Bool {
+        scheduled >= window.start && scheduled < window.end
     }
 
     /// Minutes after midnight to offer as the start time when no time is
