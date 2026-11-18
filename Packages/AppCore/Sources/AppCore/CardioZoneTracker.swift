@@ -264,8 +264,9 @@ public nonisolated struct CardioZoneTracker: Sendable, Equatable {
     public static let staleSeconds: TimeInterval = 30
 
     public let scheme: HeartRateZoneScheme
-    /// The band to hold, or nil with no target.
-    public let band: HeartRateBand?
+    /// The band to hold, or nil with no target. An interval session moves it
+    /// from step to step (`retarget`).
+    public private(set) var band: HeartRateBand?
 
     /// Seconds in zones 1-5 (index 0 = zone 1).
     public private(set) var zoneSeconds: [Double]
@@ -296,6 +297,15 @@ public nonisolated struct CardioZoneTracker: Sendable, Equatable {
     private var lastAlertAt: Date?
     private var isPaused = false
     private var weightedBpm = 0.0
+    /// No taps before this (just after `retarget`).
+    private var quietUntil: Date?
+
+    /// After a step of an interval session changes the band, no tap for this
+    /// long: heart rate lags effort by a minute or two in each round
+    /// (`IntervalSession`'s notes, Helgerud 2007), so a "too hard" tap at the
+    /// start of the easy minutes would be noise; the step's effort cue leads
+    /// instead. 60 s is the app's choice, at the short end of that lag.
+    public static let retargetQuietSeconds: TimeInterval = 60
 
     public init(scheme: HeartRateZoneScheme, target: CardioTarget = .off) {
         self.scheme = scheme
@@ -322,7 +332,28 @@ public nonisolated struct CardioZoneTracker: Sendable, Equatable {
         maximumBpm = max(maximumBpm ?? bpm, bpm)
         guard let band else { return nil }
         if let gap, gap > Self.staleSeconds { pending = nil }
+        // Just retargeted: heart rate is still catching up, so nothing is judged yet.
+        if let quietUntil, date < quietUntil {
+            pending = nil
+            return nil
+        }
         return step(side: band.side(of: bpm), at: date)
+    }
+
+    /// A new band from `date` (an interval session's next step; nil for none).
+    /// Time already counted stays in its zones, and time in the band from now
+    /// on counts against the new one. The band starts over as "settling", and
+    /// no tap comes for `quiet` seconds while heart rate catches up.
+    public mutating func retarget(_ newBand: HeartRateBand?, at date: Date, quiet: TimeInterval = retargetQuietSeconds) {
+        if !isPaused, let reading = last {
+            credit(until: date)
+            last = Reading(bpm: reading.bpm, date: max(reading.date, date))
+        }
+        band = newBand
+        pending = nil
+        lastAlertAt = nil
+        state = newBand == nil ? .off : .settling
+        quietUntil = quiet > 0 ? date.addingTimeInterval(quiet) : nil
     }
 
     /// The workout paused: the last reading counts up to now, and nothing after.

@@ -240,8 +240,8 @@ final class WatchWorkoutModel: NSObject {
         LocalLiftLog.clear()
     }
 
-    private func received(plan: WatchSession?, library: WatchExerciseLibrary?) {
-        if let plan { plannedSession = plan }
+    private func received(plan: WatchSession?, clearsPlan: Bool, library: WatchExerciseLibrary?) {
+        if plan != nil || clearsPlan { plannedSession = plan }
         if let library { self.library = library }
     }
 
@@ -1263,15 +1263,21 @@ extension WatchWorkoutModel: WCSessionDelegate {
         if let zones = WatchMessage.decode(HeartRateZoneScheme.self, from: session.receivedApplicationContext, key: WatchMessage.zones) {
             WatchZoneStore.save(zones)
         }
-        // Today's plan and the exercise library, for lifting with the phone away.
-        receivePlanAndLibrary(session.receivedApplicationContext)
+        // Today's plan, the exercise library and this week's hard cardio.
+        receiveContext(session.receivedApplicationContext)
     }
 
-    nonisolated private func receivePlanAndLibrary(_ payload: [String: Any]) {
-        let plan = WatchMessage.decode(WatchSession.self, from: payload, key: WatchMessage.plan)
-        let library = WatchMessage.decode(WatchExerciseLibrary.self, from: payload, key: WatchMessage.library)
-        guard plan != nil || library != nil else { return }
-        Task { @MainActor in self.received(plan: plan, library: library) }
+    /// The phone's whole application context (at activation, or a new one):
+    /// a key that's missing means the phone has none now (rest day, done).
+    nonisolated private func receiveContext(_ context: [String: Any]) {
+        let plan = WatchMessage.decode(WatchSession.self, from: context, key: WatchMessage.plan)
+        let library = WatchMessage.decode(WatchExerciseLibrary.self, from: context, key: WatchMessage.library)
+        let intervals = WatchMessage.decode(IntervalSession.self, from: context, key: WatchMessage.intervals)
+            .flatMap { $0.version <= IntervalSession.currentVersion ? $0 : nil }
+        Task { @MainActor in
+            self.received(plan: plan, clearsPlan: true, library: library)
+            WatchCardioModel.shared.received(intervals: intervals)
+        }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
@@ -1281,6 +1287,7 @@ extension WatchWorkoutModel: WCSessionDelegate {
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         receive(applicationContext)
+        receiveContext(applicationContext)
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
@@ -1307,7 +1314,6 @@ extension WatchWorkoutModel: WCSessionDelegate {
         if let zones = WatchMessage.decode(HeartRateZoneScheme.self, from: payload, key: WatchMessage.zones) {
             WatchZoneStore.save(zones)
         }
-        receivePlanAndLibrary(payload)
     }
 }
 

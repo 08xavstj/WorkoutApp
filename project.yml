@@ -206,6 +206,11 @@ targets:
       # two never disagree (Foundation only).
       - path: Packages/AppCore/Sources/AppCore/Glances.swift
       - path: WatchWidgets/PlanFace.swift
+      # This week's hard cardio session, run step by step on the wrist (Foundation
+      # and HeartRateZoneScheme.swift only).
+      - path: Packages/AppCore/Sources/AppCore/IntervalSession.swift
+      - path: Packages/AppCore/Sources/AppCore/IntervalSession+Zones.swift
+      - path: Packages/AppCore/Sources/AppCore/IntervalSession+Progress.swift
       - path: SharedCardio
     dependencies:
       - sdk: HealthKit.framework

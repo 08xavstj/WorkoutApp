@@ -76,6 +76,15 @@ final class WatchCardioModel: NSObject {
     private(set) var topSpeed: Double?
     /// The saved workout's UUID, for Handoff from the summary.
     private(set) var savedWorkoutID: UUID?
+    /// This week's hard cardio session as the phone sent it (`WatchMessage.intervals`).
+    private(set) var weeklyIntervals: IntervalSession?
+    /// The interval session this workout runs, step by step; nil for steady cardio.
+    private(set) var interval: IntervalSession?
+    /// The step running (index into `interval.steps`); `steps.count` once it's over.
+    private(set) var intervalStepIndex: Int?
+    /// Seconds added to the session's clock by "Skip step".
+    @ObservationIgnored private var intervalOffset: TimeInterval = 0
+    @ObservationIgnored private var intervalTask: Task<Void, Never>?
     /// Clears a timed banner.
     @ObservationIgnored private var bannerTask: Task<Void, Never>?
 
@@ -194,8 +203,9 @@ final class WatchCardioModel: NSObject {
 
     // MARK: Recording
 
-    /// Starts recording `activity`, holding heart rate to `target` if one is set.
-    func start(_ activity: CardioActivity, target chosenTarget: CardioTarget) async {
+    /// Starts recording `activity`, holding heart rate to `target` if one is set,
+    /// or to each step's band of `interval` (this week's hard session).
+    func start(_ activity: CardioActivity, target chosenTarget: CardioTarget, interval: IntervalSession? = nil) async {
         guard phase == .idle || phase == .ended else { return }
         // One workout at a time.
         let lifting = WatchWorkoutModel.shared
@@ -208,9 +218,13 @@ final class WatchCardioModel: NSObject {
         summary = nil
         savedWorkoutID = nil
         self.activity = activity
-        // Sports record with no target (`CardioActivity.takesTarget`).
-        let target = activity.takesTarget ? chosenTarget : .off
+        // Sports record with no target (`CardioActivity.takesTarget`). An interval
+        // session sets its own band per step instead.
+        let target = activity.takesTarget && interval == nil ? chosenTarget : .off
         self.target = target
+        self.interval = interval
+        intervalStepIndex = nil
+        intervalOffset = 0
         await requestAuthorization()
         let zones = await resolveZones()
         let configuration = HKWorkoutConfiguration()
@@ -256,6 +270,7 @@ final class WatchCardioModel: NSObject {
                               ? nil : LapTracker.autoLapMeters(miles: watchUsesMiles()))
             tracker = CardioZoneTracker(scheme: zones.scheme, target: target)
             zoneSource = zones.source
+            if interval != nil { startIntervalRunner() }
             startedAt = start
             runningSince = start
             phase = .running
@@ -435,6 +450,72 @@ final class WatchCardioModel: NSObject {
         WKInterfaceDevice.current().enableWaterLock()
     }
 
+    // MARK: Interval session
+
+    /// The session's clock: the workout's own, plus any skipped steps.
+    func intervalElapsed(at date: Date) -> TimeInterval? {
+        elapsed(at: date).map { $0 + intervalOffset }
+    }
+
+    /// The step running now and its timing; nil without a session or once it's over.
+    func intervalProgress(at date: Date) -> IntervalSession.Progress? {
+        guard let interval, let elapsed = intervalElapsed(at: date) else { return nil }
+        return interval.progress(at: elapsed)
+    }
+
+    /// Skip step: the next step starts now (its band, tap and banner come with it).
+    func skipIntervalStep() {
+        guard isActive, let interval, let elapsed = intervalElapsed(at: .now),
+              let skip = interval.skipSeconds(at: elapsed) else { return }
+        intervalOffset += skip
+        checkIntervalStep()
+    }
+
+    /// Checks the step once a second while the workout runs; the clock stands
+    /// still while paused, so the steps do too.
+    private func startIntervalRunner() {
+        intervalTask?.cancel()
+        checkIntervalStep()
+        intervalTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, self.isActive else { return }
+                self.checkIntervalStep()
+            }
+        }
+    }
+
+    /// A new step: its band becomes the target (`CardioZoneTracker.retarget`),
+    /// a `.start` tap for a hard step and `.stop` for an easier one (WKHapticType's
+    /// meanings), and a banner, as a buzz at every change helps (app's choice).
+    private func checkIntervalStep() {
+        guard let interval else { return }
+        let now = Date.now
+        let progress = intervalProgress(at: now)
+        let index = progress?.index ?? interval.steps.count
+        guard index != intervalStepIndex else { return }
+        let first = intervalStepIndex == nil
+        intervalStepIndex = index
+        guard let progress else {
+            tracker.retarget(nil, at: now, quiet: 0)
+            WKInterfaceDevice.current().play(.success)
+            showBanner("Session done · end when you're ready", seconds: nil)
+            return
+        }
+        let step = progress.step
+        // The first step starts with the workout: no extra quiet minute for it.
+        tracker.retarget(step.target.band.heartRateBand(in: tracker.scheme), at: now,
+                         quiet: first ? 0 : CardioZoneTracker.retargetQuietSeconds)
+        guard !first else { return }
+        WKInterfaceDevice.current().play(step.phase.isHard ? .start : .stop)
+        showBanner("\(step.title(rounds: interval.rounds)) · \(step.lengthText)", seconds: Self.bannerSeconds)
+    }
+
+    /// This week's session from the phone (nil: none planned or it's done).
+    func received(intervals: IntervalSession?) {
+        weeklyIntervals = intervals
+    }
+
     /// Whether this activity has laps: distance activities and sports (as periods).
     var hasLaps: Bool {
         activity.movement != .stationary || activity.category == .sport
@@ -497,6 +578,8 @@ final class WatchCardioModel: NSObject {
             summary.hasRoute = true
         }
         self.summary = summary
+        intervalTask?.cancel()
+        intervalTask = nil
         WatchHistoryStore.save(WatchActivityRecord(
             kind: .cardio, title: activity.title, start: startedAt ?? end, end: end,
             minutes: max(1, Int(active / 60)), detail: Self.historyDetail(summary),
@@ -517,6 +600,8 @@ final class WatchCardioModel: NSObject {
     /// Stops without saving anything.
     func discard() {
         guard isActive, !isEnding else { return }
+        intervalTask?.cancel()
+        intervalTask = nil
         isAutoPaused = false
         bannerTask?.cancel()
         banner = nil
@@ -593,6 +678,8 @@ final class WatchCardioModel: NSObject {
     private func fail(_ message: String) {
         guard isBusy, !isEnding else { return }
         problem = "Recording stopped: \(message)"
+        intervalTask?.cancel()
+        intervalTask = nil
         isAutoPaused = false
         banner = nil
         route?.discard()

@@ -34,6 +34,10 @@ struct HomeView: View {
                         }
                     }
                     QuickStartTiles(showingPicker: $showingPicker)
+                    if let session = cardio.weeklyIntervals,
+                       let activity = CardioActivity(rawValue: session.modality.watchActivity) {
+                        HardCardioCard(session: session, activity: activity)
+                    }
                     NavigationLink {
                         ActivityPickerView()
                     } label: {
@@ -377,6 +381,48 @@ private struct QuickStartTiles: View {
         .frame(maxWidth: .infinity, minHeight: Self.height)
         .background(tint, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+// MARK: Hard cardio
+
+/// This week's hard cardio session from the phone ("4 × 4 min · Bike"),
+/// started in cardio mode and run step by step (Helgerud 2007, Wen 2019:
+/// `IntervalSession`).
+private struct HardCardioCard: View {
+    @Environment(WatchCardioModel.self) private var cardio
+    @Environment(WatchWorkoutModel.self) private var model
+    let session: IntervalSession
+    let activity: CardioActivity
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("Hard cardio this week", systemImage: "bolt.heart.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(WatchPalette.heart)
+            Text(session.title)
+                .font(.headline)
+            Text("\(session.totalMinutes) min · \(session.hardMinutes) hard")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button {
+                let session = session
+                let activity = activity
+                Task { await cardio.start(activity, target: .off, interval: session) }
+            } label: {
+                Label("Start", systemImage: "play.fill")
+                    .font(.headline)
+                    .foregroundStyle(WatchPalette.onTint)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(WatchPalette.heart, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(model.phase == .starting || cardio.phase == .starting)
+            .accessibilityLabel("Start \(session.title)")
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

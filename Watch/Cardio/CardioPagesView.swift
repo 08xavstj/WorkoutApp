@@ -18,7 +18,10 @@ struct CardioPagesView: View {
     @State private var metric: CardioMetricPage = .main
 
     private var pages: [CardioMetricPage] {
-        CardioPageSettings.shown(for: cardio.activity, hasTarget: cardio.tracker.band != nil)
+        var pages = CardioPageSettings.shown(for: cardio.activity, hasTarget: cardio.interval != nil || cardio.tracker.band != nil)
+        // An interval session always has its page, right after Main.
+        if cardio.interval != nil, !pages.contains(.target) { pages.insert(.target, at: min(1, pages.count)) }
+        return pages
     }
 
     var body: some View {
@@ -47,5 +50,7 @@ struct CardioPagesView: View {
         .onChange(of: pages, initial: true) {
             if !pages.contains(metric) { metric = pages.first ?? .main }
         }
+        // An interval session opens on its step.
+        .onAppear { if cardio.interval != nil { metric = .target } }
     }
 }

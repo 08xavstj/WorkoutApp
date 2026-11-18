@@ -67,6 +67,7 @@ final class WatchSync: NSObject {
     @ObservationIgnored private var lastPlan: WatchSession?
     @ObservationIgnored private var lastPlanKey: String?
     @ObservationIgnored private var lastLibrary: [WatchSession.ExerciseSnapshot]?
+    @ObservationIgnored private var lastIntervals: IntervalSession??
 
     /// Called once from the root view, so commands can reach the database.
     func configure(context: ModelContext, gym: GymStore, launcher: WorkoutLauncher, health: HealthKitClient?,
@@ -380,6 +381,23 @@ final class WatchSync: NSObject {
                                            weightStepKg: profile.unit == .kg ? 2.5 : profile.unit.toKilograms(5), sentAt: .now)
         guard let data = WatchMessage.encode(library) else { return }
         updateContext(key: WatchMessage.library, data: data)
+    }
+
+    /// This week's hard cardio session (`HardCardio`), so the Watch can run it
+    /// step by step (`WatchMessage.intervals`); nil when none is planned, it's
+    /// done, or rest mode or a deload week blocks it. Sends only on change.
+    func updateIntervals(_ session: IntervalSession?) {
+        guard let connection, connection.activationState == .activated,
+              connection.isPaired, connection.isWatchAppInstalled else { return }
+        if let lastIntervals, lastIntervals == session { return }
+        lastIntervals = .some(session)
+        if let session, let data = session.encoded() {
+            updateContext(key: WatchMessage.intervals, data: data)
+        } else {
+            var context = connection.applicationContext
+            context[WatchMessage.intervals] = nil
+            try? connection.updateApplicationContext(context)
+        }
     }
 
     /// One exercise for a plan or the library: makeable loads around `planned`,

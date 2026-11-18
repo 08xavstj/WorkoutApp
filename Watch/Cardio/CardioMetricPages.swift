@@ -23,7 +23,7 @@ struct CardioMetricPageView: View {
         case .speed: CardioSpeedPage()
         case .elevation: CardioElevationPage()
         case .splits: CardioSplitsPage()
-        case .target: CardioTargetPage()
+        case .target: CardioTargetOrIntervalPage()
         }
     }
 }
@@ -387,6 +387,94 @@ private struct CardioSplitsPage: View {
 }
 
 // MARK: Target
+
+/// The Target page, or with an interval session the Interval page.
+private struct CardioTargetOrIntervalPage: View {
+    @Environment(WatchCardioModel.self) private var cardio
+
+    var body: some View {
+        if cardio.interval != nil {
+            CardioIntervalPage()
+        } else {
+            CardioTargetPage()
+        }
+    }
+}
+
+/// An interval session's step: "Hard 2 of 4", the time left in the step as a
+/// ring, the step's band and effort cue, heart rate against it, and Skip step
+/// (a 44 pt button; no double tap on these vertical pages, HIG Gestures).
+private struct CardioIntervalPage: View {
+    @Environment(WatchCardioModel.self) private var cardio
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            if let interval = cardio.interval, let progress = cardio.intervalProgress(at: context.date) {
+                let step = progress.step
+                let tint = step.phase.isHard ? WatchPalette.heart : WatchPalette.easy
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .center, spacing: 8) {
+                        ZStack {
+                            Circle().stroke(WatchPalette.track, lineWidth: 6)
+                                .hiddenWhenLuminanceReduced()
+                            RingArc(fraction: progress.fractionLeft)
+                                .stroke(tint, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                                .dimmedWhenLuminanceReduced()
+                            Text(watchClock(Double(progress.remaining)))
+                                .font(.headline)
+                                .monospacedDigit()
+                                .minimumScaleFactor(0.9)
+                        }
+                        .frame(width: 64, height: 64)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(progress.remaining) seconds left in this step")
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(step.title(rounds: interval.rounds))
+                                .font(.headline)
+                                .foregroundStyle(tint)
+                            Text(step.target.band.text(in: cardio.tracker.scheme))
+                                .font(.footnote)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    Text(step.target.effortText)
+                        .font(.footnote.weight(.semibold))
+                    Text(step.target.cue)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .hiddenWhenLuminanceReduced()
+                    Spacer(minLength: 0)
+                    HStack {
+                        HeartLine(role: .tertiary)
+                        Button {
+                            cardio.skipIntervalStep()
+                        } label: {
+                            Label("Skip step", systemImage: "forward.fill")
+                                .font(.footnote.weight(.semibold))
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(cardio.phase != .running)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Session done", systemImage: "checkmark.seal.fill")
+                        .font(.headline)
+                        .foregroundStyle(WatchPalette.recovery)
+                    Text("Keep moving easily, and end the workout from Controls when you're ready.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    HeartLine(role: .secondary)
+                }
+            }
+        }
+    }
+}
 
 /// The target band as a vertical gauge with heart rate as a marker, where it
 /// stands in words, and the time inside the band.

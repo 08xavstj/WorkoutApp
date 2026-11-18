@@ -559,6 +559,17 @@ struct RootView: View {
         WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd, glance: glancePlan())
         updateWatchPlan(lastWorkoutEnd: lastWorkoutEnd)
         WatchSync.shared.updateLibrary(sessions: Array(sessions.prefix(30)))
+        // This week's hard cardio, unless blocked (rest mode, deload) or already done.
+        let hard = weeklyPlans.current.flatMap { plan -> IntervalSession? in
+            guard HardCardio.blocker(plan: plan, goals: metrics.goals, restMode: settings.isRestMode,
+                                     isDeloadWeek: weeklyPlans.blockWeek?.isDeload ?? false) == nil,
+                  let slot = HardCardio.slot(for: plan, goals: metrics.goals),
+                  !HardCardio.weekDone(plan: plan, goals: metrics.goals,
+                                       workouts: WeeklyPlanStore.cardioWorkouts(muscles: muscles, metrics: metrics)).hard
+            else { return nil }
+            return slot.session
+        }
+        WatchSync.shared.updateIntervals(hard)
     }
 
     /// [Watch] Today's planned lifting session, sent ahead so the Watch can run it
