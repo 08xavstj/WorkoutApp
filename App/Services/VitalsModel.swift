@@ -111,6 +111,9 @@ final class VitalsModel {
     /// A hypertension notification still waiting for the 7-day home check
     /// (`HomeBloodPressure.pendingHypertensionEvent`); nil when none.
     private(set) var hypertensionPromptDate: Date?
+    /// Apple Watch's own high, low and irregular-rhythm notifications in the
+    /// last 30 days (W5; `VitalsModel+NewMeasures`), for one line in Heart.
+    private(set) var heartEvents: HeartEvents.Counts?
     /// One line for the Health tab when a core read (resting heart rate, VO₂
     /// max, heart rate, steps, weight) threw on the last refresh; nil when
     /// they all answered (an empty answer is not a failure). The extras added
@@ -257,6 +260,9 @@ final class VitalsModel {
         async let healthSymptoms = health.reportedSymptoms(from: calendar.date(byAdding: .day, value: -3, to: today) ?? today, to: now)
         async let hypertension = health.hypertensionEvents(since: calendar.date(byAdding: .day, value: -HomeBloodPressure.hypertensionPromptDays, to: today) ?? today)
         async let cuffReadings = health.bloodPressureReadings(days: 90)
+        // Walking speed (iPhone) and Apple's heart events (HealthKitClient+HeartEventsAndMobility).
+        async let walkingSpeed = health.walkingSpeed(days: 90)
+        async let heartEventCounts = health.heartEventCounts()
 
         func get(_ value: [DatedValue]?) -> [DatedValue] { value ?? [] }
         // Reads that throw are logged; the core ones also set `readProblem`.
@@ -502,6 +508,10 @@ final class VitalsModel {
         let hearing: HearingExposure.Result?
         do { hearing = try await health.weeklyHeadphoneExposure() } catch { failed("headphone exposure", error); hearing = nil }
         result.append(Self.hearingStat(hearing, today: today))
+        let walkingSpeedSeries: [DatedValue]
+        do { walkingSpeedSeries = try await walkingSpeed } catch { failed("walking speed", error); walkingSpeedSeries = [] }
+        result.append(Self.walkingSpeedStat(series: walkingSpeedSeries, age: settings.age, miles: miles, now: now))
+        do { heartEvents = try await heartEventCounts } catch { failed("heart events", error); heartEvents = nil }
 
         // MARK: Body
         let unit = settings.weightUnit

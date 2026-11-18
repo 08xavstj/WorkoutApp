@@ -214,7 +214,10 @@ enum DemoData {
         let store = BodyMeasurementsStore()
         store.addWaist(centimeters: 89, date: demo.day(62))
         store.addWaist(centimeters: 87.5, date: demo.day(33))
-        store.addWaist(centimeters: 86, date: demo.day(4))
+        store.addWaist(centimeters: 86, hipCentimeters: 99, date: demo.day(4))
+        // Two DEXA scans (I9): visceral fat falling on a cut, lean mass holding.
+        store.addDexa(vat: 560, vatUnit: .grams, appendicularLeanKg: 27.1, heightCm: demo.heightCm, date: demo.day(170))
+        store.addDexa(vat: 480, vatUnit: .grams, appendicularLeanKg: 27.4, heightCm: demo.heightCm, date: demo.day(21))
         // The dominant hand only, as grip norms use (Dodds et al. 2014).
         store.addGrip(kilograms: 47, hand: .right, date: demo.day(40))
     }
@@ -230,6 +233,9 @@ enum DemoData {
             LabResult(name: "Vitamin D (25-OH)", markerID: "vitaminD", value: 24, unit: "ng/mL", referenceLow: 30,
                       referenceHigh: 100, date: date, panel: "Vitamins"),
         ])
+        // ApoB and Lp(a) as if imported from Health Records earlier (`DemoHealth.labResultRecords`).
+        let labs = LabsModel()
+        _ = labs.importHealthRecords(demo.labResultRecords().filter { DemoHealth.importedRecordIDs.contains($0.identifier) }, sex: .male)
     }
 
     // MARK: Workouts

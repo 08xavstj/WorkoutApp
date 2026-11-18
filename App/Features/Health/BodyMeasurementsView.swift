@@ -1,8 +1,10 @@
 import SwiftUI
 import AppCore
 
-/// Waist (and waist-to-height ratio), grip strength and the STOP-Bang sleep
-/// apnoea screen: typed in by hand, on their own slow cadences.
+/// Waist (and waist-to-height ratio, hip optional), DEXA scan numbers, grip
+/// strength and the STOP-Bang sleep apnoea screen: typed in by hand, on their
+/// own slow cadences. Waist is also written to Apple Health, and other apps'
+/// waist readings are read back (`BodyMeasurementsStore.refreshFromHealth`).
 ///
 /// Pushed from Health › Records (`pushed: true`); a root sheet from the Log
 /// tab, reminders and workoutapp://measurements. Histories and the STOP-Bang
@@ -13,6 +15,7 @@ struct BodyMeasurementsView: View {
     @Environment(DailyMetricsModel.self) private var metrics
     @Environment(UserSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.healthClient) private var health
     @State private var showingStopBang = false
     @State private var history: VitalsModel.Stat?
     /// True when pushed onto another NavigationStack.
@@ -27,6 +30,8 @@ struct BodyMeasurementsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     WaistCard(heightCm: heightCm, goals: metrics.goals) { history = $0 }
+                    // Beside waist-to-height (I9): visceral fat and ALMI from a scan report.
+                    DexaCard(heightCm: heightCm)
                     GripCard(age: settings.age, sex: settings.sex) { history = $0 }
                     StopBangSummaryCard { showingStopBang = true }
                     Text("Measurements you take yourself. They track change; none of them is a diagnosis.")
@@ -37,6 +42,9 @@ struct BodyMeasurementsView: View {
                 .lockedToScreenWidth()
             }
             .background(Theme.background)
+            .task {
+                if let health { await store.refreshFromHealth(health) }
+            }
             .navigationTitle("Body measurements")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -69,7 +77,9 @@ struct WaistCard: View {
     let heightCm: Double?
     let goals: Goals?
     let openHistory: (VitalsModel.Stat) -> Void
+    @Environment(\.healthClient) private var health
     @State private var value: Double?
+    @State private var hip: Double?
     /// Follows the app's weight unit (kg → cm, lb → in), not the phone's region.
     @State private var unit: LengthUnit = .centimeters
     @State private var unitChosen = false
@@ -92,13 +102,17 @@ struct WaistCard: View {
             if let latest = store.latestWaist {
                 WaistReading(latest: latest, ratio: ratio, heightCm: heightCm, unit: unit, goals: goals)
             }
+            if let hipRatio = store.waistToHipRatio {
+                WaistToHipLine(ratio: hipRatio, sex: settings.sex)
+            }
             entryRow
+            hipRow
             if store.waistSeries.count > 1 {
                 Button("Waist history") { openHistory(WaistCard.stat(series: store.waistSeries, unit: unit, heightCm: heightCm)) }
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.nutrition)
             }
-            Text("Tape at navel height, standing relaxed, after a normal breath out; same time of day each month. Waist under half your height (ratio under 0.5) is the target: it picks out heart and diabetes risk better than BMI and isn't fooled by muscle (Ashwell et al., Obes Rev 2012).")
+            Text("Tape at navel height, standing relaxed, after a normal breath out; same time of day each month. Waist under half your height (ratio under 0.5) is the target: it picks out heart and diabetes risk better than BMI and isn't fooled by muscle (Ashwell et al., Obes Rev 2012). Hip is optional, at the widest point. Waist is saved to Apple Health too, and readings other apps save there show here.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -137,16 +151,39 @@ struct WaistCard: View {
         }
     }
 
+    /// Optional hip, saved with the next waist.
+    private var hipRow: some View {
+        HStack(spacing: 10) {
+            TextField(unit == .centimeters ? "Hip, cm" : "Hip, in", value: $hip, format: .number.precision(.fractionLength(0...1)))
+                .keyboardType(.decimalPad)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: fieldWidth * 1.3)
+                .accessibilityLabel("Hip in \(unit == .centimeters ? "centimetres" : "inches"), optional")
+            Text("optional")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+            Spacer()
+        }
+    }
+
     private var isValid: Bool {
         guard let value else { return false }
         let cm = unit.toCentimeters(value)
-        return cm > 40 && cm < 200
+        guard cm > 40 && cm < 200 else { return false }
+        guard let hip else { return true }
+        let hipCm = unit.toCentimeters(hip)
+        return hipCm > 50 && hipCm < 220
     }
 
     private func save() {
         guard let value, isValid else { return }
-        store.addWaist(centimeters: unit.toCentimeters(value))
+        let entry = store.addWaist(centimeters: unit.toCentimeters(value), hipCentimeters: hip.map { unit.toCentimeters($0) })
         self.value = nil
+        hip = nil
+        // One source of truth (I10): the typed waist goes to Apple Health as well.
+        if let entry, let health {
+            Task { try? await health.saveWaist(centimeters: entry.centimeters, date: entry.date) }
+        }
     }
 
     /// The history stat for `VitalDetailView`: one point per measurement, in the chosen unit, with the 0.5 line as the goal.
@@ -180,7 +217,7 @@ private struct WaistReading: View {
                     .fontDesign(.rounded)
                     .monospacedDigit()
                     .foregroundStyle(Theme.primaryText)
-                Text(latest.date.formatted(date: .abbreviated, time: .omitted))
+                Text(latest.date.formatted(date: .abbreviated, time: .omitted) + (latest.fromHealth == true ? " · from Apple Health" : ""))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -215,6 +252,180 @@ private struct WaistReading: View {
         case .healthy: Theme.recoveryHigh
         case .raised: Theme.recoveryModerate
         case .high: Theme.recoveryLow
+        }
+    }
+}
+
+/// Waist-to-hip under waist-to-height, only when a hip was typed (WHO 2008 lines).
+private struct WaistToHipLine: View {
+    let ratio: Double
+    let sex: BiologicalSex
+
+    var body: some View {
+        let raised = WaistToHipRatio.isRaised(ratio, sex: sex)
+        let line = WaistToHipRatio.threshold(sex: sex).formatted(.number.precision(.fractionLength(2)))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Waist-to-hip \(ratio.formatted(.number.precision(.fractionLength(2))))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                Chip(text: raised ? "Raised" : "Under \(line)", color: raised ? Theme.recoveryModerate : Theme.recoveryHigh)
+            }
+            Text("WHO puts raised risk at \(line) or more for \(sex == .male ? "men" : "women") (WHO 2008). Waist-to-height is the main number here; this is a second view of the same tape.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - DEXA
+
+/// Visceral fat and appendicular lean mass from a DEXA report (I9), typed in
+/// after a scan. VAT shows its change between scans and is never graded
+/// (one cohort, no agreed cut-off; Cesaro 2026). ALMI is read against the
+/// EWGSOP2 low-muscle line (`DexaMeasures`).
+struct DexaCard: View {
+    @Environment(BodyMeasurementsStore.self) private var store
+    @Environment(UserSettings.self) private var settings
+    let heightCm: Double?
+    @State private var entering = false
+    @State private var vat: Double?
+    @State private var vatUnit: DexaMeasures.VATUnit = .grams
+    @State private var lean: Double?
+    @State private var date = Date.now
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                CardLabel(text: "DEXA scan", color: Theme.nutrition)
+                Spacer()
+                Text("Optional")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if let scan = store.latestDexa {
+                DexaReading(scan: scan, previousVAT: store.previousVAT, sex: settings.sex)
+            } else if !entering {
+                Text("Had a body-composition scan? Add visceral fat and arm-and-leg lean mass from the report. Once a year at most is plenty.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if entering {
+                entryFields
+            } else {
+                Button(store.latestDexa == nil ? "Add scan results" : "Add a new scan") { entering = true }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.nutrition)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("dexa-add")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(tint: Theme.nutrition)
+    }
+
+    private var entryFields: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                TextField("Visceral fat", value: $vat, format: .number.precision(.fractionLength(0...1)))
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Visceral fat, \(vatUnit == .grams ? "grams" : "square centimetres")")
+                Picker("Unit", selection: $vatUnit) {
+                    ForEach(DexaMeasures.VATUnit.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 120)
+            }
+            HStack(spacing: 10) {
+                TextField("Arm + leg lean mass", value: $lean, format: .number.precision(.fractionLength(0...1)))
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Appendicular lean mass in kilograms")
+                Text("kg")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            DatePicker("Scan date", selection: $date, in: ...Date.now, displayedComponents: .date)
+                .font(.subheadline)
+            Text("Reports call it \"appendicular lean mass\" or list arms and legs separately: add both arms and both legs. Some print ALMI (or \"RSMI\") directly; this works it out from your height\(heightCm == nil ? ", so add your height in Settings first" : "").")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Cancel") { reset() }
+                    .foregroundStyle(Theme.secondaryText)
+                Spacer()
+                Button("Save") {
+                    store.addDexa(vat: vat, vatUnit: vatUnit, appendicularLeanKg: lean, heightCm: heightCm, date: date)
+                    reset()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.nutrition)
+                .disabled(vat == nil && lean == nil)
+            }
+        }
+    }
+
+    private func reset() {
+        entering = false
+        vat = nil
+        lean = nil
+        date = .now
+    }
+}
+
+private struct DexaReading: View {
+    let scan: BodyMeasurementsStore.DexaEntry
+    let previousVAT: Double?
+    let sex: BiologicalSex
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Scan of \(scan.date.formatted(date: .abbreviated, time: .omitted))")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+            if let vat = scan.vat, let unit = scan.vatUnit {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text("Visceral fat \(vat.formatted(.number.precision(.fractionLength(0)))) \(unit.rawValue)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.primaryText)
+                        if let change = DexaMeasures.vatChange(latest: vat, previous: previousVAT, unit: unit) {
+                            Chip(text: change, color: Theme.secondaryText)
+                        }
+                    }
+                    Text(DexaMeasures.vatText)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let almi = scan.almi {
+                let reading = DexaMeasures.reading(almi: almi, sex: sex)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text("ALMI \(almi.formatted(.number.precision(.fractionLength(1)))) kg/m²")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.primaryText)
+                        Chip(text: reading == .below ? "Below line" : "Above line",
+                             color: reading == .below ? Theme.recoveryModerate : Theme.recoveryHigh)
+                    }
+                    Text(DexaMeasures.almiText(almi, sex: sex))
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if scan.appendicularLeanKg != nil {
+                Text("Add your height in Settings to see the lean mass index.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
         }
     }
 }

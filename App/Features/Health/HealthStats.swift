@@ -23,8 +23,47 @@ struct HealthExtraStats {
             result.append(proteinStat(protein))
         }
         result.append(waistStat)
+        // DEXA numbers beside waist-to-height (I9), only once a scan is entered.
+        result.append(contentsOf: dexaStats)
         result.append(gripStat)
         return result
+    }
+
+    /// Visceral fat (ungraded, Cesaro 2026) and ALMI (EWGSOP2 line) from typed scans.
+    var dexaStats: [VitalsModel.Stat] {
+        let scans = measurements.dexaEntries
+        var stats: [VitalsModel.Stat] = []
+        // Only scans in the latest scan's VAT unit are comparable.
+        let vatUnit = scans.last { $0.vat != nil }?.vatUnit
+        let vatScans = scans.filter { $0.vat != nil && $0.vatUnit == vatUnit }
+        if let last = vatScans.last, let vat = last.vat, let unit = last.vatUnit {
+            var stat = VitalsModel.Stat(
+                id: "vat", category: .body, title: "Visceral fat (DEXA)", icon: "circle.dashed.inset.filled",
+                value: vat.formatted(.number.precision(.fractionLength(0))), unit: unit.rawValue,
+                status: DexaMeasures.vatChange(latest: vat, previous: vatScans.dropLast().last?.vat, unit: unit) ?? "Not graded",
+                tone: .neutral,
+                series: vatScans.compactMap { scan in scan.vat.map { DatedValue(date: scan.date, value: $0) } }
+            )
+            stat.defaultDays = 730
+            stat.about = DexaMeasures.vatText
+            stats.append(stat)
+        }
+        let almiScans = scans.filter { $0.almi != nil }
+        if let last = almiScans.last, let almi = last.almi {
+            let reading = DexaMeasures.reading(almi: almi, sex: settings.sex)
+            var stat = VitalsModel.Stat(
+                id: "almi", category: .body, title: "Lean mass index (DEXA)", icon: "figure.strengthtraining.functional",
+                value: almi.formatted(.number.precision(.fractionLength(1))), unit: "kg/m²",
+                status: reading.rawValue, tone: reading == .below ? .caution : .good,
+                series: almiScans.compactMap { scan in scan.almi.map { DatedValue(date: scan.date, value: $0) } }
+            )
+            stat.digits = 1
+            stat.defaultDays = 730
+            stat.goal = DexaMeasures.lowALMI(sex: settings.sex)
+            stat.about = DexaMeasures.almiText(almi, sex: settings.sex)
+            stats.append(stat)
+        }
+        return stats
     }
 
     /// Every stat of a category: `VitalsModel`'s, then Health's own.

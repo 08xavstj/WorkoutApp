@@ -49,6 +49,8 @@ struct MoodView: View {
             MoodChartCard(samples: checkIns.moods)
             // PHQ-9 / GAD-7: the offer when it applies, then past results (`MoodQuestionnaires`).
             MoodScreenCard()
+            // The optional 3-item loneliness check every 3 months (I6), only when switched on.
+            SocialConnectionCard()
             MoodListCard(samples: checkIns.moods)
             Text("From Apple Health (any app that logs State of Mind) and your check-ins. Short sleep reliably lowers mood (Palmer et al. 2024, 154 experiments) and exercise lifts it (Heissel et al. 2023); when your own data shows those links, they appear under What affects you. Tracking mood by itself has weak evidence of helping; its value here is as a signal.")
                 .font(Theme.Typography.context)

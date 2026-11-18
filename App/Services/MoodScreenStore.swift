@@ -20,13 +20,74 @@ final class MoodScreenStore {
     private static let lastOfferedKey = "moodScreens.lastOffered"
     private static let dismissedKey = "moodScreens.dismissed"
 
+    // MARK: Social connection check (I6)
+
+    /// 3-item UCLA Loneliness Scale results (`SocialConnectionCheck`), oldest first.
+    private(set) var socialResults: [SocialConnectionCheck.Result] = []
+    /// Settings › Mood › "Social connection check": off by default.
+    private(set) var socialCheckOn: Bool
+    @ObservationIgnored private var canSaveSocial = false
+    @ObservationIgnored private let socialFile = SafeJSONFile.appSupport("social-connection.json")
+    static let socialCheckOnKey = "socialCheck.on"
+
     private init() {
         turnedOff = UserDefaults.standard.bool(forKey: Self.turnedOffKey)
+        socialCheckOn = UserDefaults.standard.bool(forKey: Self.socialCheckOnKey)
         reload()
+        reloadSocial()
+    }
+
+    /// Newest first.
+    var socialHistory: [SocialConnectionCheck.Result] { socialResults.sorted { $0.date > $1.date } }
+
+    var socialCheckDue: Bool {
+        SocialConnectionCheck.isDue(enabled: socialCheckOn, lastTaken: socialResults.map(\.date).max())
+    }
+
+    func setSocialCheckOn(_ on: Bool) {
+        socialCheckOn = on
+        UserDefaults.standard.set(on, forKey: Self.socialCheckOnKey)
+    }
+
+    func addSocial(_ result: SocialConnectionCheck.Result) {
+        guard result.isComplete else { return }
+        if !canSaveSocial { reloadSocial() }
+        socialResults.append(result)
+        guard !DemoMode.isOn else { return }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        socialFile.saveLogged(socialResults, canSave: canSaveSocial, encoder: encoder)
+    }
+
+    func deleteSocial(_ result: SocialConnectionCheck.Result) {
+        if !canSaveSocial { reloadSocial() }
+        socialResults.removeAll { $0.id == result.id }
+        guard !DemoMode.isOn else { return }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        socialFile.saveLogged(socialResults, canSave: canSaveSocial, encoder: encoder)
+    }
+
+    private func reloadSocial() {
+        // Demo mode: switched on with one earlier answer, saved nowhere, so the tour shows the card.
+        if DemoMode.isOn {
+            canSaveSocial = false
+            socialCheckOn = true
+            if let demo = DemoHealth.active, socialResults.isEmpty {
+                socialResults = [SocialConnectionCheck.Result(date: demo.day(40), answers: [1, 2, 1])]
+            }
+            return
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let loaded = socialFile.loadLogged([SocialConnectionCheck.Result].self, decoder: decoder)
+        canSaveSocial = loaded.state.canSave
+        if canSaveSocial { socialResults = loaded.value ?? [] }
     }
 
     func reloadIfUnavailable() {
         if !canSave { reload() }
+        if !canSaveSocial { reloadSocial() }
     }
 
     /// Newest first.

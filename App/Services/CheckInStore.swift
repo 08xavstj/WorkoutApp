@@ -229,6 +229,12 @@ final class CheckInStore {
             }
         }
 
+        // Mindful minutes from Apple Health (W11), by day. People with none on
+        // record get nil, so the factor never appears for them.
+        let mindfulByDay = (try? await health.mindfulMinutesByDay(days: 91)) ?? [:]
+        var mindfulByKey: [String: Double] = [:]
+        for (day, minutes) in mindfulByDay { mindfulByKey[key(day), default: 0] += minutes }
+
         var days: [CheckInDay] = []
         for offset in 0..<90 {
             guard let morning = calendar.date(byAdding: .day, value: -offset, to: today),
@@ -256,7 +262,8 @@ final class CheckInStore {
                 trainedYesterday: trainingDays.contains(key(previous)),
                 strainYesterday: saved.strains?[key(previous)],
                 usualTrainingStrain: saved.usualTrainingStrain,
-                sleepDebtHours: debtByMorning[key(morning)]
+                sleepDebtHours: debtByMorning[key(morning)],
+                mindfulMinutesYesterday: mindfulByKey.isEmpty ? nil : (mindfulByKey[key(previous)] ?? 0)
             ))
         }
         alcoholFindings = AlcoholEffect.compare(alcoholNights)
