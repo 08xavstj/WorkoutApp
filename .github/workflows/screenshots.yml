@@ -22,7 +22,7 @@ jobs:
   shots:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screens]')
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 80  # the tour now covers ~120 screens; printing them needs the extra minutes
     steps:
       - uses: actions/checkout@v4
 
