@@ -401,7 +401,7 @@ private enum SummaryFormat {
         let set = "\(weight(best.weightKg, unit)) × \(best.reps)"
         guard result.estimatedOneRepMaxKg > 0 else { return "Best \(set)" }
         let estimate = weight(result.estimatedOneRepMaxKg.rounded(), unit)
-        return "Best \(set) · est. 1RM \(estimate)"
+        return "Best \(set) · est. 1RM \(OneRepMax.symbol) \(estimate)"
     }
 
     /// "vs 3 Nov: volume ▲ 120 kg · 1RM ▲ 2.5 kg".
@@ -849,7 +849,7 @@ private struct SummaryGoalsCard: View {
     private func detail(_ goal: SummaryGoal) -> String {
         let current = LiftGoalHistory.weightText(goal.currentKg, unit: unit)
         let target = LiftGoalHistory.weightText(goal.targetKg, unit: unit)
-        var text = "Est. 1RM \(current) of \(target)"
+        var text = "Est. 1RM \(OneRepMax.symbol) \(current) of \(target)"
         if let change = goal.changeKg {
             let moved = SummaryFormat.delta(change, unit)
             text += moved == "Same" ? " · same as last time" : " · \(moved) since last time"
@@ -865,7 +865,7 @@ private struct SummaryNotes: View {
     var body: some View {
         // Epley/Brzycki are within about 3 kg from 3-5RM (`LiftGoalProjection.maximumReps`).
         let accuracy = LiftGoalHistory.weightText(3, unit: unit)
-        Text("Total lifted is weight × reps over your working sets. Estimated 1RM uses the Epley formula: about ±\(accuracy) from sets of 3–5 reps, less past 10.")
+        Text("Total lifted is weight × reps over your working sets. Estimated 1RM (≈) uses the Epley formula: about ±\(accuracy) from sets of 3–5 reps, and isn't shown for sets of more than 10.")
             .font(.caption2)
             .foregroundStyle(Theme.secondaryText)
             .fixedSize(horizontal: false, vertical: true)

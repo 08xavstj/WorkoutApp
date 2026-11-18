@@ -133,6 +133,16 @@ final class ScreenshotTests: XCTestCase {
             }
             back(app)
         }
+        // One calendar of every activity, cardio bests and the year in review.
+        for page in [(key: "fitness-calendar", name: "activity-calendar"), (key: "Cardio bests", name: "cardio-bests"),
+                     (key: "Year in review", name: "year-in-review")] {
+            openTab(app, "Fitness")
+            if tap(app, [page.key], name: "Fitness \(page.name)") {
+                sleep(2)
+                capture(app, page.name, pages: 2)
+                back(app)
+            }
+        }
         openTab(app, "Fitness")
         if tap(app, ["Workout history", "History"], name: "Fitness history") {
             capture(app, "history", pages: 1)

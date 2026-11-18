@@ -381,6 +381,8 @@ nonisolated final class DemoHealth: Sendable {
         }
         if let workout = cardioByDay[daysAgo]?.first(where: { date >= $0.start && date < $0.end }) {
             let minutesIn = date.timeIntervalSince(workout.start) / 60
+            // An interval run (HealthKitClient+WorkoutStructure.swift).
+            if isIntervalDemo(workout) { return Self.intervalBpm(minutesIn: minutesIn) + 3 * wobble }
             if minutesIn < 5 { return 100 + (workout.bpm - 100) * minutesIn / 5 }
             return workout.bpm + 4 * wobble
         }
@@ -439,7 +441,8 @@ nonisolated final class DemoHealth: Sendable {
         cardio.filter { $0.start < end && $0.end > start && $0.end <= now }
             .sorted { $0.start < $1.start }
             .map { ExternalWorkout(name: $0.name, isStrength: false, start: $0.start, end: $0.end, distanceKm: $0.km,
-                                   uuid: $0.id, sourceName: "Apple Watch", activeKcal: $0.kcal) }
+                                   uuid: $0.id, sourceName: "Apple Watch", activeKcal: $0.kcal,
+                                   kind: $0.name == "Ride" ? .ride : .run) }
     }
 
     /// Every workout in Health: the watch's and the logged sessions (saved to Health).

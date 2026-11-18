@@ -812,7 +812,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
                 sourceName: workout.device?.name ?? workout.sourceRevision.source.name,
                 activeKcal: energy,
                 isTensileCardio: workout.metadata?[Self.watchCardioMetadataKey] != nil,
-                tensileActivity: tensileActivity
+                tensileActivity: tensileActivity,
+                kind: Self.activityKind(for: workout.workoutActivityType, tensile: tensileActivity)
             )
         }
     }
@@ -1084,6 +1085,8 @@ nonisolated struct ExternalWorkout: Sendable, Identifiable, Equatable {
     var isTensileCardio = false
     /// Which activity, for Tensile's own cardio (its icon and name).
     var tensileActivity: CardioActivity? = nil
+    /// Lifting, run, ride, sport... for the activity calendar (`ActivityKind`).
+    var kind: ActivityKind = .other
     var id: UUID { uuid }
     var minutes: Int { Int(end.timeIntervalSince(start) / 60) }
 

@@ -55,7 +55,7 @@ enum PRFormat {
     static func record(_ record: PRHistory.Record, unit: WeightUnit, traits: PRHistory.Traits) -> String {
         switch record {
         case let .estimatedOneRepMax(value):
-            return "Best estimated 1RM: \(weight(value, unit, perHand: traits.isPerHand))"
+            return "Best estimated 1RM: \(OneRepMax.symbol) \(weight(value, unit, perHand: traits.isPerHand))"
         case let .heaviest(kilograms, reps):
             let label = traits.isBodyweight ? "Most added weight" : "Heaviest"
             return "\(label): \(weight(kilograms, unit, perHand: traits.isPerHand)) × \(reps)"
@@ -85,6 +85,20 @@ struct ProgressRecordsCard: View {
                 PastBlocksView()
             } label: {
                 RecordsLinkRow(title: "Past blocks", detail: "What each training block did", systemImage: "square.stack.3d.up")
+            }
+            .buttonStyle(.plain)
+            Divider().overlay(Theme.separator)
+            NavigationLink {
+                CardioBestsView()
+            } label: {
+                RecordsLinkRow(title: "Cardio bests", detail: "Fastest 400 m to 10 km from your routes", systemImage: "stopwatch")
+            }
+            .buttonStyle(.plain)
+            Divider().overlay(Theme.separator)
+            NavigationLink {
+                YearInReviewView()
+            } label: {
+                RecordsLinkRow(title: "Year in review", detail: "Sessions, time and records by year", systemImage: "calendar.badge.checkmark")
             }
             .buttonStyle(.plain)
         }
@@ -318,7 +332,7 @@ private struct PRLiftRow: View {
         var result: [String] = []
         if let best = lift.estimatedOneRepMax {
             let value = PRFormat.weight(best.value, unit, perHand: perHand)
-            result.append("Est. 1RM \(value) · \(PRFormat.date(best.date))")
+            result.append("Est. 1RM \(OneRepMax.symbol) \(value) · \(PRFormat.date(best.date))")
         }
         if let heaviest = lift.heaviest {
             let label = lift.traits.isBodyweight ? "Most added" : "Heaviest"
@@ -344,7 +358,7 @@ private struct PRFootnote: View {
     var body: some View {
         EvidenceDisclosure(points: [
             "Records count working sets only: no warm-ups, drop sets or mini-sets, and nothing on a lift's first session.",
-            "Estimated 1RM is worked out from a set and the reps you had left (Epley with RPE). It's for comparing sessions, not a test.",
+            "Estimated 1RM (≈) is worked out from a set of 10 reps or fewer and the reps you had left (Epley with RPE); the formulas lose accuracy past 10 reps and differ by lift (LeSuer 1997; Nuzzo 2024). It's for comparing sessions, not a test.",
             "Bodyweight lifts show reps and any added weight. Dumbbell weights are per hand.",
             "Seeing how you compare with earlier sessions helps over a training cycle (Weakley et al., Sports Med 2023).",
         ], title: "How records count")

@@ -42,12 +42,19 @@ struct CardioWorkoutDetailView: View {
                         mapCard(route)
                     }
                     totalsCard(detail)
+                    if let route, route.points.count >= 2 {
+                        RouteChartsCard(route: route, showsPace: detail.showsPace)
+                    }
                     heartCard(detail)
+                    IntervalBoutsCard(workoutID: detail.uuid, heartRate: detail.heartRate, route: route, showsPace: detail.showsPace)
                     if let vo2 = detail.vo2Max {
                         fitnessCard(vo2)
                     }
                     if let route, !route.splits(unitMeters: unitMeters).isEmpty {
                         splitsCard(route, showsPace: detail.showsPace)
+                    }
+                    if let route, route.points.count >= 2 {
+                        CardioBestsCard(workoutID: detail.uuid, date: detail.start, kind: detail.kind, route: route)
                     }
                     Text(footnote(detail))
                         .font(.caption)

@@ -127,9 +127,11 @@ final class SetLog {
         set { setKindRaw = newValue == .straight ? nil : newValue.rawValue }
     }
 
-    /// Estimated one-rep max (Epley, counting reps left from the set's RPE).
+    /// Estimated one-rep max (Epley, counting reps left from the set's RPE);
+    /// 0 for a set of more than 10 reps, where the estimate isn't shown or
+    /// used for records (`OneRepMax.displayEstimate`).
     var estimatedOneRepMax: Double {
-        OneRepMax.estimate(weight: weightKg, reps: reps, rpe: rpe)
+        OneRepMax.displayEstimate(weight: weightKg, reps: reps, rpe: rpe) ?? 0
     }
 }
 

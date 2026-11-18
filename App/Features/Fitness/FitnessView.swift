@@ -505,9 +505,18 @@ private struct FitnessWorkoutsCard: View {
             NavigationLink {
                 WorkoutHistoryView()
             } label: {
-                FitnessLinkRow(title: "History", detail: "Every session you've logged", systemImage: "calendar")
+                FitnessLinkRow(title: "History", detail: "Every session you've logged", systemImage: "list.bullet")
             }
             .buttonStyle(.plain)
+            Divider().overlay(Theme.separator)
+            // Lifting, cardio and sports in one month grid (`ActivityCalendar`).
+            NavigationLink {
+                ActivityCalendarView()
+            } label: {
+                FitnessLinkRow(title: "Calendar", detail: "Lifting, cardio and sports by day", systemImage: "calendar")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("fitness-calendar") // UI tests (ScreenshotTests)
             Divider().overlay(Theme.separator)
             // The 5-minute stretch (`Stretching`), any time: the week's minutes are what count.
             Button { showingStretch = true } label: {
