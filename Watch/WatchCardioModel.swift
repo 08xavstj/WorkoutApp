@@ -88,7 +88,7 @@ final class WatchCardioModel: NSObject {
     @ObservationIgnored private var intervalStepStartedAt: Date?
     /// Metadata key on a step's segment event: its index in `interval.steps`.
     /// Matches `IntervalSession.stepMetadataKey` on the phone.
-    private static let intervalStepKey = "TensileIntervalStep"
+    private static let intervalStepKey = IntervalSession.stepMetadataKey
     @ObservationIgnored private var intervalTask: Task<Void, Never>?
     /// Clears a timed banner.
     @ObservationIgnored private var bannerTask: Task<Void, Never>?
