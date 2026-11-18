@@ -45,6 +45,11 @@ targets:
     sources:
       - path: App
       - path: Shared
+        # Watch-only: compiled by the two watch targets below.
+        excludes:
+          - WatchPalette.swift
+          - WatchGauges.swift
+          - WatchIntents.swift
       # How cardio activities map to Apple Health workouts (also on the Watch).
       - path: SharedCardio
       # Privacy manifest (UserDefaults: CA92.1 own data, 1C8F.1 the shared App
@@ -129,6 +134,10 @@ targets:
     sources:
       - path: Widget
       - path: Shared
+        excludes:
+          - WatchPalette.swift
+          - WatchGauges.swift
+          - WatchIntents.swift
       - path: Privacy/Widget/PrivacyInfo.xcprivacy
         buildPhase: resources
     dependencies:
@@ -179,6 +188,11 @@ targets:
       # other Shared files need ActivityKit.
       - path: Shared/WatchSession.swift
       - path: Shared/WatchFaceData.swift
+      # Colours and the recovery/strain gauges, shared with the complications.
+      - path: Shared/WatchPalette.swift
+      - path: Shared/WatchGauges.swift
+      # The App Intents, shared with the controls in the widget extension.
+      - path: Shared/WatchIntents.swift
       # The experimental rep counter's signal maths (pure Swift).
       - path: Packages/AppCore/Sources/AppCore/RepDetection.swift
       # Heart-rate zones and the cardio mode's zone clock (pure Swift).
@@ -186,6 +200,21 @@ targets:
       - path: Packages/AppCore/Sources/AppCore/CardioZoneTracker.swift
       # The route's distance, speed and elevation for the end screen.
       - path: Packages/AppCore/Sources/AppCore/CardioRoute.swift
+      # The redesign's pure logic (Foundation only): the crown's load steps,
+      # laps and current pace, rest cues, and the heart-rate series for charts.
+      - path: Packages/AppCore/Sources/AppCore/LoadStepper.swift
+      - path: Packages/AppCore/Sources/AppCore/LapTracker.swift
+      - path: Packages/AppCore/Sources/AppCore/RestCues.swift
+      - path: Packages/AppCore/Sources/AppCore/HeartRateSeries.swift
+      # Home's glance and plan card use the complications' own rules, so the
+      # two never disagree (Foundation only).
+      - path: Packages/AppCore/Sources/AppCore/Glances.swift
+      - path: WatchWidgets/PlanFace.swift
+      # This week's hard cardio session, run step by step on the wrist (Foundation
+      # and HeartRateZoneScheme.swift only).
+      - path: Packages/AppCore/Sources/AppCore/IntervalSession.swift
+      - path: Packages/AppCore/Sources/AppCore/IntervalSession+Zones.swift
+      - path: Packages/AppCore/Sources/AppCore/IntervalSession+Progress.swift
       - path: SharedCardio
     dependencies:
       - sdk: HealthKit.framework
@@ -256,12 +285,19 @@ targets:
       - path: Privacy/WatchWidgets/PrivacyInfo.xcprivacy
         buildPhase: resources
       - path: Shared/WatchFaceData.swift
+      # Colours and gauges, the same as the Watch app's.
+      - path: Shared/WatchPalette.swift
+      - path: Shared/WatchGauges.swift
+      # The intents the controls run (StartControls.swift).
+      - path: Shared/WatchIntents.swift
       # What the plan says when, and when a score goes "--" (pure Swift; the
       # iPhone widgets get the same rules from AppCore).
       - path: Packages/AppCore/Sources/AppCore/Glances.swift
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
+      # The controls' intents (Shared/WatchIntents.swift).
+      - sdk: AppIntents.framework
     entitlements:
       path: WatchWidgets/TensileWatchWidgets.entitlements
       properties:

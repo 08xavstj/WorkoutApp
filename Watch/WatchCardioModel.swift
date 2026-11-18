@@ -15,9 +15,12 @@ import WatchKit
 /// other watch workout (`HealthKitClient.externalWorkouts`), so it shows once
 /// and never becomes a lifting session (a `WatchWorkoutSummary` would make one).
 ///
-/// No GPS route is recorded: that needs location permission and a route
-/// builder that could not be tested here. Distance comes from the Watch's own
-/// workout data.
+/// Outdoors, the GPS route is recorded with an `HKWorkoutRouteBuilder`
+/// (`WatchRouteRecorder`) and saved with the workout; distance comes from the
+/// Watch's own workout data. Laps and splits (`LapTracker`) are saved as
+/// workout events, runs pause with the system's auto-pause, and Water Lock
+/// can be turned on for rain, sweat and gloves
+/// (docs/research/watch-app-redesign-2026-11.md §4.5).
 @Observable
 final class WatchCardioModel: NSObject {
     static let shared = WatchCardioModel()
@@ -29,7 +32,7 @@ final class WatchCardioModel: NSObject {
     /// Metadata on the saved workout: the `CardioActivity` (the phone's
     /// `HealthKitClient.watchCardioMetadataKey` is the same string).
     static let metadataKey = "TensileCardioActivity"
-    /// UserDefaults keys the start list keeps (`WatchCardioStartView`'s `@AppStorage`).
+    /// UserDefaults keys the activity list keeps (`ActivityPickerView`'s `@AppStorage`).
     static let lastActivityKey = "cardioLastActivity"
     static let targetKey = "cardioTarget"
 
@@ -57,6 +60,33 @@ final class WatchCardioModel: NSObject {
     private(set) var pausedSeconds: TimeInterval = 0
     /// Siri asked for cardio (`StartCardioIntent`): the start screen opens the activity list.
     var pickerRequested = false
+    /// Laps, splits and current pace for this workout.
+    private(set) var laps = LapTracker(start: .now, autoLapMeters: nil)
+    /// Heart rate over the workout, for the charts.
+    private(set) var heartSeries = HeartRateSeries()
+    /// Altitude, climb and the 30-minute profile, outdoors.
+    private(set) var elevation = RunningElevation()
+    /// A short message over the metric pages: a split, a lap, auto-pause.
+    private(set) var banner: CardioBanner?
+    /// HealthKit's auto-pause has stopped the clock (the session itself runs on).
+    private(set) var isAutoPaused = false
+    /// The system's auto-pause has fired in this workout, so the controls say where it's set.
+    private(set) var autoPauseSeen = false
+    /// The fastest current speed so far (m/s, the 20 s window), for the Speed page.
+    private(set) var topSpeed: Double?
+    /// The saved workout's UUID, for Handoff from the summary.
+    private(set) var savedWorkoutID: UUID?
+    /// This week's hard cardio session as the phone sent it (`WatchMessage.intervals`).
+    private(set) var weeklyIntervals: IntervalSession?
+    /// The interval session this workout runs, step by step; nil for steady cardio.
+    private(set) var interval: IntervalSession?
+    /// The step running (index into `interval.steps`); `steps.count` once it's over.
+    private(set) var intervalStepIndex: Int?
+    /// Seconds added to the session's clock by "Skip step".
+    @ObservationIgnored private var intervalOffset: TimeInterval = 0
+    @ObservationIgnored private var intervalTask: Task<Void, Never>?
+    /// Clears a timed banner.
+    @ObservationIgnored private var bannerTask: Task<Void, Never>?
 
     @ObservationIgnored private let store = HKHealthStore()
     @ObservationIgnored private var workoutSession: HKWorkoutSession?
@@ -83,6 +113,7 @@ final class WatchCardioModel: NSObject {
             HKQuantityType(.heartRate), HKQuantityType(.activeEnergyBurned),
             HKQuantityType(.distanceWalkingRunning), HKQuantityType(.distanceCycling),
             HKQuantityType(.distanceCrossCountrySkiing),
+            // Split times and current pace need the distance as it comes in (above).
             // For zones from age, when the phone has sent none.
             HKCharacteristicType(.dateOfBirth),
         ]
@@ -172,8 +203,9 @@ final class WatchCardioModel: NSObject {
 
     // MARK: Recording
 
-    /// Starts recording `activity`, holding heart rate to `target` if one is set.
-    func start(_ activity: CardioActivity, target chosenTarget: CardioTarget) async {
+    /// Starts recording `activity`, holding heart rate to `target` if one is set,
+    /// or to each step's band of `interval` (this week's hard session).
+    func start(_ activity: CardioActivity, target chosenTarget: CardioTarget, interval: IntervalSession? = nil) async {
         guard phase == .idle || phase == .ended else { return }
         // One workout at a time.
         let lifting = WatchWorkoutModel.shared
@@ -184,10 +216,15 @@ final class WatchCardioModel: NSObject {
         phase = .starting
         problem = nil
         summary = nil
+        savedWorkoutID = nil
         self.activity = activity
-        // Sports record with no target (`CardioActivity.takesTarget`).
-        let target = activity.takesTarget ? chosenTarget : .off
+        // Sports record with no target (`CardioActivity.takesTarget`). An interval
+        // session sets its own band per step instead.
+        let target = activity.takesTarget && interval == nil ? chosenTarget : .off
         self.target = target
+        self.interval = interval
+        intervalStepIndex = nil
+        intervalOffset = 0
         await requestAuthorization()
         let zones = await resolveZones()
         let configuration = HKWorkoutConfiguration()
@@ -222,13 +259,25 @@ final class WatchCardioModel: NSObject {
             distanceMeters = nil
             pausedAt = nil
             pausedSeconds = 0
+            isAutoPaused = false
+            autoPauseSeen = false
+            topSpeed = nil
+            banner = nil
+            heartSeries = HeartRateSeries()
+            elevation = RunningElevation()
+            // Auto laps every 1 km (1 mi) where the activity has a distance (`LapTracker`).
+            laps = LapTracker(start: start, autoLapMeters: activity.movement == .stationary
+                              ? nil : LapTracker.autoLapMeters(miles: watchUsesMiles()))
             tracker = CardioZoneTracker(scheme: zones.scheme, target: target)
             zoneSource = zones.source
+            if interval != nil { startIntervalRunner() }
             startedAt = start
             runningSince = start
             phase = .running
             if activity.isOutdoor == true {
                 let recorder = WatchRouteRecorder(store: store)
+                // Altitude for the Elevation page, as the fixes come in.
+                recorder.onPoints = { [weak self] points in self?.received(points) }
                 recorder.start()
                 route = recorder
             }
@@ -249,6 +298,13 @@ final class WatchCardioModel: NSObject {
         workoutSession?.pause()
         phase = .paused
         lastLocalPauseChange = .now
+        // Auto-paused already: that pause carries on as this one, and the
+        // builder's auto pause is closed so the session's own pause pairs up.
+        if isAutoPaused {
+            isAutoPaused = false
+            addEvent(HKWorkoutEvent(type: .resume, dateInterval: DateInterval(start: .now, duration: 0), metadata: nil))
+            clearBanner()
+        }
         beginPause()
         WKInterfaceDevice.current().play(.stop)
     }
@@ -267,6 +323,7 @@ final class WatchCardioModel: NSObject {
         route?.isPaused = true
         pausedAt = date
         tracker.pause(at: date)
+        laps.pause(at: date)
     }
 
     private func endPause(at date: Date = .now) {
@@ -276,6 +333,200 @@ final class WatchCardioModel: NSObject {
         pausedAt = nil
         runningSince = date
         tracker.resume(at: date)
+        laps.resume(at: date)
+    }
+
+    /// The clock's start moved on by the pauses already over, for a `Text`
+    /// timer the system keeps current in Always On (`WorkoutClockText`).
+    var clockTimerStart: Date? {
+        startedAt.map { $0.addingTimeInterval(pausedSeconds) }
+    }
+
+    // MARK: Auto-pause, laps and Water Lock
+
+    /// HealthKit's `.motionPaused` / `.motionResumed`, which come during running
+    /// workouts when Settings › Workout › Auto-Pause is on (HKWorkoutEventType
+    /// docs). Apple's advice is not to pause the session for them but to add
+    /// pause and resume events to the live builder, so the workout's time leaves
+    /// the stop out (Apple Developer Forums thread 649276). The clock, zones,
+    /// route and laps stand still, with a `.stop` / `.start` tap like a pause by hand.
+    private func generated(_ type: HKWorkoutEventType, at date: Date) {
+        guard isActive, !isEnding else { return }
+        switch type {
+        case .motionPaused:
+            guard phase == .running, !isAutoPaused else { return }
+            isAutoPaused = true
+            autoPauseSeen = true
+            beginPause(at: date)
+            addEvent(HKWorkoutEvent(type: .pause, dateInterval: DateInterval(start: date, duration: 0), metadata: nil))
+            showBanner("Auto-paused", seconds: nil)
+            WKInterfaceDevice.current().play(.stop)
+        case .motionResumed:
+            guard phase == .running, isAutoPaused else { return }
+            isAutoPaused = false
+            endPause(at: date)
+            addEvent(HKWorkoutEvent(type: .resume, dateInterval: DateInterval(start: date, duration: 0), metadata: nil))
+            showBanner("Resumed", seconds: Self.bannerSeconds)
+            WKInterfaceDevice.current().play(.start)
+        default:
+            break
+        }
+    }
+
+    /// The Lap button: closes the lap now running and saves it as a segment
+    /// (`HKWorkoutEventType.segment`, a period of interest; `.lap` is for equal
+    /// distances such as the auto laps). In a sport it marks a period.
+    func markLap() {
+        guard phase == .running, !isEnding else { return }
+        let now = Date.now
+        guard let lap = laps.markLap(at: now) else { return }
+        addEvent(HKWorkoutEvent(type: .segment, dateInterval: DateInterval(start: lap.start, end: lap.end), metadata: nil))
+        if WatchPreferences.splitTaps { WKInterfaceDevice.current().play(.navigationGenericManeuver) }
+        let miles = watchUsesMiles()
+        var text = "\(activity.movement == .stationary ? "Period" : "Lap") \(lap.number) · \(workoutElapsedText(lap.seconds))"
+        if activity.movement != .stationary, let pace = paceOrSpeedText(lap: lap, miles: miles) { text += " · \(pace)" }
+        showBanner(text, seconds: Self.bannerSeconds)
+    }
+
+    /// Auto laps finished by the latest distance: saved as `.lap` events with
+    /// their start and end, one tap each, and a banner with the split.
+    private func autoLapped(_ finished: [LapTracker.Lap]) {
+        guard let lap = finished.last else { return }
+        for lap in finished {
+            addEvent(HKWorkoutEvent(type: .lap, dateInterval: DateInterval(start: lap.start, end: lap.end), metadata: nil))
+        }
+        if WatchPreferences.splitTaps { WKInterfaceDevice.current().play(.navigationGenericManeuver) }
+        let miles = watchUsesMiles()
+        var text = "\(miles ? "Mile" : "Km") \(lap.number) · \(workoutElapsedText(lap.seconds))"
+        if let pace = paceOrSpeedText(lap: lap, miles: miles) { text += " · \(pace)" }
+        showBanner(text, seconds: Self.bannerSeconds)
+    }
+
+    /// "5:12 /km" on foot, "24.6 km/h" on a bike.
+    func paceOrSpeedText(lap: LapTracker.Lap, miles: Bool) -> String? {
+        if activity.movement.showsSpeed {
+            return lap.speed(miles: miles).map { CardioSummary.speedText($0, miles: miles) }
+        }
+        return lap.pace(miles: miles).map { CardioSummary.paceText($0, miles: miles) }
+    }
+
+    private func addEvent(_ event: HKWorkoutEvent) {
+        builder?.addWorkoutEvents([event]) { _, _ in }
+    }
+
+    /// How long a split or lap banner stays (app's choice). In Always On it
+    /// stays until the wrist is raised (`CardioBannerView`).
+    static let bannerSeconds = 3.0
+
+    /// Shows a banner over the metric pages; `seconds` nil keeps it until replaced or cleared.
+    func showBanner(_ text: String, seconds: Double?) {
+        let banner = CardioBanner(text: text, at: .now)
+        self.banner = banner
+        bannerTask?.cancel()
+        guard let seconds else { return }
+        bannerTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.clearBanner(banner)
+        }
+    }
+
+    /// Clears `banner` if it's still the one showing.
+    func clearBanner(_ shown: CardioBanner? = nil) {
+        guard shown == nil || banner == shown else { return }
+        banner = nil
+    }
+
+    /// Water Lock for an outdoor run (rain, sweat) and snow (gloves, sleeves):
+    /// the app's choice; Apple turns it on by itself only for swims. Allowed in
+    /// the foreground during a workout on a water-resistant Watch
+    /// (`WKInterfaceDevice.enableWaterLock`, watchOS 6.1); the crown unlocks it.
+    var offersWaterLock: Bool {
+        activity == .outdoorRun || activity.category == .snow
+    }
+
+    func enableWaterLock() {
+        guard isActive else { return }
+        WKInterfaceDevice.current().enableWaterLock()
+    }
+
+    // MARK: Interval session
+
+    /// The session's clock: the workout's own, plus any skipped steps.
+    func intervalElapsed(at date: Date) -> TimeInterval? {
+        elapsed(at: date).map { $0 + intervalOffset }
+    }
+
+    /// The step running now and its timing; nil without a session or once it's over.
+    func intervalProgress(at date: Date) -> IntervalSession.Progress? {
+        guard let interval, let elapsed = intervalElapsed(at: date) else { return nil }
+        return interval.progress(at: elapsed)
+    }
+
+    /// Skip step: the next step starts now (its band, tap and banner come with it).
+    func skipIntervalStep() {
+        guard isActive, let interval, let elapsed = intervalElapsed(at: .now),
+              let skip = interval.skipSeconds(at: elapsed) else { return }
+        intervalOffset += skip
+        checkIntervalStep()
+    }
+
+    /// Checks the step once a second while the workout runs; the clock stands
+    /// still while paused, so the steps do too.
+    private func startIntervalRunner() {
+        intervalTask?.cancel()
+        checkIntervalStep()
+        intervalTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, self.isActive else { return }
+                self.checkIntervalStep()
+            }
+        }
+    }
+
+    /// A new step: its band becomes the target (`CardioZoneTracker.retarget`),
+    /// a `.start` tap for a hard step and `.stop` for an easier one (WKHapticType's
+    /// meanings), and a banner, as a buzz at every change helps (app's choice).
+    private func checkIntervalStep() {
+        guard let interval else { return }
+        let now = Date.now
+        let progress = intervalProgress(at: now)
+        let index = progress?.index ?? interval.steps.count
+        guard index != intervalStepIndex else { return }
+        let first = intervalStepIndex == nil
+        intervalStepIndex = index
+        guard let progress else {
+            tracker.retarget(nil, at: now, quiet: 0)
+            WKInterfaceDevice.current().play(.success)
+            showBanner("Session done · end when you're ready", seconds: nil)
+            return
+        }
+        let step = progress.step
+        // The first step starts with the workout: no extra quiet minute for it.
+        tracker.retarget(step.target.band.heartRateBand(in: tracker.scheme), at: now,
+                         quiet: first ? 0 : CardioZoneTracker.retargetQuietSeconds)
+        guard !first else { return }
+        WKInterfaceDevice.current().play(step.phase.isHard ? .start : .stop)
+        showBanner("\(step.title(rounds: interval.rounds)) · \(step.lengthText)", seconds: Self.bannerSeconds)
+    }
+
+    /// This week's session from the phone (nil: none planned or it's done).
+    func received(intervals: IntervalSession?) {
+        weeklyIntervals = intervals
+    }
+
+    /// Whether this activity has laps: distance activities and sports (as periods).
+    var hasLaps: Bool {
+        activity.movement != .stationary || activity.category == .sport
+    }
+
+    /// GPS fixes from the route recorder (main actor): altitude for the Elevation page.
+    private func received(_ points: [RoutePoint]) {
+        guard isActive else { return }
+        for point in points {
+            if let altitude = point.altitude { elevation.add(altitude: altitude, at: point.time) }
+        }
     }
 
     /// The workout clock at `date`: time since the start without the pauses,
@@ -293,6 +544,12 @@ final class WatchCardioModel: NSObject {
         let end = Date.now
         let active = elapsed(at: end) ?? 0
         tracker.end(at: end)
+        // A lap still running at the end is saved as the last one (if it has any time).
+        if hasLaps, activity.movement != .stationary, laps.currentLap(at: end).meters >= LapTracker.minimumMetersForPace,
+           let lap = laps.markLap(at: end) {
+            builder.addWorkoutEvents([HKWorkoutEvent(type: lap.isAuto ? .lap : .segment,
+                                                     dateInterval: DateInterval(start: lap.start, end: lap.end), metadata: nil)]) { _, _ in }
+        }
         workoutSession.end()
         var saved = false
         var workout: HKWorkout?
@@ -300,6 +557,7 @@ final class WatchCardioModel: NSObject {
             try await builder.endCollection(at: end)
             workout = try await builder.finishWorkout()
             saved = workout != nil
+            savedWorkoutID = workout?.uuid
         } catch {
             problem = "Couldn't save the workout: \(error.localizedDescription)"
         }
@@ -320,8 +578,20 @@ final class WatchCardioModel: NSObject {
             summary.hasRoute = true
         }
         self.summary = summary
+        intervalTask?.cancel()
+        intervalTask = nil
+        // This week's hard session is done: Home stops offering it (the phone clears it too once Health has the workout).
+        if interval != nil, saved, interval == weeklyIntervals { weeklyIntervals = nil }
+        WatchHistoryStore.save(WatchActivityRecord(
+            kind: .cardio, title: activity.title, start: startedAt ?? end, end: end,
+            minutes: max(1, Int(active / 60)), detail: Self.historyDetail(summary),
+            averageBpm: summary.averageBpm.map { Int($0.rounded()) }, maximumBpm: summary.maximumBpm.map { Int($0.rounded()) },
+            activity: activity.rawValue, saved: saved))
         pausedAt = nil
         pausedSeconds = 0
+        isAutoPaused = false
+        bannerTask?.cancel()
+        banner = nil
         self.workoutSession = nil
         self.builder = nil
         isEnding = false
@@ -332,6 +602,11 @@ final class WatchCardioModel: NSObject {
     /// Stops without saving anything.
     func discard() {
         guard isActive, !isEnding else { return }
+        intervalTask?.cancel()
+        intervalTask = nil
+        isAutoPaused = false
+        bannerTask?.cancel()
+        banner = nil
         route?.discard()
         route = nil
         workoutSession?.end()
@@ -352,6 +627,22 @@ final class WatchCardioModel: NSObject {
             summary = nil
         }
         if !isBusy { problem = nil }
+    }
+
+    /// "5.02 km · 5:12 /km", or the calories where there's no distance.
+    private static func historyDetail(_ summary: CardioSummary) -> String {
+        let miles = watchUsesMiles()
+        if summary.activity.movement != .stationary, let meters = summary.distanceMeters {
+            let distance = CardioSummary.distanceText(meters: meters, miles: miles)
+            return [distance, summary.paceOrSpeedText(miles: miles)].compactMap { $0 }.joined(separator: " · ")
+        }
+        return summary.activeKilocalories.map { "\(Int($0.rounded())) kcal" } ?? "Heart rate and zones"
+    }
+
+    /// Workouts shorter than this ask before they're saved (HIG Workouts; the
+    /// 60 s is the app's choice, the same as lifting's).
+    var isBrief: Bool {
+        (elapsed(at: .now) ?? 0) < WatchWorkoutModel.briefSeconds
     }
 
     /// Back to the start screen after the end screen.
@@ -376,6 +667,7 @@ final class WatchCardioModel: NSObject {
                 phase = .running
                 endPause(at: date)
             }
+            // A running session while auto-paused is expected: the stop is the builder's, not the session's.
         case .paused:
             if phase == .running {
                 phase = .paused
@@ -388,6 +680,10 @@ final class WatchCardioModel: NSObject {
     private func fail(_ message: String) {
         guard isBusy, !isEnding else { return }
         problem = "Recording stopped: \(message)"
+        intervalTask?.cancel()
+        intervalTask = nil
+        isAutoPaused = false
+        banner = nil
         route?.discard()
         route = nil
         builder?.discardWorkout()
@@ -404,13 +700,19 @@ final class WatchCardioModel: NSObject {
         averageHeartRate = average ?? averageHeartRate
         maximumHeartRate = maximum ?? maximumHeartRate
         activeKilocalories = energy ?? activeKilocalories
-        distanceMeters = distance ?? distanceMeters
+        if let distance {
+            distanceMeters = distance
+            let finished = laps.add(meters: distance, at: .now)
+            if !finished.isEmpty { autoLapped(finished) }
+            if let speed = laps.currentSpeed(at: .now), speed.isFinite, speed > (topSpeed ?? 0) { topSpeed = speed }
+        }
         guard let current else { return }
         heartRate = current
-        guard phase == .running else { return }
+        let now = Date.now
+        heartSeries.add(current, at: min(now, date ?? now))
+        guard phase == .running, !isAutoPaused else { return }
         // The reading's own time, kept inside the stretch now running: one
         // that arrives late must not reach back across a pause.
-        let now = Date.now
         let when = min(now, max(date ?? now, runningSince ?? now))
         if let alert = tracker.reading(bpm: current, at: when) { play(alert) }
     }
@@ -440,6 +742,13 @@ extension WatchCardioModel: HKWorkoutSessionDelegate {
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: any Error) {
         let message = error.localizedDescription
         Task { @MainActor in self.fail(message) }
+    }
+
+    /// Auto-pause and resume during a run (`generated(_:at:)`).
+    nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didGenerate event: HKWorkoutEvent) {
+        let type = event.type
+        let date = event.dateInterval.start
+        Task { @MainActor in self.generated(type, at: date) }
     }
 }
 
@@ -479,4 +788,10 @@ extension WatchCardioModel: HKLiveWorkoutBuilderDelegate {
     }
 
     nonisolated func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {}
+}
+
+/// A short message over the cardio pages ("Km 3 · 5:12 /km", "Auto-paused").
+nonisolated struct CardioBanner: Equatable, Sendable {
+    var text: String
+    var at: Date
 }

@@ -33,9 +33,9 @@ struct NextSessionView: View {
     private var symbolColor: Color {
         guard renderingMode == .fullColor else { return .primary }
         switch state {
-        case .bedBy: return FacePalette.sleep
-        case .done: return FacePalette.recovered
-        case .session, .next: return FacePalette.lifting
+        case .bedBy: return WatchPalette.sleep
+        case .done: return WatchPalette.recovered
+        case .session, .next: return WatchPalette.lifting
         case .rest, .noPlan, .stale: return .secondary
         }
     }

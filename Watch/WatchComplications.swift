@@ -10,13 +10,17 @@ enum WatchComplications {
 
     /// Stores the phone's latest data; reloads only when it's newer and different.
     static func store(_ data: WatchFaceData) {
-        guard WatchFaceStore.save(data) else { return }
+        let changed = WatchFaceStore.save(data)
+        // Home shows the newest data even when the face wouldn't change.
+        FaceFeed.shared.reload()
+        guard changed else { return }
         reload()
     }
 
     /// A workout ended on the Watch: today's planned session counts as done.
     static func workoutEnded(at date: Date) {
         WatchFaceStore.markWorkoutEnded(at: date)
+        FaceFeed.shared.reload()
         reload()
     }
 

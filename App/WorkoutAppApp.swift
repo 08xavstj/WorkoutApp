@@ -557,6 +557,57 @@ struct RootView: View {
         guard metrics.errorMessage == nil, metrics.lastUpdated != nil else { return }
         let lastWorkoutEnd = sessions.lazy.compactMap(\.endedAt).max()
         WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd, glance: glancePlan())
+        updateWatchPlan(lastWorkoutEnd: lastWorkoutEnd)
+        WatchSync.shared.updateLibrary(sessions: Array(sessions.prefix(30)))
+        // This week's hard cardio, unless blocked (rest mode, deload) or already done.
+        let hard = weeklyPlans.current.flatMap { plan -> IntervalSession? in
+            guard HardCardio.blocker(plan: plan, goals: metrics.goals, restMode: settings.isRestMode,
+                                     isDeloadWeek: weeklyPlans.blockWeek?.isDeload ?? false) == nil,
+                  let slot = HardCardio.slot(for: plan, goals: metrics.goals),
+                  !HardCardio.weekDone(plan: plan, goals: metrics.goals,
+                                       workouts: WeeklyPlanStore.cardioWorkouts(muscles: muscles, metrics: metrics)).hard
+            else { return nil }
+            return slot.session
+        }
+        WatchSync.shared.updateIntervals(hard)
+    }
+
+    /// [Watch] Today's planned lifting session, sent ahead so the Watch can run it
+    /// with the phone out of reach (`WatchSync.updatePlan`). The same planner
+    /// request as the coach and the workout builder (`TrainerPlanRequest`); built
+    /// only when the day, the planned session or the latest workout changed.
+    private func updateWatchPlan(lastWorkoutEnd: Date?) {
+        let calendar = Calendar.current
+        let today = weeklyPlans.todayPlan()
+        let doneToday = lastWorkoutEnd.map { calendar.isDateInToday($0) } ?? false
+        let key = [calendar.startOfDay(for: .now).description, today?.focus.rawValue ?? "-", "\(today?.minutes ?? 0)",
+                   "\(doneToday)", "\(settings.isRestMode)", gym.activeGymID.uuidString,
+                   sessions.first?.startedAt.description ?? "-"].joined(separator: "|")
+        guard WatchSync.shared.planIsStale(key) else { return }
+        let start = today.flatMap { calendar.date(bySettingHour: $0.time / 60, minute: $0.time % 60, second: 0, of: .now) } ?? .now
+        guard let today, !doneToday, !settings.isRestMode, metrics.dayGuidance?.isRestDay != true else {
+            WatchSync.shared.updatePlan(nil, plannedFor: start, key: key)
+            return
+        }
+        let history = LiftHistory.make(from: sessions, unit: gym.profile.unit)
+        let left = weeklyPlans.progress(sessions: sessions)?.remaining ?? 2
+        let request = TrainerPlanRequest(
+            focus: today.focus,
+            minutes: today.minutes,
+            prioritySlots: muscles.coverage(sessionsLeft: max(1, left), preferred: today.focus)?.prioritySlots ?? [],
+            block: weeklyPlans.blockWeek,
+            finisherLength: settings.absFinisher,
+            exerciseFilter: ExerciseFilter(neverAgain: ExerciseExclusions.shared.ids,
+                                           reports: PainLogStore.shared.allReports(checkIns: checkIns, health: []),
+                                           today: .now),
+            warmUpMinutes: WarmUpRoutine.make(tier: settings.warmUpTier(for: today.focus),
+                                              firstSlots: today.focus.slots, gym: gym.profile).minutes
+        )
+        let session = request.plan(gym: gym, plans: weeklyPlans, muscles: muscles, metrics: metrics,
+                                   settings: settings, sessions: sessions, history: history)
+        let plan = AbsFinisher.appending(request.finisher(for: session, gym: gym, sessions: sessions, history: history),
+                                         to: session)
+        WatchSync.shared.updatePlan(plan.exercises.isEmpty ? nil : plan, plannedFor: start, key: key)
     }
 
     /// [Widgets] The plan the iPhone widgets and the watch face both show (`PlanGlance`).

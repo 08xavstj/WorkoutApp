@@ -17,6 +17,8 @@ final class WatchRouteRecorder: NSObject, CLLocationManagerDelegate {
     /// Fixes while running (none while paused), for the summary.
     private(set) var points: [RoutePoint] = []
     var isPaused = false
+    /// New fixes as they're kept (main actor), for the live Elevation page.
+    var onPoints: (([RoutePoint]) -> Void)?
 
     init(store: HKHealthStore) {
         self.store = store
@@ -50,6 +52,7 @@ final class WatchRouteRecorder: NSObject, CLLocationManagerDelegate {
 
     /// Stops and attaches the route to the saved workout.
     func finish(with workout: HKWorkout) async {
+        onPoints = nil
         manager.stopUpdatingLocation()
         guard let builder else { return }
         self.builder = nil
@@ -62,6 +65,7 @@ final class WatchRouteRecorder: NSObject, CLLocationManagerDelegate {
 
     /// Stops without saving a route.
     func discard() {
+        onPoints = nil
         manager.stopUpdatingLocation()
         builder?.discard()
         builder = nil
@@ -72,14 +76,16 @@ final class WatchRouteRecorder: NSObject, CLLocationManagerDelegate {
         // The same limit the map uses (`CardioRoute.maximumAccuracyMeters`).
         let usable = locations.filter { $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= CardioRoute.maximumAccuracyMeters }
         guard !usable.isEmpty else { return }
-        points += usable.map { location in
+        let added = usable.map { location in
             RoutePoint(
                 latitude: location.coordinate.latitude, longitude: location.coordinate.longitude,
                 altitude: location.verticalAccuracy >= 0 ? location.altitude : nil,
                 time: location.timestamp, horizontalAccuracy: location.horizontalAccuracy
             )
         }
+        points += added
         builder.insertRouteData(usable) { _, _ in }
+        onPoints?(added)
     }
 
     // The manager was made on the main thread, so it calls back there.

@@ -1,66 +1,27 @@
 import SwiftUI
 
-enum WatchPage: Hashable {
-    case controls, live, exercises
-}
-
-/// Start screen → the three workout pages (crown scrolls between them) → end screen.
-/// Cardio from the start screen runs its own three pages and end screen.
+/// Home → the lifting pages (`LiftPagesView`) → summary
+/// (`LiftSummaryView`). Cardio runs its own pages and summary.
 struct WatchRootView: View {
     @Environment(WatchWorkoutModel.self) private var model
     @Environment(WatchCardioModel.self) private var cardio
-    @State private var page: WatchPage = .live
 
     var body: some View {
         // A cardio workout (`WatchCardioModel`) has its own pages and end screen;
         // only one of the two models records at a time.
         if cardio.isActive {
-            WatchCardioPagesView()
+            CardioPagesView()
         } else if cardio.phase == .ended {
-            WatchCardioEndView()
+            CardioSummaryView()
         } else {
             switch model.phase {
             case .idle, .starting:
-                WatchStartView()
+                HomeView()
             case .running, .paused:
-                workoutPages
+                LiftPagesView()
             case .ended:
-                WatchEndView()
+                LiftSummaryView()
             }
         }
-    }
-
-    private var workoutPages: some View {
-        TabView(selection: $page) {
-            WatchControlsView(page: $page)
-                .tag(WatchPage.controls)
-            WatchLiveView()
-                .tag(WatchPage.live)
-            WatchExerciseListView(page: $page)
-                .tag(WatchPage.exercises)
-        }
-        .tabViewStyle(.verticalPage)
-    }
-}
-
-/// Live heart rate and calories on one line.
-struct WatchVitalsLine: View {
-    @Environment(WatchWorkoutModel.self) private var model
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "heart.fill")
-                .foregroundStyle(WatchTheme.heart)
-            Text(model.heartRate.map { "\(Int($0.rounded()))" } ?? "–")
-                .monospacedDigit()
-            Text("bpm")
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 4)
-            Text(model.activeKilocalories.map { "\(Int($0.rounded())) kcal" } ?? "– kcal")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-        }
-        .font(.footnote.weight(.semibold))
-        .accessibilityElement(children: .combine)
     }
 }

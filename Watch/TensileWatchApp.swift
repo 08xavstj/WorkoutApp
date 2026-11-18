@@ -12,13 +12,18 @@ struct TensileWatchApp: App {
     @State private var model = WatchWorkoutModel.shared
     @State private var cardio = WatchCardioModel.shared
 
+    init() {
+        // Siri, Shortcuts and the controls run their intents through this (`WatchIntentRouter`).
+        WatchIntentActions.install()
+    }
+
     var body: some Scene {
         WindowGroup {
             WatchRootView()
                 .environment(model)
                 .environment(cardio)
                 .task { model.activate() }
-                // A tapped complication (`tensile://start`) opens the start screen.
+                // A tapped complication (`tensile://start`) opens Home.
                 .onOpenURL { url in
                     guard url.scheme == "tensile" else { return }
                     if model.phase == .ended { model.reset() }
@@ -32,6 +37,7 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
     /// Activates WatchConnectivity on every launch, including background ones
     /// (complication data from the phone wakes the app without its UI).
     func applicationDidFinishLaunching() {
+        WatchIntentActions.install()
         WatchWorkoutModel.shared.activate()
     }
 

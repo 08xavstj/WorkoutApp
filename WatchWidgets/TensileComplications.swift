@@ -1,3 +1,4 @@
+import MapKit
 import RelevanceKit
 import SwiftUI
 import WidgetKit
@@ -12,6 +13,9 @@ struct TensileComplications: WidgetBundle {
     var body: some Widget {
         RecoveryStrainComplication()
         NextSessionComplication()
+        // Controls (watchOS 26): Control Center and the Smart Stack.
+        StartLiftingControl()
+        StartLastCardioControl()
     }
 }
 
@@ -86,6 +90,7 @@ nonisolated struct FaceProvider: TimelineProvider {
         let now = Date.now
         let calendar = Calendar.current
         var clues: [(interval: DateInterval, kind: RelevantContext.DateKind)] = []
+        var trainsToday = false
         switch kind {
         case .nextSession:
             // The hour before each session still to do, and from an hour before
@@ -98,6 +103,7 @@ nonisolated struct FaceProvider: TimelineProvider {
                 let dateKind: RelevantContext.DateKind = window.reason == .session ? .scheduled : .informational
                 clues.append((interval: window.interval, kind: dateKind))
             }
+            trainsToday = windows.contains { $0.reason == .session && calendar.isDateInToday($0.interval.start) }
         case .recoveryStrain:
             var day = calendar.startOfDay(for: now)
             for _ in 0..<7 {
@@ -110,43 +116,19 @@ nonisolated struct FaceProvider: TimelineProvider {
                 day = next
             }
         }
-        let attributes = clues.prefix(PlanGlance.maximumRelevantIntervals).map { clue in
+        var attributes = clues.prefix(PlanGlance.maximumRelevantIntervals).map { clue in
             WidgetRelevanceAttribute<Void>(context: .date(interval: clue.interval, kind: clue.kind))
         }
-        return WidgetRelevance(Array(attributes))
-    }
-}
-
-/// The app's score colours (dark variants from `App/Design/Theme.swift` and
-/// `RecoveryWording`), copied here because `Theme` needs UIKit.
-nonisolated enum FacePalette {
-    static let strain = color(0xFF8E3C)
-    static let lifting = color(0xFF6B97)
-    /// The bed-by window (`Theme.sleep`, dark).
-    static let sleep = color(0x9692FF)
-    /// "Easy day" band (`Theme.oxygen`).
-    static let easy = color(0x5C9DFF)
-    /// "Normal" band (`Theme.recoveryModerate`).
-    static let normal = color(0xFFC53D)
-    /// "Recovered" band (`Theme.recoveryHigh`).
-    static let recovered = color(0x3EDB84)
-    static let track = Color.white.opacity(0.18)
-
-    static func band(_ band: String?) -> Color {
-        switch band {
-        case "low": easy
-        case "moderate": normal
-        case "high": recovered
-        default: .secondary
+        // On a training day, also at the gym: RelevanceKit's point-of-interest
+        // context (watchOS 26). It returns nil for a category it doesn't support,
+        // and then only the date windows apply. Whether it needs location
+        // permission is still to check on the wrist (docs/research/watch-app-redesign-2026-11.md §8).
+        // (Typed as optional so it builds whether the SDK returns one or not.)
+        let gym: RelevantContext? = trainsToday ? RelevantContext.location(category: .fitnessCenter) : nil
+        if let gym {
+            attributes.append(WidgetRelevanceAttribute<Void>(context: gym))
         }
-    }
-
-    static func color(_ hex: UInt32) -> Color {
-        Color(
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255
-        )
+        return WidgetRelevance(Array(attributes))
     }
 }
 
@@ -157,11 +139,6 @@ nonisolated func facePercent(_ value: Double) -> String {
 
 nonisolated func faceWhole(_ value: Double) -> Int {
     value.isFinite ? Int(value.rounded()) : 0
-}
-
-/// A 0-100 score as a 0-1 fraction for rings and bars.
-nonisolated func faceFraction(_ value: Double) -> Double {
-    value.isFinite ? min(max(value / 100, 0), 1) : 0
 }
 
 /// e.g. "50–70%".

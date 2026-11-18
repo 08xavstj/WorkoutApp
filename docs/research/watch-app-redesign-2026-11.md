@@ -884,6 +884,18 @@ Each chunk compiles and runs on its own, in this order. "Done when" lists what t
 
 ## 8. Still to verify on the wrist
 
+**Built (18 Nov 2026), chunks C0-C9.** Not checked on a device or in a simulator (the sandbox can't build watchOS); CI builds it. Changes from the plan above:
+
+- The lifting toolbar puts Undo, else the rest left (on another page), else the elapsed time in the leading corner, and heart rate in the trailing one; there's no centre item, because the system clock takes the centre when both corners are used.
+- A superset's first half with a "Reps left?" question moves to the Rest page for the question (no rest runs), then back to the Set page with the partner; without a question it stays on Set, as planned.
+- The Done button is a custom filled button with a black label (contrast measured), not `.glassProminent`, so its contrast doesn't depend on the system's glass tint.
+- The warm-up step card keeps Back and Skip behind its info button, with the cue, so the card never scrolls.
+- Handoff from the summary is advertised (`NSUserActivity` "com.lontraindustries.workoutapp.viewWorkout" with the workout UUID); the iPhone doesn't handle it yet (left out to keep the phone-side changes small), so the row reads as text.
+- The iPhone's "Running on Apple Watch" note for a plan started on the Watch is not built: a phone session started meanwhile is joined when the Watch's log arrives (`WatchLogMerge`), not blocked.
+- Cardio pages at the accessibility text sizes don't switch to a scroll view (a scroll view inside the crown-paged stack would fight the crown); check them at AX3.
+
+To check on the Series 12:
+
 - That the 46 mm Series 12 defaults to the xLarge text size, and the Set page fits at the default and largest sizes on 42 mm.
 - The label colour `.glassProminent` uses on a light tint, and that black labels can be forced.
 - Crown detents with `achievableLoadsKg` windows of 40 loads (the phone sends ±20 around the plan); that is too few for a big change. Consider asking the phone for a wider window in C6.

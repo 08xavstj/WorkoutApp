@@ -4,19 +4,20 @@ import WatchKit
 import AppCore
 #endif
 
-/// The experimental rep counter under a squat or deadlift set: the count
-/// (after 3 reps; it only pre-fills the reps field, which stays editable), a
-/// dot per rep shaded by bar speed, and one tap with "Slowing" once the bar has
-/// slowed about 20 % (Hickmott 2022, see `RepDetection`). Shown only when the
-/// phone says the setting is on and the exercise is a barbell squat or
-/// deadlift. Counting starts only when you tap "Start set" under the bar (so
-/// walking out and unracking aren't counted, app choice) and runs only while
-/// the set is in progress: not during rest or a pause.
-struct WatchRepCounterView: View {
+/// The experimental rep counter, inline on the Set page's reps line: a small
+/// "Count" glyph button (44 pt hit area) starts it under the bar (so walking
+/// out and unracking aren't counted, app choice). While it counts, the reps
+/// value fills in live (it only pre-fills the reps, which stay editable with
+/// the crown), dots under it show bar speed, and "Slowing" appears once the
+/// bar has slowed about 20 % (Hickmott 2022, see `RepDetection`), with one
+/// tap. Shown only when the phone says the setting is on and the exercise is
+/// a barbell squat or deadlift; runs only while the set is in progress (no
+/// rest, not paused).
+struct RepCountControl: View {
     @Environment(WatchWorkoutModel.self) private var model
     /// `WatchSession.setKey` of the set being done.
     let setKey: String
-    /// The set "Start set" was tapped for, and how many taps (a tap after the
+    /// The set "Count" was tapped for, and how many taps (a tap after the
     /// counter stopped on its own starts it again).
     @State private var startedKey: String?
     @State private var starts = 0
@@ -35,51 +36,42 @@ struct WatchRepCounterView: View {
         RunKey(setKey: setKey, active: canRun && startedKey == setKey, starts: starts)
     }
 
+    private var isRunningHere: Bool { counter.setKey == setKey && counter.isRunning }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            WatchRepCountLine(count: shownCount, isRunning: isRunningHere, isAvailable: counter.isAvailable)
-            if counter.isAvailable, canRun, !isRunningHere {
-                Button {
-                    startedKey = setKey
-                    starts += 1
-                } label: {
-                    Label("Start set", systemImage: "play.fill")
-                        .font(.footnote.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(WatchTheme.lifting)
-                .accessibilityHint("Starts the experimental rep counter")
+        Button {
+            if isRunningHere {
+                counter.stop()
+                startedKey = nil
+            } else {
+                model.clearRepsEdit(setKey)
+                startedKey = setKey
+                starts += 1
             }
-            if shownCount != nil {
-                WatchRepDots(speeds: speeds, losses: losses)
-            }
-            if isSlowingHere {
-                WatchSlowingNote()
-            }
+        } label: {
+            Image(systemName: isRunningHere ? "stop.fill" : "waveform.path")
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(isRunningHere ? WatchPalette.onTint : WatchPalette.lifting)
+                .frame(width: 30, height: 30)
+                .background(isRunningHere ? WatchPalette.lifting : WatchPalette.lifting.opacity(0.18), in: Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
-        .background(WatchTheme.lifting.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .contain)
+        .buttonStyle(.plain)
+        .disabled(!counter.isAvailable || !canRun)
+        .opacity(counter.isAvailable ? 1 : 0.4)
+        .accessibilityLabel(isRunningHere ? "Stop counting reps" : "Count reps")
+        .accessibilityHint("Experimental rep counter for squats and deadlifts")
         .task(id: runKey) {
             await run(runKey)
         }
     }
 
-    private var isThisSet: Bool { counter.setKey == setKey }
-    private var shownCount: Int? { counter.countedReps(forSet: setKey) }
-    private var isRunningHere: Bool { isThisSet && counter.isRunning }
-    private var isSlowingHere: Bool { isThisSet && counter.hasSignalledSlowing }
-    private var speeds: [Double] { isThisSet ? counter.analysis.relativeSpeeds : [] }
-    private var losses: [Double] { isThisSet ? counter.analysis.losses : [] }
-
     /// Counts once started while the set is in progress; stops when it isn't,
     /// or when the view goes away (the task is cancelled).
     private func run(_ key: RunKey) async {
         guard key.active else {
-            counter.stop()
+            if counter.setKey == key.setKey { counter.stop() }
             return
         }
         let token = counter.start(setKey: key.setKey)
@@ -91,40 +83,38 @@ struct WatchRepCounterView: View {
     }
 }
 
-private struct WatchRepCountLine: View {
-    let count: Int?
-    let isRunning: Bool
-    let isAvailable: Bool
+/// Under the reps while counting: a dot per rep shaded by bar speed, and
+/// "Slowing" once the bar has slowed (a cross-check for how hard it feels,
+/// not a verdict).
+struct RepCountDetail: View {
+    let setKey: String
+
+    private var counter: RepCounter { RepCounter.shared }
+    private var isThisSet: Bool { counter.setKey == setKey }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.footnote)
-                .foregroundStyle(WatchTheme.lifting)
-            Text(title)
-                .font(.headline)
-                .monospacedDigit()
-            Text("Beta")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            Text(status)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+        HStack(spacing: 6) {
+            if isThisSet, counter.isRunning, counter.countedReps(forSet: setKey) == nil {
+                Text("Counts from rep 3")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            WatchRepDots(speeds: isThisSet ? counter.analysis.relativeSpeeds : [],
+                         losses: isThisSet ? counter.analysis.losses : [])
+            if isThisSet, counter.hasSignalledSlowing {
+                Text("Slowing")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(WatchPalette.strain)
+                    .accessibilityLabel("Slowing: about 1 to 2 reps left")
+            }
         }
+        .lineLimit(1)
     }
 
-    private var title: String {
-        if let count { return count == 1 ? "1 rep" : "\(count) reps" }
-        return isAvailable ? "Reps" : "No motion data"
-    }
-
-    private var status: String {
-        guard isAvailable else { return "" }
-        if isRunning { return count == nil ? "Counts from rep 3" : "Counting" }
-        return count == nil ? "" : "Edit if wrong"
+    /// True while there's something to show for this set.
+    static func isActive(for setKey: String) -> Bool {
+        let counter = RepCounter.shared
+        return counter.setKey == setKey && (counter.isRunning || counter.count != nil)
     }
 }
 
@@ -135,7 +125,7 @@ private struct WatchRepDots: View {
     let losses: [Double]
 
     /// Room for this many on the smallest Watch; older reps scroll off.
-    private static let maximumDots = 12
+    private static let maximumDots = 10
 
     private struct Dot: Identifiable {
         var id: Int
@@ -162,21 +152,6 @@ private struct WatchRepDots: View {
     }
 
     private func color(loss: Double) -> Color {
-        loss >= RepDetection.slowingLoss ? WatchTheme.strain : WatchTheme.recovery
-    }
-}
-
-/// The "slowing" hint: a cross-check for how hard it feels, not a verdict.
-private struct WatchSlowingNote: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Label("Slowing: about 1–2 reps left", systemImage: "arrow.down.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(WatchTheme.strain)
-            Text("Bar speed dropped about 20%. Check it against how the set feels.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        loss >= RepDetection.slowingLoss ? WatchPalette.strain : WatchPalette.recovery
     }
 }

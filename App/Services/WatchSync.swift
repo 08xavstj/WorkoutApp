@@ -63,6 +63,11 @@ final class WatchSync: NSObject {
     @ObservationIgnored private var lastZones: HeartRateZoneScheme?
     /// When the face data last went as a complication transfer (the kind that wakes the Watch app).
     @ObservationIgnored private var lastFacePushedAt = Date.distantPast
+    /// The plan and library as last sent to the Watch (`updatePlan`, `updateLibrary`), and what the plan was built from.
+    @ObservationIgnored private var lastPlan: WatchSession?
+    @ObservationIgnored private var lastPlanKey: String?
+    @ObservationIgnored private var lastLibrary: [WatchSession.ExerciseSnapshot]?
+    @ObservationIgnored private var lastIntervals: IntervalSession??
 
     /// Called once from the root view, so commands can reach the database.
     func configure(context: ModelContext, gym: GymStore, launcher: WorkoutLauncher, health: HealthKitClient?,
@@ -310,6 +315,189 @@ final class WatchSync: NSObject {
         updateContext(key: WatchMessage.zones, data: data)
     }
 
+    // MARK: Plan ahead and Quick lift
+
+    /// Whether the plan built from `key` (the day, the planned session and the
+    /// latest workout) still has to be sent; false when it went already.
+    func planIsStale(_ key: String) -> Bool {
+        key != lastPlanKey
+    }
+
+    /// Sends today's planned lifting session to the Watch ahead of time, so it
+    /// can run it with the phone out of reach (`WatchMessage.plan`, application
+    /// context). `plan` nil clears it (rest day, done, no plan). Built from
+    /// the same planner request the workout builder and the coach use, so the
+    /// loads, rest and targets are the phone's. Sends only on change.
+    func updatePlan(_ plan: PlannedWorkout?, plannedFor: Date, key: String) {
+        lastPlanKey = key
+        guard let connection, connection.activationState == .activated,
+              connection.isPaired, connection.isWatchAppInstalled else { return }
+        let snapshot = plan.map { makePlanSnapshot($0, plannedFor: plannedFor) }
+        var previous = lastPlan
+        previous?.sentAt = snapshot?.sentAt ?? .now
+        guard snapshot != previous || (snapshot == nil) != (lastPlan == nil) else { return }
+        lastPlan = snapshot
+        if let snapshot, let data = WatchMessage.encode(snapshot) {
+            updateContext(key: WatchMessage.plan, data: data)
+        } else {
+            var context = connection.applicationContext
+            context[WatchMessage.plan] = nil
+            try? connection.updateApplicationContext(context)
+        }
+    }
+
+    /// Sends up to 40 recent exercises with their last sets, rest and makeable
+    /// loads, for Quick lift on the Watch (`WatchMessage.library`). Sends only on change.
+    func updateLibrary(sessions: [WorkoutSession]) {
+        guard let connection, connection.activationState == .activated,
+              connection.isPaired, connection.isWatchAppInstalled else { return }
+        let profile = gym?.profile ?? .commercialKilograms
+        var seen = Set<String>()
+        var exercises: [WatchSession.ExerciseSnapshot] = []
+        for session in sessions.filter({ !$0.isActive }).sorted(by: { $0.startedAt > $1.startedAt }) {
+            for exercise in session.orderedExercises where !seen.contains(exercise.exerciseID) {
+                let done = exercise.orderedSets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage }
+                guard !done.isEmpty else { continue }
+                seen.insert(exercise.exerciseID)
+                // Last time's sets as today's plan (at most 4, app's choice to keep the
+                // library small), each with itself as the ghost.
+                let sets = done.prefix(4).map { set in
+                    var snapshot = WatchSession.SetSnapshot(reps: set.reps, weightKg: set.weightKg, isCompleted: false,
+                                                            isWarmup: false, rpe: nil)
+                    snapshot.lastWeightKg = set.weightKg
+                    snapshot.lastReps = set.reps
+                    snapshot.lastRPE = set.rpe
+                    return snapshot
+                }
+                exercises.append(exerciseSnapshot(id: exercises.count, exerciseID: exercise.exerciseID, name: exercise.name,
+                                                  sets: Array(sets), planned: done.last?.weightKg ?? 0, profile: profile,
+                                                  plannedRest: nil, loadWindow: 10))
+                if exercises.count >= WatchExerciseLibrary.maximumCount { break }
+            }
+            if exercises.count >= WatchExerciseLibrary.maximumCount { break }
+        }
+        guard exercises != lastLibrary else { return }
+        lastLibrary = exercises
+        var library = WatchExerciseLibrary(exercises: exercises, unit: profile.unit.rawValue,
+                                           weightStepKg: profile.unit == .kg ? 2.5 : profile.unit.toKilograms(5), sentAt: .now)
+        // The application context shares one size limit with the live session and the
+        // face data: the library stays under `libraryByteLimit` (app's choice), dropping
+        // the oldest exercises first.
+        var encoded = WatchMessage.encode(library)
+        while let size = encoded?.count, size > Self.libraryByteLimit, library.exercises.count > 5 {
+            library.exercises.removeLast(5)
+            encoded = WatchMessage.encode(library)
+        }
+        guard let payload = encoded else { return }
+        updateContext(key: WatchMessage.library, data: payload)
+    }
+
+    /// Largest library sent, in bytes (see `updateLibrary`).
+    private static let libraryByteLimit = 24_000
+
+    /// This week's hard cardio session (`HardCardio`), so the Watch can run it
+    /// step by step (`WatchMessage.intervals`); nil when none is planned, it's
+    /// done, or rest mode or a deload week blocks it. Sends only on change.
+    func updateIntervals(_ session: IntervalSession?) {
+        guard let connection, connection.activationState == .activated,
+              connection.isPaired, connection.isWatchAppInstalled else { return }
+        if let lastIntervals, lastIntervals == session { return }
+        lastIntervals = .some(session)
+        if let session, let data = session.encoded() {
+            updateContext(key: WatchMessage.intervals, data: data)
+        } else {
+            var context = connection.applicationContext
+            context[WatchMessage.intervals] = nil
+            try? connection.updateApplicationContext(context)
+        }
+    }
+
+    /// One exercise for a plan or the library: makeable loads around `planned`,
+    /// the exercise's rest, and how it's held or loaded.
+    private func exerciseSnapshot(id: Int, exerciseID: String, name: String, sets: [WatchSession.SetSnapshot],
+                                  planned: Double, profile: GymProfile, plannedRest: Int?,
+                                  loadWindow: Int = 20) -> WatchSession.ExerciseSnapshot {
+        let loadKind = ExerciseCatalog.exercise(id: exerciseID)?.load
+        var snapshot = WatchSession.ExerciseSnapshot(
+            id: id, name: name, supersetLabel: nil, sets: sets,
+            achievableLoadsKg: loads(for: exerciseID, around: planned, profile: profile, window: loadWindow),
+            repCounting: UserDefaults.standard.bool(forKey: "watchRepCounting") && RepDetection.supports(exerciseID: exerciseID),
+            key: nil,
+            isHold: LiveSetCoach.isHold(exerciseID) ? true : nil,
+            perHand: Prescription.isPerHand(loadKind) ? true : nil,
+            machineNote: gym?.machineNote(for: exerciseID)?.shortLine
+        )
+        snapshot.catalogID = exerciseID
+        snapshot.restSeconds = RestPreferences.resolved(for: exerciseID, style: gym?.style ?? .balanced, planned: plannedRest)
+        return snapshot
+    }
+
+    /// A planned session as the Watch runs it: warm-up ramps, working sets with
+    /// the plan's reps and effort, then any drop stages or mini-sets, in kg.
+    private func makePlanSnapshot(_ plan: PlannedWorkout, plannedFor: Date) -> WatchSession {
+        let profile = gym?.profile ?? .commercialKilograms
+        let unit = plan.unit
+        // Last time's sets for the ghost line, from the latest 60 sessions.
+        var recent = FetchDescriptor<WorkoutSession>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
+        recent.fetchLimit = 60
+        let sessions = (try? context?.fetch(recent)) ?? []
+        var exercises: [WatchSession.ExerciseSnapshot] = []
+        for (index, planned) in plan.exercises.enumerated() {
+            let weightKg = planned.load.map { unit.toKilograms($0) } ?? 0
+            let ghosts = LiftHistory.previousSets(for: planned.exerciseID, before: plannedFor, in: sessions)
+                .filter { !$0.isWarmup && !$0.kind.isStage }
+            var sets: [WatchSession.SetSnapshot] = []
+            let ramps = planned.warmUpSets ?? []
+            for (number, ramp) in ramps.enumerated() {
+                var set = WatchSession.SetSnapshot(reps: ramp.reps, weightKg: unit.toKilograms(ramp.load), isCompleted: false,
+                                                   isWarmup: true, rpe: nil)
+                set.title = "Warm-up \(number + 1) of \(ramps.count)"
+                sets.append(set)
+            }
+            let working = max(1, planned.sets)
+            for number in 0..<working {
+                var set = WatchSession.SetSnapshot(reps: planned.repsToday, weightKg: weightKg, isCompleted: false,
+                                                   isWarmup: false, rpe: planned.rpe)
+                set.title = "Set \(number + 1) of \(working)"
+                set.targetReps = planned.repsToday
+                set.targetRIR = LiveSetCoach.isHold(planned.exerciseID) ? nil : max(0, 10 - planned.rpe)
+                if number < ghosts.count {
+                    set.lastWeightKg = ghosts[number].weightKg
+                    set.lastReps = ghosts[number].reps
+                    set.lastRPE = ghosts[number].rpe
+                }
+                sets.append(set)
+            }
+            if let kind = planned.lastSetKind, let stages = planned.stages {
+                for (number, stage) in stages.enumerated() {
+                    var set = WatchSession.SetSnapshot(reps: stage.reps, weightKg: stage.load.map { unit.toKilograms($0) } ?? weightKg,
+                                                       isCompleted: false, isWarmup: false, rpe: nil)
+                    set.kind = kind.rawValue
+                    set.restBeforeSeconds = kind.restBeforeSeconds ?? 0
+                    set.title = "\(kind.stageName) \(number + 1) of \(stages.count)"
+                    set.note = kind.howTo
+                    sets.append(set)
+                }
+            }
+            for position in sets.indices { sets[position].order = position }
+            var exercise = exerciseSnapshot(id: index, exerciseID: planned.exerciseID, name: planned.name, sets: sets,
+                                            planned: weightKg, profile: profile, plannedRest: planned.restSeconds)
+            exercise.supersetLabel = Supersets.label(for: index, in: plan.exercises)
+            exercises.append(exercise)
+        }
+        var snapshot = WatchSession(
+            id: WatchSession.id(for: plannedFor), startedAt: plannedFor, name: plan.title, exercises: exercises,
+            currentExercise: nil, currentSet: nil,
+            restSeconds: exercises.first?.restSeconds ?? RestCues.standaloneRestSeconds, restEndsAt: nil,
+            unit: profile.unit.rawValue, isFinished: false, sentAt: .now,
+            weightStepKg: profile.unit == .kg ? 2.5 : profile.unit.toKilograms(5)
+        )
+        snapshot.plannedFor = plannedFor
+        snapshot.plannedMinutes = plan.minutes
+        snapshot.restBuzz = RestAlertPolicy.watchBuzzes
+        return snapshot
+    }
+
     func updateFace(_ data: WatchFaceData) {
         guard let connection, connection.activationState == .activated,
               connection.isPaired, connection.isWatchAppInstalled else { return }
@@ -438,13 +626,13 @@ final class WatchSync: NSObject {
     }
 
     /// Up to 20 loads either side of the planned weight that the gym can make, in kg.
-    private func loads(for exerciseID: String, around weightKg: Double, profile: GymProfile) -> [Double]? {
+    private func loads(for exerciseID: String, around weightKg: Double, profile: GymProfile, window size: Int = 20) -> [Double]? {
         guard let kind = ExerciseCatalog.exercise(id: exerciseID)?.load, profile.has(kind) else { return nil }
         let all = profile.achievableLoads(for: kind)
         guard !all.isEmpty else { return nil }
         let target = profile.unit.fromKilograms(weightKg)
         let position = all.firstIndex { $0 >= target - 0.001 } ?? all.count
-        let window = all[max(0, position - 20)..<min(all.count, position + 20)]
+        let window = all[max(0, position - size)..<min(all.count, position + size)]
         return window.map { profile.unit.toKilograms($0) }
     }
 
@@ -691,16 +879,22 @@ final class WatchSync: NSObject {
             }
             return
         }
+        // Sets logged on the Watch alone (a plan sent ahead or a quick lift): the
+        // Watch's log (`WatchLogMerge`). Nil for a session the phone ran.
+        let logged = summary.loggedExercises.map { WatchLogMerge.completed($0.map(Self.logged)) }
         let session: WorkoutSession
         if let found = matchingSession(for: summary) {
             session = found
+            // The same workout on the phone: the Watch's sets join it, not a second session.
+            if let logged { merge(logged, into: found, at: summary.end) }
         } else {
-            // No session to join and no Health workout (the Watch's save failed):
-            // nothing to record, and an empty session would never be swept.
-            guard summary.workoutUUID != nil else { return }
-            session = WorkoutSession(name: "Watch workout, \(summary.minutes) min", startedAt: summary.start)
+            // No session to join and no Health workout (the Watch's save failed) and no
+            // sets: nothing to record, and an empty session would never be swept.
+            guard summary.workoutUUID != nil || !(logged ?? []).isEmpty else { return }
+            session = WorkoutSession(name: summary.name ?? "Watch workout, \(summary.minutes) min", startedAt: summary.start)
             session.endedAt = summary.end
             context.insert(session)
+            if let logged { insert(logged, into: session, at: summary.end) }
         }
         // A failed save mustn't erase an earlier recording's id.
         if let id = summary.workoutUUID {
@@ -709,7 +903,8 @@ final class WatchSync: NSObject {
         }
         if session.sessionRPE == nil, let rpe = summary.sessionRPE { session.sessionRPE = max(1, min(10, rpe)) }
         // Still open on the phone: the Watch's end is when the workout ended (`FinishWorkoutSheet`).
-        if session.isActive, LiveSessionStore.entry(for: session.startedAt).watchFinishedAt == nil {
+        // Not for a Watch-only log joined to it: that one was its own recording.
+        if session.isActive, summary.loggedExercises == nil, LiveSessionStore.entry(for: session.startedAt).watchFinishedAt == nil {
             LiveSessionStore.update(for: session.startedAt) { $0.watchFinishedAt = summary.end }
         }
         // The recording has ended, and any pause of it with it.
@@ -722,6 +917,68 @@ final class WatchSync: NSObject {
             Task { try? await health.saveWorkoutEffort(score: rpe, start: start, end: end) }
         }
         if session.isActive { update(from: session) }
+    }
+
+    /// One exercise of the Watch's log as `WatchLogMerge` reads it (kg throughout).
+    private static func logged(_ exercise: WatchSession.ExerciseSnapshot) -> WatchLogMerge.LoggedExercise {
+        WatchLogMerge.LoggedExercise(catalogID: exercise.catalogID, name: exercise.name, sets: exercise.sets.map { set in
+            WatchLogMerge.LoggedSet(reps: set.reps, weightKg: set.weightKg, rpe: set.rpe, isWarmup: set.isWarmup,
+                                    isCompleted: set.isCompleted, kind: set.kind)
+        })
+    }
+
+    /// A Watch-only log as the exercises and completed sets of a new session, in the Watch's order.
+    private func insert(_ logged: [WatchLogMerge.LoggedExercise], into session: WorkoutSession, at end: Date) {
+        guard let context else { return }
+        for (order, exercise) in logged.enumerated() {
+            let log = ExerciseLog(exerciseID: exercise.storedID, name: exercise.name, order: order)
+            log.session = session
+            context.insert(log)
+            addSets(exercise.sets, to: log, from: 0, at: end)
+        }
+        LiveSessionStore.update(for: session.startedAt) { $0.highestOrder = logged.isEmpty ? nil : logged.count - 1 }
+    }
+
+    /// A Watch-only log joined to the phone's overlapping session (`WatchLogMerge.merge`).
+    private func merge(_ logged: [WatchLogMerge.LoggedExercise], into session: WorkoutSession, at end: Date) {
+        guard let context else { return }
+        let ordered = session.orderedExercises
+        let existing = ordered.map { exercise in
+            WatchLogMerge.ExistingExercise(catalogID: exercise.exerciseID, name: exercise.name,
+                                           openSets: exercise.sets.filter { !$0.isCompleted }.count)
+        }
+        for action in WatchLogMerge.merge(logged, into: existing) {
+            switch action {
+            case let .merge(index, fill, extra):
+                let exercise = ordered[index]
+                for (set, values) in zip(exercise.orderedSets.filter { !$0.isCompleted }, fill) {
+                    set.reps = values.reps
+                    set.weightKg = values.weightKg
+                    set.rpe = values.rpe ?? set.rpe
+                    set.completedAt = end
+                }
+                addSets(extra, to: exercise, from: (exercise.sets.map(\.order).max() ?? -1) + 1, at: end)
+            case let .add(exercise):
+                let order = LiveWorkoutRules.nextOrder(existing: session.exercises.map(\.order),
+                                                       highestUsed: LiveSessionStore.entry(for: session.startedAt).highestOrder)
+                LiveSessionStore.noteOrders([order], for: session.startedAt)
+                let log = ExerciseLog(exerciseID: exercise.storedID, name: exercise.name, order: order)
+                log.session = session
+                context.insert(log)
+                addSets(exercise.sets, to: log, from: 0, at: end)
+            }
+        }
+    }
+
+    private func addSets(_ sets: [WatchLogMerge.LoggedSet], to log: ExerciseLog, from first: Int, at end: Date) {
+        guard let context else { return }
+        for (offset, values) in sets.enumerated() {
+            let set = SetLog(order: first + offset, weightKg: values.weightKg, reps: values.reps, rpe: values.rpe,
+                             isWarmup: values.isWarmup, kind: values.kind.flatMap(SetKind.init(rawValue:)) ?? .straight)
+            set.completedAt = end
+            set.exercise = log
+            context.insert(set)
+        }
     }
 
     private func matchingSession(for summary: WatchWorkoutSummary) -> WorkoutSession? {
