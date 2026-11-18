@@ -84,12 +84,10 @@ extension View {
         modifier(StatusFont())
     }
 
-    /// The smallest text a workout page shows: Footnote (14 pt). Footnote 2
-    /// (13 pt) is the floor (app's choice, above the HIG's 12 pt minimum), so
-    /// nothing here shrinks with `minimumScaleFactor`.
-    func supportingText() -> some View {
-        font(.footnote)
-    }
+    // The smallest text a workout page shows is Footnote (14 pt); Footnote 2
+    // (13 pt) is the floor (app's choice, above the HIG's 12 pt minimum), so no
+    // minimumScaleFactor on a workout page takes text below it.
+
 }
 
 /// "12:34" from seconds (minutes past 60 keep counting: "75:10").

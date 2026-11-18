@@ -359,8 +359,9 @@ final class WatchSync: NSObject {
                 let done = exercise.orderedSets.filter { $0.isCompleted && !$0.isWarmup && !$0.kind.isStage }
                 guard !done.isEmpty else { continue }
                 seen.insert(exercise.exerciseID)
-                // Last time's sets as today's plan, each with itself as the ghost.
-                let sets = done.map { set in
+                // Last time's sets as today's plan (at most 4, app's choice to keep the
+                // library small), each with itself as the ghost.
+                let sets = done.prefix(4).map { set in
                     var snapshot = WatchSession.SetSnapshot(reps: set.reps, weightKg: set.weightKg, isCompleted: false,
                                                             isWarmup: false, rpe: nil)
                     snapshot.lastWeightKg = set.weightKg
@@ -369,19 +370,30 @@ final class WatchSync: NSObject {
                     return snapshot
                 }
                 exercises.append(exerciseSnapshot(id: exercises.count, exerciseID: exercise.exerciseID, name: exercise.name,
-                                                  sets: sets, planned: done.last?.weightKg ?? 0, profile: profile,
-                                                  plannedRest: nil))
+                                                  sets: Array(sets), planned: done.last?.weightKg ?? 0, profile: profile,
+                                                  plannedRest: nil, loadWindow: 10))
                 if exercises.count >= WatchExerciseLibrary.maximumCount { break }
             }
             if exercises.count >= WatchExerciseLibrary.maximumCount { break }
         }
         guard exercises != lastLibrary else { return }
         lastLibrary = exercises
-        let library = WatchExerciseLibrary(exercises: exercises, unit: profile.unit.rawValue,
+        var library = WatchExerciseLibrary(exercises: exercises, unit: profile.unit.rawValue,
                                            weightStepKg: profile.unit == .kg ? 2.5 : profile.unit.toKilograms(5), sentAt: .now)
-        guard let data = WatchMessage.encode(library) else { return }
-        updateContext(key: WatchMessage.library, data: data)
+        // The application context shares one size limit with the live session and the
+        // face data: the library stays under `libraryByteLimit` (app's choice), dropping
+        // the oldest exercises first.
+        var encoded = WatchMessage.encode(library)
+        while let size = encoded?.count, size > Self.libraryByteLimit, library.exercises.count > 5 {
+            library.exercises.removeLast(5)
+            encoded = WatchMessage.encode(library)
+        }
+        guard let payload = encoded else { return }
+        updateContext(key: WatchMessage.library, data: payload)
     }
+
+    /// Largest library sent, in bytes (see `updateLibrary`).
+    private static let libraryByteLimit = 24_000
 
     /// This week's hard cardio session (`HardCardio`), so the Watch can run it
     /// step by step (`WatchMessage.intervals`); nil when none is planned, it's
@@ -403,11 +415,12 @@ final class WatchSync: NSObject {
     /// One exercise for a plan or the library: makeable loads around `planned`,
     /// the exercise's rest, and how it's held or loaded.
     private func exerciseSnapshot(id: Int, exerciseID: String, name: String, sets: [WatchSession.SetSnapshot],
-                                  planned: Double, profile: GymProfile, plannedRest: Int?) -> WatchSession.ExerciseSnapshot {
+                                  planned: Double, profile: GymProfile, plannedRest: Int?,
+                                  loadWindow: Int = 20) -> WatchSession.ExerciseSnapshot {
         let loadKind = ExerciseCatalog.exercise(id: exerciseID)?.load
         var snapshot = WatchSession.ExerciseSnapshot(
             id: id, name: name, supersetLabel: nil, sets: sets,
-            achievableLoadsKg: loads(for: exerciseID, around: planned, profile: profile),
+            achievableLoadsKg: loads(for: exerciseID, around: planned, profile: profile, window: loadWindow),
             repCounting: UserDefaults.standard.bool(forKey: "watchRepCounting") && RepDetection.supports(exerciseID: exerciseID),
             key: nil,
             isHold: LiveSetCoach.isHold(exerciseID) ? true : nil,
@@ -613,13 +626,13 @@ final class WatchSync: NSObject {
     }
 
     /// Up to 20 loads either side of the planned weight that the gym can make, in kg.
-    private func loads(for exerciseID: String, around weightKg: Double, profile: GymProfile) -> [Double]? {
+    private func loads(for exerciseID: String, around weightKg: Double, profile: GymProfile, window size: Int = 20) -> [Double]? {
         guard let kind = ExerciseCatalog.exercise(id: exerciseID)?.load, profile.has(kind) else { return nil }
         let all = profile.achievableLoads(for: kind)
         guard !all.isEmpty else { return nil }
         let target = profile.unit.fromKilograms(weightKg)
         let position = all.firstIndex { $0 >= target - 0.001 } ?? all.count
-        let window = all[max(0, position - 20)..<min(all.count, position + 20)]
+        let window = all[max(0, position - size)..<min(all.count, position + size)]
         return window.map { profile.unit.toKilograms($0) }
     }
 

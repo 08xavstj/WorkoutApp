@@ -580,6 +580,8 @@ final class WatchCardioModel: NSObject {
         self.summary = summary
         intervalTask?.cancel()
         intervalTask = nil
+        // This week's hard session is done: Home stops offering it (the phone clears it too once Health has the workout).
+        if interval != nil, saved, interval == weeklyIntervals { weeklyIntervals = nil }
         WatchHistoryStore.save(WatchActivityRecord(
             kind: .cardio, title: activity.title, start: startedAt ?? end, end: end,
             minutes: max(1, Int(active / 60)), detail: Self.historyDetail(summary),
