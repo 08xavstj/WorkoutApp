@@ -42,12 +42,21 @@ public enum HeartRateMerge {
         /// True when this app recorded the readings in a live workout session
         /// (AirPods Pro or a Bluetooth strap), whatever the device is called.
         public var isOwnRecording: Bool
+        /// The Apple Health source's bundle identifier, when known: tells an
+        /// Oura ring from a watch whose name happens to contain "oura"
+        /// (`SleepSource.tracker`).
+        public var bundleID: String?
 
-        public init(name: String, samples: [HeartRateSample], isOwnRecording: Bool = false) {
+        public init(name: String, samples: [HeartRateSample], isOwnRecording: Bool = false, bundleID: String? = nil) {
             self.name = name
             self.samples = samples
             self.isOwnRecording = isOwnRecording
+            self.bundleID = bundleID
         }
+
+        /// One device across reads: the bundle ID when known (each Apple
+        /// Watch writes under its own), else the name.
+        public var identity: String { bundleID.flatMap { $0.isEmpty ? nil : $0 } ?? name }
 
         public var placement: Placement {
             if isOwnRecording || name.range(of: "AirPods", options: .caseInsensitive) != nil { return .ear }

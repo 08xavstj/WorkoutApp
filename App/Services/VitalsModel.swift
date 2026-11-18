@@ -306,10 +306,10 @@ final class VitalsModel {
         cardioVigorousByDay = derived.cardioVigorousByDay
         restingHeartRateHistory = rhrSeries
         // 30 nights of sleeping heart rate from the same device the recovery
-        // baseline uses (`sleepingHeartRate(nights:today:)`: the Oura ring's
+        // baseline uses (`sleepingHeartRate(nights:today:days:)`: the Oura ring's
         // nights or the watch's, never both), so the illness watch compares
         // yesterday and today from one device.
-        let sleepingByNight = await health.sleepingHeartRate(nights: Array(nights.suffix(30)), today: today).nights
+        let sleepingByNight = await health.sleepingHeartRate(nights: Array(nights.suffix(30)), today: today, days: 30).nights
         let sleepingSeries = sleepingByNight.map { DatedValue(date: $0.key, value: $0.value) }.sorted { $0.date < $1.date }
         sleepingHeartRateHistory = sleepingSeries
 

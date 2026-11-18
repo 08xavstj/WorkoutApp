@@ -28,7 +28,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
     }
     /// Average sleeping heart rate for finished nights (`nightlySleepingHeartRate`).
     /// v2: the watch's own minutes only; v1 nights also averaged in Oura's.
-    let sleepingHeartRateCache = NightlyValueCache(fileName: "sleeping-hr-nights-v2.json")
+    /// v3: each night's value per source, so one source carries the whole window.
+    let sleepingHeartRateCache = NightlyValueCache(fileName: "sleeping-hr-nights-v3.json")
     /// The running observer queries and what they call (`observeChanges`).
     private let observers = ObserverRegistry()
 
@@ -275,15 +276,19 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         var groups: [String: [HeartRateSample]] = [:]
         var order: [String] = []
         var own: Set<String> = []
+        var bundles: [String: String] = [:]
         for sample in try await descriptor.result(for: store) {
             let source = sample.sourceRevision.source.name
             let device = sample.device?.name
             let label = device.map { "\($0) (\(source))" } ?? source
-            if groups[label] == nil { order.append(label) }
+            if groups[label] == nil {
+                order.append(label)
+                bundles[label] = sample.sourceRevision.source.bundleIdentifier
+            }
             if sample.sourceRevision.source.bundleIdentifier == ownBundle { own.insert(label) }
             groups[label, default: []].append(HeartRateSample(date: sample.startDate, bpm: sample.quantity.doubleValue(for: unit)))
         }
-        return order.map { HeartRateSource(name: $0, samples: groups[$0] ?? [], isOwnRecording: own.contains($0)) }
+        return order.map { HeartRateSource(name: $0, samples: groups[$0] ?? [], isOwnRecording: own.contains($0), bundleID: bundles[$0]) }
     }
 
     /// Heart rate averaged per minute, one series per source, for
@@ -319,7 +324,8 @@ nonisolated final class HealthKitClient: @unchecked Sendable {
         for (source, samples) in bySource {
             let device = try? await deviceName(for: source, type: type, from: start, to: end)
             let label = device.map { "\($0) (\(source.name))" } ?? source.name
-            result.append(HeartRateSource(name: label, samples: samples, isOwnRecording: source.bundleIdentifier == ownBundle))
+            result.append(HeartRateSource(name: label, samples: samples, isOwnRecording: source.bundleIdentifier == ownBundle,
+                                          bundleID: source.bundleIdentifier))
         }
         return result.sorted { $0.samples.count > $1.samples.count }
     }
@@ -1095,11 +1101,13 @@ nonisolated struct HeartRateSource: Sendable, Identifiable {
     var samples: [HeartRateSample]
     /// True when this app wrote the readings (a live AirPods or strap session).
     var isOwnRecording = false
+    /// The writing app's bundle identifier in Apple Health, when known (`SleepSource.tracker`).
+    var bundleID: String? = nil
     var id: String { name }
 
     /// The same readings for `HeartRateMerge`.
     var mergeSource: HeartRateMerge.Source {
-        HeartRateMerge.Source(name: name, samples: samples, isOwnRecording: isOwnRecording)
+        HeartRateMerge.Source(name: name, samples: samples, isOwnRecording: isOwnRecording, bundleID: bundleID)
     }
 }
 

@@ -3,12 +3,13 @@ import AppCore
 
 nonisolated extension HealthKitClient {
     /// Average heart rate during each night's main sleep, keyed by the morning
-    /// it ended, from the watch's per-minute heart rate (any source but the
-    /// Oura ring, one source a night: `OneDeviceBaseline.watchSleepingHeartRate`).
+    /// it ended, from the watch's per-minute heart rate: any source but the
+    /// Oura ring, and one source for every night (`OneDeviceBaseline.oneWatchSource`,
+    /// the one with the most nights), so two devices never share a baseline.
     /// Nights with fewer than 60 minutes of readings are left out (the same
     /// rule as the Biology tab's sleeping heart rate).
     ///
-    /// With the ring's own nights (`sleepingHeartRate(nights:today:)`), this
+    /// With the ring's own nights (`sleepingHeartRate(nights:today:days:)`), this
     /// is the resting heart rate fed to the recovery baseline and the illness
     /// watch, with HealthKit's `restingHeartRate` as the fallback (see
     /// `RecoveryCalculator.preferSleepingHeartRate`): sleep-period heart rate
@@ -28,24 +29,24 @@ nonisolated extension HealthKitClient {
         let settledEmpty = calendar.date(byAdding: .day, value: -7, to: today) ?? today
         // Demo mode (`DemoHealth`) never touches the real cache.
         let useCache = DemoHealth.active == nil
-        var known = useCache ? sleepingHeartRateCache.values(for: nights) : [:]
+        // Each night's value per source (empty: read, nothing there).
+        var known = useCache ? sleepingHeartRateCache.sourceValues(for: nights) : [:]
         let toRead = nights.filter { known[$0.date] == nil }
         if let first = toRead.map(\.bedtime).min(), let last = toRead.map(\.wake).max() {
             // Per source, so Oura's own minutes in Apple Health are never averaged with the watch's.
-            let sources = ((try? await heartRatePerMinuteBySource(from: first, to: last)) ?? [])
-                .map { HeartRateMerge.Source(name: $0.name, samples: $0.samples, isOwnRecording: $0.isOwnRecording) }
-            var finished: [(night: SleepNight, value: Double?)] = []
+            let sources = ((try? await heartRatePerMinuteBySource(from: first, to: last)) ?? []).map(\.mergeSource)
+            var finished: [(night: SleepNight, bySource: [String: Double])] = []
             for night in toRead {
-                let value = OneDeviceBaseline.watchSleepingHeartRate(sources, from: night.bedtime, to: night.wake)
-                known[night.date] = .some(value)
-                let settledNight = value != nil ? night.date < settled : night.date < settledEmpty
+                let values = OneDeviceBaseline.watchSleepingHeartRates(sources, from: night.bedtime, to: night.wake)
+                known[night.date] = values
+                let settledNight = !values.isEmpty ? night.date < settled : night.date < settledEmpty
                 if settledNight {
-                    finished.append((night, value))
+                    finished.append((night: night, bySource: values))
                 }
             }
-            if useCache { sleepingHeartRateCache.store(finished) }
+            if useCache { sleepingHeartRateCache.storeSourceValues(finished) }
         }
-        return known.compactMapValues { $0 }
+        return OneDeviceBaseline.oneWatchSource(known)
     }
 
     /// Sleeping heart rate from one device (`OneDeviceBaseline`): the Oura
@@ -54,9 +55,15 @@ nonisolated extension HealthKitClient {
     /// The ring is first because its nocturnal heart rate agreed with ECG at
     /// CCC 0.98 (Dial et al., Physiol Rep 2025), against a 3.7 bpm mean error
     /// for Apple Watch resting heart rate (O'Grady et al., Sensors 2024).
+    ///
+    /// - Parameter days: the baseline's window; the ring's nights are cut to
+    ///   it (`OneDeviceBaseline.recent`), as the watch's are by `nights`, so
+    ///   up to 120 days of Oura download don't fill a 30-night baseline or
+    ///   meet its 15-night threshold with old nights.
     @concurrent
-    func sleepingHeartRate(nights: [SleepNight], today: Date) async -> OneDeviceBaseline.Choice {
-        let ring = DemoHealth.active == nil ? OuraCache.shared.nightlySleepingHeartRate() : [:]
+    func sleepingHeartRate(nights: [SleepNight], today: Date, days: Int) async -> OneDeviceBaseline.Choice {
+        let ring = DemoHealth.active == nil
+            ? OneDeviceBaseline.recent(OuraCache.shared.nightlySleepingHeartRate(), days: days, today: today) : [:]
         return OneDeviceBaseline.choose(ring: ring, watch: await nightlySleepingHeartRate(nights: nights), latest: today)
     }
 
@@ -67,9 +74,12 @@ nonisolated extension HealthKitClient {
     /// 2025); Apple Watch HRV (SDNN) was off by a mean 29% against a chest
     /// strap (O'Grady et al., Sensors 2024). Oura doesn't write HRV to Apple
     /// Health, so the ring's nights come only from the direct link.
+    ///
+    /// - Parameter days: the baseline's window; the ring's nights are cut to
+    ///   it (`OneDeviceBaseline.recent`), as the watch's are by `nights`.
     @concurrent
-    func overnightRMSSD(nights: [SleepNight], today: Date) async -> OneDeviceBaseline.Choice {
-        let ring = DemoHealth.active == nil ? OuraCache.shared.nightlyRMSSD() : [:]
+    func overnightRMSSD(nights: [SleepNight], today: Date, days: Int) async -> OneDeviceBaseline.Choice {
+        let ring = DemoHealth.active == nil ? OneDeviceBaseline.recent(OuraCache.shared.nightlyRMSSD(), days: days, today: today) : [:]
         return OneDeviceBaseline.choose(ring: ring, watch: await nightlyRMSSD(nights: nights), latest: today)
     }
 }
