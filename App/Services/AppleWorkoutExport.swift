@@ -1,6 +1,8 @@
 import Foundation
 import HealthKit
-import WorkoutKit
+// WorkoutKit types (WorkoutScheduler.AuthorizationState, ScheduledWorkoutPlan) aren't marked Sendable yet;
+// the scheduler is an actor, so reading them from the main actor needs this.
+@preconcurrency import WorkoutKit
 import AppCore
 
 /// Optional: puts a planned cardio session into Apple's Workout app on its day
