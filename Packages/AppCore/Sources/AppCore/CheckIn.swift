@@ -301,11 +301,15 @@ public struct CheckInDay: Sendable, Equatable {
     public var usualTrainingStrain: Double?
     /// Hours of sleep debt over the 14 nights up to and including this night (`SleepDebt`).
     public var sleepDebtHours: Double?
+    /// Minutes of mindful sessions in Apple Health the day before (Apple's
+    /// Mindfulness app or another). Nil when the person has none on record
+    /// at all, so non-users never get the factor.
+    public var mindfulMinutesYesterday: Double?
 
     public init(morning: Date, evening: EveningCheckIn?, checkIn: MorningCheckIn?, hrv: Double?, restingHeartRate: Double?, sleepScore: Double?,
                 waterLiters: Double? = nil, bedtimeMinutes: Int? = nil,
                 moodValence: Double? = nil, trainedYesterday: Bool? = nil, strainYesterday: Double? = nil,
-                usualTrainingStrain: Double? = nil, sleepDebtHours: Double? = nil) {
+                usualTrainingStrain: Double? = nil, sleepDebtHours: Double? = nil, mindfulMinutesYesterday: Double? = nil) {
         self.morning = morning
         self.evening = evening
         self.checkIn = checkIn
@@ -319,6 +323,7 @@ public struct CheckInDay: Sendable, Equatable {
         self.strainYesterday = strainYesterday
         self.usualTrainingStrain = usualTrainingStrain
         self.sleepDebtHours = sleepDebtHours
+        self.mindfulMinutesYesterday = mindfulMinutesYesterday
     }
 
     /// Associations named in the evening before or this morning ("work", "family"...).
@@ -423,6 +428,15 @@ public enum CheckInInsights {
         // Sleep loss lowers positive affect and raises anxiety (Palmer et al.,
         // Psychol Bull 2024, 154 experiments). 3 h is `SleepDebt`'s "moderate" line.
         Factor(id: "sleepDebt", name: "3 h+ of sleep debt") { $0.sleepDebtHours.map { $0 >= 3 } },
+        // Mindful minutes from Apple Health (W11 in next-features-2026-11.md;
+        // the app runs no session of its own). Weak-to-moderate evidence:
+        // breathwork lowered self-reported stress a little (g = −0.35, 12
+        // RCTs, most at moderate risk of bias; Fincham et al., Sci Rep 2023),
+        // and relaxation may be counterproductive inside insomnia therapy
+        // (Furukawa et al., JAMA Psychiatry 2024). So it is only tested
+        // against your own mornings, like every factor here. Any logged
+        // minute counts (app's choice).
+        Factor(id: "mindful", name: "A mindful session") { $0.mindfulMinutesYesterday.map { $0 >= 1 } },
     ]
 
     /// What the mood was about, from the check-ins' "What's affecting it?"
