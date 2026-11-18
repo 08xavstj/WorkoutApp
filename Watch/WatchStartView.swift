@@ -64,6 +64,12 @@ struct WatchStartView: View {
                         .font(.caption2)
                         .foregroundStyle(WatchTheme.heart)
                 }
+                // When the complications last got scores from the iPhone, so a
+                // face showing "--" says why (`WatchFaceStore`, sent by `WatchSync`).
+                Text(phoneDataLine)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("watch-phone-data")
             }
             .padding(.horizontal, 4)
         }
@@ -77,5 +83,12 @@ struct WatchStartView: View {
             cardio.pickerRequested = false
             showingCardio = true
         }
+    }
+
+    private var phoneDataLine: String {
+        guard let updated = WatchFaceStore.load()?.updated else {
+            return "No scores from your iPhone yet. Open Tensile on your iPhone."
+        }
+        return "Scores from your iPhone: " + updated.formatted(date: Calendar.current.isDateInToday(updated) ? .omitted : .abbreviated, time: .shortened)
     }
 }
