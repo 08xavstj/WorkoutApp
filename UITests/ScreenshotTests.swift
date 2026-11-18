@@ -104,6 +104,7 @@ final class ScreenshotTests: XCTestCase {
             ("metric-Strength", "strength"),
             ("metric-Muscles", "muscles"),
             ("lift-goal-rings", "lift-goals"),
+            ("thisWeek.hardCardio", "interval-session"),
         ]
         for page in pages {
             openTab(app, "Fitness")
@@ -111,6 +112,15 @@ final class ScreenshotTests: XCTestCase {
                 capture(app, "fitness-\(page.name)", pages: 2)
                 back(app)
             }
+        }
+        // The quarterly fitness check, from the cardio fitness page.
+        openTab(app, "Fitness")
+        if tap(app, ["metric-Cardio fitness (VO₂ max)", "Cardio fitness (VO₂ max)"], name: "Fitness cardio fitness for the check") {
+            if tap(app, ["fitness-check-row"], name: "Fitness check row") {
+                capture(app, "fitness-check", pages: 2)
+                back(app)
+            }
+            back(app)
         }
         openTab(app, "Fitness")
         if tap(app, ["Saved workouts"], name: "Fitness saved workouts") {
@@ -182,6 +192,8 @@ final class ScreenshotTests: XCTestCase {
             (["row-What affects you", "What affects you"], "patterns"),
             (["row-Alcohol and your sleep", "Alcohol and your sleep"], "alcohol-sleep"),
             (["metric-Mood", "Mood"], "mood"),
+            (["row-Longevity", "Longevity"], "longevity"),
+            (["row-Insights", "Insights"], "insights"),
         ]
         for page in pages {
             openTab(app, "Health")
@@ -239,9 +251,9 @@ final class ScreenshotTests: XCTestCase {
         // Each page, then the pages it pushes.
         let sections: [(key: String, name: String, pages: Int, inner: [(keys: [String], name: String)])] = [
             ("settings-profile", "profile", 2, []),
-            ("settings-training", "training", 2, [(["Gym equipment"], "gym")]),
+            ("settings-training", "training", 2, [(["Gym equipment"], "gym"), (["settings-heart-zones", "Heart-rate zones"], "heart-zones")]),
             ("settings-notifications", "notifications", 3, [(["Medications & supplements", "Medication reminders"], "medications")]),
-            ("settings-sleep-nutrition", "sleep-nutrition", 1, []),
+            ("settings-sleep-nutrition", "sleep-nutrition", 1, [(["settings-sleep-window", "Trouble sleeping"], "sleep-window")]),
             ("settings-data", "data", 1, [(["Using a Garmin"], "garmin-help"), (["Using Cronometer"], "cronometer-help")]),
         ]
         for section in sections {
