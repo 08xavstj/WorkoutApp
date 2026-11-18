@@ -136,7 +136,8 @@ public enum WorkoutBanterFacts {
 
     /// Weeks in a row the plan was kept (`Consistency.weekKept`), ending with
     /// last week, plus this week once it is kept. A week without a plan ends
-    /// the run. Only ever reported while it stands.
+    /// the run. A planned busy week with no session neither adds to it nor
+    /// ends it (`Consistency.weekMissed`). Only ever reported while it stands.
     public static func weeksInARow(records: [WeekRecord], now: Date, calendar: Calendar = .current) -> Int {
         let thisWeek = WeeklyPlan.weekStart(containing: now, calendar: calendar)
         let byWeek = Dictionary(records.map { (calendar.startOfDay(for: $0.weekStart), $0) }, uniquingKeysWith: { first, _ in first })
@@ -144,8 +145,8 @@ public enum WorkoutBanterFacts {
         if let current = byWeek[thisWeek], Consistency.weekKept(planned: current.planned, done: current.done) { count += 1 }
         var week = thisWeek
         while let previous = calendar.date(byAdding: .day, value: -7, to: week), let record = byWeek[calendar.startOfDay(for: previous)],
-              Consistency.weekKept(planned: record.planned, done: record.done) {
-            count += 1
+              record.planned > 0, !Consistency.weekMissed(record) {
+            if Consistency.weekKept(planned: record.planned, done: record.done) { count += 1 }
             week = previous
         }
         return count

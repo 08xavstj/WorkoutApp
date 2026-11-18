@@ -309,8 +309,9 @@ public enum SleepWindow {
             }
         }
 
-        /// The ones the owner is asked about. Pregnancy isn't asked of a man.
-        public static func asked(sex: BiologicalSex) -> [Exclusion] {
+        /// The ones the owner is asked about. Pregnancy isn't asked of a man;
+        /// with sex not set (nil) it is asked.
+        public static func asked(sex: BiologicalSex?) -> [Exclusion] {
             allCases.filter { $0 != .pregnancy || sex != .male }
         }
     }
@@ -557,7 +558,8 @@ public enum SleepWindow {
         public var initialWindowMinutes: Int
         public var averageSleepMinutes: Int
         public var reviews: [Review]
-        /// Days he tapped "Too sleepy" (each widened the window by a step).
+        /// When he tapped "Too sleepy" (each widened the window by a step).
+        /// Saved as the moment of the tap; older files hold the start of the day.
         public var sleepyDays: [Date]
         /// He chose to keep going after the app suggested seeing someone.
         public var continuedPastStall: Bool
@@ -691,10 +693,11 @@ public enum SleepWindow {
             let week = course.reviews.count + 1
             guard now >= course.reviewDue(week: week, calendar: calendar) else { break }
             let weekNights = Self.nights(ofWeek: week, course: course, from: nights, calendar: calendar)
-            let days = (week - 1) * reviewDays
-            let weekStart = calendar.date(byAdding: .day, value: days, to: course.startDay) ?? course.startDay
-            let weekEnd = calendar.date(byAdding: .day, value: days + reviewDays, to: course.startDay) ?? course.startDay
-            let sleepy = course.sleepyDays.contains { $0 >= weekStart && $0 < weekEnd }
+            // Taps between the last review and this one, so a tap on the morning of a review
+            // day counts for the week under review (a day saved at midnight counts the same way).
+            let from = week == 1 ? Date.distantPast : course.reviewDue(week: week - 1, calendar: calendar)
+            let until = course.reviewDue(week: week, calendar: calendar)
+            let sleepy = course.sleepyDays.contains { $0 >= from && $0 < until }
             let review = Self.review(week: week, windowMinutes: course.windowMinutes, nights: weekNights,
                                      regularMinutes: regularMinutes, sleepy: sleepy, resting: resting)
             course.reviews.append(review)
@@ -723,7 +726,14 @@ public enum SleepWindow {
     public static func tooSleepy(_ course: Course, regularMinutes: Int, now: Date = .now, calendar: Calendar = .current) -> Course {
         var course = course
         course.windowMinutes = min(max(regularMinutes, course.windowMinutes), course.windowMinutes + stepMinutes)
-        course.sleepyDays.append(calendar.startOfDay(for: now))
+        // A tap counts for the next review not yet made (`advance`): one that came due
+        // before the app ran it still sees the tap, rather than undoing the step it gave.
+        var when = now
+        if course.reviews.count < maximumWeeks {
+            let due = course.reviewDue(week: course.reviews.count + 1, calendar: calendar)
+            if when >= due { when = due.addingTimeInterval(-1) }
+        }
+        course.sleepyDays.append(when)
         return course
     }
 

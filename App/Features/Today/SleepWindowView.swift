@@ -173,7 +173,8 @@ private struct SleepWindowQuestionFlow: View {
             Text(SleepWindow.screeningTitle)
         }
         Section {
-            ForEach(SleepWindow.Exclusion.asked(sex: settings.sex)) { exclusion in
+            // Until sex is set, `settings.sex` is a stand-in (male): pregnancy is asked then.
+            ForEach(SleepWindow.Exclusion.asked(sex: settings.sexIsSet ? settings.sex : nil)) { exclusion in
                 Toggle(isOn: Binding(
                     get: { declared.contains(exclusion) },
                     set: { on in

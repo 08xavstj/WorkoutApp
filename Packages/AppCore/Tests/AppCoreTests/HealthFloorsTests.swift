@@ -85,6 +85,15 @@ struct HealthFloorsTests {
         }
     }
 
+    /// 87 starts the most regular fifth; 81 was typical (Windred 2024). The line must not call 87 typical.
+    @Test func sleepRegularityLineNamesTheBestFifthNotTheTypicalValue() throws {
+        let target = try #require(HealthFloors.assess(lifterWeek).check(.sleepRegularity)?.targetText)
+        #expect(target.hasPrefix("87+"))
+        #expect(target.contains("risk was lowest"))
+        #expect(target.contains("81 is typical"))
+        #expect(!target.contains("87, the typical"))
+    }
+
     @Test func vigorousMinutesGetTheirOwnLineWithTheCohortLabel() {
         let note = HealthFloors.assess(lifterWeek).check(.activeMinutes)?.note ?? ""
         #expect(note.hasPrefix("Vigorous: 12 min."))

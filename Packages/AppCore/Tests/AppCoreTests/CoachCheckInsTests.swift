@@ -379,6 +379,45 @@ struct CoachCheckInsTests {
         #expect(CoachCheckIns.outsideQuietHours(date(hour: 23), kind: .postWorkout, quiet: nil, calendar: calendar) == date(hour: 23))
     }
 
+    /// The morning message a refresh at `now` writes, with the bed-by window
+    /// worked out at that moment (usual wake 6:30, no quiet hours unless given).
+    func morningFireAt(_ now: Date, scheduledToday: Date? = nil, quiet: CoachCheckIns.QuietHours? = nil) -> Date? {
+        let window = BedtimeWindow.compute(sleepNeedHours: 8, sleepDebt: nil, usualWakeMinutes: 6 * 60 + 30,
+                                           regularity: nil, now: now, calendar: calendar)
+        return CoachCheckIns.nextMorningFire(wake: window?.wake, scheduledToday: scheduledToday, quiet: quiet,
+                                             now: now, calendar: calendar)
+    }
+
+    @Test func aRefreshShortlyBeforeTheMorningMessageRewritesTodaysNotTomorrows() {
+        // The window's wake is tomorrow's from 2:30 (four hours before 6:30)...
+        let window = BedtimeWindow.compute(sleepNeedHours: 8, sleepDebt: nil, usualWakeMinutes: 6 * 60 + 30,
+                                           regularity: nil, now: date(day: 12, hour: 6, minute: 15), calendar: calendar)
+        #expect(window?.wake == date(day: 13, hour: 6, minute: 30))
+        // ...but today's message, due at 7:00, is still the one written then.
+        #expect(morningFireAt(date(day: 12, hour: 6, minute: 15)) == date(day: 12, hour: 7))
+        #expect(morningFireAt(date(day: 12, hour: 3)) == date(day: 12, hour: 7))
+        #expect(morningFireAt(date(day: 12, hour: 1)) == date(day: 12, hour: 7))
+        // The evening before writes it for the morning; once it has gone, the next is tomorrow's.
+        #expect(morningFireAt(date(day: 11, hour: 21)) == date(day: 12, hour: 7))
+        #expect(morningFireAt(date(day: 12, hour: 7, minute: 5)) == date(day: 13, hour: 7))
+        #expect(morningFireAt(date(day: 12, hour: 15)) == date(day: 13, hour: 7))
+    }
+
+    @Test func todaysScheduledMorningKeepsItsTimeAndQuietHoursStillApply() {
+        // Written the evening before for a wake moved early for a session: kept while ahead.
+        #expect(morningFireAt(date(day: 12, hour: 4), scheduledToday: date(day: 12, hour: 5, minute: 30)) == date(day: 12, hour: 5, minute: 30))
+        #expect(morningFireAt(date(day: 12, hour: 6), scheduledToday: date(day: 12, hour: 5, minute: 30)) == date(day: 12, hour: 7))
+        // A wake at 6:00 makes 6:30, inside quiet hours: it waits for 7:00, and a refresh at 6:40 still writes today's.
+        let quiet = CoachCheckIns.defaultQuietHours
+        let early = BedtimeWindow.compute(sleepNeedHours: 8, sleepDebt: nil, usualWakeMinutes: 6 * 60, regularity: nil,
+                                          now: date(day: 12, hour: 6, minute: 40), calendar: calendar)
+        #expect(CoachCheckIns.nextMorningFire(wake: early?.wake, quiet: quiet, now: date(day: 12, hour: 6, minute: 40),
+                                              calendar: calendar) == date(day: 12, hour: 7))
+        // Without sleep data: 7:30 today while ahead, else tomorrow.
+        #expect(CoachCheckIns.nextMorningFire(wake: nil, quiet: nil, now: date(day: 12, hour: 6), calendar: calendar) == date(day: 12, hour: 7, minute: 30))
+        #expect(CoachCheckIns.nextMorningFire(wake: nil, quiet: nil, now: date(day: 12, hour: 8), calendar: calendar) == date(day: 13, hour: 7, minute: 30))
+    }
+
     // MARK: Rewording
 
     @Test func acceptsAFaithfulRewordInTheAppsWords() {

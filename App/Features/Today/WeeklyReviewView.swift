@@ -215,7 +215,10 @@ struct WeeklyReviewView: View {
             default: "\(-difference) fewer than planned"
             }
             let swaps = store.swapLines(weekStart: lastWeek).map { "Swapped " + $0 }.joined(separator: "; ")
-            let base = kept ? versusPlan + " · week kept" : "A lighter week than planned. This week starts fresh."
+            // A busy week with no session was chosen ahead: not a miss (`Consistency.weekMissed`).
+            let base = kept ? versusPlan + " · week kept"
+                : record.isBusy ? "A busy week, planned ahead. This week starts fresh."
+                : "A lighter week than planned. This week starts fresh."
             return ReviewLine(id: "sessions", title: "Training days", value: "\(record.done) \(days)",
                               detail: swaps.isEmpty ? base : base + ". " + swaps)
         }
@@ -224,7 +227,8 @@ struct WeeklyReviewView: View {
 
     /// Sleep debt. Regularity is one of the basics (`HealthFloors`), so it isn't repeated here.
     private var sleepLine: ReviewLine? {
-        guard let debt = metrics.sleepDebt else { return nil }
+        // Paused while the sleep window runs: short nights are the plan (`SleepWindow.debtPausedNote`).
+        guard !metrics.sleepWindowOn, let debt = metrics.sleepDebt else { return nil }
         // The same rule as Health: "Caught up" only at zero; a debt under an hour says so.
         let value: String
         if debt.hours > 0 {
@@ -347,7 +351,9 @@ struct WeeklyReviewView: View {
         // Not while the insomnia path's sleep window is on: its start is the earliest
         // bedtime, not a time to be in bed by, and the window is short on purpose.
         context.bedByMinutes = metrics.bedtimeWindow.flatMap { $0.isSleepWindow ? nil : WeeklyChange.eveningMinutes($0.end) }
-        context.usualWakeMinutes = BedtimeWindow.usualWakeMinutes(metrics.sleepNights.suffix(14).map(\.wake))
+        // While the sleep window runs, its fixed wake time is the one to keep.
+        context.usualWakeMinutes = SleepWindowStore.shared.course?.wakeMinutes
+            ?? BedtimeWindow.usualWakeMinutes(metrics.sleepNights.suffix(14).map(\.wake))
         context.hasMealTimes = WeeklyReviewData.hasMealTimes(food)
         context.drinkLimit = drinkLimit
         if floors.drinkNightsLogged >= HealthFloors.drinksMinimumNights { context.lastWeekDrinks = floors.drinks }
@@ -361,7 +367,7 @@ struct WeeklyReviewView: View {
             context.proteinLow = true
         }
         let record = lastWeekRecord
-        context.weekNotKept = record.planned > 0 && !Consistency.weekKept(planned: record.planned, done: record.done)
+        context.weekNotKept = Consistency.weekMissed(record)
         context.trainEasy = metrics.trainEasyToday
         if let weekly = metrics.weightTrendWeekly, let mass = metrics.bodyMassKg, settings.goalsSet {
             context.weightPace = WeightPace.check(weeklyChangeKg: weekly, bodyMassKg: mass, goals: settings.goals)

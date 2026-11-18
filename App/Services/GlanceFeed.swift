@@ -80,7 +80,10 @@ enum GlanceFeed {
         }
 
         // Tonight's window only: one that has already ended says nothing about tonight.
-        let window = metrics.bedtimeWindow.flatMap { $0.end > now ? $0 : nil }
+        // Not the sleep window: its start is the earliest bedtime ("Bed from 23:45, when sleepy"),
+        // which the glance's "In bed by" would misstate, so neither the glance nor its
+        // Smart Stack bedtime relevance shows it (`SleepWindow`).
+        let window = metrics.bedtimeWindow.flatMap { $0.end > now && !$0.isSleepWindow ? $0 : nil }
         let restMode = (restUntil ?? .distantPast) > now
         // Today's guidance calls it a rest day from the queue it was given (`DailyMetricsModel.dayGuidance`).
         // When that isn't today's queue and the sessions above came from a fresh one, the two can disagree

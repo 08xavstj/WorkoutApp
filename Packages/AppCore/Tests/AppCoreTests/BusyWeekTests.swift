@@ -226,6 +226,29 @@ struct BusyWeekBlockTests {
                                                  now: day(22), calendar: calendar) == 2)
     }
 
+    @Test func aBusyWeekWithNoSessionIsNotAMissedWeek() {
+        let busy = WeekRecord(weekStart: week(1), planned: 1, done: 0, busy: true)
+        #expect(!Consistency.weekMissed(busy))
+        #expect(Consistency.weekMissed(WeekRecord(weekStart: week(1), planned: 4, done: 1)))
+        #expect(!Consistency.weekMissed(WeekRecord(weekStart: week(1), planned: 4, done: 3)))
+        #expect(!Consistency.weekMissed(WeekRecord(weekStart: week(1), planned: 0, done: 0)))
+        // The banter's "weeks in a row": the busy week neither ends the run nor adds to it.
+        let records = [
+            WeekRecord(weekStart: week(0), planned: 4, done: 4),
+            busy,
+            WeekRecord(weekStart: week(2), planned: 4, done: 3),
+        ]
+        #expect(WorkoutBanterFacts.weeksInARow(records: records, now: day(22), calendar: calendar) == 2)
+        // A busy week kept from its one session counts, as in the score.
+        var kept = records
+        kept[1].done = 1
+        #expect(WorkoutBanterFacts.weeksInARow(records: kept, now: day(22), calendar: calendar) == 3)
+        // An ordinary week not kept still ends it.
+        var missed = records
+        missed[1] = WeekRecord(weekStart: week(1), planned: 4, done: 0)
+        #expect(WorkoutBanterFacts.weeksInARow(records: missed, now: day(22), calendar: calendar) == 1)
+    }
+
     @Test func deloadAdvisorIgnoresBusyWeekSessions() {
         // Three lifts flat for four weeks: a stall. Inside the busy week the points are left out.
         var lifts: [DeloadAdvisor.LiftPoint] = []
@@ -268,6 +291,19 @@ struct FirstSessionBackTests {
         let earlier = [day(4), day(10)]
         #expect(!FirstSessionBack.applies(sessionDay: day(14), earlierTrainingDays: earlier,
                                           plans: [plan, busy, standingPlan(weekStart: week(2))], calendar: calendar))
+    }
+
+    @Test func aBusyWeekKeptFromItsFirstSessionIsNoGapToComeBackFrom() {
+        // Busy week of two (Mon and Fri): Monday done, Friday not. It counts as kept, so the
+        // next Monday's session is on plan, not a first session back.
+        let busy = BusyWeek.plan(from: standingPlan(weekStart: week(1)), sessions: 2)
+        #expect(busy.sortedDays.map(\.weekday) == [2, 6])
+        #expect(Consistency.weekKept(planned: busy.sessionTarget, done: 1))
+        #expect(!FirstSessionBack.applies(sessionDay: day(14), earlierTrainingDays: [day(7)],
+                                          plans: [busy, standingPlan(weekStart: week(2))], calendar: calendar))
+        // A normal week with the same days missed still marks the return.
+        #expect(FirstSessionBack.applies(sessionDay: day(14), earlierTrainingDays: [day(7)],
+                                         plans: [standingPlan(weekStart: week(1)), standingPlan(weekStart: week(2))], calendar: calendar))
     }
 
     @Test func theLineNeverSaysWhatWasMissed() {
@@ -540,10 +576,11 @@ struct BusyWeekSimulationTests {
         #expect(Consistency.weekKept(planned: output.weeks[1].record.planned, done: output.weeks[1].record.done))
         // Nothing carries over into the next week.
         #expect(AdaptiveWeek.leftOver(plan: output.weeks[1].plan, done: [], calendar: calendar).isEmpty)
-        // The next session follows a planned session that didn't happen: the first session back.
+        // The busy week was kept from its first session, so the next session is on plan,
+        // not a first session back (its second session not happening is no gap).
         let nextMonday = week(2).addingTimeInterval(18 * 3600)
-        #expect(FirstSessionBack.applies(sessionDay: nextMonday, earlierTrainingDays: output.trainingDays.filter { $0 < week(2) },
-                                         plans: output.plans, calendar: calendar))
+        #expect(!FirstSessionBack.applies(sessionDay: nextMonday, earlierTrainingDays: output.trainingDays.filter { $0 < week(2) },
+                                          plans: output.plans, calendar: calendar))
     }
 
     @Test(arguments: [GymProfile.homeDumbbells, SimFixtures.barbellRack, SimFixtures.hotel])

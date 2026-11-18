@@ -159,10 +159,26 @@ public enum HardCardio {
 
     /// Said on the session's own day when the day reads as easy (recovery
     /// under the moderate band or 7-day HRV below normal): never a hard
-    /// session on an easy-recovery day. Nil on any other day.
-    public static func dayNote(slot: Slot, weekday today: Int, lowRecovery: Bool) -> String? {
-        guard lowRecovery, slot.weekday == nil || slot.weekday == today else { return nil }
-        return "Today reads as an easy day, so no intervals today: an easy \(EasyCardio.shortMinutes) minutes instead, or leave it. The intervals keep for another day."
+    /// session on an easy-recovery day. Also when the week's queue
+    /// (`AdaptiveWeek`) has put a heavy leg session on that day or the next,
+    /// as it does when a missed one moves: the same two days `weekday(for:)`
+    /// keeps clear. Nil on any other day.
+    /// - Parameters:
+    ///   - queueToday: the focus the queue has today, if any.
+    ///   - queueTomorrow: the focus the queue has tomorrow, if any.
+    public static func dayNote(slot: Slot, weekday today: Int, lowRecovery: Bool,
+                               queueToday: WorkoutFocus? = nil, queueTomorrow: WorkoutFocus? = nil) -> String? {
+        guard slot.weekday == nil || slot.weekday == today else { return nil }
+        if lowRecovery {
+            return "Today reads as an easy day, so no intervals today: an easy \(EasyCardio.shortMinutes) minutes instead, or leave it. The intervals keep for another day."
+        }
+        if let queueToday, CardioPlanner.isHeavyLower(queueToday) {
+            return "Legs are on today now, so no intervals today. They keep for another day."
+        }
+        if let queueTomorrow, CardioPlanner.isHeavyLower(queueTomorrow) {
+            return "Legs are on tomorrow now, and intervals today would tire them. They keep for another day."
+        }
+        return nil
     }
 
     // MARK: What the gym has

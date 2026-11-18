@@ -291,8 +291,6 @@ public enum CoachCheckIns {
             link: morningCheckInLink, question: nil, priority: .low)
         if f.restMode { return checkInOnly } // Rest mode pauses nudges (Settings › Rest mode).
         let debt = !f.sleepWindow && (f.sleepDebtHours ?? 0) >= notableSleepDebtHours ? f.sleepDebtHours : nil
-        guard f.recovery != nil || f.session != nil || debt != nil else { return checkInOnly }
-
         let easy = isEasy(f)
         let session = f.restDay ? nil : f.session
         let title: String
@@ -307,7 +305,9 @@ public enum CoachCheckIns {
         }
 
         // Low-mood rule (`LowMoodRule`, LowMood.swift): where this would suggest rest, offer a walk or an easy session.
+        // Before the "nothing to say" check, so its one sentence is said on a quiet day too.
         if let message = lowMoodMorning(f, title: title, easy: easy) { return message }
+        guard f.recovery != nil || f.session != nil || debt != nil else { return checkInOnly }
 
         var sentences: [String] = []
         if let state = morningState(f, easy: easy) { sentences.append(state) }
@@ -595,6 +595,39 @@ public enum CoachCheckIns {
     public static func morningFire(wake: Date?, fallbackDay: Date, calendar: Calendar = .current) -> Date? {
         if let wake { return wake.addingTimeInterval(TimeInterval(morningMinutesAfterWake * 60)) }
         return at(fallbackMorningMinutes, on: fallbackDay, calendar: calendar)
+    }
+
+    /// The morning message to write at `now`, out of quiet hours: today's while
+    /// it is still to come, else the next one.
+    ///
+    /// `wake` is the bed-by window's (`BedtimeWindow.Result.wake`): the next
+    /// usual wake at least `BedtimeWindow.minimumHoursAhead` away, so from four
+    /// hours before today's wake it is already tomorrow's. A refresh then (the
+    /// background refresh asked for before the message, or Health delivering
+    /// last night's sleep) rewrites today's message with this morning's
+    /// numbers instead of replacing it with tomorrow's.
+    /// - Parameter scheduledToday: today's message as already scheduled, kept
+    ///   while it is ahead (its wake may have been moved for a session, which
+    ///   the window worked out now no longer shows).
+    public static func nextMorningFire(wake: Date?, scheduledToday: Date? = nil, quiet: QuietHours?, now: Date,
+                                       calendar: Calendar = .current) -> Date? {
+        func adjusted(_ fire: Date?) -> Date? {
+            fire.flatMap { outsideQuietHours($0, kind: .morning, quiet: quiet, calendar: calendar) }
+        }
+        if let kept = adjusted(scheduledToday), kept > now, calendar.isDate(kept, inSameDayAs: now) { return kept }
+        let today = calendar.startOfDay(for: now)
+        let candidates: [Date?]
+        if let wake {
+            // The same wake a day earlier is today's, while its message is still ahead.
+            let earlier = calendar.date(byAdding: .day, value: -1, to: wake)
+            candidates = [earlier.flatMap { morningFire(wake: $0, fallbackDay: today, calendar: calendar) },
+                          morningFire(wake: wake, fallbackDay: today, calendar: calendar)]
+        } else {
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)
+            candidates = [morningFire(wake: nil, fallbackDay: today, calendar: calendar),
+                          tomorrow.flatMap { morningFire(wake: nil, fallbackDay: $0, calendar: calendar) }]
+        }
+        return candidates.compactMap { adjusted($0) }.first { $0 > now }
     }
 
     /// The evening time: `eveningMinutesBeforeBed` before the bed-by window, or the fallback day's 21:30.

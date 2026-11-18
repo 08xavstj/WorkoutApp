@@ -183,6 +183,37 @@ struct HardCardioTests {
         #expect(HardCardio.dayNote(slot: slot, weekday: 5, lowRecovery: true) == nil)
     }
 
+    @Test func waitsWhenTheQueueMovesLegsOntoItsDayOrTheNext() {
+        let slot = HardCardio.Slot(weekday: 3, choice: HardCardio.Choice(modality: .bike))
+        #expect(HardCardio.dayNote(slot: slot, weekday: 3, lowRecovery: false, queueToday: .lower)?.contains("keep for another day") == true)
+        #expect(HardCardio.dayNote(slot: slot, weekday: 3, lowRecovery: false, queueTomorrow: .legs)?.contains("keep for another day") == true)
+        #expect(HardCardio.dayNote(slot: slot, weekday: 3, lowRecovery: false, queueToday: .upper, queueTomorrow: .push) == nil)
+        // Only on its own day.
+        #expect(HardCardio.dayNote(slot: slot, weekday: 4, lowRecovery: false, queueToday: .lower) == nil)
+    }
+
+    @Test func aMissedLegDayThatMovesOntoTheIntervalDayHoldsTheIntervals() throws {
+        // Mon lower, Wed upper, Fri lower: the intervals go on Tuesday.
+        let week = plan([(2, .lower), (4, .upper), (6, .lower)],
+                        cardio: EasyCardio(sessionsPerWeek: 0, hard: HardCardio.Choice(modality: .bike)))
+        let slot = try #require(HardCardio.slot(for: week, goals: nil))
+        #expect(slot.weekday == 3)
+        // Monday's lower didn't happen: on Tuesday the queue has it today.
+        let tuesday = calendar.date(byAdding: .hour, value: 24 + 9, to: monday)!
+        let queue = try #require(AdaptiveWeek.make(plan: week, done: [], now: tuesday, calendar: calendar))
+        let today = queue.slot(on: tuesday, calendar: calendar)?.focus
+        let tomorrow = queue.slot(on: tuesday.addingTimeInterval(86_400), calendar: calendar)?.focus
+        #expect([today, tomorrow].contains { $0.map(CardioPlanner.isHeavyLower) == true })
+        #expect(HardCardio.dayNote(slot: slot, weekday: 3, lowRecovery: false, queueToday: today, queueTomorrow: tomorrow)?
+            .contains("keep for another day") == true)
+        // As planned (Monday done), Tuesday stays free for them.
+        let done = [AdaptiveWeek.DoneSession(date: calendar.date(byAdding: .hour, value: 18, to: monday)!, focus: .lower)]
+        let kept = try #require(AdaptiveWeek.make(plan: week, done: done, now: tuesday, calendar: calendar))
+        #expect(HardCardio.dayNote(slot: slot, weekday: 3, lowRecovery: false,
+                                   queueToday: kept.slot(on: tuesday, calendar: calendar)?.focus,
+                                   queueTomorrow: kept.slot(on: tuesday.addingTimeInterval(86_400), calendar: calendar)?.focus) == nil)
+    }
+
     @Test func promisesMinutesNotAVO2MaxNumber() {
         let text = HardCardio.promise(.fourByFour(.bike))
         #expect(text.contains("vigorous minutes"))

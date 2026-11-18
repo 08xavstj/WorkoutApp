@@ -20,6 +20,24 @@ private let plan = WeeklyPlan(weekStart: monday, plannedDays: [
 
 @Suite("Plan calendar")
 struct PlanCalendarTests {
+    @Test func lastWeeksPlannedSessionsThatPassedAreClearedOnceTheWeekTurns() throws {
+        // Week 1 planned Mon, Wed and Fri; Wed was missed. On Tuesday of week 2 the window is
+        // week 2 and 3, so last week's entries are outside it: the lookback finds them.
+        let now = at(8, hour: 9)
+        let window = PlanCalendar.window(now: now, calendar: calendar)
+        #expect(window.start == at(7, hour: 0))
+        let lookback = PlanCalendar.lookback(before: window.start, calendar: calendar)
+        #expect(lookback.start == monday)
+        #expect(lookback.end == window.start)
+        let entries = PlanCalendar.entries(plan: plan, week: nil, now: at(0, hour: 9), calendar: calendar)
+        let missed = try #require(entries.first { $0.start == at(2, hour: 18) })
+        #expect(PlanCalendar.isPassedSession(key: missed.key, start: missed.start, now: now, calendar: calendar))
+        // A finished session's entry stays, and so does anything later today or untagged.
+        #expect(!PlanCalendar.isPassedSession(key: "done|2026-01-07", start: at(2, hour: 18), now: now, calendar: calendar))
+        #expect(!PlanCalendar.isPassedSession(key: "lift|2026-01-13", start: at(8, hour: 18), now: now, calendar: calendar))
+        #expect(!PlanCalendar.isPassedSession(key: nil, start: at(2, hour: 18), now: now, calendar: calendar))
+    }
+
     @Test func entriesForTheDaysStillToCome() {
         let entries = PlanCalendar.entries(plan: plan, week: nil, now: at(1, hour: 9), calendar: calendar)
         #expect(entries.map(\.title) == [WorkoutFocus.lower.title, WorkoutFocus.fullBody.title])
