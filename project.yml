@@ -287,3 +287,15 @@ schemes:
         - WorkoutAppUITests
     archive:
       config: Release
+  # Runs the Watch app straight on the Watch (pick your Apple Watch as the
+  # destination). The WorkoutApp scheme is iOS-only, so choosing the Watch
+  # there gives "mismatched platform"; this one also shows the Watch's own
+  # install error and lets automatic signing register a new Watch.
+  TensileWatch:
+    build:
+      targets:
+        TensileWatch: all
+    run:
+      config: Debug
+    archive:
+      config: Release
