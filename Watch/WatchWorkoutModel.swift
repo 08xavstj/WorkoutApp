@@ -9,6 +9,11 @@ import WatchKit
 /// session (`WatchSession`), and sends what you do back as `WatchCommand`s.
 /// Works with the phone out of reach: commands queue, and the workout is
 /// saved and summarised to the phone whenever it next connects.
+///
+/// It can also run a session of its own (`isLocal`): a plan the phone sent
+/// ahead, or a quick lift from the exercise library. Then nothing is sent
+/// while it runs; sets are kept in a file after each one (so a crash keeps
+/// the log) and go to the phone with the summary (`loggedExercises`).
 @Observable
 final class WatchWorkoutModel: NSObject {
     static let shared = WatchWorkoutModel()
@@ -75,6 +80,16 @@ final class WatchWorkoutModel: NSObject {
     /// The session as it stood when the workout ended (the phone's finished
     /// snapshot, or the Watch's own), for the summary's sets.
     private(set) var finishedSession: WatchSession?
+    /// The session running is the Watch's own (a plan sent ahead or a quick
+    /// lift): no commands go to the phone; its log goes with the summary.
+    private(set) var isLocal = false
+    /// Today's planned session as the phone sent it ahead (`WatchMessage.plan`).
+    private(set) var plannedSession: WatchSession?
+    /// Recent exercises for Quick lift (`WatchMessage.library`).
+    private(set) var library: WatchExerciseLibrary?
+    /// The plan (by id) already run here today, so Home stops offering it.
+    private(set) var planDoneID: String? = UserDefaults.standard.string(forKey: WatchWorkoutModel.planDoneKey)
+    private static let planDoneKey = "watchPlanDone"
     /// Record notes already shown (each rides along in a minute of snapshots).
     @ObservationIgnored private var shownRecordIDs: Set<String> = []
     @ObservationIgnored private var recordTask: Task<Void, Never>?
@@ -107,6 +122,127 @@ final class WatchWorkoutModel: NSObject {
         session.delegate = self
         session.activate()
         connection = session
+    }
+
+    // MARK: The Watch's own sessions
+
+    /// Starts today's plan on the Watch alone: the plan becomes the session,
+    /// logged here and sent to the phone with the summary.
+    func startPlanned(_ plan: WatchSession) async {
+        guard phase == .idle || phase == .ended, !WatchCardioModel.shared.isBusy else { return }
+        await startLocal(Self.localSession(from: plan, name: plan.name))
+    }
+
+    /// Quick lift: the chosen exercises from the library, logged here.
+    func startQuickLift(_ exercises: [WatchSession.ExerciseSnapshot]) async {
+        guard phase == .idle || phase == .ended, !WatchCardioModel.shared.isBusy, let library, !exercises.isEmpty else { return }
+        let session = WatchSession(
+            id: "", startedAt: .now, name: "Watch workout", exercises: exercises,
+            currentExercise: nil, currentSet: nil,
+            restSeconds: exercises.first?.restSeconds ?? RestCues.standaloneRestSeconds, restEndsAt: nil,
+            unit: library.unit, isFinished: false, sentAt: .now, weightStepKg: library.weightStepKg
+        )
+        await startLocal(Self.localSession(from: session, name: session.name))
+    }
+
+    /// Adds an exercise from the library to the Watch's own session (Exercises page).
+    func addExercise(_ exercise: WatchSession.ExerciseSnapshot) {
+        guard isLocal, var current = snapshot else { return }
+        var added = exercise
+        added.id = (current.exercises.map(\.id).max() ?? -1) + 1
+        added.supersetLabel = nil
+        current.exercises.append(added)
+        if let next = current.upNext() {
+            current.currentExercise = next.exercise
+            current.currentSet = next.set
+        }
+        snapshot = current
+        selectedExercise = current.exercises.count - 1
+        LocalLiftLog.save(current)
+    }
+
+    /// Whether `plan` is today's and not yet run here.
+    func offersPlan(_ plan: WatchSession, at now: Date = .now) -> Bool {
+        guard let plannedFor = plan.plannedFor else { return false }
+        return Calendar.current.isDate(plannedFor, inSameDayAs: now) && planDoneID != plan.id
+    }
+
+    private func startLocal(_ session: WatchSession) async {
+        snapshot = session
+        isLocal = true
+        selectedExercise = nil
+        LocalLiftLog.save(session)
+        await start(sessionID: nil)
+        // Didn't start (Health refused, or another workout began): not a session after all.
+        if !isRecording {
+            snapshot = nil
+            isLocal = false
+            LocalLiftLog.clear()
+        }
+    }
+
+    /// A plan or a pick from the library, as a session of the Watch's own:
+    /// nothing done yet, ids in order, the next set up.
+    private static func localSession(from source: WatchSession, name: String) -> WatchSession {
+        var session = source
+        let now = Date.now
+        session.id = WatchSession.id(for: now)
+        session.startedAt = now
+        session.name = name
+        session.sentAt = now
+        session.isFinished = false
+        session.plannedFor = nil
+        session.restEndsAt = nil
+        session.records = nil
+        for index in session.exercises.indices {
+            session.exercises[index].id = index
+            session.exercises[index].key = nil
+            for set in session.exercises[index].sets.indices {
+                session.exercises[index].sets[set].isCompleted = false
+                session.exercises[index].sets[set].order = session.exercises[index].sets[set].order ?? set
+            }
+        }
+        if let next = session.upNext() {
+            session.currentExercise = next.exercise
+            session.currentSet = next.set
+        }
+        return session
+    }
+
+    /// Completed sets only, exercises with none left out, weights in kg.
+    private static func logged(_ session: WatchSession) -> [WatchSession.ExerciseSnapshot] {
+        session.exercises.compactMap { exercise in
+            var done = exercise
+            done.sets = exercise.sets.filter(\.isCompleted)
+            return done.sets.isEmpty ? nil : done
+        }
+    }
+
+    /// Sends a Watch-only log to the phone with no Health workout (a failed
+    /// recording, or one recovered after a crash).
+    private func sendLog(of session: WatchSession, start: Date, end: Date) {
+        let logged = Self.logged(session)
+        guard !logged.isEmpty else { return }
+        var summary = WatchWorkoutSummary(sessionID: nil, workoutUUID: nil, start: start, end: max(start, end),
+                                          averageHeartRate: nil, maximumHeartRate: nil, activeKilocalories: nil, sessionRPE: nil)
+        summary.loggedExercises = logged
+        summary.name = session.name
+        if let data = WatchMessage.encode(summary) {
+            connection?.transferUserInfo([WatchMessage.summary: data])
+        }
+    }
+
+    /// A log left by a session that never ended (the app was closed or
+    /// crashed): its sets go to the phone, so nothing lifted is lost.
+    private func recoverLocalLog() {
+        guard phase == .idle, let saved = LocalLiftLog.load() else { return }
+        sendLog(of: saved.session, start: saved.session.startedAt, end: saved.savedAt)
+        LocalLiftLog.clear()
+    }
+
+    private func received(plan: WatchSession?, library: WatchExerciseLibrary?) {
+        if let plan { plannedSession = plan }
+        if let library { self.library = library }
     }
 
     // MARK: Recording
@@ -316,6 +452,21 @@ final class WatchWorkoutModel: NSObject {
         // Ended while paused: that pause runs to the end.
         let paused = pausedSeconds + (pausedAt.map { max(0, end.timeIntervalSince($0)) } ?? 0)
         if paused > 0 { summary.pausedSeconds = paused }
+        // The Watch's own session: its sets go with the summary, and the phone makes the session.
+        if isLocal, let snapshot {
+            summary.sessionID = nil
+            summary.loggedExercises = Self.logged(snapshot)
+            summary.name = snapshot.name
+            if let planned = plannedSession, snapshot.name == planned.name {
+                planDoneID = planned.id
+                UserDefaults.standard.set(planned.id, forKey: Self.planDoneKey)
+            }
+            LocalLiftLog.clear()
+            // The summary keeps it; Home goes back to the phone's sessions.
+            finishedSession = snapshot
+            self.snapshot = nil
+            isLocal = false
+        }
         pausedAt = nil
         pausedSeconds = 0
         self.summary = summary
@@ -350,6 +501,14 @@ final class WatchWorkoutModel: NSObject {
     func discard() {
         guard isRecording else { return }
         dropHeld()
+        let wasLocal = isLocal
+        if wasLocal { LocalLiftLog.clear() }
+        defer {
+            if wasLocal {
+                snapshot = nil
+                isLocal = false
+            }
+        }
         workoutSession?.end()
         builder?.discardWorkout()
         workoutSession = nil
@@ -380,6 +539,10 @@ final class WatchWorkoutModel: NSObject {
     func reset() {
         phase = .idle
         summary = nil
+        if isLocal {
+            snapshot = nil
+            isLocal = false
+        }
         pendingRating = nil
         restEndedAt = nil
         lastLogged = nil
@@ -454,6 +617,7 @@ final class WatchWorkoutModel: NSObject {
             guard !Task.isCancelled else { return }
             self?.flushHeld()
         }
+        if isLocal { LocalLiftLog.save(current) }
         lastLogged = LoggedSet(id: pending.id, title: Self.loggedTitle(set: set, exercise: exercise, index: setIndex), at: tappedAt)
         logCount += 1
         restEndedAt = nil
@@ -514,6 +678,7 @@ final class WatchWorkoutModel: NSObject {
         restEndedAt = nil
         lastLogged = nil
         lastLocalEdit = .now
+        if isLocal { LocalLiftLog.save(before.snapshot) }
         // What happened after the set that isn't about it still goes (a pause, the warm-up).
         for message in held.messages where !Self.isAboutTheSet(message.command) {
             deliver(message)
@@ -579,6 +744,7 @@ final class WatchWorkoutModel: NSObject {
             current.exercises[exerciseIndex].sets[setIndex].rpe = rpe
             lastLocalEdit = .now
             snapshot = current
+            if isLocal { LocalLiftLog.save(current) }
         }
         send(.rateSet(exerciseIndex: pending.exerciseIndex, setIndex: pending.setIndex, rpe: rpe,
                       exerciseOrder: pending.exerciseID, setOrder: pending.setOrder, exerciseKey: pending.exerciseKey))
@@ -734,7 +900,10 @@ final class WatchWorkoutModel: NSObject {
            session.exercises[partner].sets.contains(where: { !$0.isCompleted }) {
             return
         }
-        startRest(until: Date.now.addingTimeInterval(Double(session.restSeconds)), length: session.restSeconds)
+        // The exercise's own rest when the Watch runs the session (the phone's
+        // `RestPreferences`, sent with the plan), else the phone's next rest.
+        let seconds = session.exercises[index].restSeconds ?? session.restSeconds
+        startRest(until: Date.now.addingTimeInterval(Double(seconds)), length: seconds)
     }
 
     private func startRest(until ends: Date, length: Int, startedAt: Date = .now) {
@@ -835,6 +1004,9 @@ final class WatchWorkoutModel: NSObject {
     // MARK: Phone → Watch
 
     private func apply(_ incoming: WatchSession) {
+        // Running the Watch's own session: the phone's snapshots are for its own
+        // session, not this one. (A plan arrives under its own key, `plan`.)
+        if isLocal, isRecording || phase == .starting { return }
         // A set is held for its undo window: the phone hasn't heard of it, so its
         // snapshots would open the set again. Its next one, after the tick, is used.
         if held != nil {
@@ -923,6 +1095,8 @@ final class WatchWorkoutModel: NSObject {
     /// takes the phone's id first, so its summary joins that session instead of
     /// becoming a second workout.
     private func stopApplies(to sessionID: String) -> Bool {
+        // The Watch's own session ends only on the wrist.
+        if isLocal { return false }
         if belongsToRecording(sessionID) { return true }
         guard isRecording, let phoneStart = WatchSession.startDate(for: sessionID), let startedAt,
               abs(startedAt.timeIntervalSince(phoneStart)) < 30 * 60 else { return false }
@@ -934,7 +1108,7 @@ final class WatchWorkoutModel: NSObject {
     /// recording was started from the phone before the session was attached and
     /// began within a few minutes of it.
     private func belongsToRecording(_ sessionID: String) -> Bool {
-        guard isRecording else { return false }
+        guard isRecording, !isLocal else { return false }
         if let recordingSessionID { return recordingSessionID == sessionID }
         guard let phoneStart = WatchSession.startDate(for: sessionID), let startedAt else { return false }
         return abs(startedAt.timeIntervalSince(phoneStart)) < 5 * 60
@@ -942,12 +1116,16 @@ final class WatchWorkoutModel: NSObject {
 
     private func activated(snapshot: WatchSession?, reachable: Bool) {
         phoneReachable = reachable
+        // Transfers need an activated session: now a log left by a crash can go.
+        recoverLocalLog()
         if let snapshot { apply(snapshot) }
     }
 
     // MARK: Watch → Phone
 
     private func send(_ command: WatchCommand, sessionID: String? = nil, sentAt: Date = .now) {
+        // The Watch's own session: the phone hears of it once, with the summary.
+        if isLocal { return }
         let message = WatchCommandMessage(sessionID: sessionID ?? snapshot?.id ?? recordingSessionID, command: command, sentAt: sentAt)
         // Behind a set in its undo window, so the phone gets them in order.
         if held != nil, Self.waitsBehindHeldSet(command) {
@@ -991,6 +1169,18 @@ final class WatchWorkoutModel: NSObject {
         problem = "Recording stopped: \(message)"
         // The sets themselves are the phone's: what was held still goes.
         flushHeld()
+        // The Watch's own session: the sets logged so far still reach the phone.
+        let wasLocal = isLocal
+        if wasLocal {
+            if let snapshot { sendLog(of: snapshot, start: startedAt ?? .now, end: .now) }
+            LocalLiftLog.clear()
+        }
+        defer {
+            if wasLocal {
+                snapshot = nil
+                isLocal = false
+            }
+        }
         builder?.discardWorkout()
         workoutSession = nil
         builder = nil
@@ -1073,6 +1263,15 @@ extension WatchWorkoutModel: WCSessionDelegate {
         if let zones = WatchMessage.decode(HeartRateZoneScheme.self, from: session.receivedApplicationContext, key: WatchMessage.zones) {
             WatchZoneStore.save(zones)
         }
+        // Today's plan and the exercise library, for lifting with the phone away.
+        receivePlanAndLibrary(session.receivedApplicationContext)
+    }
+
+    nonisolated private func receivePlanAndLibrary(_ payload: [String: Any]) {
+        let plan = WatchMessage.decode(WatchSession.self, from: payload, key: WatchMessage.plan)
+        let library = WatchMessage.decode(WatchExerciseLibrary.self, from: payload, key: WatchMessage.library)
+        guard plan != nil || library != nil else { return }
+        Task { @MainActor in self.received(plan: plan, library: library) }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
@@ -1108,6 +1307,7 @@ extension WatchWorkoutModel: WCSessionDelegate {
         if let zones = WatchMessage.decode(HeartRateZoneScheme.self, from: payload, key: WatchMessage.zones) {
             WatchZoneStore.save(zones)
         }
+        receivePlanAndLibrary(payload)
     }
 }
 
@@ -1136,4 +1336,34 @@ struct HeldSet {
     var setKey: String
     var before: Before
     var messages: [WatchCommandMessage]
+}
+
+/// The Watch's own session kept in a file after every set, so a crash or a
+/// closed app doesn't lose the log (`WatchWorkoutModel.recoverLocalLog`).
+nonisolated enum LocalLiftLog {
+    nonisolated struct Saved: Codable, Sendable {
+        var session: WatchSession
+        var savedAt: Date
+    }
+
+    private static var url: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("watch-local-lift.json")
+    }
+
+    static func save(_ session: WatchSession) {
+        guard let url, let data = try? JSONEncoder().encode(Saved(session: session, savedAt: .now)) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func load() -> Saved? {
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(Saved.self, from: data)
+    }
+
+    static func clear() {
+        guard let url else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
 }

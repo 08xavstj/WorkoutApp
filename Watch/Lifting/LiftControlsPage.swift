@@ -12,6 +12,12 @@ struct LiftControlsPage: View {
 
     private static let size: CGFloat = 64
 
+    /// Whether the iPhone hears the sets as they're logged.
+    private var statusLine: String {
+        if model.isLocal { return "Logged on Watch · sent to iPhone at the end" }
+        return model.phoneReachable ? "iPhone connected" : "iPhone out of reach · sets saved on Watch"
+    }
+
     /// "Save this 0:42 workout?"
     private var briefTitle: String {
         "Save this \(workoutElapsedText(model.elapsed(at: .now) ?? 0)) workout?"
@@ -50,8 +56,7 @@ struct LiftControlsPage: View {
                 }
             }
             Spacer(minLength: 0)
-            Label(model.phoneReachable ? "iPhone connected" : "iPhone out of reach · sets saved on Watch",
-                  systemImage: model.phoneReachable ? "iphone" : "iphone.slash")
+            Label(statusLine, systemImage: model.phoneReachable ? "iphone" : "iphone.slash")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)

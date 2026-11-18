@@ -256,6 +256,30 @@ private struct PlanCard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Join \(live.name)")
+            } else if let plan = model.plannedSession, model.offersPlan(plan, at: now) {
+                // Sent ahead by the phone: runs on the Watch alone.
+                Label(lines.eyebrow, systemImage: lines.symbol)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(WatchPalette.lifting)
+                Text(plan.name)
+                    .font(.headline)
+                    .lineLimit(2)
+                if let detail = lines.detail {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                NavigationLink {
+                    SessionPreviewView(session: plan, isPlan: true, minutes: plan.plannedMinutes)
+                } label: {
+                    Label("Start", systemImage: "play.fill")
+                        .font(.headline)
+                        .foregroundStyle(WatchPalette.onTint)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(WatchPalette.recovery, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Start \(plan.name)")
             } else {
                 Label(lines.eyebrow, systemImage: lines.symbol)
                     .font(.footnote.weight(.semibold))
@@ -309,16 +333,23 @@ private struct QuickStartTiles: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Lift: \(live.name)")
+            } else if let plan = model.plannedSession, model.offersPlan(plan) {
+                NavigationLink {
+                    SessionPreviewView(session: plan, isPlan: true, minutes: plan.plannedMinutes)
+                } label: {
+                    tile("Lift", systemImage: "dumbbell.fill", tint: WatchPalette.lifting)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Lift: \(plan.name)")
             } else {
-                Button {
-                    Task { await model.start(sessionID: nil) }
+                NavigationLink {
+                    QuickLiftView()
                 } label: {
                     tile("Lift", systemImage: "dumbbell.fill", tint: WatchPalette.lifting)
                 }
                 .buttonStyle(.plain)
                 .disabled(isStarting)
-                .accessibilityLabel("Lift")
-                .accessibilityHint("Records heart rate; sets appear when you start on your iPhone")
+                .accessibilityLabel("Quick lift")
             }
             Button {
                 let target = CardioTarget(storage: targetRaw)

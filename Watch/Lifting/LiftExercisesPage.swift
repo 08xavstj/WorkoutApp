@@ -30,7 +30,17 @@ struct LiftExercisesPage: View {
                         }
                     }
                 }
-                Text("Change a logged set on your iPhone.")
+                // A session the Watch runs alone can grow from the library.
+                if model.isLocal {
+                    NavigationLink {
+                        AddExerciseView()
+                    } label: {
+                        Label("Add exercise", systemImage: "plus")
+                            .frame(minHeight: 44)
+                    }
+                }
+                Text(model.isLocal ? "Logged on your Watch; your iPhone gets the session when it's back in reach."
+                                   : "Change a logged set on your iPhone.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .listRowBackground(Color.clear)

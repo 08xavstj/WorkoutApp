@@ -60,7 +60,12 @@ struct SessionPreviewView: View {
     }
 
     private func start() {
-        let id = session.id
-        Task { await model.start(sessionID: id) }
+        if isPlan {
+            let plan = session
+            Task { await model.startPlanned(plan) }
+        } else {
+            let id = session.id
+            Task { await model.start(sessionID: id) }
+        }
     }
 }

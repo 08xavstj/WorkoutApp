@@ -107,6 +107,15 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
         var perHand: Bool? = nil
         /// Machine settings at this gym ("Seat 4 · Pin 7"). Missing on older phones.
         var machineNote: String? = nil
+        /// The exercise's catalog id (`ExerciseLog.exerciseID`), so the phone can
+        /// recreate a log made on the Watch alone. Sent with plans and the
+        /// library; missing from older phones and live snapshots.
+        var catalogID: String? = nil
+        /// Rest after a set of this exercise, in seconds, for a plan or a quick
+        /// lift run on the Watch alone (the phone's `RestPreferences`, so the
+        /// evidence-based defaults still apply). Nil in live snapshots, where the
+        /// phone runs the rest.
+        var restSeconds: Int? = nil
 
         /// "60 kg", "20 kg each" (per hand), in the session's unit.
         func weightText(_ kilograms: Double, unit: String) -> String {
@@ -170,6 +179,12 @@ nonisolated struct WatchSession: Codable, Sendable, Equatable {
     /// The full length of the phone's running rest, in seconds, for the Watch's
     /// rest bar (`restSeconds` is the next exercise's rest). Nil on older phones.
     var restLengthSeconds: Int?
+    /// Set on a plan sent ahead (`WatchMessage.plan`): when it's planned for.
+    /// Such a session isn't running on the phone; the Watch never sends
+    /// commands for it, and logs it itself when started. Nil for a live session.
+    var plannedFor: Date?
+    /// Planned length in minutes, for a plan sent ahead.
+    var plannedMinutes: Int?
 
     static func id(for startedAt: Date) -> String {
         String(Int(startedAt.timeIntervalSince1970))
@@ -379,9 +394,29 @@ nonisolated struct WatchWorkoutSummary: Codable, Sendable, Equatable {
     /// leaves them out of the workout's duration. Nil when it never paused,
     /// and from older Watches.
     var pausedSeconds: Double? = nil
+    /// Sets done in a session the Watch ran on its own (a plan sent ahead, or
+    /// a quick lift): completed sets only, weights in kg, in order. The phone
+    /// creates the session from them (`WatchSync.apply`). Nil for a session the
+    /// phone ran, so nothing changes for those, and from older Watches.
+    var loggedExercises: [WatchSession.ExerciseSnapshot]? = nil
+    /// The standalone session's name ("Push", "Watch workout").
+    var name: String? = nil
 
     /// The workout's length without its pauses, as Apple Health has it.
     var minutes: Int { max(1, Int((end.timeIntervalSince(start) - max(0, pausedSeconds ?? 0)) / 60)) }
+}
+
+/// Recent exercises for Quick lift on the Watch: each with its last working
+/// sets as the planned values (not completed), the last-time ghost, its rest
+/// and the loads the gym can make. Weights in kilograms.
+nonisolated struct WatchExerciseLibrary: Codable, Sendable, Equatable {
+    var exercises: [WatchSession.ExerciseSnapshot]
+    /// "kg" or "lb".
+    var unit: String
+    var weightStepKg: Double?
+    var sentAt: Date
+    /// At most this many exercises (app's choice: a crown-scrolled list stays short).
+    static let maximumCount = 40
 }
 
 /// Keys in the WatchConnectivity dictionaries. Every value is JSON `Data` of
@@ -396,6 +431,16 @@ nonisolated enum WatchMessage {
     /// The chosen heart-rate zones for the Watch's cardio mode (phone → Watch):
     /// a `HeartRateZoneScheme` (AppCore; the Watch compiles that file itself).
     static let zones = "zones"
+    /// Today's (or the next) planned lifting session, sent ahead (phone →
+    /// Watch, application context): a `WatchSession` with `plannedFor` set.
+    /// The Watch can run it with the phone out of reach.
+    static let plan = "plan"
+    /// Recent exercises with their last sets and makeable loads, for Quick
+    /// lift (phone → Watch, application context): a `WatchExerciseLibrary`.
+    static let library = "library"
+    /// This week's hard cardio session (phone → Watch, application context):
+    /// an `IntervalSession` (AppCore; the Watch compiles that file itself).
+    static let intervals = "intervals"
 
     static func encode<T: Encodable>(_ value: T) -> Data? {
         try? JSONEncoder().encode(value)
