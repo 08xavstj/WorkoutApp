@@ -5,15 +5,15 @@ import Foundation
 /// When to stop caffeine so it doesn't cost sleep.
 ///
 /// In a meta-analysis of 24 studies, caffeine cut total sleep by about 45
-/// minutes. The model in that paper puts a coffee (~107 mg) at 8.8 hours
-/// before bed and a typical pre-workout (~217 mg) at 13.2 hours (Gardiner et
-/// al., Sleep Med Rev 2023; the 8.8/13.2 h figures are the paper's model
-/// averages, from memory in the audit). The cut-off here is interpolated by
-/// dose along that line rather than stepped, and it is a conservative
-/// average: a 2025 crossover trial by the same group found 100 mg four hours
-/// before bed had no measurable effect on sleep, while 400 mg at 12 hours did
-/// (Gardiner et al., Sleep 2025; secondary source). Sensitivity varies a lot
-/// between people.
+/// minutes. The paper puts a coffee (107 mg) at least 8.8 hours before bed
+/// and a standard pre-workout serve (217.5 mg) at least 13.2 hours (Gardiner
+/// et al., Sleep Med Rev 2023; abstract checked on PubMed November 2026, PMID
+/// 36870101). The cut-off here is interpolated by dose along that line rather
+/// than stepped, and it is a conservative average: a crossover trial by the
+/// same group (23 young men) found 100 mg up to 4 hours before bed had no
+/// measurable effect on sleep, while 400 mg within 12 hours did (Gardiner et
+/// al., Sleep 2025; abstract checked on PubMed November 2026, PMID 39377163).
+/// Sensitivity varies a lot between people.
 public enum CaffeineTiming {
     /// Hours before bed at the reference dose (Gardiner et al., Sleep Med Rev 2023).
     public static let baseHours = 8.8
@@ -281,9 +281,11 @@ public enum HeatAndCold {
 
 // MARK: - Protein per meal
 
-/// Protein spread across meals. About 0.4 g per kg of body weight per meal,
-/// over at least 4 meals, maximises muscle building (Schoenfeld & Aragon,
-/// JISSN 2018).
+/// Protein spread across meals: about 0.4 g per kg of body weight at each of
+/// 4 meals is one way to spread the day's target (Schoenfeld & Aragon, JISSN
+/// 2018). It isn't a per-meal limit, and the daily total is what the
+/// meta-analysis supports (Morton et al., Br J Sports Med 2018; evidence
+/// audit, should-change 10).
 public enum ProteinMeals {
     public static let gramsPerKgPerMeal = 0.4
     public static let targetMeals = 4

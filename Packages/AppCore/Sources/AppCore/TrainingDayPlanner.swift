@@ -142,6 +142,17 @@ public enum TrainingDayPlanner {
                         focus: focus)
     }
 
+    /// Low enough to turn a lift into rest: low recovery, but not the 7-day
+    /// HRV on its own. HRV-guided training comes from endurance trials
+    /// (Kiviniemi et al., Eur J Appl Physiol 2007; Javaloyes et al., IJSPP
+    /// 2019, n = 17, no between-group difference) and the meta-analysis found
+    /// only small, non-significant fitness benefits (Manresa-Rocamora et al.,
+    /// IJERPH 2021, SMD 0.20), so on HRV alone a lift gets easier, never
+    /// cancelled (evidence audit, should-change 13).
+    static func restWorthy(lowRecovery: Bool, fromHRVOnly: Bool) -> Bool {
+        lowRecovery && !fromHRVOnly
+    }
+
     /// Strain that makes a rest day count as a hard training day: the bottom
     /// of your normal training range (`StrainCalculator.targetStrain`), at least 40%.
     public static func hardDayStrain(usualTrainingStrain: Double?) -> Double {
@@ -152,10 +163,14 @@ public enum TrainingDayPlanner {
     ///   - plannedToday: today's session in the plan, or nil on a rest day.
     ///   - past: finished days before today, oldest first (the last week is plenty).
     ///   - lowRecovery: recovery under 34, or the 7-day HRV below normal.
+    ///   - lowFromHRVOnly: `lowRecovery` comes from the 7-day HRV alone
+    ///     (recovery itself 34 or more). It eases a planned lift but never
+    ///     turns it into rest (`restWorthy`).
     public static func guidance(
         plannedToday: WorkoutFocus?,
         past: [PastDay],
         lowRecovery: Bool,
+        lowFromHRVOnly: Bool = false,
         usualTrainingStrain: Double?,
         calendar: Calendar = .current
     ) -> Guidance {
@@ -170,7 +185,7 @@ public enum TrainingDayPlanner {
             if let planned = plannedToday, !lowRecovery, yesterday.wasHardNonLift {
                 return liftAfterSport(planned, training: training)
             }
-            if let planned = plannedToday, !lowRecovery {
+            if let planned = plannedToday, !restWorthy(lowRecovery: lowRecovery, fromHRVOnly: lowFromHRVOnly) {
                 return Guidance(
                     kind: .easyTraining, strainRange: easy, title: "Easy day",
                     reason: "Yesterday was a rest day that turned into a hard one, so keep today's \(planned.shortTitle) session short and easy, or move it to your next free day.",
@@ -240,6 +255,7 @@ public enum TrainingDayPlanner {
         week: AdaptiveWeek.Result,
         past: [PastDay],
         lowRecovery: Bool,
+        lowFromHRVOnly: Bool = false,
         usualTrainingStrain: Double?,
         calendar: Calendar = .current
     ) -> Guidance {
@@ -273,7 +289,7 @@ public enum TrainingDayPlanner {
             if let slot, !lowRecovery, yesterday.wasHardNonLift {
                 return liftAfterSport(slot.focus, training: training)
             }
-            if let slot, !lowRecovery {
+            if let slot, !restWorthy(lowRecovery: lowRecovery, fromHRVOnly: lowFromHRVOnly) {
                 return Guidance(
                     kind: .easyTraining, strainRange: easy, title: "Easy day",
                     reason: "Yesterday was a rest day that turned into a hard one, so keep today's \(slot.focus.shortTitle) session short and easy, or move it to tomorrow.",
@@ -362,6 +378,7 @@ public enum TrainingDayPlanner {
         nextFocus: WorkoutFocus?,
         past: [PastDay],
         lowRecovery: Bool,
+        lowFromHRVOnly: Bool = false,
         usualTrainingStrain: Double?,
         calendar: Calendar = .current
     ) -> Guidance {
@@ -387,7 +404,7 @@ public enum TrainingDayPlanner {
             )
         }
         if lowRecovery {
-            if week.slack > 0 {
+            if week.slack > 0, restWorthy(lowRecovery: lowRecovery, fromHRVOnly: lowFromHRVOnly) {
                 return Guidance(
                     kind: .rest, strainRange: restDayRange, title: "Rest day",
                     reason: "Recovery is low and the week has room (\(left) to go, \(days) left), so today can be a rest day. Train on a day you feel better."

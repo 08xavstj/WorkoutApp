@@ -11,7 +11,7 @@ nonisolated enum WatchZoneStore {
         case phone
         /// Apple Health's own zones (watchOS 27), with nothing from the phone yet.
         case health
-        /// Percent of a maximum heart rate estimated from the age in Health.
+        /// Tensile's zones from a maximum heart rate estimated from the age in Health.
         case ageEstimate
         /// No age either: a stand-in age, so the numbers are rough.
         case standIn
@@ -45,8 +45,13 @@ nonisolated enum WatchZoneStore {
         UserDefaults.standard.set(data, forKey: key)
     }
 
-    /// The phone's zones as last received, or nil before the first.
+    /// The phone's zones as last received, or nil before the first. Percent-of-max
+    /// zones a phone sent before that option was dropped (17 Nov 2026) are
+    /// skipped: the Watch uses Health's or Tensile's from age until the phone
+    /// sends its zones again.
     static var fromPhone: HeartRateZoneScheme? {
-        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(HeartRateZoneScheme.self, from: $0) }
+        UserDefaults.standard.data(forKey: key)
+            .flatMap { try? JSONDecoder().decode(HeartRateZoneScheme.self, from: $0) }
+            .flatMap { $0.kind == .percentOfMax ? nil : $0 }
     }
 }

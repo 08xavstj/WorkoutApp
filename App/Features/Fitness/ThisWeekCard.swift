@@ -564,8 +564,10 @@ private struct ThisWeekDeloadLine: View {
     }
 
     private var info: Info? {
-        if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.isDeload {
-            return Info(chip: "Planned deload this week", line: week.note, color: Theme.oxygen)
+        if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.isDeload || week.offersEasier {
+            // The last week carries on unless an easier week is taken (evidence audit, should-change 4).
+            let chip = week.offersEasier ? (week.isDeload ? "Easier week" : "Last week of the block") : "Planned deload this week"
+            return Info(chip: chip, line: week.note, color: Theme.oxygen)
         }
         if let advice = muscles.deload {
             return Info(

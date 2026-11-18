@@ -58,8 +58,9 @@ struct IntervalSessionTests {
         #expect(hard?.lower == scheme.band(forZone: 4)?.lower)
         #expect(hard?.upper == HeartRateBand.noUpperLimit)
         #expect(IntervalSession.Band.none.heartRateBand(in: scheme) == nil)
-        // Helgerud's 90-95% of maximum sits inside the hard band on both scales, and 70% inside easy.
-        for scale in [scheme, HeartRateZoneScheme.percentOfMax(maximum: 185, resting: 55)] {
+        // Helgerud's 90-95% of maximum sits inside the hard band, and 70% inside easy, with the
+        // measured resting rate and with the Watch's stand-in (percent-of-max zones were dropped, evidence audit).
+        for scale in [scheme, HeartRateZoneScheme.reserve(resting: HeartRateZoneScheme.standInResting, maximum: 185)] {
             let work = IntervalSession.Band.zones(low: 4, high: 5).heartRateBand(in: scale)!
             #expect(work.contains(0.90 * 185) && work.contains(0.95 * 185))
             #expect(scale.easyBand.contains(0.70 * 185))

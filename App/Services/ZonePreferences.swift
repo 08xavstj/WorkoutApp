@@ -22,8 +22,9 @@ nonisolated enum ZonePreferences {
         var setByUser: Bool
     }
 
+    /// A retired percent-of-max choice reads as Tensile's (`Kind.inUse`; evidence audit, 17 Nov 2026).
     static var kind: HeartRateZoneScheme.Kind {
-        get { UserDefaults.standard.string(forKey: kindKey).flatMap(HeartRateZoneScheme.Kind.init(rawValue:)) ?? .reserve }
+        get { UserDefaults.standard.string(forKey: kindKey).flatMap(HeartRateZoneScheme.Kind.init(rawValue:))?.inUse ?? .reserve }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: kindKey) }
     }
 

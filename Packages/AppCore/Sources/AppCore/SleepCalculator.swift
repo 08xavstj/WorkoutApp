@@ -13,7 +13,9 @@ import Foundation
 /// because efficiency, stages and "no interruptions" are easy to max out on
 /// a tiny sleep.
 ///
-/// - Need: 8 h by default. Adults need 7 h or more (Watson et al., Sleep 2015,
+/// - Need: your setting, 7.5 h by default in the app (`UserSettings`; this
+///   type's `baseSleepNeedHours` starts at 8 h until the app sets it from
+///   the setting; evidence audit, should-change 12). Adults need 7 h or more (Watson et al., Sleep 2015,
 ///   AASM/SRS consensus); no study ties extra need to the previous day's
 ///   training load, so strain doesn't change it. Full marks at your need,
 ///   falling faster under 7 h (`durationScore`, the slopes are the app's).

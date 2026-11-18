@@ -272,7 +272,7 @@ struct StrengthDaysCard: View {
     }
 }
 
-// MARK: - Weekly active minutes
+// MARK: - Weekly cardio minutes
 
 /// This week's moderate and vigorous minutes outside lifting against the
 /// 150-floor / 300-best band (WHO 2020, Bull et al.; Lee et al., Circulation

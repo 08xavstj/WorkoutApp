@@ -36,14 +36,20 @@ public nonisolated struct HeartRateBand: Codable, Sendable, Equatable {
 }
 
 /// How heart rate is cut into five zones for display and for the Watch's
-/// cardio mode (docs/research/workout-zones-2026-11.md). Four ways to choose
-/// the limits:
+/// cardio mode (docs/research/workout-zones-2026-11.md). Three ways to choose
+/// the limits (`Kind.choices`):
 ///
 /// - `reserve`: Tensile's own, by heart-rate reserve. The default, and what
 ///   `HeartRateProfile.zone` and day strain have always used.
-/// - `percentOfMax`: percent of maximum heart rate.
 /// - `appleHealth`: the limits Apple Health holds (read on iOS/watchOS 27).
 /// - `custom`: limits the user typed, e.g. from a lab or threshold test.
+///
+/// Percent of maximum was a fourth option until 17 Nov 2026. The evidence
+/// audit dropped it: it added a second scale on which the same heart rate
+/// lands about a zone higher, and fixed percentages match individual
+/// thresholds poorly whichever base they use (Iannetta 2020, below). The
+/// `percentOfMax` case stays only so a saved choice or a scheme the Watch
+/// stored still decodes; it is used as Tensile's (`Kind.inUse`).
 ///
 /// Day strain does not read this type: `StrainCalculator` weights every
 /// minute by its fraction of heart-rate reserve (Banister's TRIMP), whatever
@@ -59,9 +65,16 @@ public nonisolated struct HeartRateBand: Codable, Sendable, Equatable {
 /// (project.yml, `TensileWatch: sources:`).
 public nonisolated struct HeartRateZoneScheme: Codable, Sendable, Equatable {
     public nonisolated enum Kind: String, Codable, Sendable, CaseIterable, Identifiable {
+        /// `percentOfMax` is retired (see the type comment): it decodes, is never offered, and stands for `reserve`.
         case reserve, percentOfMax, appleHealth, custom
 
         public var id: String { rawValue }
+
+        /// The options offered in Settings.
+        public static let choices: [Kind] = [.reserve, .appleHealth, .custom]
+
+        /// The option used for this choice: a retired percent-of-max choice falls back to Tensile's.
+        public var inUse: Kind { self == .percentOfMax ? .reserve : self }
 
         /// Short name, for pickers and captions.
         public var title: String {
@@ -79,7 +92,7 @@ public nonisolated struct HeartRateZoneScheme: Codable, Sendable, Equatable {
             case .reserve:
                 "Five zones from 50% to 100% of the gap between your resting and maximum heart rate. Day strain uses the same scale."
             case .percentOfMax:
-                "Five zones from 50% to 100% of your maximum heart rate, the way most watches and gym machines label them."
+                "No longer offered: Tensile's zones are used instead."
             case .appleHealth:
                 "The zones set in Apple Health, so Tensile matches Apple's Workout and Fitness apps."
             case .custom:
@@ -127,21 +140,14 @@ public nonisolated struct HeartRateZoneScheme: Codable, Sendable, Equatable {
     /// (resting + fraction × (maximum − resting); Karvonen MJ, Kentala E,
     /// Mustala O. The effects of training on heart rate: a longitudinal study.
     /// Ann Med Exp Biol Fenn 1957;35:307-315). The 10-point steps are Edwards'
-    /// five zones (see `maxFractions`) moved onto reserve, which tracks
+    /// five zones from 50% of maximum (Edwards S. The Heart Rate Monitor Book.
+    /// Polar Electro, 1993; as described in Borresen J, Lambert MI. Sports Med
+    /// 2009;39(9):779-795; neither re-verified) moved onto reserve, which tracks
     /// oxygen-uptake reserve better than percent of maximum does (Swain DP,
     /// Leutholtz BC. Heart rate reserve is equivalent to %VO2 reserve, not to
     /// %VO2max. Med Sci Sports Exerc 1997;29:410-414). The same numbers as
     /// `HeartRateProfile.zone`; putting the steps on reserve is the app's choice.
     public static let reserveFractions = [0.5, 0.6, 0.7, 0.8, 0.9]
-
-    /// Zones 1-5 start at these fractions of maximum heart rate: the five
-    /// 10-point zones from 50% used for Edwards' summated-zone training load
-    /// (Edwards S. The Heart Rate Monitor Book. Polar Electro, 1993; as
-    /// described in Borresen J, Lambert MI. The quantification of training
-    /// load, the training response and the effect on performance. Sports Med
-    /// 2009;39(9):779-795). Neither the book nor the review was re-verified
-    /// this round; the five bands are the ones most watch makers publish.
-    public static let maxFractions = [0.5, 0.6, 0.7, 0.8, 0.9]
 
     /// "Easy" as a fraction of heart-rate reserve: 40% up to 60%, ACSM's
     /// moderate intensity (40-59% of reserve; vigorous starts at 60%. Garber
@@ -160,22 +166,16 @@ public nonisolated struct HeartRateZoneScheme: Codable, Sendable, Equatable {
     public static let easyReserveLower = 0.40
     public static let easyReserveUpper = 0.60
 
-    /// "Easy" when the resting heart rate isn't known (the Watch on its own):
-    /// ACSM's moderate band as percent of maximum, 64-76%, with vigorous from
-    /// 77% (Garber 2011, table 1; this column is cited from memory of the
-    /// table and was not re-verified).
-    public static let easyMaxLower = 0.64
-    public static let easyMaxUpper = 0.77
+    /// Resting heart rate assumed when none is known (the Watch on its own,
+    /// before the phone has sent its zones): a typical adult value, so the
+    /// Watch can stay on Tensile's reserve scale. The app's choice; the phone's
+    /// measured resting rate replaces it at the next sync.
+    public static let standInResting = 60.0
 
     /// The easy band from resting and maximum heart rate (40-60% of reserve).
     public static func easyBand(resting: Double, maximum: Double) -> HeartRateBand {
         let reserve = max(0, maximum - resting)
         return HeartRateBand(lower: resting + easyReserveLower * reserve, upper: resting + easyReserveUpper * reserve)
-    }
-
-    /// The easy band from maximum heart rate alone (64-76% of maximum).
-    public static func easyBand(maximum: Double) -> HeartRateBand {
-        HeartRateBand(lower: easyMaxLower * maximum, upper: easyMaxUpper * maximum)
     }
 
     /// Maximum heart rate from age: 208 − 0.7 × age (Tanaka H, Monahan KD,
@@ -199,19 +199,13 @@ public nonisolated struct HeartRateZoneScheme: Codable, Sendable, Equatable {
         )
     }
 
-    /// Zones by percent of maximum heart rate. `resting` only sets the easy band.
-    public static func percentOfMax(maximum: Double, resting: Double? = nil) -> HeartRateZoneScheme {
-        let edges = maxFractions.map { $0 * maximum }
-        return HeartRateZoneScheme(
-            kind: .percentOfMax, floor: edges[0], boundaries: Array(edges.dropFirst()),
-            easyBand: resting.map { easyBand(resting: $0, maximum: maximum) } ?? easyBand(maximum: maximum)
-        )
-    }
-
-    /// Percent-of-max zones from age alone, for a Watch that has heard nothing
-    /// from the phone and has no zones in Health.
+    /// Tensile's zones from age alone, for a Watch that has heard nothing from
+    /// the phone and has no zones in Health: the maximum from age and the
+    /// stand-in resting rate. It was percent of maximum until the option was
+    /// dropped (evidence audit, 17 Nov 2026), so the Watch never shows a
+    /// second scale.
     public static func ageEstimate(age: Int) -> HeartRateZoneScheme {
-        percentOfMax(maximum: estimatedMaximum(age: age))
+        reserve(resting: standInResting, maximum: estimatedMaximum(age: age))
     }
 
     /// Apple Health's zones. `boundaries` are where zones 2-5 start; `floor` is

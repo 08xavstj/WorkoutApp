@@ -38,22 +38,25 @@ struct HomeBloodPressureTests {
         #expect(check.category == .elevated)
     }
 
-    @Test func repeatEveryThreeOrSixMonths() {
-        // 3-6-monthly repeat of the home protocol (ESH 2021; ACC/AHA): 3 months when elevated or high, 6 when normal.
+    @Test func repeatEveryThreeOrTwelveMonths() {
+        // 3 months when elevated or high, 12 when normal. Normal was 6 months; the evidence audit
+        // (should-change 11) moved it to yearly, as USPSTF 2021 screens even less often at normal BP.
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
         let ended = calendar.date(from: DateComponents(year: 2027, month: 3, day: 7, hour: 20))!
-        #expect(HomeBloodPressure.repeatMonths(after: .normal) == 6)
-        #expect(HomeBloodPressure.repeatMonths(after: nil) == 6)
+        #expect(HomeBloodPressure.repeatMonths(after: .normal) == 12)
+        #expect(HomeBloodPressure.repeatMonths(after: nil) == 12)
         #expect(HomeBloodPressure.repeatMonths(after: .elevated) == 3)
         #expect(HomeBloodPressure.repeatMonths(after: .stage1) == 3)
         #expect(HomeBloodPressure.repeatMonths(after: .stage2) == 3)
         #expect(HomeBloodPressure.nextCheckDue(lastCheck: ended, category: .normal, calendar: calendar)
-                == calendar.date(from: DateComponents(year: 2027, month: 9, day: 7))!)
+                == calendar.date(from: DateComponents(year: 2028, month: 3, day: 7))!)
         #expect(HomeBloodPressure.nextCheckDue(lastCheck: ended, category: .elevated, calendar: calendar)
                 == calendar.date(from: DateComponents(year: 2027, month: 6, day: 7))!)
         #expect(!HomeBloodPressure.isCheckDue(lastCheck: ended, category: .normal, now: ended.addingTimeInterval(100 * 86_400), calendar: calendar))
         #expect(HomeBloodPressure.isCheckDue(lastCheck: ended, category: .elevated, now: ended.addingTimeInterval(100 * 86_400), calendar: calendar))
+        #expect(!HomeBloodPressure.isCheckDue(lastCheck: ended, category: .normal, now: ended.addingTimeInterval(200 * 86_400), calendar: calendar))
+        #expect(HomeBloodPressure.isCheckDue(lastCheck: ended, category: .normal, now: ended.addingTimeInterval(366 * 86_400), calendar: calendar))
     }
 
     @Test func lastCompletedCheckNeedsAFullWeek() throws {

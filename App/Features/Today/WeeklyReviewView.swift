@@ -499,7 +499,7 @@ private struct BasicsRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Basics, \(result.summary)")
             .accessibilityValue(open ? "Open" : "Closed")
-            .accessibilityHint("Shows active minutes, strength days, steps, sleep regularity and drinks")
+            .accessibilityHint("Shows cardio minutes, strength days, steps, sleep regularity and drinks")
             .accessibilityIdentifier("review-basics")
             if open {
                 ForEach(result.checks) { check in

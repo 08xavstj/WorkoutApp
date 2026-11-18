@@ -21,12 +21,16 @@ import Foundation
 ///   A weekly mean one day-to-day standard deviation away from the 4-week
 ///   mean is about 2.6 standard errors, unlikely to be noise; nothing says
 ///   that size matters for health, and the copy doesn't claim it does.
-/// - **Fixed lines are published ones** (150 active minutes, 25 g of fibre,
+/// - **Fixed lines are published ones** (150 cardio minutes, 25 g of fibre,
 ///   the headphone limit, the sleep-regularity lines), cited at `Longevity`.
 /// - **Few, and not daily.** Repeated prompts lose their effect within weeks
 ///   (Klasnja et al., Ann Behav Med 2019), so a line shows for at most
-///   `maxRunDays` days running and then rests; the cap of 4 and the rest
-///   lengths are app choices, untested.
+///   `maxRunDays` days running and then rests; the cap of 2 and the rest
+///   lengths are app choices, untested. The cap was 4; the evidence audit
+///   (17 Nov 2026) cut it to 2 so the feed reads in about five seconds
+///   (docs/research/cleanup-2026-11.md). Lines are never sent as
+///   notifications: they show only on the Longevity page and the Insights
+///   list.
 /// - **Hysteresis.** A rule turns on at one size and off at about half of
 ///   it, so a value sitting on the line doesn't flip the insight on and off.
 public enum DailyInsights {
@@ -179,8 +183,8 @@ public enum DailyInsights {
 
     // MARK: Limits (app choices; see the type's comment)
 
-    /// Most lines shown at once.
-    public static let maxShown = 4
+    /// Most lines shown at once (was 4; evidence audit, 17 Nov 2026).
+    public static let maxShown = 2
     public static let maxPerCategory = 2
     /// Most amber lines at once: status colour only where it earns it
     /// (docs/research/cleanup-2026-11.md).

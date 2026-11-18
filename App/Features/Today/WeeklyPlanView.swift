@@ -284,7 +284,7 @@ struct WeeklyPlanView: View {
         if CardioPlanner.recommendedKind(goals: goals) == .bike {
             text += ", so the bike suits your goal"
         }
-        text += ". It counts toward the WHO's 150-300 active minutes a week (Bull 2020). On a low-recovery day it shrinks to 15 minutes."
+        text += ". It counts toward the WHO's 150-300 aerobic minutes a week (Bull 2020). On a low-recovery day it shrinks to 15 minutes."
         return text
     }
 

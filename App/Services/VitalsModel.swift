@@ -237,7 +237,6 @@ final class VitalsModel {
         async let diastolic = health.dailySeries(.bloodPressureDiastolic, unit: .millimeterOfMercury(), days: 90, cumulative: false)
         async let water = health.dailySeries(.dietaryWater, unit: .liter(), days: 90, cumulative: true)
         async let workouts = health.workoutIntervals(from: twoWeeksAgo, to: now)
-        // Strength workouts from the watch or other apps: lifting, like logged sessions (evidence audit M1).
         async let otherWorkouts = health.externalWorkouts(from: twoWeeksAgo, to: now)
         let fullHeartRateRead = heartRateCacheEdge == nil
             || lastFullHeartRateRead.map { now.timeIntervalSince($0) >= 3600 } ?? true
@@ -284,11 +283,14 @@ final class VitalsModel {
             failed("heart rate", error, core: true)
             heartRateMinutes = []
         }
+        // Logged gym sessions plus strength workouts from the watch or other apps (evidence audit M1).
+        let strengthWorkouts = ((try? await otherWorkouts) ?? []).filter(\.isStrength)
+        let liftingWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
+            + strengthWorkouts.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
         let derived = await Self.derive(
             heartRate: heartRateMinutes,
             workouts: workoutWindows,
-            lifting: sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
-                + ((try? await otherWorkouts) ?? []).filter(\.isStrength).map { DateInterval(start: $0.start, end: max($0.start, $0.end)) },
+            lifting: liftingWindows,
             sleep: (try? await lastNight) ?? [],
             nights: nights,
             profile: resolvedProfile,

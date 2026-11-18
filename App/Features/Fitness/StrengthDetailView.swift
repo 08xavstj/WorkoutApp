@@ -25,8 +25,11 @@ private struct DeloadCard: View {
     @Environment(DailyMetricsModel.self) private var metrics
 
     var body: some View {
-        // Training block: the planned easier week (Bell et al. 2023 consensus; `TrainingBlock`).
-        if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.isDeload {
+        // The block's last week: carry on, or an easier week if run down (evidence audit, should-change 4).
+        if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.offersEasier {
+            LastBlockWeekCard(week: week)
+        // Training block: the planned easier week of a block saved before that (Bell et al. 2023 consensus; `TrainingBlock`).
+        } else if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.isDeload {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Planned deload this week", systemImage: "arrow.down.right.circle.fill")
                     .font(.headline)
@@ -52,7 +55,7 @@ private struct DeloadCard: View {
                 Text("Stalled: " + advice.stalledLifts.joined(separator: ", "))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
-                Text("Deloads are standard in strength training (Bell et al., Sports Med Open 2023 consensus): keep the weights, cut sets by about half, for about a week.")
+                Text("Coaches commonly use deloads (Bell et al., Sports Med Open 2023, an expert consensus): keep the weights, cut sets by about half, for about a week.")
                     .font(.caption2)
                     .foregroundStyle(Theme.secondaryText)
                 // 2+ days and 30+ min a week keep the mortality benefit (Momma 2022; `StrengthHealthFloor`).
@@ -62,5 +65,45 @@ private struct DeloadCard: View {
             }
             .card()
         }
+    }
+}
+
+/// The block's last week (`TrainingBlock.lastWeek(easier:)`): it carries on
+/// unless you take the easier week, and you can switch back. Not a planned
+/// deload: a week off mid-programme cost some strength in the one trial
+/// (Coleman et al., PeerJ 2024), so the easier week is for when you feel run
+/// down (evidence audit, should-change 4).
+private struct LastBlockWeekCard: View {
+    @Environment(WeeklyPlanStore.self) private var plans
+    let week: TrainingBlock.WeekState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(week.isDeload ? "Easier week" : "Last week of the block", systemImage: "arrow.down.right.circle.fill")
+                .font(.headline)
+                .foregroundStyle(Theme.oxygenText)
+            Text(week.isDeload
+                 ? "\(week.label). The trainer plans about half the sets, a little lighter. The next block starts next week."
+                 : week.note)
+                .font(.subheadline)
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(week.isDeload ? "Carry on instead" : "Take an easier week") {
+                plans.setEasierWeek(!week.isDeload)
+            }
+            .buttonStyle(.bordered)
+            .tint(Theme.oxygen)
+            .accessibilityIdentifier("strength.easierWeek")
+            Text("A planned easier week isn't shown to help: in one trial, a week off mid-programme gave less strength gain and the same muscle growth (Coleman 2024). Take one when you feel run down.")
+                .font(.caption2)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            if week.isDeload {
+                Text(StrengthHealthFloor.deloadNote)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .card()
     }
 }

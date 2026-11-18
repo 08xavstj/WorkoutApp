@@ -395,7 +395,7 @@ private struct FitnessProgressCard: View {
             verdict: verdict,
             trend: history.filter { $0.date >= start },
             trendColor: Theme.oxygen,
-            hint: "Shows your VO₂ max trend and weekly active minutes",
+            hint: "Shows your VO₂ max trend and weekly cardio minutes",
             destination: CardioDetailView()
         )
     }

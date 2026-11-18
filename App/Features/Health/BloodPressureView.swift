@@ -28,7 +28,7 @@ struct BloodPressureView: View {
     }
 
     /// The last full 7-day check and when the next is due (3 months if it was
-    /// elevated or high, 6 if normal: `HomeBloodPressure.nextCheckDue`).
+    /// elevated or high, 12 if normal: `HomeBloodPressure.nextCheckDue`).
     private var lastCompleted: (ended: Date, check: HomeBloodPressure.WeekCheck)? {
         HomeBloodPressure.lastCompletedCheck(readings.map(\.asCore))
     }
@@ -85,7 +85,7 @@ struct BloodPressureView: View {
         await Reminders.scheduleBloodPressureReminder(due: nextCheckDue)
     }
 
-    /// "Next check due 7 Sep: every 6 months while normal."
+    /// "Next check due 7 Mar: every 12 months while normal."
     @ViewBuilder
     private var nextCheckLine: some View {
         if let last = lastCompleted, let due = nextCheckDue {

@@ -35,9 +35,9 @@ import Foundation
 //   the standard session has 16 hard minutes and the short one 12, under that
 //   line: the UI says so.
 // - Helgerud's 70% of maximum for the easy minutes sits inside the easy band
-//   (40-60% of heart-rate reserve, or 64-76% of maximum without a resting
-//   rate). Zones 4-5 cover 90-95% of maximum on both the percent-of-maximum
-//   and the heart-rate-reserve scales. Heart rate lags a minute or two behind
+//   (40-60% of heart-rate reserve; the Watch alone uses a stand-in resting
+//   rate). Zones 4-5 on the heart-rate-reserve scale cover 90-95% of maximum
+//   (percent-of-maximum zones were dropped, evidence audit 17 Nov 2026). Heart rate lags a minute or two behind
 //   effort in each round, so the effort cue leads. Warm-up and cool-down
 //   lengths and the effort numbers are the app's choice.
 
@@ -264,8 +264,8 @@ public nonisolated struct IntervalSession: Codable, Sendable, Equatable, Identif
     /// Hard and easy interval lengths (Helgerud 2007).
     public static let workSeconds = 240
     public static let recoverySeconds = 180
-    /// The hard band: zones 4-5 hold Helgerud's 90-95% of maximum on either
-    /// scale; the lower edge leaves room for heart rate climbing in each round.
+    /// The hard band: zones 4-5 hold Helgerud's 90-95% of maximum on the
+    /// reserve scale; the lower edge leaves room for heart rate climbing in each round.
     public static let workBand = Band.zones(low: 4, high: 5)
 
     static let warmUpTarget = Target(band: .easy, effort: 3...5,

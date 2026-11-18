@@ -53,8 +53,14 @@ public enum NutritionTargets {
     /// least 4 meals, 0.25-0.55 g/kg per dose; Moore et al., J Gerontol A 2015:
     /// about 0.24 g/kg young, 0.40 g/kg older per dose; Kerksick et al., ISSN
     /// nutrient timing 2017: 20-40 g every 3-4 h). With 3 logged meals the
-    /// per-meal dose rises so the day still reaches 1.6 g/kg (0.53 g/kg, inside
-    /// Schoenfeld's 0.55 ceiling). Endurance or health-only goals get 3 meals
+    /// per-meal dose rises so the day still reaches 1.6 g/kg (0.53 g/kg).
+    /// No ceiling (evidence audit, should-change 10): Schoenfeld & Aragon's
+    /// 0.55 g/kg is the top of a range for spreading 2.2 g/kg over 4 meals, not
+    /// a limit on what one meal can use; a trial found 100 g in one meal gave a
+    /// larger, longer anabolic response than 25 g (Trommelen et al., Cell Rep
+    /// Med 2023, not re-verified), and the daily total is what the
+    /// meta-analysis supports (Morton et al., Br J Sports Med 2018). So the
+    /// per-meal figure is a way to spread the day's target. Endurance or health-only goals get 3 meals
     /// of 0.4 g/kg, which add up to their 1.2 g/kg daily target
     /// (`GoalPlanner.proteinPerKg`) and clear the dose that fully stimulates
     /// muscle protein synthesis at any age (Moore 2015: 0.24 g/kg young, 0.40
@@ -64,7 +70,6 @@ public enum NutritionTargets {
     /// over the meals, so the two always agree. Long-term body-composition
     /// trials on meal distribution are few, so the UI says "about".
     public static let proteinPerMealGramsPerKg = ProteinMeals.gramsPerKgPerMeal
-    public static let proteinPerMealCeilingGramsPerKg = 0.55
 
     /// Per-meal dose for people 65 and older, g/kg: older muscle needs about
     /// 0.40 g/kg per meal to respond fully, against 0.24 g/kg in young men
@@ -99,15 +104,14 @@ public enum NutritionTargets {
     ///     g/kg of body weight: 1.2 g/kg over 3 meals for endurance or health
     ///     goals, at least 0.4 g/kg a meal for lifters.
     ///   - loggedMeals: meals seen in today's food log (3 switches lifters to
-    ///     3 meals, unless that would put a meal over Schoenfeld & Aragon's
-    ///     0.55 g/kg; then it stays at 4).
+    ///     3 meals; there's no per-meal ceiling, evidence audit should-change 10).
     public static func proteinPerMeal(bodyMassKg: Double?, goals: Goals?, loggedMeals: Int? = nil, age: Int? = nil,
                                       dailyProteinGrams: Double?) -> (grams: Double, meals: Int)? {
         guard let bodyMassKg, bodyMassKg > 0 else { return nil }
         let lifting = goals.map { $0.focuses.contains(.muscle) || $0.focuses.contains(.strength) || $0.weight == .lose } ?? true
         if let daily = dailyProteinGrams, daily > 0 {
             var meals = lifting ? ProteinMeals.targetMeals : nonLiftingMeals
-            if lifting, loggedMeals == 3, daily / 3 <= bodyMassKg * proteinPerMealCeilingGramsPerKg { meals = 3 }
+            if lifting, loggedMeals == 3 { meals = 3 }
             return ((daily / Double(meals)).rounded(), meals)
         }
         if !lifting {
@@ -115,7 +119,7 @@ public enum NutritionTargets {
             return ((bodyMassKg * nonLiftingDailyGramsPerKg / Double(nonLiftingMeals)).rounded(), nonLiftingMeals)
         }
         let meals = loggedMeals == 3 ? 3 : ProteinMeals.targetMeals
-        let perKg = min(proteinPerMealCeilingGramsPerKg, max(proteinPerMealGramsPerKg, 1.6 / Double(meals)))
+        let perKg = max(proteinPerMealGramsPerKg, 1.6 / Double(meals))
         return ((bodyMassKg * perKg).rounded(), meals)
     }
 

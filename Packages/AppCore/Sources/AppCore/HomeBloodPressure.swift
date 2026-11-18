@@ -101,15 +101,18 @@ public enum HomeBloodPressure {
     // MARK: Repeat cadence
 
     /// How often to repeat the 7-day home check: every 3 months when the
-    /// last average was elevated or high, every 6 months when it was normal.
+    /// last average was elevated or high, every 12 months when it was normal.
     /// Guidelines ask for home monitoring to be repeated at intervals rather
     /// than once (ESH 2021 home BP practice guidelines; ACC/AHA 2017 and the
-    /// 2025 AHA/ACC guideline); the research round put the interval at 3-6
-    /// months (docs/research/health-metrics.md, section 3), and the exact
-    /// months here are the app's choice within that. A doctor's plan wins.
+    /// 2025 AHA/ACC guideline). Normal was every 6 months; USPSTF 2021 screens
+    /// adults 18-39 with normal blood pressure and no risk factors every 3-5
+    /// years, and yearly from 40 or with risk factors (not re-verified), so a
+    /// yearly check keeps it at lower burden (evidence audit, should-change
+    /// 11). The 3 months above normal is the app's choice from the research
+    /// round (docs/research/health-metrics.md, section 3). A doctor's plan wins.
     public static func repeatMonths(after category: Category?) -> Int {
         switch category {
-        case .normal, nil: 6
+        case .normal, nil: 12
         case .elevated, .stage1, .stage2, .severe: 3
         }
     }

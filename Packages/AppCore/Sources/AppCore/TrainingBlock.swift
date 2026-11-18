@@ -1,18 +1,30 @@
 import Foundation
 
 /// A training block (mesocycle): 4-6 weeks in which the sets per exercise
-/// ramp up, the effort target moves closer to failure, then one easier week,
-/// then the next block starts.
+/// ramp up, the effort target moves closer to failure, then a last week that
+/// carries on or eases off, then the next block starts.
 ///
-/// - Periodised training beats non-periodised for 1RM strength (Williams et
-///   al., Sports Med 2017, meta-analysis, ES 0.43); for muscle growth the
-///   evidence is weaker and linear vs undulating makes no difference (Grgic
-///   et al., PeerJ 2017), so the ramp is modest.
-/// - The planned easier week follows the international Delphi consensus on
-///   deloads: about a week, same weights, roughly half the sets (Bell et al.,
-///   Sports Med Open 2023). One RCT found no advantage for a planned deload
-///   over continuous training (Coleman et al., PeerJ 2024, not re-verified in
-///   docs/research/competitors.md), so the UI calls it "planned", not "needed".
+/// - The ramp is the app's choice. The ACSM position stand (Currier et al.,
+///   Med Sci Sports Exerc 2026, overview of 137 reviews; abstract checked on
+///   PubMed November 2026) found that periodisation "did not consistently
+///   impact training outcomes"; what did matter was ≥ 10 sets a week for
+///   hypertrophy and heavy loads on ≥ 2 sessions a week for strength. An
+///   older meta-analysis favoured periodised training for 1RM (Williams et
+///   al., Sports Med 2017, ES 0.43), and linear vs undulating made no
+///   difference for muscle (Grgic et al., PeerJ 2017), so the ramp is modest.
+/// - The last week is reactive, not a planned deload (evidence audit,
+///   should-change 4). It carries on at the last building week's sets, and
+///   becomes an easier week (about half the sets, same weights) when HRV is
+///   below normal as the week starts, or when you choose it because you feel
+///   run down (`settingEasier`). The easier week's shape follows the Delphi
+///   consensus on deloads (Bell et al., Sports Med Open 2023): coaches'
+///   opinion, not outcome data. The one RCT (Coleman et al., PeerJ 2024;
+///   abstract checked on PubMed November 2026) found that a week *off* at the
+///   midpoint of 9 weeks gave less strength gain (isometric and dynamic) and
+///   the same hypertrophy as training straight through. The app's easier
+///   week is half the sets, not a week off, so the trial doesn't test it
+///   directly, but nothing shows that a planned one helps. `DeloadAdvisor`
+///   still suggests a lighter week when lifts stall.
 /// - Volume ramps within the planner's 10-20 hard sets per muscle a week and
 ///   is capped at 5 sets per exercise, because more sets keep adding muscle
 ///   only with diminishing returns (Pelland et al., Sports Med 2026;
@@ -45,9 +57,16 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         /// `week` is the week it goes on with afterwards. Nil otherwise and in
         /// blocks saved before busy weeks existed.
         public var busy: Bool?
+        /// True in the block's last week, where an easier week is offered
+        /// rather than planned (`TrainingBlock.lastWeek(easier:)`): with
+        /// `isDeload` false the week carries on; with `isDeload` true the
+        /// easier week was chosen (by you, or by a low HRV as the week began).
+        /// Nil in other weeks and in blocks saved before the change, whose
+        /// last week stays the planned deload.
+        public var easierOffered: Bool?
 
         public init(week: Int, length: Int, setMultiplier: Double, targetRIR: Int, isDeload: Bool, isHeld: Bool = false,
-                    busy: Bool? = nil) {
+                    busy: Bool? = nil, easierOffered: Bool? = nil) {
             self.week = week
             self.length = length
             self.setMultiplier = setMultiplier
@@ -55,10 +74,18 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
             self.isDeload = isDeload
             self.isHeld = isHeld
             self.busy = busy
+            self.easierOffered = easierOffered
         }
 
         /// A planned busy week: the block is paused (`BusyWeek`).
         public var isBusy: Bool { busy == true }
+
+        /// The block's last week, where the easier week is yours to take or
+        /// leave (`TrainingBlock.settingEasier`).
+        public var offersEasier: Bool { easierOffered == true && !isBusy }
+
+        /// The carrying-on last week's line.
+        public static let lastWeekNote = "Last week of the block: carry on as last week. If you feel run down, take an easier week instead (about half the sets)."
 
         /// The RIR target as an RPE on the reps-in-reserve scale (RIR 1 = RPE 9).
         public var targetRPE: Double { Double(10 - targetRIR) }
@@ -68,6 +95,7 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         public var label: String {
             // No reps-in-reserve number: sets show a rep goal (`RepGoal`), and the reserve stays behind it.
             if isBusy { return "Busy week" }
+            if isDeload && offersEasier { return "Easier week (\(week) of \(length))" }
             return isDeload ? "Deload week (\(week) of \(length))" : "Block week \(week) of \(length)"
         }
 
@@ -83,7 +111,9 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         public var note: String {
             // RIR 3 at the usual reps makes the planner's weights a little lighter (`WorkoutPlanner.suggestedLoad`).
             if isBusy { return BusyWeek.blockNote }
+            if isDeload && offersEasier { return "Easier week: about half the sets, a little lighter." }
             if isDeload { return "Planned easier week: about half the sets, a little lighter." }
+            if offersEasier { return Self.lastWeekNote }
             if isHeld { return "HRV is below your normal range, so this week repeats last week's sets instead of adding more." }
             let percent = Int(((setMultiplier - 1) * 100).rounded())
             if percent <= 0 { return "Base sets this week." }
@@ -180,10 +210,35 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
 
     // MARK: Moving through the block
 
+    /// The block's last week, marked `easierOffered`: the last building
+    /// week's sets and effort carried on (`easier` false), or the easier week
+    /// (`easier` true, the old planned deload's sets). Evidence audit,
+    /// should-change 4.
+    public func lastWeek(easier: Bool) -> WeekState {
+        var state = Self.weekState(easier ? length : max(1, length - 1), style: style, length: length)
+        state.week = length
+        state.isDeload = easier
+        state.isHeld = false
+        state.easierOffered = true
+        return state
+    }
+
+    /// The block's last week switched to the easier week, or back to carrying
+    /// on. Any other week, a busy week, or a style without a last easier week
+    /// comes back unchanged.
+    public func settingEasier(_ easier: Bool) -> TrainingBlock {
+        guard Self.hasDeload(style: style), week.week == length, !week.isBusy else { return self }
+        let state = lastWeek(easier: easier)
+        guard state != week else { return self }
+        var block = self
+        block.week = state
+        return block
+    }
+
     /// The week after `week`, or nil when the block is finished. With HRV
     /// below normal the ramp holds: the same week comes back marked `isHeld`,
-    /// unless the next week is the deload, which is the right week for a low
-    /// HRV anyway.
+    /// unless the next week is the last one: that starts as the easier week
+    /// with HRV below normal, and otherwise carries on (`lastWeek(easier:)`).
     public func nextWeek(after week: WeekState, hrvBelowNormal: Bool = false) -> WeekState? {
         if week.isBusy {
             // A busy week pauses the block: the week it stood in for comes next, unless that
@@ -193,6 +248,7 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
         }
         guard week.week < length else { return nil }
         let next = Self.weekState(week.week + 1, style: style, length: length)
+        if next.isDeload && !week.isDeload { return lastWeek(easier: hrvBelowNormal) }
         if hrvBelowNormal && !next.isDeload && !week.isDeload {
             var held = week
             held.isHeld = true
@@ -258,7 +314,10 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     public func settingBusy(_ busy: Bool) -> TrainingBlock {
         guard busy != week.isBusy else { return self }
         var block = self
-        block.week = busy ? busyState(pausing: week) : Self.weekState(week.week, style: style, length: length)
+        // Back from busy in the last week: it carries on, as it would have (`lastWeek(easier:)`).
+        let restored = Self.hasDeload(style: style) && week.week == length
+            ? lastWeek(easier: false) : Self.weekState(week.week, style: style, length: length)
+        block.week = busy ? busyState(pausing: week) : restored
         return block
     }
 
@@ -272,7 +331,8 @@ public struct TrainingBlock: Codable, Sendable, Equatable {
     public var coachLine: String {
         var line = "Training block: week \(week.week) of \(week.length) (the user works to rep goals per set; don't mention reps in reserve or RIR)"
         if week.isBusy { line += " (planned busy week: one or two short sessions that hold strength and muscle, not build them)" }
-        else if week.isDeload { line += " (planned easier week, about half the sets)" }
+        else if week.isDeload { line += week.offersEasier ? " (easier week, about half the sets)" : " (planned easier week, about half the sets)" }
+        else if week.offersEasier { line += " (last week of the block: carrying on; an easier week is there if they feel run down)" }
         else if week.isHeld { line += " (ramp held: HRV below normal)" }
         else if week.setMultiplier > 1 { line += " (sets ×\(week.setMultiplier.formatted()))" }
         return line + "."

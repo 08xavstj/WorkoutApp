@@ -98,16 +98,16 @@ final class TodayHabits {
     func proteinLine(metrics: DailyMetricsModel) -> String? {
         guard let weight = metrics.bodyMassKg,
               let result = ProteinMeals.assess(proteinToday.map { (date: $0.date, grams: $0.value) }, bodyMassKg: weight) else { return nil }
-        // 0.4 g/kg per meal over 4+ meals is a floor per meal (Schoenfeld &
-        // Aragon, JISSN 2018); the day's target can be higher, so say both
-        // and "at least" so the meals don't seem to add up to less.
+        // 0.4 g/kg at each of 4 meals is a way to spread the day (Schoenfeld &
+        // Aragon, JISSN 2018), not a ceiling; the daily total matters most
+        // (Morton 2018; evidence audit, should-change 10).
         let day = metrics.proteinTarget.map { " (\(whole($0)) g across the day)" } ?? ""
         switch result {
         case .noMealTimes:
             // Without meal times the meals can't be told apart, so just the aim.
-            return "Aim for at least \(whole(weight * ProteinMeals.gramsPerKgPerMeal)) g protein at each of \(ProteinMeals.targetMeals) meals."
+            return "About \(whole(weight * ProteinMeals.gramsPerKgPerMeal)) g protein at each of \(ProteinMeals.targetMeals) meals is one way to spread the day\(day)."
         case .meals(let meals, goodMeals: let good, perMealTarget: let target):
-            return "\(good) of \(ProteinMeals.targetMeals) meals with \(whole(target)) g+ protein. \(meals.count) meal\(meals.count == 1 ? "" : "s") logged today. At least \(whole(target)) g at each of \(ProteinMeals.targetMeals) meals\(day) builds the most muscle."
+            return "\(good) of \(ProteinMeals.targetMeals) meals with \(whole(target)) g+ protein. \(meals.count) meal\(meals.count == 1 ? "" : "s") logged today. About \(whole(target)) g at each of \(ProteinMeals.targetMeals) meals is one way to spread the day\(day); the daily total matters most."
         }
     }
 

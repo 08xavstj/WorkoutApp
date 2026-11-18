@@ -756,13 +756,15 @@ struct AuditNutritionTests {
         #expect(meal.meals == 4)
         #expect(meal.grams == 38)
         #expect(abs(meal.grams * Double(meal.meals) - daily) <= 2)
-        // Three logged meals: 152 / 3 = 51 g, under the 0.55 g/kg ceiling, so three it is.
+        // Three logged meals: 152 / 3 = 51 g, so three it is.
         let three = try #require(NutritionTargets.proteinPerMeal(bodyMassKg: 118, goals: muscle, loggedMeals: 3, dailyProteinGrams: daily))
         #expect(three.meals == 3 && three.grams == 51)
-        // A cutting 80 kg lifter at 176 g a day: 3 meals would be 59 g (0.73 g/kg), so it stays at 4 × 44.
+        // A cutting 80 kg lifter at 176 g a day eating 3 meals: 3 × 59 g (0.73 g/kg). It stayed at
+        // 4 × 44 under a 0.55 g/kg "ceiling"; the evidence audit (should-change 10) found that
+        // figure is the top of a range for spreading the day, not a per-meal limit, so 3 meals it is.
         let cut = Goals(weight: .lose, weeklyRatePercent: 0.5, focuses: [.muscle])
         let cutting = try #require(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: cut, loggedMeals: 3, dailyProteinGrams: 176))
-        #expect(cutting.meals == 4 && cutting.grams == 44)
+        #expect(cutting.meals == 3 && cutting.grams == 59)
     }
 }
 

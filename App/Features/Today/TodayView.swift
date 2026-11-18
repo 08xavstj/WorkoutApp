@@ -545,7 +545,7 @@ private struct WaterColumn: View {
     }
 }
 
-/// Today's water in detail: the even-pace line, what the amount means and
+/// Today's water in detail: the litres logged, what they mean and
 /// where the target comes from (was Home's water card).
 private struct WaterDetailsSheet: View {
     @Environment(DailyMetricsModel.self) private var metrics

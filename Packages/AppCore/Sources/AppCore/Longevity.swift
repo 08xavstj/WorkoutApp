@@ -688,7 +688,7 @@ public enum Longevity {
         switch category {
         case .normal:
             measure.status = .onTarget
-            measure.nextStep = "Repeat the home check in 6-12 months."
+            measure.nextStep = "Repeat the home check in a year." // `HomeBloodPressure.repeatMonths`
         case .elevated:
             measure.status = .close
             measure.nextStep = "Less salt, regular cardio and a waist under half your height all lower it. Repeat the check in 3 months."

@@ -5,6 +5,11 @@ import Testing
 struct HeartRateZoneSchemeTests {
     let start = Date(timeIntervalSince1970: 1_800_000_000)
 
+    /// Limit-based zones at 95/114/133/152/171 bpm (they were percent-of-max zones
+    /// for a 190 maximum until that option was dropped, evidence audit 17 Nov 2026;
+    /// the zone arithmetic under test is the same for any typed limits).
+    static let typed = HeartRateZoneScheme.custom(starts: [95, 114, 133, 152, 171], easyBand: HeartRateBand(lower: 112, upper: 137))!
+
     /// A fixed pseudo-random stream, so the "noisy" series are the same every run.
     struct Noise {
         var state: UInt64
@@ -120,9 +125,9 @@ struct HeartRateZoneSchemeTests {
         #expect(HeartRateZoneScheme.reserve(resting: 55, maximum: 185).zone(for: 133) == 2)
     }
 
-    @Test func percentOfMaxLimitsAndTheirEdges() {
-        let scheme = HeartRateZoneScheme.percentOfMax(maximum: 190, resting: 55)
-        #expect(scheme.kind == .percentOfMax)
+    @Test func limitBasedZonesAndTheirEdges() {
+        let scheme = Self.typed
+        #expect(scheme.kind == .custom)
         #expect(scheme.floor == 95)
         // Typed out: the literal-array comparison was too slow for the macOS type checker.
         let expected: [Double] = [114, 133, 152, 171]
@@ -131,23 +136,32 @@ struct HeartRateZoneSchemeTests {
         #expect(scheme.zone(for: 94.9) == nil)
         // A heart rate exactly on a limit is in the zone that starts there.
         #expect(scheme.zone(for: 95) == 1)
-        #expect(scheme.zone(for: 0.6 * 190) == 2)
-        #expect(scheme.zone(for: 0.6 * 190 - 0.01) == 1)
-        #expect(scheme.zone(for: 0.7 * 190) == 3)
-        #expect(scheme.zone(for: 0.8 * 190) == 4)
-        #expect(scheme.zone(for: 0.9 * 190) == 5)
-        #expect(scheme.zone(for: 0.9 * 190 - 0.01) == 4)
+        #expect(scheme.zone(for: 114) == 2)
+        #expect(scheme.zone(for: 114 - 0.01) == 1)
+        #expect(scheme.zone(for: 133) == 3)
+        #expect(scheme.zone(for: 152) == 4)
+        #expect(scheme.zone(for: 171) == 5)
+        #expect(scheme.zone(for: 171 - 0.01) == 4)
         #expect(scheme.zone(for: 230) == 5)
     }
 
-    @Test func sameHeartRateIsADifferentZoneInEachScheme() {
-        // Resting 55, maximum 185. 125 bpm is 54% of reserve and 68% of maximum.
-        let reserve = HeartRateZoneScheme.reserve(resting: 55, maximum: 185)
-        let ofMax = HeartRateZoneScheme.percentOfMax(maximum: 185, resting: 55)
-        #expect(reserve.zone(for: 125) == 1)
-        #expect(ofMax.zone(for: 125) == 2)
-        // Percent-of-max zone 2 (111–130) sits under the reserve scheme's zone 2 (133–146).
-        #expect(ofMax.boundaries[1] < reserve.boundaries[0])
+    @Test func percentOfMaxIsRetiredButStillDecodes() throws {
+        // Dropped by the evidence audit (17 Nov 2026): not offered, and a saved choice is Tensile's.
+        #expect(HeartRateZoneScheme.Kind.choices == [.reserve, .appleHealth, .custom])
+        #expect(!HeartRateZoneScheme.Kind.choices.contains(.percentOfMax))
+        #expect(HeartRateZoneScheme.Kind(rawValue: "percentOfMax")?.inUse == .reserve)
+        #expect(HeartRateZoneScheme.Kind.appleHealth.inUse == .appleHealth)
+        let profile = HeartRateProfile(age: 30, sex: .male, restingHeartRate: 55)
+        let old = HeartRateZoneScheme.resolve(kind: .percentOfMax, profile: profile)
+        #expect(old.scheme == HeartRateZoneScheme.tensile(profile: profile))
+        #expect(old.requested == .reserve)
+        #expect(!old.fellBack)
+        // A percent-of-max scheme a phone sent the Watch before the change still decodes,
+        // so the Watch can recognise it and skip it (`WatchZoneStore.fromPhone`).
+        let json = #"{"kind":"percentOfMax","floor":95,"boundaries":[114,133,152,171],"easyBand":{"lower":122,"upper":146}}"#
+        let decoded = try JSONDecoder().decode(HeartRateZoneScheme.self, from: Data(json.utf8))
+        #expect(decoded.kind == .percentOfMax)
+        #expect(decoded.zone(for: 120) == 2)
     }
 
     @Test func appleHealthZoneOneHasNoFloor() throws {
@@ -204,9 +218,6 @@ struct HeartRateZoneSchemeTests {
         let custom = HeartRateZoneScheme.resolve(kind: .custom, profile: profile, customStarts: [110, 128, 142, 155, 168])
         #expect(!custom.fellBack)
         #expect(custom.scheme.kind == .custom)
-        let ofMax = HeartRateZoneScheme.resolve(kind: .percentOfMax, profile: profile)
-        #expect(ofMax.scheme.floor == 0.5 * profile.maxHeartRate)
-        #expect(ofMax.scheme.easyBand == tensile.easyBand)
     }
 
     // MARK: Easy band
@@ -227,15 +238,17 @@ struct HeartRateZoneSchemeTests {
         // "easy" is zone 1 and just under it, not zone 2.
         let tensile = HeartRateZoneScheme.reserve(resting: 55, maximum: 185)
         #expect(band.upper == tensile.boundaries[0])
-        // With no resting heart rate (the Watch alone): 64–77% of maximum.
+        // With no resting heart rate (the Watch alone): Tensile's scale on a stand-in resting rate.
+        // It was 64–77% of maximum on percent-of-max zones until that option was dropped (evidence audit).
         let alone = HeartRateZoneScheme.ageEstimate(age: 34)
         let maximum = HeartRateZoneScheme.estimatedMaximum(age: 34)
-        #expect(alone.easyBand == HeartRateBand(lower: 0.64 * maximum, upper: 0.77 * maximum))
-        #expect(alone.kind == .percentOfMax)
+        #expect(alone.kind == .reserve)
+        #expect(alone == HeartRateZoneScheme.reserve(resting: HeartRateZoneScheme.standInResting, maximum: maximum))
+        #expect(alone.easyBand == HeartRateZoneScheme.easyBand(resting: HeartRateZoneScheme.standInResting, maximum: maximum))
     }
 
     @Test func zoneBandsCoverTheScaleWithoutGaps() {
-        let scheme = HeartRateZoneScheme.percentOfMax(maximum: 190)
+        let scheme = Self.typed
         for zone in 1...4 {
             #expect(scheme.band(forZone: zone)?.upper == scheme.band(forZone: zone + 1)?.lower)
         }
@@ -252,8 +265,8 @@ struct HeartRateZoneSchemeTests {
     // MARK: Minutes
 
     @Test func minutesInZonesFromASteadyRun() {
-        let scheme = HeartRateZoneScheme.percentOfMax(maximum: 190)
-        // 30 minutes at 140 bpm (74% of maximum: zone 3), a reading every 5 s.
+        let scheme = Self.typed
+        // 30 minutes at 140 bpm (zone 3: 133-152), a reading every 5 s.
         let samples = (0...360).map { HeartRateSample(date: start.addingTimeInterval(Double($0) * 5), bpm: 140) }
         let minutes = scheme.minutes(samples)
         #expect(minutes.count == 5)
@@ -262,7 +275,7 @@ struct HeartRateZoneSchemeTests {
     }
 
     @Test func minutesCapLongGapsAndSkipDropouts() {
-        let scheme = HeartRateZoneScheme.percentOfMax(maximum: 190)
+        let scheme = Self.typed
         let samples = [
             HeartRateSample(date: start, bpm: 160),                            // stands for 60 s
             HeartRateSample(date: start.addingTimeInterval(60), bpm: 160),     // 5 min to the next: capped at 2 min
@@ -284,7 +297,7 @@ struct HeartRateZoneSchemeTests {
         let profile = HeartRateProfile(age: 30, sex: .male, restingHeartRate: 55)
         let schemes = [
             HeartRateZoneScheme.tensile(profile: profile),
-            HeartRateZoneScheme.percentOfMax(maximum: 187, resting: 55),
+            HeartRateZoneScheme.ageEstimate(age: 30),
             HeartRateZoneScheme.resolve(kind: .appleHealth, profile: profile, appleBoundaries: [137, 149, 160, 172]).scheme,
             HeartRateZoneScheme.resolve(kind: .custom, profile: profile, customStarts: [110, 128, 142, 155, 168]).scheme,
         ]
