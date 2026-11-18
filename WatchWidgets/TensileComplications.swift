@@ -1,3 +1,4 @@
+import MapKit
 import RelevanceKit
 import SwiftUI
 import WidgetKit
@@ -12,6 +13,9 @@ struct TensileComplications: WidgetBundle {
     var body: some Widget {
         RecoveryStrainComplication()
         NextSessionComplication()
+        // Controls (watchOS 26): Control Center and the Smart Stack.
+        StartLiftingControl()
+        StartLastCardioControl()
     }
 }
 
@@ -86,6 +90,7 @@ nonisolated struct FaceProvider: TimelineProvider {
         let now = Date.now
         let calendar = Calendar.current
         var clues: [(interval: DateInterval, kind: RelevantContext.DateKind)] = []
+        var trainsToday = false
         switch kind {
         case .nextSession:
             // The hour before each session still to do, and from an hour before
@@ -98,6 +103,7 @@ nonisolated struct FaceProvider: TimelineProvider {
                 let dateKind: RelevantContext.DateKind = window.reason == .session ? .scheduled : .informational
                 clues.append((interval: window.interval, kind: dateKind))
             }
+            trainsToday = windows.contains { $0.reason == .session && calendar.isDateInToday($0.interval.start) }
         case .recoveryStrain:
             var day = calendar.startOfDay(for: now)
             for _ in 0..<7 {
@@ -110,8 +116,17 @@ nonisolated struct FaceProvider: TimelineProvider {
                 day = next
             }
         }
-        let attributes = clues.prefix(PlanGlance.maximumRelevantIntervals).map { clue in
+        var attributes = clues.prefix(PlanGlance.maximumRelevantIntervals).map { clue in
             WidgetRelevanceAttribute<Void>(context: .date(interval: clue.interval, kind: clue.kind))
+        }
+        // On a training day, also at the gym: RelevanceKit's point-of-interest
+        // context (watchOS 26). It returns nil for a category it doesn't support,
+        // and then only the date windows apply. Whether it needs location
+        // permission is still to check on the wrist (docs/research/watch-app-redesign-2026-11.md §8).
+        // (Typed as optional so it builds whether the SDK returns one or not.)
+        let gym: RelevantContext? = trainsToday ? RelevantContext.location(category: .fitnessCenter) : nil
+        if let gym {
+            attributes.append(WidgetRelevanceAttribute<Void>(context: gym))
         }
         return WidgetRelevance(Array(attributes))
     }

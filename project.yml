@@ -49,6 +49,7 @@ targets:
         excludes:
           - WatchPalette.swift
           - WatchGauges.swift
+          - WatchIntents.swift
       # How cardio activities map to Apple Health workouts (also on the Watch).
       - path: SharedCardio
       # Privacy manifest (UserDefaults: CA92.1 own data, 1C8F.1 the shared App
@@ -136,6 +137,7 @@ targets:
         excludes:
           - WatchPalette.swift
           - WatchGauges.swift
+          - WatchIntents.swift
       - path: Privacy/Widget/PrivacyInfo.xcprivacy
         buildPhase: resources
     dependencies:
@@ -189,6 +191,8 @@ targets:
       # Colours and the recovery/strain gauges, shared with the complications.
       - path: Shared/WatchPalette.swift
       - path: Shared/WatchGauges.swift
+      # The App Intents, shared with the controls in the widget extension.
+      - path: Shared/WatchIntents.swift
       # The experimental rep counter's signal maths (pure Swift).
       - path: Packages/AppCore/Sources/AppCore/RepDetection.swift
       # Heart-rate zones and the cardio mode's zone clock (pure Swift).
@@ -284,12 +288,16 @@ targets:
       # Colours and gauges, the same as the Watch app's.
       - path: Shared/WatchPalette.swift
       - path: Shared/WatchGauges.swift
+      # The intents the controls run (StartControls.swift).
+      - path: Shared/WatchIntents.swift
       # What the plan says when, and when a score goes "--" (pure Swift; the
       # iPhone widgets get the same rules from AppCore).
       - path: Packages/AppCore/Sources/AppCore/Glances.swift
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
+      # The controls' intents (Shared/WatchIntents.swift).
+      - sdk: AppIntents.framework
     entitlements:
       path: WatchWidgets/TensileWatchWidgets.entitlements
       properties:

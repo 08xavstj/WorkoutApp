@@ -50,6 +50,9 @@ final class WatchWorkoutModel: NSObject {
     private(set) var setsCompletedHere = 0
     /// The exercise on the live page; nil follows the next set to do.
     var selectedExercise: Int?
+    /// The "Start lifting" control asked for lifting (`StartLiftingIntent`): Home
+    /// opens the session preview, or Quick lift.
+    var liftRequested = false
     /// Records from the exercise just finished here, shown for a few seconds.
     private(set) var recordNote: WatchRecordNote?
     /// A working set just ticked here, waiting for "Reps left?" (asked after the

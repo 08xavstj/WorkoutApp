@@ -16,6 +16,7 @@ struct HomeView: View {
     @State private var feed = FaceFeed.shared
     @State private var showingPicker = false
     @State private var showingToday = false
+    @State private var showingLift = false
 
     var body: some View {
         NavigationStack {
@@ -60,6 +61,9 @@ struct HomeView: View {
             .navigationDestination(isPresented: $showingPicker) {
                 ActivityPickerView()
             }
+            .navigationDestination(isPresented: $showingLift) {
+                liftDestination
+            }
             .background(alignment: .top) {
                 // A faint wash of the lifting colour at the top (the iPhone app's look);
                 // never on the workout pages (HIG Color).
@@ -78,6 +82,24 @@ struct HomeView: View {
             guard cardio.pickerRequested else { return }
             cardio.pickerRequested = false
             showingPicker = true
+        }
+        // The "Start lifting" control (`StartLiftingIntent`).
+        .onChange(of: model.liftRequested, initial: true) {
+            guard model.liftRequested else { return }
+            model.liftRequested = false
+            showingLift = true
+        }
+    }
+
+    /// The phone's waiting session, today's plan, else Quick lift.
+    @ViewBuilder
+    private var liftDestination: some View {
+        if let live = model.snapshot, !live.isFinished {
+            SessionPreviewView(session: live)
+        } else if let plan = model.plannedSession, model.offersPlan(plan) {
+            SessionPreviewView(session: plan, isPlan: true, minutes: plan.plannedMinutes)
+        } else {
+            QuickLiftView()
         }
     }
 
