@@ -26,8 +26,13 @@ nonisolated struct CardioWorkoutDetail: Sendable {
     var elevationAscended: Double?
     var route: [RoutePoint]
     var heartRate: [HeartRateSample]
-    /// VO₂ max (ml/kg/min) Apple Health estimated from this workout.
+    /// VO₂ max (ml/kg/min) saved with this workout.
     var vo2Max: Double?
+    /// Who saved `vo2Max` ("Apple Watch", "Connect"); nil if unknown.
+    var vo2SourceName: String? = nil
+    /// `vo2Max` came from an Apple Watch, so Apple's measured bias applies
+    /// (`VO2Source.appleWatchAccuracy`).
+    var vo2IsAppleWatch = false
     var sourceName: String?
     /// Run, ride, sport... (`ActivityKind`), for best efforts.
     var kind: ActivityKind = .other
@@ -98,6 +103,9 @@ nonisolated extension HealthKitClient {
             route: points,
             heartRate: heartRate,
             vo2Max: vo2?.quantity.doubleValue(for: vo2Unit),
+            vo2SourceName: vo2.map { $0.device?.name ?? $0.sourceRevision.source.name },
+            vo2IsAppleWatch: vo2.map { $0.sourceRevision.source.bundleIdentifier.hasPrefix("com.apple.")
+                && $0.device?.model?.lowercased().contains("watch") == true } ?? false,
             sourceName: workout.device?.name ?? workout.sourceRevision.source.name,
             kind: Self.activityKind(for: workout.workoutActivityType, tensile: activity)
         )
@@ -161,7 +169,8 @@ nonisolated extension DemoHealth {
             uuid: workout.id, name: workout.name, activity: nil, showsPace: workout.name == "Run",
             start: workout.start, end: workout.end, activeSeconds: duration, distanceMeters: meters,
             activeKcal: workout.kcal, elevationAscended: nil, route: points, heartRate: heart,
-            vo2Max: workout.name == "Run" ? 47.2 : nil, sourceName: "Apple Watch",
+            vo2Max: workout.name == "Run" ? 47.2 : nil, vo2SourceName: workout.name == "Run" ? "Apple Watch" : nil,
+            vo2IsAppleWatch: workout.name == "Run", sourceName: "Apple Watch",
             kind: workout.name == "Ride" ? .ride : .run
         )
     }

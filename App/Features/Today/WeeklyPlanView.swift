@@ -82,7 +82,7 @@ struct WeeklyPlanView: View {
                 } header: {
                     Text("Weekly review")
                 } footer: {
-                    Text("Every Monday: last week in plain numbers, then three changes for this week.")
+                    Text("Every Monday: last week in plain numbers, then one change for the week (up to three).")
                 }
             }
             .navigationTitle("This week")

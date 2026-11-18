@@ -448,7 +448,8 @@ extension CoachView {
         if let scored = vitals.vo2ForScores {
             // The FRIEND percentile only; no fitness age (evidence-audit-2026-11.md, "Should change" 6).
             let standing = VO2Norms.standing(vo2: scored.value, age: settings.age, sex: settings.sex)
-            let source = scored.isEstimate ? "Tensile's no-test estimate, about ±5" : "Apple Watch, which tends to read low"
+            // Health doesn't say which watch saved the reading: no Apple-specific bias claim.
+            let source = scored.isEstimate ? "Tensile's no-test estimate, about ±5" : "the user's watch's estimate"
             var line = "VO₂ max \(scored.value.formatted(.number.precision(.fractionLength(scored.isEstimate ? 0 : 1)))) ml/kg/min (\(source)); \(standing.percentileText) (FRIEND norms)."
             if let trend = CardioFitness.trend(vitals.vo2MaxHistory.map { DayValue(date: $0.date, value: $0.value) }) {
                 line += " Watch 90-day trend \(trend.direction.rawValue)." + (CardioFitness.nudge(for: trend).map { " " + $0 } ?? "")

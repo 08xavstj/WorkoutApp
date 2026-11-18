@@ -779,7 +779,7 @@ nonisolated enum Reminders {
         for (index, fire) in fires.enumerated() {
             let content = UNMutableNotificationContent()
             content.title = "Weekly review"
-            content.body = "Last week in plain numbers, then three changes for this week. Two minutes."
+            content.body = "Last week in plain numbers, then one change for the week (up to three). Two minutes."
             content.sound = .default
             content.userInfo = ["link": "workoutapp://review"]
             await add(content, identifier: "review|weekly|\(index)", at: fire, center: center, calendar: calendar)

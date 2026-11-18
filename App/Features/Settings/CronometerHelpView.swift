@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// How Cronometer's food log reaches Tensile through Apple Health. Setup
-/// help, so it lives under Settings › Data sources next to the Garmin page
+/// help, so it lives under Settings › Data & privacy next to the Garmin page
 /// (ux-audit.md 4.3, S4; moved from the README). Works pushed onto any
 /// NavigationStack.
 struct CronometerHelpView: View {
@@ -10,7 +10,7 @@ struct CronometerHelpView: View {
             HelpCard(title: "Turn on sharing", lines: [
                 "In Cronometer, open its settings, find Apple Health under connected apps and devices, and turn on exporting nutrition.",
                 "In Apple Health, tap your profile picture › Apps › Cronometer, and check it can write Energy Consumed, Protein, Carbohydrates, Fat, Fiber and Water.",
-                "In Tensile, allow reading the same types: Settings › Data sources › Ask for Apple Health access.",
+                "In Tensile, allow reading the same types: Settings › Data & privacy › Ask for Apple Health access.",
             ])
             HelpCard(title: "What Tensile gets", lines: [
                 "Food you log in Cronometer shows on Today's nutrition card, and the coach uses it. Vitamins and minerals show in Health › Key measures › Vitamins & minerals.",

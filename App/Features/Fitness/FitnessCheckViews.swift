@@ -4,8 +4,9 @@ import AppCore
 
 /// One row in the cardio fitness card: the quarterly fitness check
 /// (`FitnessCheck`; evidence-audit-2026-11.md, Gaps, item 5). Apple Watch
-/// reads VO₂ max only on outdoor walks and runs, and about ±16% off
-/// (Caserman 2024), so a lifter gets few, rough readings. A standard
+/// reads VO₂ max only on outdoor walks and runs, about 6 ml/kg/min low on
+/// average with 13% typical error (Lambe 2025, `VO2Source.appleWatchAccuracy`),
+/// so a lifter gets few, rough readings. A standard
 /// walking test done the same way every 3 months gives a steadier line.
 /// A row, never a notification.
 struct FitnessCheckRow: View {
@@ -145,7 +146,7 @@ struct FitnessCheckPage: View {
             Text("A steadier VO₂ max, every 3 months")
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)
-            Text("Your watch reads VO₂ max only on outdoor walks and runs, and in a lab comparison it was off by about 16% on average. A standard walking test, done the same way each time, shows whether your fitness is really moving.")
+            Text("Apple Watch reads VO₂ max only on outdoor walks, runs and hikes. \(VO2Source.appleWatchAccuracy) A standard walking test, done the same way each time, shows whether your fitness is really moving.")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

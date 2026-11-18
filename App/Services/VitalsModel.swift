@@ -655,7 +655,7 @@ final class VitalsModel {
             stat.value = scored.value.formatted(.number.precision(.fractionLength(0)))
             stat.status = Biomarkers.vo2MaxLabel(scored.value, age: settings.age, sex: settings.sex)
             stat.tone = VO2Norms.category(vo2: scored.value, age: settings.age, sex: settings.sex).isBelowAverage ? .caution : .good
-            let watch = vo2Series.last.map { " Apple Watch's last reading: \($0.value.formatted(.number.precision(.fractionLength(1))))." } ?? ""
+            let watch = vo2Series.last.map { " Your watch's last reading: \($0.value.formatted(.number.precision(.fractionLength(1))))." } ?? ""
             stat.footnote = "Tensile's estimate from heart rate and activity, about ±5.\(watch)"
             result[index] = stat
         }

@@ -230,6 +230,11 @@ public enum VO2MaxEstimate {
 /// too (about ±5 mL/kg/min), so neither is a lab number: the setting is the
 /// user's choice, and the UI always says which one is in use.
 public enum VO2Source: String, Sendable, Codable, CaseIterable, Identifiable {
+    /// The one figure for Apple Watch's accuracy wherever the app gives one
+    /// (Lambe et al., PLOS ONE 2025;20:e0323741: 6.1 mL/kg/min low on
+    /// average, 13% mean absolute error, in 30 adults). Only for a reading
+    /// that came from an Apple Watch; other watches weren't in that study.
+    public static let appleWatchAccuracy = "Against lab tests, Apple Watch read about 6 ml/kg/min low on average, with a typical error of 13% (Lambe 2025)."
     /// The app's estimate (heart rate and activity), else the watch.
     case estimate
     /// The watch's latest reading, else the estimate.
