@@ -4,9 +4,9 @@ import WidgetKit
 /// Keeps the complications' data in the App Group (`WatchFaceStore`) and
 /// redraws them when it changes.
 enum WatchComplications {
-    /// The complications' kinds (`NextSessionComplication`, `RecoveryStrainComplication`
+    /// The complications' kinds (`NextSessionComplication`, `RecoveryStrainComplication`, `IntervalsComplication`
     /// in WatchWidgets, which this target doesn't compile).
-    static let relevanceKinds = ["NextSession", "RecoveryStrain"]
+    static let relevanceKinds = ["NextSession", "RecoveryStrain", "Intervals"]
 
     /// Stores the phone's latest data; reloads only when it's newer and different.
     static func store(_ data: WatchFaceData) {

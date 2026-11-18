@@ -262,7 +262,8 @@ final class WatchSync: NSObject {
         return (try? context.fetch(descriptor)) ?? []
     }
 
-    func updateFace(metrics: DailyMetricsModel, plans: WeeklyPlanStore, lastWorkoutEnd: Date?, glance: PlanGlance.Plan? = nil, now: Date = .now) {
+    func updateFace(metrics: DailyMetricsModel, plans: WeeklyPlanStore, lastWorkoutEnd: Date?, glance: PlanGlance.Plan? = nil,
+                    intervals: WatchFaceData.Intervals? = nil, now: Date = .now) {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         let horizon = today.addingTimeInterval(8 * 86_400)
@@ -298,6 +299,8 @@ final class WatchSync: NSObject {
         )
         // The same sessions, bed-by window and week count as the iPhone widgets (`GlanceFeed`).
         if let glance { face.apply(glance) }
+        // This week's hard cardio for the Watch's "Intervals" card and its Smart Stack day.
+        face.intervals = intervals
         updateFace(face)
     }
 

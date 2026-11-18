@@ -556,20 +556,35 @@ struct RootView: View {
     private func updateWatchFace() {
         guard metrics.errorMessage == nil, metrics.lastUpdated != nil else { return }
         let lastWorkoutEnd = sessions.lazy.compactMap(\.endedAt).max()
-        WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd, glance: glancePlan())
+        let hard = hardCardioThisWeek()
+        WatchSync.shared.updateFace(metrics: metrics, plans: weeklyPlans, lastWorkoutEnd: lastWorkoutEnd, glance: glancePlan(),
+                                    intervals: hard.card)
         updateWatchPlan(lastWorkoutEnd: lastWorkoutEnd)
         WatchSync.shared.updateLibrary(sessions: Array(sessions.prefix(30)))
-        // This week's hard cardio, unless blocked (rest mode, deload) or already done.
-        let hard = weeklyPlans.current.flatMap { plan -> IntervalSession? in
-            guard HardCardio.blocker(plan: plan, goals: metrics.goals, restMode: settings.isRestMode,
-                                     isDeloadWeek: weeklyPlans.blockWeek?.isDeload ?? false) == nil,
-                  let slot = HardCardio.slot(for: plan, goals: metrics.goals),
-                  !HardCardio.weekDone(plan: plan, goals: metrics.goals,
+        WatchSync.shared.updateIntervals(hard.run)
+    }
+
+    /// [Watch] This week's hard cardio, unless blocked (busy week, hard cut, rest
+    /// mode, deload): the session for the Watch to run (nil once Apple Health
+    /// has it done), and the "Intervals" card's data with its planned day, for
+    /// the Smart Stack (`IntervalGlance`).
+    private func hardCardioThisWeek(now: Date = .now) -> (run: IntervalSession?, card: WatchFaceData.Intervals?) {
+        guard let plan = weeklyPlans.current,
+              HardCardio.blocker(plan: plan, goals: metrics.goals, restMode: settings.isRestMode,
+                                 isDeloadWeek: weeklyPlans.blockWeek?.isDeload ?? false) == nil,
+              let slot = HardCardio.slot(for: plan, goals: metrics.goals) else { return (nil, nil) }
+        let calendar = Calendar.current
+        let done = HardCardio.weekDone(plan: plan, goals: metrics.goals,
                                        workouts: WeeklyPlanStore.cardioWorkouts(muscles: muscles, metrics: metrics)).hard
-            else { return nil }
-            return slot.session
-        }
-        WatchSync.shared.updateIntervals(hard)
+        let day = slot.weekday
+            .flatMap { calendar.date(byAdding: .day, value: WeeklyPlan.order($0), to: plan.weekStart) }
+            .map { calendar.startOfDay(for: $0) }
+        let weekEnd = calendar.date(byAdding: .day, value: 7, to: plan.weekStart) ?? plan.weekStart.addingTimeInterval(7 * 86_400)
+        let waits = !done && HardCardioInputs.dayNote(slot: slot, metrics: metrics, now: now) != nil
+        let card = WatchFaceData.Intervals(title: slot.session.title, symbol: slot.choice.modality.systemImage,
+                                           minutes: slot.session.totalMinutes, day: day, weekEnd: weekEnd, done: done,
+                                           waitsOn: waits ? calendar.startOfDay(for: now) : nil)
+        return (done ? nil : slot.session, card)
     }
 
     /// [Watch] Today's planned lifting session, sent ahead so the Watch can run it

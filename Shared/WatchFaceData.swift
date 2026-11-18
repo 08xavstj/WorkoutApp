@@ -57,6 +57,27 @@ nonisolated struct WatchFaceData: Codable, Sendable, Equatable {
     var nextWeek: String? = nil
     /// Rest mode is on until then: sessions before it are rest days.
     var restUntil: Date? = nil
+    /// This week's hard cardio session for the "Intervals" card (`IntervalGlance`).
+    /// Optional, so data from older builds still decodes (no card then).
+    var intervals: Intervals? = nil
+
+    /// This week's hard cardio session (`HardCardio`), when one is planned and
+    /// not blocked (busy week, hard cut, rest mode, deload week).
+    nonisolated struct Intervals: Codable, Sendable, Equatable {
+        /// "4 × 4 min · Bike".
+        var title: String
+        /// SF Symbol for the modality.
+        var symbol: String
+        var minutes: Int
+        /// Start of its planned day; nil in a flexible week (any day).
+        var day: Date?
+        /// End of its week (the next Monday 00:00).
+        var weekEnd: Date
+        /// Apple Health has it this week.
+        var done: Bool
+        /// Start of the day the app said it waits (`HardCardio.dayNote`), if any.
+        var waitsOn: Date?
+    }
 
     /// The recovery band as the app words it.
     var bandLabel: String? {
@@ -87,6 +108,7 @@ nonisolated struct WatchFaceData: Codable, Sendable, Equatable {
             && restToday == other.restToday && bedByStart == other.bedByStart && bedByEnd == other.bedByEnd
             && weekDone == other.weekDone && weekPlanned == other.weekPlanned && weekEnd == other.weekEnd
             && hasPlan == other.hasPlan && nextWeek == other.nextWeek && restUntil == other.restUntil
+            && intervals == other.intervals
             && Self.withinAPoint(strain, other.strain)
             && Self.withinAPoint(targetLower, other.targetLower)
             && Self.withinAPoint(targetUpper, other.targetUpper)
@@ -125,6 +147,8 @@ nonisolated struct WatchFaceData: Codable, Sendable, Equatable {
         data.weekPlanned = 4
         data.weekEnd = calendar.date(byAdding: .day, value: 7, to: today)
         data.nextWeek = "unplanned"
+        data.intervals = Intervals(title: "4 × 4 min · Bike", symbol: "figure.indoor.cycle", minutes: 40, day: today,
+                                   weekEnd: data.weekEnd ?? today.addingTimeInterval(7 * 86_400), done: false, waitsOn: nil)
         return data
     }
 }
