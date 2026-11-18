@@ -111,9 +111,13 @@ struct RecoveryStrainView: View {
 
     // MARK: Corner
 
+    /// Recovery as "R 72%" in the corner and strain as the curved bar along
+    /// the edge, labelled "S" at its start and with its value at the end.
+    /// Unlabelled, a corner read as one bar and one number with nothing to
+    /// say which score was which (the bar is strain, the number recovery).
     private var corner: some View {
-        Text(recoveryPercent)
-            .font(.system(size: 18, weight: .semibold, design: .rounded))
+        Text(data?.recovery == nil ? "R --" : "R \(recoveryPercent)")
+            .font(.system(size: 16, weight: .semibold, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(recoveryColor)
             .widgetCurvesContent()
@@ -121,6 +125,10 @@ struct RecoveryStrainView: View {
                 Gauge(value: faceFraction(strain ?? 0)) {
                     Text("Strain")
                 } currentValueLabel: {
+                    Text(strainPercent)
+                } minimumValueLabel: {
+                    Text("S")
+                } maximumValueLabel: {
                     Text(strainPercent)
                 }
                 .tint(strainColor)
