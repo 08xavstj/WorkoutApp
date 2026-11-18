@@ -196,6 +196,12 @@ targets:
       - path: Packages/AppCore/Sources/AppCore/CardioZoneTracker.swift
       # The route's distance, speed and elevation for the end screen.
       - path: Packages/AppCore/Sources/AppCore/CardioRoute.swift
+      # The redesign's pure logic (Foundation only): the crown's load steps,
+      # laps and current pace, rest cues, and the heart-rate series for charts.
+      - path: Packages/AppCore/Sources/AppCore/LoadStepper.swift
+      - path: Packages/AppCore/Sources/AppCore/LapTracker.swift
+      - path: Packages/AppCore/Sources/AppCore/RestCues.swift
+      - path: Packages/AppCore/Sources/AppCore/HeartRateSeries.swift
       - path: SharedCardio
     dependencies:
       - sdk: HealthKit.framework
