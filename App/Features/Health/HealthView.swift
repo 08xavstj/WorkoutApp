@@ -134,6 +134,17 @@ struct HRVBaselineCard: View {
                 Text("90-day average")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
+                if let baseline = biology.hrvBaseline {
+                    // The chart as an image (ShareableChart.swift); its values, not the models.
+                    // HRV is read against your own baseline (Plews et al., Sports Med 2013).
+                    let series = biology.hrvSeries
+                    let trend = metrics.recovery?.hrvTrend
+                    ChartShareButton(title: "HRV, last 90 days",
+                                     subtitle: "Baseline \(whole(baseline.rounded())) ms · line = 7-day average",
+                                     caveat: "Nightly HRV from the watch; compare with your own range, not other people's.") {
+                        HRVBaselineChart(baseline: baseline, series: series, trend: trend)
+                    }
+                }
             }
             if let baseline = biology.hrvBaseline {
                 headline(baseline)

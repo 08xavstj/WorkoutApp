@@ -262,7 +262,16 @@ struct VitalDetailView: View {
 
     private var chartCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            selectionLine
+            HStack(alignment: .top) {
+                selectionLine
+                Spacer(minLength: 0)
+                if !isWindows {
+                    // The chart as an image, e.g. for a doctor (ShareableChart.swift).
+                    let chart = valuesChart
+                    ChartShareButton(title: stat.title,
+                                     subtitle: ["Last \(rangeLabel(days))", stat.unit].filter { !$0.isEmpty }.joined(separator: " · ")) { chart }
+                }
+            }
             Group {
                 if isWindows {
                     windowsChart

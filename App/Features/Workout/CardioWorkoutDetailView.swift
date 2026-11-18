@@ -72,6 +72,8 @@ struct CardioWorkoutDetailView: View {
         .navigationTitle(detail?.name ?? title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        // Share image and GPX, privacy-trimmed (CardioShareSheet.swift).
+        .cardioShareToolbar(detail: detail, route: route, heart: heart, zones: zones, miles: miles)
     }
 
     private func load() async {
