@@ -45,6 +45,10 @@ targets:
     sources:
       - path: App
       - path: Shared
+      # Privacy manifest (UserDefaults: CA92.1 own data, 1C8F.1 the shared App
+      # Group). Nothing is collected or tracked: data stays on the device.
+      - path: Privacy/App/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: AppCore
       - sdk: HealthKit.framework
@@ -123,6 +127,8 @@ targets:
     sources:
       - path: Widget
       - path: Shared
+      - path: Privacy/Widget/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       # Shared/SharedStore.swift uses AppCore's MedicationSchedule (the Live Activity's doses).
       - package: AppCore
@@ -165,6 +171,8 @@ targets:
           enabled: 1
     sources:
       - path: Watch
+      - path: Privacy/Watch/PrivacyInfo.xcprivacy
+        buildPhase: resources
       # Only the session model and the complications' data are shared: the
       # other Shared files need ActivityKit.
       - path: Shared/WatchSession.swift
@@ -236,6 +244,8 @@ targets:
       Release: Config/Base.xcconfig
     sources:
       - path: WatchWidgets
+      - path: Privacy/WatchWidgets/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - path: Shared/WatchFaceData.swift
       # What the plan says when, and when a score goes "--" (pure Swift; the
       # iPhone widgets get the same rules from AppCore).
