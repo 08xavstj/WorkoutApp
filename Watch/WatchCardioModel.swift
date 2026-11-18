@@ -251,7 +251,10 @@ final class WatchCardioModel: NSObject {
                 return
             }
             // Marks the workout as Tensile's cardio, with which activity (treadmill and outdoor run share a type).
-            builder.addMetadata([Self.metadataKey: activity.rawValue]) { _, _ in }
+            // An interval session also says which one, for the phone's bout table (`IntervalBouts`).
+            var metadata: [String: Any] = [Self.metadataKey: activity.rawValue]
+            if let interval { metadata[IntervalSession.metadataKey] = interval.id }
+            builder.addMetadata(metadata) { _, _ in }
             heartRate = nil
             averageHeartRate = nil
             maximumHeartRate = nil

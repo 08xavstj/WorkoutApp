@@ -43,6 +43,12 @@ import Foundation
 
 /// One cardio session, step by step.
 public nonisolated struct IntervalSession: Codable, Sendable, Equatable, Identifiable {
+    /// Metadata key on a Health workout recorded from an interval session;
+    /// its value is the session's `id` ("4x4-bike"). In this file because
+    /// the Watch compiles it (project.yml), so the phone's bout table
+    /// (`IntervalBouts`) and the Watch's recording agree on it.
+    public static let metadataKey = "TensileIntervalSession"
+
     /// What it is done on.
     public nonisolated enum Modality: String, Codable, Sendable, CaseIterable, Identifiable {
         case bike, rower, treadmill, outdoorRun, outdoorRide

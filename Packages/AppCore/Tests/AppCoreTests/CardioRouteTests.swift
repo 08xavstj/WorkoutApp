@@ -195,3 +195,10 @@ struct CardioRouteTests {
         #expect(summary.recoveryDrop == nil)
     }
 }
+
+struct IntervalMetadataKeyTests {
+    /// The Watch writes it and the phone reads it; saved workouts hold it, so it never changes.
+    @Test func keyIsStable() {
+        #expect(IntervalSession.metadataKey == "TensileIntervalSession")
+    }
+}

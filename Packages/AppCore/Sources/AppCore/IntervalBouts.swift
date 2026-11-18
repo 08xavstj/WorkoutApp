@@ -18,11 +18,6 @@ import Foundation
 // short hard bout's average reads lower than the effort was: the UI says so.
 
 extension IntervalSession {
-    /// Metadata key on a Health workout recorded from an interval session;
-    /// its value is the session's `id` ("4x4-bike"). Kept here so the phone
-    /// and the Watch agree on it.
-    public static let metadataKey = "TensileIntervalSession"
-
     /// The standard or short session for an `id` as `make` builds it ("4x4-bike", "3x4-rower").
     public static func named(_ id: String) -> IntervalSession? {
         let parts = id.split(separator: "-", maxSplits: 1).map(String.init)
