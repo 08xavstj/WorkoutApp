@@ -16,7 +16,7 @@ struct LiftingShareSheet: View {
     @State private var style = ShareCardStyle.light
     @State private var showMuscles = true
     @State private var showHeart = true
-    @State private var png: Data?
+    @State private var image: RenderedShareImage?
 
     private struct Options: Equatable {
         var style: ShareCardStyle
@@ -33,7 +33,7 @@ struct LiftingShareSheet: View {
                     }
                     .pickerStyle(.segmented)
                     .listRowBackground(Color.clear)
-                    ShareImagePreview(png: png, style: style, subject: data.title)
+                    ShareImagePreview(image: image, style: style, subject: data.title)
                         .listRowBackground(Color.clear)
                 }
                 Section {
@@ -62,7 +62,7 @@ struct LiftingShareSheet: View {
             .task(id: Options(style: style, showMuscles: showMuscles, showHeart: showHeart)) {
                 let card = LiftingShareCard(data: data, heart: heart, unit: unit, style: style,
                                             showMuscles: showMuscles, showHeart: showHeart)
-                png = ShareRenderer.png(card, size: ShareRenderer.cardSize, style: style)
+                image = ShareRenderer.image(card, size: ShareRenderer.cardSize, style: style)
             }
         }
     }

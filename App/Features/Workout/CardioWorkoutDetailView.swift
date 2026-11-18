@@ -398,7 +398,7 @@ private struct RouteMapView: View {
 
     var body: some View {
         let points = coordinates
-        let stretches = route.stretches(for: metric, zones: metric == .heartRate ? zones : nil)
+        let stretches = route.stretches(for: metric, zones: metric == .heartRate ? zones : nil, minimumPoints: max(5, route.points.count / 200))
         Map(initialPosition: .rect(region), interactionModes: [.pan, .zoom]) {
             ForEach(Array(stretches.enumerated()), id: \.offset) { _, stretch in
                 MapPolyline(coordinates: Array(points[stretch.range]))

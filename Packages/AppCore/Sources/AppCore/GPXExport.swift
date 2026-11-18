@@ -79,12 +79,12 @@ public nonisolated enum GPXExport {
         String(format: "%.7f", degrees)
     }
 
-    /// xsd:dateTime in UTC: "2026-11-18T06:30:05Z".
+    /// xsd:dateTime in UTC: "2026-11-18T06:30:05Z". One shared value-type
+    /// style: a new formatter per point made long routes slow to export.
+    static let timeStyle = Date.ISO8601FormatStyle(timeZone: .gmt)
+
     static func time(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
+        date.formatted(timeStyle)
     }
 
     /// XML character escaping for text and attribute values.

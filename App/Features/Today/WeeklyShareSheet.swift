@@ -32,7 +32,7 @@ struct WeeklyShareSheet: View {
     @State private var style = ShareCardStyle.light
     @State private var showSleep = false
     @State private var cardio: (sessions: Int, minutes: Int)?
-    @State private var png: Data?
+    @State private var image: RenderedShareImage?
 
     private struct Options: Equatable {
         var style: ShareCardStyle
@@ -56,7 +56,7 @@ struct WeeklyShareSheet: View {
                     }
                     .pickerStyle(.segmented)
                     .listRowBackground(Color.clear)
-                    ShareImagePreview(png: png, style: style, subject: "My week")
+                    ShareImagePreview(image: image, style: style, subject: "My week")
                         .listRowBackground(Color.clear)
                 }
                 if floors.sleepRegularity != nil {
@@ -78,8 +78,13 @@ struct WeeklyShareSheet: View {
             }
             .task { await loadCardio() }
             .task(id: Options(style: style, showSleep: showSleep, cardioLoaded: cardio != nil)) {
-                png = ShareRenderer.png(WeeklyShareCard(summary: summary, style: style),
-                                        size: ShareRenderer.cardSize, style: style)
+                // Until cardio is in, the card would read "0 cardio": no image, no Share button.
+                guard cardio != nil else {
+                    image = nil
+                    return
+                }
+                image = ShareRenderer.image(WeeklyShareCard(summary: summary, style: style),
+                                            size: ShareRenderer.cardSize, style: style)
             }
         }
     }

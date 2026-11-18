@@ -1,10 +1,11 @@
 import Foundation
 
-/// The full JSON backup (spec B5d, docs/research/competitor-features-2026-11.md):
-/// the gym log and saved workouts from SwiftData, plus each JSON store the
-/// app keeps in Application Support, with a schema version so a later
-/// restore can read it. Weights in kilograms, as stored. Built on the phone
-/// and handed to the share sheet or Files; nothing is uploaded.
+/// The JSON data copy (spec B5d, docs/research/competitor-features-2026-11.md),
+/// shown as "Data copy" because the app can't restore from it yet: the gym
+/// log and saved workouts from SwiftData, plus each JSON store the app keeps
+/// in Application Support except `excludedStores`, with a schema version so a
+/// later restore could read it. Weights in kilograms, as stored. Built on the
+/// phone and handed to the share sheet or Files; nothing is uploaded.
 public nonisolated struct BackupDocument: Codable, Sendable, Equatable {
     /// Bumped when the layout changes.
     public static let currentFormat = 1
@@ -157,10 +158,17 @@ public nonisolated struct BackupDocument: Codable, Sendable, Equatable {
         return try decoder.decode(BackupDocument.self, from: data)
     }
 
+    /// Stores never put in the file: `route-privacy.json` holds the private
+    /// places (home's coordinates) and the salt that keeps each workout's
+    /// route trim secret. With both, anyone holding the file could undo the
+    /// trimming on every route the user has shared (`RoutePrivacy`).
+    public static let excludedStores: Set<String> = ["route-privacy.json"]
+
     /// Store files worth backing up: the app's own JSON, not the `.bak`
-    /// copies or files set aside as corrupt (`SafeJSONFile`).
+    /// copies or files set aside as corrupt (`SafeJSONFile`), and not
+    /// `excludedStores`.
     public static func isBackedUpStore(_ fileName: String) -> Bool {
-        fileName.hasSuffix(".json") && !fileName.hasPrefix(".")
+        fileName.hasSuffix(".json") && !fileName.hasPrefix(".") && !excludedStores.contains(fileName)
     }
 }
 

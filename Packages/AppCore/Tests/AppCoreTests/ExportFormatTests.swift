@@ -11,6 +11,9 @@ struct CSVExportTests {
         #expect(CSV.field("Press, incline") == "\"Press, incline\"")
         #expect(CSV.field("The \"big\" one") == "\"The \"\"big\"\" one\"")
         #expect(CSV.field("two\nlines") == "\"two\nlines\"")
+        // "\r\n" is one Character in Swift; it still needs quotes.
+        #expect(CSV.field("two\r\nlines") == "\"two\r\nlines\"")
+        #expect(CSV.field("two\rlines") == "\"two\rlines\"")
         #expect(CSV.field("") == "")
     }
 
@@ -49,12 +52,14 @@ struct CSVExportTests {
         ]
         let text = SetsCSV.document(rows, pounds: true, timeZone: utc)
         let lines = text.components(separatedBy: "\r\n")
-        #expect(lines[0] == "date,workout,exercise,set,set_type,weight_lb,weight_kg,reps,rpe,rir")
+        #expect(lines[0] == "\u{FEFF}date,workout,exercise,set,set_type,weight_lb,weight_kg,reps,rpe,rir")
         #expect(lines[1] == "2027-01-15T08:00:00Z,\"Push, heavy\",Bench Press,1,warm-up,88.18,40,10,,")
         #expect(lines[2] == "2027-01-15T08:00:00Z,\"Push, heavy\",Bench Press,2,straight,220.46,100,5,8.5,1.5")
         #expect(lines.last == "")
         let kilos = SetsCSV.document(rows, pounds: false, timeZone: utc)
-        #expect(kilos.hasPrefix("date,workout,exercise,set,set_type,weight_kg,weight_kg,"))
+        let kiloLines = kilos.components(separatedBy: "\r\n")
+        #expect(kiloLines[0] == "\u{FEFF}date,workout,exercise,set,set_type,weight_kg,reps,rpe,rir")
+        #expect(kiloLines[2] == "2027-01-15T08:00:00Z,\"Push, heavy\",Bench Press,2,straight,100,5,8.5,1.5")
     }
 
     @Test func rirFromRPE() {
@@ -72,12 +77,19 @@ struct CSVExportTests {
                                     distanceMeters: 5012, averageBpm: 151.4, maximumBpm: 178, elevationGainMeters: 42.6),
                     CardioExportRow(start: date, type: "Yoga", durationSeconds: 3600)]
         let km = CardioCSV.document(rows, miles: false, timeZone: utc).components(separatedBy: "\r\n")
-        #expect(km[0] == "date,type,source,duration_min,distance_km,distance_km,avg_hr_bpm,max_hr_bpm,elevation_gain_m")
-        #expect(km[1] == "2027-01-15T08:00:00Z,Run,Apple Watch,30.5,5.012,5.012,151,178,43")
-        #expect(km[2] == "2027-01-15T08:00:00Z,Yoga,,60,,,,,")
+        #expect(km[0] == "\u{FEFF}date,type,source,duration_min,distance_km,avg_hr_bpm,max_hr_bpm,elevation_gain_m")
+        #expect(km[1] == "2027-01-15T08:00:00Z,Run,Apple Watch,30.5,5.012,151,178,43")
+        #expect(km[2] == "2027-01-15T08:00:00Z,Yoga,,60,,,,")
         let miles = CardioCSV.document(rows, miles: true, timeZone: utc).components(separatedBy: "\r\n")
-        #expect(miles[0].contains("distance_mi,distance_km"))
-        #expect(miles[1].contains(",3.114,5.012,"))
+        #expect(miles[0] == "\u{FEFF}date,type,source,duration_min,distance_mi,distance_km,avg_hr_bpm,max_hr_bpm,elevation_gain_m")
+        #expect(miles[1] == "2027-01-15T08:00:00Z,Run,Apple Watch,30.5,3.114,5.012,151,178,43")
+        #expect(miles[2] == "2027-01-15T08:00:00Z,Yoga,,60,,,,,")
+    }
+
+    @Test func filesStartWithAUTF8ByteOrderMarkForExcel() {
+        let text = CSV.document(header: ["name"], rows: [["Zürich"]])
+        #expect(Array(Data(text.utf8).prefix(3)) == [0xEF, 0xBB, 0xBF])
+        #expect(String(text.dropFirst()) == "name\r\nZürich\r\n")
     }
 
     @Test func dailyScoresAreMergedByDayAndSorted() {
@@ -96,7 +108,7 @@ struct CSVExportTests {
         #expect(merged[1].sleepScore == 75)
         #expect(merged[1].strain == 61.6)
         let lines = DailyScoresCSV.document(rows, calendar: calendar).components(separatedBy: "\r\n")
-        #expect(lines[0] == "date,sleep_score,recovery,strain_percent")
+        #expect(lines[0] == "\u{FEFF}date,sleep_score,recovery,strain_percent")
         #expect(lines[1] == "2027-01-15,82,,")
         #expect(lines[2] == "2027-01-16,75,,62")
     }
@@ -185,6 +197,9 @@ struct BackupDocumentTests {
         #expect(!BackupDocument.isBackedUpStore("gyms.json.bak"))
         #expect(!BackupDocument.isBackedUpStore("gyms.json.corrupt-123"))
         #expect(!BackupDocument.isBackedUpStore(".hidden.json"))
+        // Private places and the trim salt stay on the phone.
+        #expect(!BackupDocument.isBackedUpStore("route-privacy.json"))
+        #expect(BackupDocument.excludedStores.allSatisfy { !BackupDocument.isBackedUpStore($0) })
         #expect(JSONValue.parse(Data("not json".utf8)) == nil)
     }
 }

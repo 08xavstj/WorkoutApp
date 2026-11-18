@@ -6,7 +6,8 @@ import SwiftData
 /// docs/research/competitor-features-2026-11.md) into a temporary folder,
 /// for the share sheet or Files. The formats are in AppCore (`SetsCSV`,
 /// `CardioCSV`, `DailyScoresCSV`, `BackupDocument`, `GPXExport`); nothing
-/// is uploaded and the folder is emptied before each export.
+/// is uploaded, the folder is emptied before each export and when the
+/// ready sheet closes, and leftovers are cleared once per launch.
 enum DataExport {
     enum Kind: String, CaseIterable, Identifiable {
         case sets, cardio, scores, backup
@@ -18,16 +19,16 @@ enum DataExport {
             case .sets: "Lifting sets (CSV)"
             case .cardio: "Cardio workouts (CSV)"
             case .scores: "Daily scores (CSV)"
-            case .backup: "Full backup (JSON)"
+            case .backup: "Data copy (JSON)"
             }
         }
 
         var detail: String {
             switch self {
-            case .sets: "One row per set: date, exercise, weight in your unit and kg, reps, RPE and reps left"
+            case .sets: "One row per set: date, exercise, weight in kg (and lb if you lift in pounds), reps, RPE and reps left"
             case .cardio: "From Apple Health: date, type, time, distance, average and max heart rate"
             case .scores: "Sleep scores for about the last 100 mornings, and strain and recovery for recent days"
-            case .backup: "Your gym log, saved workouts, typed-in HRV and the app's settings and logs"
+            case .backup: "Your gym log, saved workouts, typed-in HRV and the app's settings and logs, without your private route places; to keep or read elsewhere, not to restore into Tensile"
             }
         }
 
@@ -41,7 +42,7 @@ enum DataExport {
         }
     }
 
-    enum Failure: LocalizedError {
+    nonisolated enum Failure: LocalizedError {
         case nothingToExport, healthUnavailable
 
         var errorDescription: String? {
@@ -52,16 +53,36 @@ enum DataExport {
         }
     }
 
+    nonisolated static var folderURL: URL {
+        URL.temporaryDirectory.appending(path: "Export", directoryHint: .isDirectory)
+    }
+
     /// A clean folder in the temporary directory for this export.
-    static func folder() throws -> URL {
-        let folder = URL.temporaryDirectory.appending(path: "Export", directoryHint: .isDirectory)
+    nonisolated static func folder() throws -> URL {
+        let folder = folderURL
         try? FileManager.default.removeItem(at: folder)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }
 
+    /// Deletes every export file: called when the ready sheet closes, so a
+    /// copy of the user's data doesn't sit in tmp until iOS clears it.
+    nonisolated static func removeFiles() {
+        try? FileManager.default.removeItem(at: folderURL)
+    }
+
+    private static var clearedLeftovers = false
+
+    /// Deletes files left by a run that ended with the ready sheet open
+    /// (the app was closed or crashed), once per launch.
+    static func removeLeftoversOnce() {
+        guard !clearedLeftovers else { return }
+        clearedLeftovers = true
+        removeFiles()
+    }
+
     /// Writes `data` as `name` in a fresh export folder.
-    static func write(_ data: Data, name: String) throws -> URL {
+    nonisolated static func write(_ data: Data, name: String) throws -> URL {
         let url = try folder().appending(path: name)
         try data.write(to: url, options: [.atomic, .completeFileProtection])
         return url
@@ -157,7 +178,8 @@ enum DataExport {
     }
 
     /// The app's JSON stores in Application Support, as they are. Progress
-    /// photos (encrypted images) and the Oura token (Keychain) are not in it.
+    /// photos (encrypted images), the Oura token (Keychain) and the private
+    /// route places with their salt (`BackupDocument.excludedStores`) are not in it.
     private static func stores() -> [String: JSONValue] {
         let folder = URL.applicationSupportDirectory
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path(percentEncoded: false))) ?? []
@@ -172,8 +194,12 @@ enum DataExport {
 
     // MARK: Routes
 
-    /// A GPX file of one workout's route, trimmed by `privacy` unless it was made untrimmed.
-    static func gpxFile(route: CardioRoute, privacy: RoutePrivacy.Result, name: String, type: String?, date: Date) throws -> URL {
+    /// A GPX file of one workout's route, trimmed by `privacy` unless it was
+    /// made untrimmed. Built off the main actor: a long route has thousands
+    /// of points.
+    @concurrent
+    nonisolated static func gpxFile(route: CardioRoute, privacy: RoutePrivacy.Result, name: String, type: String?,
+                                    date: Date) async throws -> URL {
         let segments = GPXExport.segments(route: route, privacy: privacy)
         guard segments.contains(where: { !$0.isEmpty }) else { throw Failure.nothingToExport }
         let text = GPXExport.document(name: name, type: type, segments: segments)

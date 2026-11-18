@@ -70,6 +70,8 @@ struct CardioShareCard: View {
     let line: [[RouteProjection.Point]]
     /// A route existed but every part of it was private.
     var routeHidden = false
+    /// The map snapshot couldn't be made (offline): `line` is drawn alone.
+    var mapUnavailable = false
 
     var body: some View {
         ShareCardFrame(style: style, wash: [Theme.Wash.sky, Theme.Wash.mint], footnote: content.footnote.isEmpty ? nil : content.footnote) {
@@ -119,6 +121,11 @@ struct CardioShareCard: View {
                 .frame(height: 130)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
+            if mapUnavailable {
+                Text("Map unavailable offline")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Theme.secondaryText)
+            }
         } else if routeHidden {
             Text("Route hidden: it stays near a private place.")
                 .font(.system(size: 10))

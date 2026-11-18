@@ -2,7 +2,7 @@ import AppCore
 import SwiftData
 import SwiftUI
 
-/// Settings › Data & privacy › Export: CSV files and a full JSON backup,
+/// Settings › Data & privacy › Export: CSV files and a JSON copy of the data,
 /// built on the phone and handed to the share sheet (which includes Save to
 /// Files). Nothing is uploaded (spec B5, competitor-features-2026-11.md).
 struct DataExportSettingsSection: View {
@@ -39,13 +39,16 @@ struct DataExportSettingsSection: View {
                 Text(problem).font(.footnote).foregroundStyle(Theme.recoveryModerateText)
             }
         } header: {
+            // The sheet hangs on the header, one view that is always there:
+            // on the Section, a Form applies it to every row.
             Text("Export")
+                .sheet(item: $file, onDismiss: DataExport.removeFiles) { file in
+                    ExportReadySheet(file: file)
+                }
         } footer: {
-            Text("Files are made on this iPhone and go only where you send them. Weights are in kilograms with your unit alongside; dates are ISO 8601. The backup holds your own data, so keep it somewhere private.")
+            Text("Files are made on this iPhone and go only where you send them; the copy on this iPhone is deleted when you close it. Weights are in kilograms, with pounds alongside if you lift in pounds; dates are ISO 8601. The data copy holds your own data, so keep it somewhere private.")
         }
-        .sheet(item: $file) { file in
-            ExportReadySheet(file: file)
-        }
+        .onAppear { DataExport.removeLeftoversOnce() }
     }
 
     private func export(_ kind: DataExport.Kind) async {

@@ -6,6 +6,10 @@ import Foundation
 // dates, decimals with a point whatever the phone's language, weights in
 // kilograms with the user's unit alongside (CLAUDE.md: stored in kg).
 // Fields are quoted as RFC 4180 says (commas, quotes, line breaks).
+// Each file starts with a UTF-8 byte order mark: without it Excel opens a
+// CSV in the system's legacy code page and garbles non-ASCII names
+// ("Zürich" becomes "ZÃ¼rich"; Microsoft Support, "Opening CSV UTF-8 files
+// correctly in Excel"). Numbers, Google Sheets and pandas skip the mark.
 
 public nonisolated enum CSV {
     /// One field: quoted when it holds a comma, quote or line break, with
@@ -18,7 +22,8 @@ public nonisolated enum CSV {
         if let first = value.unicodeScalars.first, ["=", "+", "-", "@", "\t", "\r"].contains(Character(first)) {
             value = "'" + value
         }
-        let needsQuotes = value.contains { $0 == "," || $0 == "\"" || $0 == "\n" || $0 == "\r" }
+        // `isNewline`, not "\n" or "\r": Swift reads "\r\n" as one Character.
+        let needsQuotes = value.contains { $0 == "," || $0 == "\"" || $0.isNewline }
         guard needsQuotes else { return value }
         return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
@@ -56,9 +61,13 @@ public nonisolated enum CSV {
         return formatter.string(from: date)
     }
 
-    /// Header and rows joined with CRLF (RFC 4180 §2.1), ending in a line break.
+    /// U+FEFF, which UTF-8 writes as EF BB BF (see the note at the top).
+    public static let byteOrderMark = "\u{FEFF}"
+
+    /// The byte order mark, then header and rows joined with CRLF
+    /// (RFC 4180 §2.1), ending in a line break.
     public static func document(header: [String], rows: [[String]]) -> String {
-        ([header.map(field)] + rows).map { $0.joined(separator: ",") }.joined(separator: "\r\n") + "\r\n"
+        byteOrderMark + ([header.map(field)] + rows).map { $0.joined(separator: ",") }.joined(separator: "\r\n") + "\r\n"
     }
 }
 
@@ -98,16 +107,18 @@ public nonisolated struct SetExportRow: Sendable, Equatable {
 public nonisolated enum SetsCSV {
     public static let poundsPerKilogram = 2.20462
 
-    /// `pounds`: the user's unit is pounds (`WeightUnit`); the kg column is always there.
+    /// `pounds`: the user's unit is pounds (`WeightUnit`). The kg column is
+    /// always there; a pounds column comes before it only for pounds users.
     public static func document(_ rows: [SetExportRow], pounds: Bool, timeZone: TimeZone = .current) -> String {
-        let unit = pounds ? "lb" : "kg"
-        let header = ["date", "workout", "exercise", "set", "set_type", "weight_\(unit)", "weight_kg", "reps", "rpe", "rir"]
+        let header = ["date", "workout", "exercise", "set", "set_type"] + (pounds ? ["weight_lb"] : [])
+            + ["weight_kg", "reps", "rpe", "rir"]
         let lines = rows.map { row -> [String] in
-            let shown = pounds ? row.weightKg * poundsPerKilogram : row.weightKg
+            let shown = pounds ? [CSV.number(row.weightKg * poundsPerKilogram, decimals: 2)] : []
             return [CSV.timestamp(row.date, timeZone: timeZone), CSV.field(row.workout), CSV.field(row.exercise),
-                    CSV.number(row.setNumber), CSV.field(row.setType),
-                    CSV.number(shown, decimals: 2), CSV.number(row.weightKg, decimals: 3), CSV.number(row.reps),
-                    CSV.number(row.rpe, decimals: 1), CSV.number(row.rir, decimals: 1)]
+                    CSV.number(row.setNumber), CSV.field(row.setType)]
+                + shown
+                + [CSV.number(row.weightKg, decimals: 3), CSV.number(row.reps),
+                   CSV.number(row.rpe, decimals: 1), CSV.number(row.rir, decimals: 1)]
         }
         return CSV.document(header: header, rows: lines)
     }
@@ -142,15 +153,17 @@ public nonisolated enum CardioCSV {
     /// Exact distances: this file is the user's own record, not a share
     /// card, so nothing is rounded (route privacy rounds shared images).
     public static func document(_ rows: [CardioExportRow], miles: Bool, timeZone: TimeZone = .current) -> String {
-        let header = ["date", "type", "source", "duration_min", miles ? "distance_mi" : "distance_km", "distance_km",
-                      "avg_hr_bpm", "max_hr_bpm", "elevation_gain_m"]
+        // A miles column before the km one only for miles users.
+        let header = ["date", "type", "source", "duration_min"] + (miles ? ["distance_mi"] : [])
+            + ["distance_km", "avg_hr_bpm", "max_hr_bpm", "elevation_gain_m"]
         let lines = rows.map { row -> [String] in
             let km = row.distanceMeters.map { $0 / 1000 }
-            let shown = miles ? row.distanceMeters.map { $0 / CardioSummary.metersPerMile } : km
+            let shown = miles ? [CSV.number(row.distanceMeters.map { $0 / CardioSummary.metersPerMile }, decimals: 3)] : []
             return [CSV.timestamp(row.start, timeZone: timeZone), CSV.field(row.type), CSV.field(row.source ?? ""),
-                    CSV.number(row.durationSeconds / 60, decimals: 1), CSV.number(shown, decimals: 3), CSV.number(km, decimals: 3),
-                    CSV.number(row.averageBpm, decimals: 0), CSV.number(row.maximumBpm, decimals: 0),
-                    CSV.number(row.elevationGainMeters, decimals: 0)]
+                    CSV.number(row.durationSeconds / 60, decimals: 1)]
+                + shown
+                + [CSV.number(km, decimals: 3), CSV.number(row.averageBpm, decimals: 0), CSV.number(row.maximumBpm, decimals: 0),
+                   CSV.number(row.elevationGainMeters, decimals: 0)]
         }
         return CSV.document(header: header, rows: lines)
     }

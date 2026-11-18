@@ -67,7 +67,7 @@ private struct ChartShareSheet<ChartContent: View>: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var style = ShareCardStyle.light
-    @State private var png: Data?
+    @State private var image: RenderedShareImage?
 
     var body: some View {
         NavigationStack {
@@ -78,7 +78,7 @@ private struct ChartShareSheet<ChartContent: View>: View {
                     }
                     .pickerStyle(.segmented)
                     .listRowBackground(Color.clear)
-                    ShareImagePreview(png: png, style: style, aspectRatio: 1, subject: title)
+                    ShareImagePreview(image: image, style: style, aspectRatio: 1, subject: title)
                         .listRowBackground(Color.clear)
                 } footer: {
                     Text("Made on this iPhone; it goes only where you send it.")
@@ -95,7 +95,7 @@ private struct ChartShareSheet<ChartContent: View>: View {
             }
             .task(id: style) {
                 let card = ShareableChartCard(title: title, subtitle: subtitle, caveat: caveat, style: style) { chart() }
-                png = ShareRenderer.png(card, size: ShareRenderer.chartSize, style: style)
+                image = ShareRenderer.image(card, size: ShareRenderer.chartSize, style: style)
             }
         }
     }

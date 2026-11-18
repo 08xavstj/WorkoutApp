@@ -20,6 +20,13 @@ nonisolated struct SharedPNG: Transferable, Sendable {
     }
 }
 
+/// A rendered share image: the PNG that is shared and the same picture
+/// decoded once for the preview, so a view body never decodes PNG data.
+struct RenderedShareImage {
+    let png: Data
+    let image: UIImage
+}
+
 /// Light or dark card, or transparent with white text to lay over your own
 /// photo (spec B1/B3: "transparent stats overlay").
 enum ShareCardStyle: String, CaseIterable, Identifiable {
@@ -44,7 +51,7 @@ enum ShareCardStyle: String, CaseIterable, Identifiable {
 enum ShareRenderer {
     /// `size` in points; the image is `ShareCards.renderScale` times larger.
     /// Dynamic Type is fixed so the card's layout is the same for everyone.
-    static func png<Content: View>(_ content: Content, size: CGSize, style: ShareCardStyle) -> Data? {
+    static func image<Content: View>(_ content: Content, size: CGSize, style: ShareCardStyle) -> RenderedShareImage? {
         let renderer = ImageRenderer(content: content
             .frame(width: size.width, height: size.height)
             .environment(\.colorScheme, style.colorScheme)
@@ -52,7 +59,8 @@ enum ShareRenderer {
         renderer.scale = ShareCards.renderScale
         renderer.isOpaque = style.isOpaque
         renderer.proposedSize = ProposedViewSize(size)
-        return renderer.uiImage?.pngData()
+        guard let image = renderer.uiImage, let png = image.pngData() else { return nil }
+        return RenderedShareImage(png: png, image: image)
     }
 
     static var cardSize: CGSize { CGSize(width: ShareCards.cardPointSize.width, height: ShareCards.cardPointSize.height) }
@@ -168,7 +176,8 @@ struct ShareZoneBar: View {
 
 /// The rendered image as it will be shared, and the share button.
 struct ShareImagePreview: View {
-    let png: Data?
+    /// Nil while rendering, or while the image doesn't match the switches.
+    let image: RenderedShareImage?
     let style: ShareCardStyle
     /// Width over height of the image.
     var aspectRatio: CGFloat = ShareCards.cardPointSize.width / ShareCards.cardPointSize.height
@@ -180,8 +189,8 @@ struct ShareImagePreview: View {
                 // A transparent image is shown on a dark tile so its white text reads.
                 RoundedRectangle(cornerRadius: 18)
                     .fill(style == .transparent ? Color(white: 0.25) : Theme.track)
-                if let png, let image = UIImage(data: png) {
-                    Image(uiImage: image)
+                if let image {
+                    Image(uiImage: image.image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(.rect(cornerRadius: 18))
@@ -193,8 +202,8 @@ struct ShareImagePreview: View {
             .aspectRatio(aspectRatio, contentMode: .fit)
             .frame(maxWidth: 360)
             .frame(maxWidth: .infinity)
-            if let png {
-                ShareLink(item: SharedPNG(data: png), preview: SharePreview(subject, image: Image(systemName: "photo"))) {
+            if let image {
+                ShareLink(item: SharedPNG(data: image.png), preview: SharePreview(subject, image: Image(systemName: "photo"))) {
                     Label("Share image", systemImage: "square.and.arrow.up")
                         .font(.headline)
                         .frame(maxWidth: .infinity, minHeight: 50)

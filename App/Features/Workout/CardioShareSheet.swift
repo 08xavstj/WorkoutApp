@@ -51,9 +51,17 @@ struct CardioShareSheet: View {
     @State private var showMap = true
     @State private var showHeartRate = true
     @State private var showCalories = false
-    @State private var png: Data?
+    /// The last image made, and the switches it was made for: it is shown
+    /// and shared only while they still match, so turning a switch off never
+    /// leaves the old image (with heart rate, say) ready to share.
+    @State private var image: RenderedShareImage?
+    @State private var renderedFor: Options?
+    /// Map snapshots already made in this sheet, so flipping a switch doesn't
+    /// ask MapKit for the same map again.
+    @State private var snapshots: [SnapshotKey: UIImage] = [:]
     @State private var fullRouteFile = false
     @State private var file: ExportedFile?
+    @State private var exporting = false
     @State private var problem: String?
 
     private var store: RoutePrivacyStore { RoutePrivacyStore.shared }
@@ -66,6 +74,20 @@ struct CardioShareSheet: View {
         var showCalories: Bool
     }
 
+    /// What a snapshot depends on: light or dark map, and what colours the line.
+    private struct SnapshotKey: Hashable {
+        var dark: Bool
+        var metric: RouteMetric
+    }
+
+    private var options: Options {
+        Options(style: style, showMap: showMap, showHeartRate: showHeartRate, showCalories: showCalories)
+    }
+
+    private var currentImage: RenderedShareImage? {
+        renderedFor == options ? image : nil
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -75,7 +97,7 @@ struct CardioShareSheet: View {
                     }
                     .pickerStyle(.segmented)
                     .listRowBackground(Color.clear)
-                    ShareImagePreview(png: png, style: style, subject: detail.name)
+                    ShareImagePreview(image: currentImage, style: style, subject: detail.name)
                         .listRowBackground(Color.clear)
                 }
                 Section {
@@ -102,10 +124,10 @@ struct CardioShareSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .task(id: Options(style: style, showMap: showMap, showHeartRate: showHeartRate, showCalories: showCalories)) {
-                await render()
+            .task(id: options) {
+                await render(options)
             }
-            .sheet(item: $file) { ExportReadySheet(file: $0) }
+            .sheet(item: $file, onDismiss: DataExport.removeFiles) { ExportReadySheet(file: $0) }
         }
     }
 
@@ -128,7 +150,10 @@ struct CardioShareSheet: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.recoveryModerateText)
             }
-            Button("Export route (GPX)", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { exportGPX() }
+            Button("Export route (GPX)", systemImage: "point.topleft.down.to.point.bottomright.curvepath") {
+                Task { await exportGPX() }
+            }
+            .disabled(exporting)
             if let problem {
                 Text(problem).font(.footnote).foregroundStyle(Theme.recoveryModerateText)
             }
@@ -141,39 +166,65 @@ struct CardioShareSheet: View {
 
     // MARK: Rendering
 
-    private func render() async {
+    private func render(_ options: Options) async {
         let privacy = route.map { store.trim($0, workoutID: detail.uuid) }
         let trimmed = privacy?.isTrimmed ?? false
         let content = CardioShareContent(detail: detail, route: route, heart: heart, miles: miles, trimmed: trimmed,
-                                         showHeartRate: showHeartRate, showCalories: showCalories)
+                                         showHeartRate: options.showHeartRate, showCalories: options.showCalories)
         var map: UIImage?
         var line: [[RouteProjection.Point]] = []
         var hidden = false
-        if showMap, let route, let privacy, route.points.count >= 2 {
+        var mapUnavailable = false
+        if options.showMap, let route, let privacy, route.points.count >= 2 {
             hidden = privacy.hidesEverything
             if !hidden {
-                if style == .transparent {
+                if options.style != .transparent {
+                    map = await snapshot(route: route, privacy: privacy, options: options)
+                    guard !Task.isCancelled else { return }
+                    mapUnavailable = map == nil
+                }
+                // The overlay style, or no map (offline): the trimmed line on its own.
+                if map == nil {
                     line = RouteProjection.normalized(RoutePrivacy.segments(route.points, privacy))
-                } else {
-                    let metric: RouteMetric = route.range(for: .speed) != nil && detail.activity?.movement != .stationary ? .speed : .heartRate
-                    let lines = RouteSnapshot.lines(route: route, privacy: privacy, metric: metric, zones: zones, dark: style == .dark)
-                    let data = await RouteSnapshot.image(lines: lines, size: CGSize(width: ShareRenderer.cardSize.width - 40, height: 140),
-                                                         dark: style == .dark)
-                    map = data.flatMap(UIImage.init(data:))
                 }
             }
         }
         guard !Task.isCancelled else { return }
-        let card = CardioShareCard(content: content, style: style, map: map, line: line, routeHidden: hidden)
-        png = ShareRenderer.png(card, size: ShareRenderer.cardSize, style: style)
+        let card = CardioShareCard(content: content, style: options.style, map: map, line: line, routeHidden: hidden,
+                                   mapUnavailable: mapUnavailable)
+        let rendered = ShareRenderer.image(card, size: ShareRenderer.cardSize, style: options.style)
+        image = rendered
+        renderedFor = rendered == nil ? nil : options
     }
 
-    private func exportGPX() {
-        guard let route else { return }
+    /// The map with the visible route on it, made once per key. The line is
+    /// coloured by speed when there is one; by heart-rate zone only while
+    /// heart rate is shown, else by elevation, so the colours can't give
+    /// away heart rate the user turned off.
+    private func snapshot(route: CardioRoute, privacy: RoutePrivacy.Result, options: Options) async -> UIImage? {
+        let moves = detail.activity?.movement != .stationary
+        let metric: RouteMetric = route.range(for: .speed) != nil && moves ? .speed
+            : options.showHeartRate ? .heartRate : .elevation
+        let key = SnapshotKey(dark: options.style == .dark, metric: metric)
+        if let cached = snapshots[key] { return cached }
+        let lines = RouteSnapshot.lines(route: route, privacy: privacy, metric: metric, zones: zones, dark: key.dark)
+        let data = await RouteSnapshot.image(lines: lines, size: CGSize(width: ShareRenderer.cardSize.width - 40, height: 140),
+                                             dark: key.dark)
+        // Not cached when it failed (offline), so the next switch tries again.
+        guard let map = data.flatMap(UIImage.init(data:)) else { return nil }
+        snapshots[key] = map
+        return map
+    }
+
+    private func exportGPX() async {
+        guard let route, !exporting else { return }
         problem = nil
+        exporting = true
+        defer { exporting = false }
         let privacy = store.trim(route, workoutID: detail.uuid, full: fullRouteFile)
         do {
-            let url = try DataExport.gpxFile(route: route, privacy: privacy, name: detail.name, type: gpxType, date: detail.start)
+            // Built off the main actor: a long route has thousands of points.
+            let url = try await DataExport.gpxFile(route: route, privacy: privacy, name: detail.name, type: gpxType, date: detail.start)
             file = ExportedFile(url: url, title: "Route file")
         } catch {
             problem = privacy.hidesEverything
