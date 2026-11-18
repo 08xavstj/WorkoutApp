@@ -586,10 +586,6 @@ nonisolated final class DemoHealth: Sendable {
         return nil
     }
 
-    func overnightRespiratoryRate(forNightEnding day: Date) -> Double? {
-        dayValue(.respiratoryRate, daysAgo(of: day))
-    }
-
     // MARK: Food
 
     /// Meals for a day: breakfast, lunch, a snack and dinner, ~2,450 kcal and

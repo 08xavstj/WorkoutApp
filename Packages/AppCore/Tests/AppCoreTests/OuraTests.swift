@@ -30,7 +30,9 @@ struct OuraTests {
           "average_heart_rate": 55.5,
           "lowest_heart_rate": 48,
           "average_breath": 14.25,
-          "heart_rate": {"interval": 300, "items": [null, 50], "timestamp": "2026-11-09T23:00:00.000+00:00"}
+          "heart_rate": {"interval": 300, "items": [null, 50], "timestamp": "2026-11-09T23:00:00.000+00:00"},
+          "readiness": {"score": 81, "temperature_deviation": -0.2, "temperature_trend_deviation": 0.1, "contributors": {"hrv_balance": 75}},
+          "low_battery_alert": true
         },
         {
           "id": "a2",
@@ -88,6 +90,31 @@ struct OuraTests {
         #expect(rmssd == [morning: 54])
     }
 
+    @Test func nightlySleepingHeartRateAndBreathingUseTheMainSleep() throws {
+        let data = try page().data
+        let morning = calendar.date(from: DateComponents(year: 2026, month: 11, day: 10))!
+        // The average while asleep, not the lowest: the same quantity as the watch's sleeping heart rate.
+        #expect(Oura.nightlySleepingHeartRate(data, calendar: calendar) == [morning: 55.5])
+        #expect(Oura.nightlyBreathingRate(data, calendar: calendar) == [morning: 14.25])
+    }
+
+    @Test func nightlyLeavesOutMissingAndZeroValues() {
+        let start = Date(timeIntervalSince1970: 1_794_265_200)
+        let zero = Oura.SleepPeriod(id: "z", day: "2026-11-10", bedtimeStart: start, bedtimeEnd: start.addingTimeInterval(8 * 3600),
+                                    averageHRV: 0, averageHeartRate: nil)
+        #expect(Oura.nightlyRMSSD([zero], calendar: calendar).isEmpty)
+        #expect(Oura.nightlySleepingHeartRate([zero], calendar: calendar).isEmpty)
+    }
+
+    @Test func decodesTemperatureAndBatteryFromTheSleepPeriod() throws {
+        let night = try page().data[0]
+        // Only the temperature change is read from the sleep's readiness object, never its score.
+        #expect(night.temperatureDeviation == -0.2)
+        #expect(night.lowBatteryAlert == true)
+        #expect(night.averageHeartRate == 55.5)
+        #expect(try page().data[1].temperatureDeviation == nil)
+    }
+
     @Test func samplesInAWindowSkipNaps() throws {
         let data = try page().data
         let from = Date(timeIntervalSince1970: 1_794_265_200 - 3600)
@@ -98,26 +125,29 @@ struct OuraTests {
     @Test func cachedPeriodsRoundTrip() throws {
         let night = try page().data[0]
         let data = try JSONEncoder().encode(night)
-        #expect(try JSONDecoder().decode(Oura.SleepPeriod.self, from: data) == night)
+        let decoded = try JSONDecoder().decode(Oura.SleepPeriod.self, from: data)
+        #expect(decoded == night)
+        // The cache keeps the temperature change at the top level.
+        #expect(decoded.temperatureDeviation == -0.2)
     }
 
-    @Test func decodesReadinessAndDailySleep() throws {
-        let readiness = try JSONDecoder().decode(Oura.Page<Oura.DailyReadiness>.self, from: Data("""
-        {"data": [{"id": "r", "day": "2026-11-10", "score": 81, "temperature_deviation": -0.2,
-                   "contributors": {"hrv_balance": 75}, "timestamp": "2026-11-10T00:00:00+00:00"}], "next_token": null}
-        """.utf8))
-        #expect(readiness.data.first == Oura.DailyReadiness(day: "2026-11-10", score: 81, temperatureDeviation: -0.2))
-        #expect(readiness.nextToken == nil)
-        let sleep = try JSONDecoder().decode(Oura.Page<Oura.DailySleep>.self, from: Data("""
-        {"data": [{"id": "s", "day": "2026-11-10", "score": 77, "contributors": {}}]}
-        """.utf8))
-        #expect(sleep.data.first?.score == 77)
+    @Test func aCacheFromBeforeTheScoresWereDroppedStillDecodes() throws {
+        // An older cache also held `readiness` and `dailySleep` lists: they are ignored.
+        struct Contents: Decodable { var periods: [Oura.SleepPeriod] }
+        let night = try page().data[0]
+        let periods = String(decoding: try JSONEncoder().encode([night]), as: UTF8.self)
+        let old = """
+        {"periods": \(periods), "readiness": [{"day": "2026-11-10", "score": 81}], "dailySleep": [{"day": "2026-11-10", "score": 77}]}
+        """
+        #expect(try JSONDecoder().decode(Contents.self, from: Data(old.utf8)).periods == [night])
     }
 
     // MARK: Sign-in
 
     @Test func authorizationURLCarriesTheRequest() throws {
-        let url = try #require(Oura.authorizationURL(clientID: "id 1", redirectURI: Oura.defaultRedirectURI, state: "s1"))
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        let url = try #require(Oura.authorizationURL(clientID: "id 1", redirectURI: Oura.defaultRedirectURI, state: "s1",
+                                                     codeVerifier: verifier))
         let items = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
         #expect(url.host() == "cloud.ouraring.com")
@@ -126,6 +156,50 @@ struct OuraTests {
         #expect(value("redirect_uri") == "workoutapp://oura")
         #expect(value("scope") == Oura.scopes)
         #expect(value("state") == "s1")
+        // PKCE: only the hash goes out with the sign-in, never the verifier.
+        #expect(value("code_challenge") == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
+        #expect(value("code_challenge_method") == "S256")
+        #expect(!url.absoluteString.contains(verifier))
+    }
+
+    @Test func scopesAreOnlyWhatIsUsed() {
+        #expect(Oura.scopes == "daily")
+        #expect(Oura.userAgent == "Tensile/1.0")
+    }
+
+    @Test func anOldOrMissingScopeAsksToReconnectOnce() {
+        // Tokens from before the scopes were trimmed: no scope recorded.
+        #expect(Oura.needsReconnect(grantedScope: nil))
+        // A permission the app needs is missing.
+        #expect(Oura.needsReconnect(grantedScope: ""))
+        #expect(Oura.needsReconnect(grantedScope: "personal heartrate"))
+        #expect(!Oura.needsReconnect(grantedScope: "daily"))
+        #expect(!Oura.needsReconnect(grantedScope: "DAILY "))
+        // Extras Oura still reports after a fresh sign-in don't ask again.
+        #expect(!Oura.needsReconnect(grantedScope: "personal daily heartrate"))
+    }
+
+    @Test func tokensRecordTheScope() throws {
+        let response = try JSONDecoder().decode(Oura.TokenResponse.self, from: Data("""
+        {"access_token": "a1", "refresh_token": "r1", "expires_in": 86400}
+        """.utf8))
+        // Oura didn't say: the scope asked for is kept.
+        #expect(response.tokens(requestedScope: "daily").scope == "daily")
+        // A refresh keeps the scope of the tokens it replaces.
+        let old = Oura.Tokens(accessToken: "a0", refreshToken: "r0", expiresAt: nil, scope: "personal daily heartrate")
+        #expect(response.tokens(keeping: old).scope == "personal daily heartrate")
+        // Oura's own answer wins.
+        let granted = try JSONDecoder().decode(Oura.TokenResponse.self, from: Data("""
+        {"access_token": "a1", "scope": "daily"}
+        """.utf8))
+        #expect(granted.tokens(keeping: old).scope == "daily")
+    }
+
+    @Test func tokensSavedBeforeTheScopeWasRecordedStillDecode() throws {
+        let saved = Data(#"{"accessToken": "a", "refreshToken": "r"}"#.utf8)
+        let tokens = try JSONDecoder().decode(Oura.Tokens.self, from: saved)
+        #expect(tokens.scope == nil)
+        #expect(Oura.needsReconnect(grantedScope: tokens.scope))
     }
 
     @Test func callbackChecksTheState() throws {
@@ -139,9 +213,10 @@ struct OuraTests {
     }
 
     @Test func tokenBodyIsFormEncoded() {
-        let body = String(decoding: Oura.tokenRequestBody(.code("a/b+c", redirectURI: "workoutapp://oura"),
+        let body = String(decoding: Oura.tokenRequestBody(.code("a/b+c", redirectURI: "workoutapp://oura", codeVerifier: "v-1_2.3~4"),
                                                           clientID: "id", clientSecret: "s&t"), as: UTF8.self)
-        #expect(body == "grant_type=authorization_code&code=a%2Fb%2Bc&redirect_uri=workoutapp%3A%2F%2Foura&client_id=id&client_secret=s%26t")
+        // The verifier goes with the code; Oura still needs the client secret alongside it.
+        #expect(body == "grant_type=authorization_code&code=a%2Fb%2Bc&redirect_uri=workoutapp%3A%2F%2Foura&code_verifier=v-1_2.3~4&client_id=id&client_secret=s%26t")
         let refresh = String(decoding: Oura.tokenRequestBody(.refresh("r1"), clientID: "id", clientSecret: "s"), as: UTF8.self)
         #expect(refresh == "grant_type=refresh_token&refresh_token=r1&client_id=id&client_secret=s")
     }

@@ -174,12 +174,13 @@ final class CheckInStore {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         let nights = (try? await health.sleepHistory(nights: 90)) ?? []
-        // The ring's and the watch's nights on one scale, as Recovery uses them
-        // (`DailyVitals.mergingOvernightRMSSD`), so patterns and recovery agree.
-        let rmssd = DailyVitals.mergingOvernightRMSSD(preferred: DailyMetricsModel.ouraRMSSD(), other: await health.nightlyRMSSD(nights: nights),
-                                                      today: today, calendar: calendar).nights
-            .merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
-        let vitals = DailyVitals.merging((try? await health.nightlyVitals(days: 90, endingOn: today)) ?? [], manualHRV: rmssd, manualOnlyHRV: true)
+        // The Oura ring's nights or the watch's, never both, as Recovery uses them
+        // (`OneDeviceBaseline`), so patterns and recovery agree.
+        let hrvChoice = await health.overnightRMSSD(nights: nights, today: today)
+        let rmssd = hrvChoice.nights.merging(manualHRV.filter { $0.value > 0 }) { _, typed in typed }
+        let healthVitals = (try? await health.nightlyVitals(days: 90, endingOn: today)) ?? []
+        let vitals = DailyVitals.merging(hrvChoice.device == .ring && hrvChoice.isEstablished ? DailyVitals.removingHRV(healthVitals) : healthVitals,
+                                         manualHRV: rmssd, manualOnlyHRV: true, calendar: calendar)
         var byMorning: [String: DailyVitals] = [:]
         for vital in vitals { byMorning[key(vital.date)] = vital }
         var waterByDay: [String: Double] = [:]
