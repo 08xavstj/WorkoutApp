@@ -278,7 +278,7 @@ private struct SetCard: View {
     }
 
     private var repsCrownTop: Double {
-        set.isHold ? Double(LoadStepper.maximumHoldSeconds / LoadStepper.holdStepSeconds) : Double(LoadStepper.repRange.upperBound)
+        self.set.isHold ? Double(LoadStepper.maximumHoldSeconds / LoadStepper.holdStepSeconds) : Double(LoadStepper.repRange.upperBound)
     }
 
     // MARK: Guide line
