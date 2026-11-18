@@ -95,4 +95,13 @@ struct WeighInNudgeTests {
         #expect(WeighInNudge.detail(lastWeighIn: now.addingTimeInterval(-4 * 86_400), now: now).hasPrefix("Last weigh-in 4 days ago."))
         #expect(WeighInNudge.detail(lastWeighIn: nil, now: now).hasPrefix("No weigh-in"))
     }
+
+    /// Evidence audit M5: Madigan 2015 found no difference between daily and
+    /// weekly weighing, so the nudge asks for a few mornings, not every one.
+    @Test func asksForAFewMorningsNotDaily() {
+        #expect(WeighInNudge.title == "Weigh in a few mornings a week")
+        let detail = WeighInNudge.detail(lastWeighIn: nil, now: now)
+        #expect(detail.contains("daily and weekly weighing worked about the same (Madigan 2015)"))
+        #expect(!detail.contains("daily beat weekly"))
+    }
 }

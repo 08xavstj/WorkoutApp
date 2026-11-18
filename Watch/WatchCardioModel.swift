@@ -94,8 +94,8 @@ final class WatchCardioModel: NSObject {
     }
 
     /// The zones to use now: the phone's choice as last received; else Apple
-    /// Health's own zones (watchOS 27); else percent of a maximum heart rate
-    /// estimated from age (`HeartRateZoneScheme.ageEstimate`).
+    /// Health's own zones (watchOS 27); else Tensile's zones from a maximum
+    /// heart rate estimated from age (`HeartRateZoneScheme.ageEstimate`).
     func resolveZones() async -> WatchZoneStore.Choice {
         if let scheme = WatchZoneStore.fromPhone {
             return WatchZoneStore.Choice(scheme: scheme, source: .phone)

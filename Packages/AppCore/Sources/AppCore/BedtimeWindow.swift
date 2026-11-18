@@ -39,6 +39,31 @@ public enum BedtimeWindow {
     public static let assumedSleepEfficiency = 0.9
     /// Most sleep debt repaid in one night, minutes (Kitamura et al., Sci Rep 2016).
     public static let maxRepaymentMinutes = 60
+    /// Most repaid in one night when sleep efficiency over the last two weeks
+    /// is under `lowEfficiency` (evidence audit, should-change 9): more time
+    /// in bed than you can sleep is what sleep restriction takes away in
+    /// insomnia treatment (Furukawa et al., JAMA Psychiatry 2024, component
+    /// network meta-analysis of CBT for insomnia; record checked on PubMed,
+    /// the effect sizes were not re-verified). Weak evidence for this use;
+    /// the 30 minutes is the app's choice.
+    public static let lowEfficiencyMaxRepaymentMinutes = 30
+    /// Sleep efficiency under this counts as low: 85% is the National Sleep
+    /// Foundation's mark of good sleep quality (Ohayon et al., Sleep Health 2017).
+    public static let lowEfficiency = 0.85
+    /// Nights needed before efficiency is judged (app's choice).
+    public static let minimumEfficiencyNights = 7
+
+    /// Average sleep efficiency over recent nights: hours asleep over the
+    /// span from falling asleep to the last waking, per night. That span
+    /// leaves out the time it takes to fall asleep, so it reads a little high
+    /// and only a clearly broken night pulls it under 85%. Nil with fewer
+    /// than `minimumEfficiencyNights` usable nights.
+    public static func averageEfficiency(_ nights: [(asleepHours: Double, spanHours: Double)]) -> Double? {
+        let usable = nights.filter { $0.spanHours >= 1 && $0.asleepHours > 0 }
+        guard usable.count >= minimumEfficiencyNights else { return nil }
+        let shares = usable.map { min(1, $0.asleepHours / $0.spanHours) }
+        return shares.reduce(0, +) / Double(shares.count)
+    }
     /// Time to get up and get going before an early planned session, minutes
     /// (an app choice, not a study).
     public static let preSessionMinutes = 60
@@ -134,6 +159,8 @@ public enum BedtimeWindow {
     ///   - usualWakeMinutes: when you usually get up, minutes after midnight (`usualWakeMinutes(_:)`).
     ///   - regularity: your Sleep Regularity Index, 0-100, if known.
     ///   - plannedSessionStart: tomorrow's planned session, if any.
+    ///   - sleepEfficiency: the last two weeks' average (`averageEfficiency`);
+    ///     under `lowEfficiency` the repayment is capped at `lowEfficiencyMaxRepaymentMinutes`.
     ///   - now: when the window is being worked out.
     /// - Returns: nil without a wake time.
     public static func compute(
@@ -142,6 +169,7 @@ public enum BedtimeWindow {
         usualWakeMinutes: Int?,
         regularity: Int?,
         plannedSessionStart: Date? = nil,
+        sleepEfficiency: Double? = nil,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> Result? {
@@ -162,7 +190,9 @@ public enum BedtimeWindow {
                 wakeForSession = true
             }
         }
-        let repayment = min(maxRepaymentMinutes, max(0, sleepDebt?.extraMinutesPerNight ?? 0))
+        let lowEfficiencyNow = sleepEfficiency.map { $0 < lowEfficiency } ?? false
+        let cap = lowEfficiencyNow ? lowEfficiencyMaxRepaymentMinutes : maxRepaymentMinutes
+        let repayment = min(cap, max(0, sleepDebt?.extraMinutesPerNight ?? 0))
         // Time in bed for the need, not the need itself: about 90% of time in bed is sleep.
         let timeInBed = need / assumedSleepEfficiency
         let exactStart = wake.addingTimeInterval(-(timeInBed * 3600 + Double(repayment) * 60))

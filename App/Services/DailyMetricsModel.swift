@@ -443,7 +443,7 @@ final class DailyMetricsModel {
         if let flexibleWeek {
             return TrainingDayPlanner.flexibleGuidance(
                 week: flexibleWeek, nextFocus: flexibleNextFocus, past: past,
-                lowRecovery: recovery.score < 34 || trainEasyToday,
+                lowRecovery: recovery.score < 34 || trainEasyToday, lowFromHRVOnly: recovery.score >= 34 && trainEasyToday,
                 usualTrainingStrain: usualTrainingStrain, calendar: calendar
             )
         }
@@ -451,6 +451,8 @@ final class DailyMetricsModel {
         if let adaptiveWeek, calendar.isDate(adaptiveWeek.day, inSameDayAs: today) {
             return TrainingDayPlanner.adaptiveGuidance(
                 week: adaptiveWeek, past: past, lowRecovery: recovery.score < 34 || trainEasyToday,
+                // HRV alone eases a lift but never makes it a rest day (evidence audit, should-change 13).
+                lowFromHRVOnly: recovery.score >= 34 && trainEasyToday,
                 usualTrainingStrain: usualTrainingStrain, calendar: calendar
             )
         }
@@ -458,6 +460,7 @@ final class DailyMetricsModel {
             plannedToday: plannedFocusByDay[today],
             past: past,
             lowRecovery: recovery.score < 34 || trainEasyToday,
+            lowFromHRVOnly: recovery.score >= 34 && trainEasyToday,
             usualTrainingStrain: usualTrainingStrain,
             calendar: calendar
         )
@@ -582,7 +585,12 @@ final class DailyMetricsModel {
             bedtimeWindow = BedtimeWindow.compute(
                 sleepNeedHours: settings.sleepNeedHours, sleepDebt: sleepDebt,
                 usualWakeMinutes: BedtimeWindow.usualWakeMinutes(nights.suffix(14).map(\.wake)),
-                regularity: sleepConsistency, plannedSessionStart: plannedSessionTomorrow, now: now
+                regularity: sleepConsistency, plannedSessionStart: plannedSessionTomorrow,
+                // Low efficiency caps tonight's repayment at 30 minutes (evidence audit, should-change 9).
+                sleepEfficiency: BedtimeWindow.averageEfficiency(nights.suffix(14).map {
+                    (asleepHours: $0.hoursAsleep, spanHours: $0.wake.timeIntervalSince($0.bedtime) / 3600)
+                }),
+                now: now
             )
             // The insomnia path (`SleepWindowStore`): reviews due weeks, stops on an apnoea
             // flag or a shift pattern, and while it runs the bed-by window is its sleep window.

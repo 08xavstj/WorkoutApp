@@ -80,10 +80,12 @@ struct WellbeingTests {
         #expect(Hydration.target(sex: .male, exerciseMinutes: 0, feelsLikeC: 20, includesWaterInFood: true).liters == 3.7)
     }
 
-    @Test func behindOnWaterInTheAfternoon() {
+    /// No "Behind" any more (evidence audit, should-change 3): the target is a
+    /// median intake and the log misses other drinks, so only "Very high" is flagged.
+    @Test func waterIsLoggedNotJudgedExceptVeryHigh() {
         let target = Hydration.target(sex: .female, exerciseMinutes: 0, feelsLikeC: nil)
-        #expect(Hydration.assess(drank: 0.5, target: target, hour: 15).status == .low)
-        #expect(Hydration.assess(drank: 2.0, target: target, hour: 15).status == .onTrack)
+        #expect(Hydration.assess(drank: 0.5, target: target, hour: 15).status == .logged)
+        #expect(Hydration.assess(drank: 2.0, target: target, hour: 15).status == .logged)
         #expect(Hydration.assess(drank: 7, target: target, hour: 15).status == .high)
     }
 

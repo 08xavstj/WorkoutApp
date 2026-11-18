@@ -28,7 +28,7 @@ struct NutritionTests {
         let spread = try #require(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: lifter))
         #expect(spread.grams == 32)
         #expect(spread.meals == 4)
-        // Three logged meals: the dose rises so the day still reaches 1.6 g/kg (0.53 g/kg, under the 0.55 ceiling).
+        // Three logged meals: the dose rises so the day still reaches 1.6 g/kg (0.53 g/kg).
         let three = try #require(NutritionTargets.proteinPerMeal(bodyMassKg: 80, goals: lifter, loggedMeals: 3))
         #expect(three.meals == 3)
         #expect(three.grams == 43)

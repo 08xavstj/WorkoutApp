@@ -9,7 +9,7 @@ struct HeartZonesSettingsRow: View {
         NavigationLink {
             HeartZonesSettingsView()
         } label: {
-            LabeledContent("Heart-rate zones", value: (HeartRateZoneScheme.Kind(rawValue: kindRaw) ?? .reserve).title)
+            LabeledContent("Heart-rate zones", value: (HeartRateZoneScheme.Kind(rawValue: kindRaw)?.inUse ?? .reserve).title)
         }
         .accessibilityIdentifier("settings-heart-zones")
     }
@@ -17,8 +17,10 @@ struct HeartZonesSettingsRow: View {
 
 /// Which heart-rate zones the app shows in workouts and sends to the Watch's
 /// cardio mode (`HeartRateZoneScheme`; docs/research/workout-zones-2026-11.md).
-/// Four options, each with one sentence and the bpm ranges it gives. Day
-/// strain stays on heart-rate reserve whatever is picked, and the page says so.
+/// Three options (`Kind.choices`), each with one sentence and the bpm ranges
+/// it gives; percent of maximum was dropped by the evidence audit (17 Nov
+/// 2026) and a saved choice of it shows as Tensile's. Day strain stays on
+/// heart-rate reserve whatever is picked, and the page says so.
 struct HeartZonesSettingsView: View {
     @Environment(UserSettings.self) private var settings
     @Environment(DailyMetricsModel.self) private var metrics
@@ -32,7 +34,7 @@ struct HeartZonesSettingsView: View {
     @State private var revision = 0
     @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 70
 
-    private var kind: HeartRateZoneScheme.Kind { HeartRateZoneScheme.Kind(rawValue: kindRaw) ?? .reserve }
+    private var kind: HeartRateZoneScheme.Kind { HeartRateZoneScheme.Kind(rawValue: kindRaw)?.inUse ?? .reserve }
 
     /// Today's profile, or the settings profile before the first refresh.
     private var profile: HeartRateProfile {
@@ -50,7 +52,7 @@ struct HeartZonesSettingsView: View {
         let scheme = resolution.scheme
         Form {
             Section {
-                ForEach(HeartRateZoneScheme.Kind.allCases) { option in
+                ForEach(HeartRateZoneScheme.Kind.choices) { option in
                     ZoneOptionRow(kind: option, isSelected: option == kind, note: note(for: option)) {
                         select(option)
                     }
@@ -196,7 +198,7 @@ struct HeartZonesSettingsView: View {
     private static let evidence = [
         "No percentage fits everyone. In 100 adults the first threshold sat anywhere from 60% to 90% of maximum heart rate (Iannetta 2020). Zones are labels for effort, not measurements.",
         "Tensile: five steps from 50% to 100% of heart-rate reserve (Karvonen 1957), the scale the strain formula uses (Banister 1991).",
-        "Percent of max: five steps from 50% to 100% of maximum (Edwards 1993). The same heart rate lands about a zone higher than on Tensile's scale.",
+        "Percent of maximum is no longer offered: the same heart rate landed about a zone higher than on Tensile's scale, and a second scale didn't fit anyone's thresholds better.",
         "Apple Health: Apple doesn't publish the percentages behind its zones.",
         "Easy: moderate intensity by the ACSM, 40–59% of reserve (Garber 2011). The talk test tracks the first threshold (Reed & Pipe 2014).",
         "Easy cardio is not proven better than harder work. Mostly easy with some hard training raised VO₂peak a little more than other mixes over under 12 weeks, and race times no more (Oliveira 2024).",

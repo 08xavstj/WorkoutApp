@@ -269,9 +269,14 @@ struct WeeklyPlanView: View {
         return "\(length), on " + names.joined(separator: " and ") + "."
     }
 
+    /// Set once a plan is saved with the two-session default in place (`EasyCardio.startingSessions`).
+    static let cardioChoiceSavedKey = "easyCardioChoiceSaved"
+
     private var cardioFooter: String {
         // Schumann et al., Sports Med 2022 (43 studies); Lundberg et al., Sports Med 2022; Bull et al., Br J Sports Med 2020 (WHO).
-        var text = "Rest days first, not the day before a leg session"
+        // Evidence audit M2: two sessions are the default for every goal.
+        var text = "Two easy sessions add about \(EasyCardio.defaultSessionsPerWeek * EasyCardio.standardMinutes) of the 150 weekly aerobic minutes and don't cost muscle (Schumann 2022). "
+        text += "Rest days first, not the day before a leg session"
         if goals?.focuses.contains(.strength) == true {
             text += ", and never on a heavy leg day for your strength goal"
         }
@@ -279,7 +284,7 @@ struct WeeklyPlanView: View {
         if CardioPlanner.recommendedKind(goals: goals) == .bike {
             text += ", so the bike suits your goal"
         }
-        text += ". It counts toward the WHO's 150-300 active minutes a week (Bull 2020). On a low-recovery day it shrinks to 15 minutes."
+        text += ". It counts toward the WHO's 150-300 aerobic minutes a week (Bull 2020). On a low-recovery day it shrinks to 15 minutes."
         return text
     }
 
@@ -336,7 +341,11 @@ struct WeeklyPlanView: View {
         // Easy cardio carries over from this week's or last week's plan; the type defaults to the goal's.
         let template = store.plan(for: weekStart).map(BusyWeek.restored) ?? store.lastPlan(before: weekStart)
         cardioKind = template?.cardio?.kind ?? CardioPlanner.recommendedKind(goals: goals)
-        cardioCount = template?.cardio?.sessionsPerWeek ?? 0
+        // New plans start with two easy sessions for every goal (`EasyCardio.defaultSessionsPerWeek`,
+        // evidence audit M2); a saved plan keeps its count, and a 0 chosen since then carries over.
+        cardioCount = EasyCardio.startingSessions(thisWeek: store.plan(for: weekStart).map(BusyWeek.restored),
+                                                  lastPlan: store.lastPlan(before: weekStart),
+                                                  choiceSaved: UserDefaults.standard.bool(forKey: Self.cardioChoiceSavedKey))
         // Once taken, the interval session stays until it's switched off.
         hardChoice = template?.cardio?.hard
     }
@@ -396,6 +405,8 @@ struct WeeklyPlanView: View {
         plan.mode = mode
         plan.sessionsPerWeek = mode == .flexible ? days.count : nil
         plan.cardio = cardioPlan
+        // From now on a plan without cardio is a choice, not the old default (`EasyCardio.startingSessions`).
+        UserDefaults.standard.set(true, forKey: Self.cardioChoiceSavedKey)
         // The first confirmed plan starts a training block in the goal's style (`WeeklyPlanStore.save`).
         store.trainingStyle = style
         store.save(plan)

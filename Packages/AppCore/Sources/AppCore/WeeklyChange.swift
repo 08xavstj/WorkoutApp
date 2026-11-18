@@ -150,7 +150,7 @@ extension WeeklyChange {
                             target: max(0, limit))
     }
 
-    public static let activeMinutes = WeeklyChange(kind: .activeMinutes, title: "\(HealthFloors.activeMinutes) active minutes",
+    public static let activeMinutes = WeeklyChange(kind: .activeMinutes, title: "\(HealthFloors.activeMinutes) cardio minutes",
                                                    target: Double(HealthFloors.activeMinutes))
 
     public static let strengthDays = WeeklyChange(kind: .strengthDays, title: "Strength training on \(HealthFloors.strengthDays) days",
@@ -571,7 +571,7 @@ public enum WeeklyChangeReview {
         let vigorous = days.compactMap(\.vigorousMinutes).reduce(0, +)
         let total = IntensityMinutes.Result(moderate: moderate, vigorous: vigorous).total
         let target = Int(change.target ?? Double(HealthFloors.activeMinutes))
-        return Report(change: change, kept: "\(total) active minutes", wasKept: total >= target,
+        return Report(change: change, kept: "\(total) cardio minutes", wasKept: total >= target,
                       moved: "\(moderate) moderate and \(vigorous) vigorous, which count double.", verdict: .numbersOnly)
     }
 

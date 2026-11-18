@@ -26,6 +26,7 @@ extension HeartRateZoneScheme {
     }
 
     /// Builds the chosen scheme, falling back to Tensile's when it can't be built.
+    /// A retired percent-of-max choice counts as a choice of Tensile's (`Kind.inUse`), not a fallback.
     /// - Parameters:
     ///   - appleFloor: zone 1's lower limit from Apple Health, if it has one.
     ///   - appleBoundaries: where Health's zones 2-5 start; nil when Health gave none.
@@ -37,12 +38,12 @@ extension HeartRateZoneScheme {
         appleBoundaries: [Double]? = nil,
         customStarts: [Double]? = nil
     ) -> Resolution {
+        let kind = kind.inUse
         let fallback = tensile(profile: profile)
         // One easy band whatever the zones: it is defined on reserve, not on a zone number.
         let easy = fallback.easyBand
         let scheme: HeartRateZoneScheme? = switch kind {
-        case .reserve: fallback
-        case .percentOfMax: percentOfMax(maximum: profile.maxHeartRate, resting: profile.restingHeartRate)
+        case .reserve, .percentOfMax: fallback
         case .appleHealth: appleBoundaries.flatMap { appleHealth(floor: appleFloor, boundaries: $0, easyBand: easy) }
         case .custom: customStarts.flatMap { custom(starts: $0, easyBand: easy) }
         }

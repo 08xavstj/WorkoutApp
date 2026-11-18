@@ -125,7 +125,10 @@ struct ThisWeekCard: View {
                     PlanButton(title: last.isFlexible ? "Same as last week" : "Same days as last week", filled: false) {
                         store.save(WeeklyPlan(weekStart: thisWeek,
                                               plannedDays: store.newWeekDays(from: last.plannedDays, weekStart: thisWeek, sessions: sessions),
-                                              mode: last.mode, sessionsPerWeek: last.sessionsPerWeek, cardio: last.cardio))
+                                              mode: last.mode, sessionsPerWeek: last.sessionsPerWeek,
+                                              // Two easy sessions unless none was chosen (evidence audit M2).
+                                              cardio: EasyCardio.carriedOver(last.cardio, choiceSaved: UserDefaults.standard.bool(forKey: WeeklyPlanView.cardioChoiceSavedKey),
+                                                                             kind: CardioPlanner.recommendedKind(goals: settings.goalsSet ? settings.goals : nil))))
                     }
                 }
                 PlanButton(title: "Plan your week", filled: true) { router.showWeeklyPlan = true }
@@ -561,8 +564,10 @@ private struct ThisWeekDeloadLine: View {
     }
 
     private var info: Info? {
-        if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.isDeload {
-            return Info(chip: "Planned deload this week", line: week.note, color: Theme.oxygen)
+        if let week = plans.projectedBlockWeek(hrvBelowNormal: metrics.trainEasyToday), week.isDeload || week.offersEasier {
+            // The last week carries on unless an easier week is taken (evidence audit, should-change 4).
+            let chip = week.offersEasier ? (week.isDeload ? "Easier week" : "Last week of the block") : "Planned deload this week"
+            return Info(chip: chip, line: week.note, color: Theme.oxygen)
         }
         if let advice = muscles.deload {
             return Info(

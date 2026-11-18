@@ -84,7 +84,8 @@ struct WeeklyChangeTests {
         #expect(WeeklyChange.drinksLimit(1).title == "Up to 1 drink this week")
         #expect(WeeklyChange.drinksLimit(0).title == "No drinks this week")
         #expect(WeeklyChange.stepsAverage().title == "Average 7,000 steps a day")
-        #expect(WeeklyChange.activeMinutes.title == "150 active minutes")
+        // "Cardio", not "active": the minutes leave lifting out (evidence audit M1).
+        #expect(WeeklyChange.activeMinutes.title == "150 cardio minutes")
         #expect(WeeklyChange.strengthDays.title == "Strength training on 2 days")
     }
 
@@ -299,7 +300,7 @@ struct WeeklyChangeTests {
             day.strengthSession = [0, 2, 3, 5].contains((offset + 28) % 7)
         }
         let reports = WeeklyChangeReview.report(changes: [.activeMinutes, .strengthDays], week: data.week, earlier: data.earlier)
-        #expect(reports[0].kept == "145 active minutes") // 105 + 2 x 20
+        #expect(reports[0].kept == "145 cardio minutes") // 105 + 2 x 20; renamed by evidence audit M1
         #expect(reports[0].wasKept == false)
         #expect(reports[0].moved == "105 moderate and 20 vigorous, which count double.")
         #expect(reports[1].kept == "4 strength days")

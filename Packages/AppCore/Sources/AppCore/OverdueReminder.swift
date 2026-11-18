@@ -1,7 +1,7 @@
 import Foundation
 
 /// When to remind about a measurement that is due (a monthly waist, a
-/// 6-monthly grip test, a 3-6-monthly home blood pressure week).
+/// 6-monthly grip test, a 3- or 12-monthly home blood pressure week).
 ///
 /// Reminders were rebuilt on every launch, and an overdue one always moved to
 /// "tomorrow morning", so an overdue measurement nagged every day. Now: one

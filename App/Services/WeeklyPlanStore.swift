@@ -327,6 +327,20 @@ final class WeeklyPlanStore {
         write()
     }
 
+    /// Makes the block's last week the easier week, or back to carrying on
+    /// (`TrainingBlock.settingEasier`; evidence audit, should-change 4). This
+    /// week's set targets are worked out again.
+    func setEasierWeek(_ easier: Bool, now: Date = .now) {
+        reloadIfUnavailable()
+        guard let block = saved.block else { return }
+        let running = blockRunning(block, now: now)
+        let updated = running.settingEasier(easier)
+        guard updated != block else { return }
+        saved.block = updated
+        saved.volume?.removeAll { Calendar.current.isDate($0.weekStart, inSameDayAs: updated.weekStart) }
+        write()
+    }
+
     private func write() {
         file.saveLogged(saved, canSave: canSave)
     }

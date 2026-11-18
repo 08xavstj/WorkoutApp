@@ -129,11 +129,14 @@ private struct ScoreRings: View {
         )
     }
 
-    /// "Rest day · up to 25%" on the plan's rest days, else "Range 50–70%".
+    /// "Rest day · keep it easy" on the plan's rest days, else "Range 50–70%".
+    /// Not "up to 25%": no guideline caps light or moderate movement, and Lee
+    /// 2022 found no harm at 2-4 times the activity guideline (evidence audit,
+    /// should-change 2). Hard training still waits for a session day.
     private var strainSubtitle: String {
         guard let target = metrics.targetStrain else { return "Day strain" }
         if metrics.dayGuidance?.isRestDay == true {
-            return "Rest day · up to \(whole(target.upperBound))%"
+            return "Rest day · keep it easy"
         }
         return "Range \(strainRangeText(target))"
     }
