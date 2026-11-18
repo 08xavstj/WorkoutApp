@@ -202,6 +202,10 @@ targets:
       - path: Packages/AppCore/Sources/AppCore/LapTracker.swift
       - path: Packages/AppCore/Sources/AppCore/RestCues.swift
       - path: Packages/AppCore/Sources/AppCore/HeartRateSeries.swift
+      # Home's glance and plan card use the complications' own rules, so the
+      # two never disagree (Foundation only).
+      - path: Packages/AppCore/Sources/AppCore/Glances.swift
+      - path: WatchWidgets/PlanFace.swift
       - path: SharedCardio
     dependencies:
       - sdk: HealthKit.framework

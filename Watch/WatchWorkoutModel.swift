@@ -320,6 +320,12 @@ final class WatchWorkoutModel: NSObject {
         pausedSeconds = 0
         self.summary = summary
         if let snapshot { finishedSession = snapshot }
+        let sets = max(setsCompletedHere, finishedSession?.completedSets ?? 0)
+        WatchHistoryStore.save(WatchActivityRecord(
+            kind: .lift, title: finishedSession?.name ?? "Workout", start: startedAt ?? end, end: end,
+            minutes: summary.minutes, detail: sets == 1 ? "1 set" : "\(sets) sets",
+            averageBpm: averageHeartRate.map { Int($0.rounded()) }, maximumBpm: maximumHeartRate.map { Int($0.rounded()) },
+            activity: nil, saved: workout != nil))
         endedAt = end
         phase = .ended
         // Today's planned session is done: the "next session" complication moves on.
@@ -755,7 +761,7 @@ final class WatchWorkoutModel: NSObject {
     /// Get set: one light tap 10 s before the end (not while a cardio
     /// workout records, nor when the phone's settings turn the Watch's rest buzz off).
     private func restWarning() {
-        if snapshot?.restBuzz != false, !WatchCardioModel.shared.isActive {
+        if snapshot?.restBuzz != false, WatchPreferences.restWarning, !WatchCardioModel.shared.isActive {
             WKInterfaceDevice.current().play(.click)
         }
     }

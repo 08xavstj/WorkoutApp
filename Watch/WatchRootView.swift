@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Start screen → the lifting pages (`LiftPagesView`) → summary
+/// Home → the lifting pages (`LiftPagesView`) → summary
 /// (`LiftSummaryView`). Cardio runs its own pages and summary.
 struct WatchRootView: View {
     @Environment(WatchWorkoutModel.self) private var model
@@ -16,7 +16,7 @@ struct WatchRootView: View {
         } else {
             switch model.phase {
             case .idle, .starting:
-                WatchStartView()
+                HomeView()
             case .running, .paused:
                 LiftPagesView()
             case .ended:

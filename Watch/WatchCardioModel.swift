@@ -32,7 +32,7 @@ final class WatchCardioModel: NSObject {
     /// Metadata on the saved workout: the `CardioActivity` (the phone's
     /// `HealthKitClient.watchCardioMetadataKey` is the same string).
     static let metadataKey = "TensileCardioActivity"
-    /// UserDefaults keys the start list keeps (`WatchCardioStartView`'s `@AppStorage`).
+    /// UserDefaults keys the activity list keeps (`ActivityPickerView`'s `@AppStorage`).
     static let lastActivityKey = "cardioLastActivity"
     static let targetKey = "cardioTarget"
 
@@ -366,7 +366,7 @@ final class WatchCardioModel: NSObject {
         let now = Date.now
         guard let lap = laps.markLap(at: now) else { return }
         addEvent(HKWorkoutEvent(type: .segment, dateInterval: DateInterval(start: lap.start, end: lap.end), metadata: nil))
-        WKInterfaceDevice.current().play(.navigationGenericManeuver)
+        if WatchPreferences.splitTaps { WKInterfaceDevice.current().play(.navigationGenericManeuver) }
         let miles = watchUsesMiles()
         var text = "\(activity.movement == .stationary ? "Period" : "Lap") \(lap.number) · \(workoutElapsedText(lap.seconds))"
         if activity.movement != .stationary, let pace = paceOrSpeedText(lap: lap, miles: miles) { text += " · \(pace)" }
@@ -380,7 +380,7 @@ final class WatchCardioModel: NSObject {
         for lap in finished {
             addEvent(HKWorkoutEvent(type: .lap, dateInterval: DateInterval(start: lap.start, end: lap.end), metadata: nil))
         }
-        WKInterfaceDevice.current().play(.navigationGenericManeuver)
+        if WatchPreferences.splitTaps { WKInterfaceDevice.current().play(.navigationGenericManeuver) }
         let miles = watchUsesMiles()
         var text = "\(miles ? "Mile" : "Km") \(lap.number) · \(workoutElapsedText(lap.seconds))"
         if let pace = paceOrSpeedText(lap: lap, miles: miles) { text += " · \(pace)" }
@@ -497,6 +497,11 @@ final class WatchCardioModel: NSObject {
             summary.hasRoute = true
         }
         self.summary = summary
+        WatchHistoryStore.save(WatchActivityRecord(
+            kind: .cardio, title: activity.title, start: startedAt ?? end, end: end,
+            minutes: max(1, Int(active / 60)), detail: Self.historyDetail(summary),
+            averageBpm: summary.averageBpm.map { Int($0.rounded()) }, maximumBpm: summary.maximumBpm.map { Int($0.rounded()) },
+            activity: activity.rawValue, saved: saved))
         pausedAt = nil
         pausedSeconds = 0
         isAutoPaused = false
@@ -535,6 +540,16 @@ final class WatchCardioModel: NSObject {
             summary = nil
         }
         if !isBusy { problem = nil }
+    }
+
+    /// "5.02 km · 5:12 /km", or the calories where there's no distance.
+    private static func historyDetail(_ summary: CardioSummary) -> String {
+        let miles = watchUsesMiles()
+        if summary.activity.movement != .stationary, let meters = summary.distanceMeters {
+            let distance = CardioSummary.distanceText(meters: meters, miles: miles)
+            return [distance, summary.paceOrSpeedText(miles: miles)].compactMap { $0 }.joined(separator: " · ")
+        }
+        return summary.activeKilocalories.map { "\(Int($0.rounded())) kcal" } ?? "Heart rate and zones"
     }
 
     /// Workouts shorter than this ask before they're saved (HIG Workouts; the
