@@ -55,7 +55,9 @@ nonisolated extension HealthKitClient {
                 let records = (samples ?? []).compactMap { sample -> HealthRecordsLabs.Record? in
                     guard let record = sample as? HKClinicalRecord, let resource = record.fhirResource,
                           resource.resourceType == .observation else { return nil }
-                    return HealthRecordsLabs.Record(identifier: resource.identifier, data: resource.data)
+                    // The FHIR id is unique only within its server, so the record is keyed by both (`Record.key`).
+                    return HealthRecordsLabs.Record(identifier: resource.identifier, sourceURL: resource.sourceURL?.absoluteString,
+                                                    data: resource.data)
                 }
                 continuation.resume(returning: records)
             }

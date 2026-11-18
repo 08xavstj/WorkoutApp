@@ -174,8 +174,12 @@ public enum LabMarkers {
         if let exact = all.first(where: { $0.aliases.contains(cleaned) || $0.name.lowercased() == cleaned }) {
             return exact
         }
+        // A name naming a lipoprotein ("Cholesterol, HDL", "Cholesterol in VLDL") is
+        // that fraction, never total cholesterol, however long the "cholesterol" alias is.
+        let namesFraction = ["hdl", "ldl", "vldl"].contains { containsWord(cleaned, $0) }
         // Longest alias contained in the name, so "LDL Cholesterol Calc" beats "cholesterol".
-        let candidates = all.flatMap { marker in marker.aliases.map { (marker, $0) } }
+        let candidates = all.filter { !(namesFraction && $0.id == "totalCholesterol") }
+            .flatMap { marker in marker.aliases.map { (marker, $0) } }
             .filter { alias in alias.1.count >= 3 && containsWord(cleaned, alias.1) }
         return candidates.max { $0.1.count < $1.1.count }?.0
     }

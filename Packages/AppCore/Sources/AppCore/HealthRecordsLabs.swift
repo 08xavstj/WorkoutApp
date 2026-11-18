@@ -13,8 +13,15 @@ import Foundation
 ///
 /// What it does:
 /// - Reads FHIR R4 (and DSTU2, which has the same fields used here)
-///   `Observation`s with a `valueQuantity`, dated by `effectiveDateTime`,
-///   then `effectivePeriod.start`, then `issued`.
+///   `Observation`s with a `valueQuantity`, or a `valueString` that holds a
+///   number (eGFR ">60", Lp(a) "<10"; the marker's first unit when it names
+///   none), dated by `effectiveDateTime`, then `effectivePeriod.start`, then
+///   `issued`.
+/// - A result reported only as a bound ("<10", ">60") is kept at the bound,
+///   with a note. One whose bound lies past the range on its open side (a
+///   "<x" above the high limit, a ">x" below the low limit) could be either
+///   side of that limit, so it is left out (`Skip.boundOutsideRange`); Labs
+///   has no field for bounds.
 /// - Recognises the test by its LOINC code (`loincToMarker`). A result with
 ///   LOINC codes none of which are known is left out (it's a different test:
 ///   urine glucose, non-HDL, a ratio...). Only a result with no LOINC code at
@@ -34,14 +41,25 @@ import Foundation
 public enum HealthRecordsLabs {
     /// One clinical record as HealthKit hands it over.
     public struct Record: Sendable, Equatable {
-        /// `HKFHIRResource.identifier`, stable across reads.
+        /// `HKFHIRResource.identifier`, stable across reads. Unique only
+        /// within its source: two clinics can both have an "obs-1".
         public var identifier: String
+        /// `HKFHIRResource.sourceURL`: the FHIR server it came from.
+        public var sourceURL: String?
         /// `HKFHIRResource.data`: the FHIR JSON.
         public var data: Data
 
-        public init(identifier: String, data: Data) {
+        public init(identifier: String, sourceURL: String? = nil, data: Data) {
             self.identifier = identifier
+            self.sourceURL = sourceURL
             self.data = data
+        }
+
+        /// The key a result is remembered by (`Imported.recordID`): source
+        /// and identifier together; the identifier alone without a source.
+        public var key: String {
+            guard let sourceURL, !sourceURL.isEmpty else { return identifier }
+            return sourceURL + "|" + identifier
         }
     }
 
@@ -63,6 +81,9 @@ public enum HealthRecordsLabs {
     /// Why a record wasn't brought in.
     public enum Skip: String, Sendable, Equatable {
         case notObservation, notResulted, noValue, noDate, unknownTest, unconvertibleUnit, unreadable
+        /// Reported only as "<x" with x above the high limit, or ">x" with x
+        /// below the low limit: it could be either side of that limit.
+        case boundOutsideRange
     }
 
     public enum Outcome: Sendable, Equatable {
@@ -95,6 +116,12 @@ public enum HealthRecordsLabs {
         public var duplicates = 0
         /// Lab observations for tests the catalog doesn't track (or units it can't convert).
         public var notTracked = 0
+        /// Tracked tests whose result has no number (a `valueString` such as
+        /// "Negative", a coded value, or none).
+        public var withoutNumber = 0
+        /// Tracked tests reported only as a bound that leaves the flag in
+        /// doubt (`Skip.boundOutsideRange`).
+        public var boundsOnly = 0
         /// Records that weren't usable results at all (no value, cancelled, not an observation).
         public var other = 0
         /// Every record read, whatever happened to it.
@@ -110,7 +137,7 @@ public enum HealthRecordsLabs {
         var summary = Summary()
         summary.recordsRead = records.count
         var known = existing
-        let parsed = records.map { parse($0.data, recordID: $0.identifier, sex: sex, calendar: calendar) }
+        let parsed = records.map { parse($0.data, recordID: $0.key, sex: sex, calendar: calendar) }
         // Oldest first, so a batch reads in report order.
         let results = parsed.compactMap { outcome -> Imported? in
             if case .result(let lab) = outcome { return lab }
@@ -121,6 +148,8 @@ public enum HealthRecordsLabs {
             if case .skipped(let reason) = outcome {
                 switch reason {
                 case .unknownTest, .unconvertibleUnit: summary.notTracked += 1
+                case .noValue: summary.withoutNumber += 1
+                case .boundOutsideRange: summary.boundsOnly += 1
                 default: summary.other += 1
                 }
             }
@@ -167,11 +196,25 @@ public enum HealthRecordsLabs {
         guard let observation = try? JSONDecoder().decode(Observation.self, from: data) else { return .skipped(.unreadable) }
         guard observation.resourceType == nil || observation.resourceType == "Observation" else { return .skipped(.notObservation) }
         if let status = observation.status?.lowercased(), ignoredStatuses.contains(status) { return .skipped(.notResulted) }
-        guard let quantity = observation.valueQuantity, let rawValue = quantity.value else { return .skipped(.noValue) }
         guard let date = [observation.effectiveDateTime, observation.effectivePeriod?.start, observation.effectiveInstant, observation.issued]
             .lazy.compactMap({ $0 }).compactMap({ parseDate($0, calendar: calendar) }).first else { return .skipped(.noDate) }
+        // The test before the value, so "without a number" counts only tests Labs tracks.
         guard let match = markerMatch(observation.code) else { return .skipped(.unknownTest) }
         guard let marker = LabMarkers.marker(id: match.markerID) else { return .skipped(.unknownTest) }
+        var unitNote: String?
+        let quantity: Quantity
+        if let valueQuantity = observation.valueQuantity, valueQuantity.value != nil {
+            quantity = valueQuantity
+        } else if let text = observation.valueString, var fromText = Self.quantity(fromString: text) {
+            if fromText.unit == nil, let unit = marker.units.first?.unit {
+                fromText.unit = unit
+                unitNote = "No unit given; read as \(unit)"
+            }
+            quantity = fromText
+        } else {
+            return .skipped(.noValue)
+        }
+        guard let rawValue = quantity.value else { return .skipped(.noValue) }
         guard let unit = canonicalUnit(quantity.unit) ?? canonicalUnit(quantity.code) else { return .skipped(.unconvertibleUnit) }
         let markerUnits = marker.units.map(\.unit)
         let target = markerUnits.first { $0 == unit }
@@ -200,8 +243,16 @@ public enum HealthRecordsLabs {
 
         var notes: [String] = []
         if let comparator = quantity.comparator, !comparator.isEmpty {
+            // "<x" above the high limit or ">x" below the low limit could be either
+            // side of that limit, so it isn't stored as if it were x.
+            switch comparator {
+            case "<", "<=": if let high, value > high { return .skipped(.boundOutsideRange) }
+            case ">", ">=": if let low, value < low { return .skipped(.boundOutsideRange) }
+            default: break
+            }
             notes.append("Reported as \(comparator) \(format(rawValue)) \(unit)")
         }
+        if let unitNote { notes.append(unitNote) }
         if let note = match.note { notes.append(note) }
         return .result(Imported(
             recordID: recordID, markerID: marker.id, name: marker.name, panel: marker.panel,
@@ -217,12 +268,32 @@ public enum HealthRecordsLabs {
         value.formatted(.number.precision(.fractionLength(0...2)))
     }
 
+    /// A number in a `valueString`, with its comparator and unit if any:
+    /// ">60", "<10", "< 0.3 mg/L", ">=90 mL/min/1.73m2", "5,4 %". Nil for
+    /// text without a leading number ("Negative", "See note"). The unit is
+    /// nil when the text names none.
+    static func quantity(fromString text: String) -> Quantity? {
+        let pattern = #"^\s*(<=|>=|≤|≥|<|>)?\s*([0-9]+(?:[.,][0-9]+)?)\s*(.*?)\s*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let found = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
+        func group(_ index: Int) -> String? {
+            guard let range = Range(found.range(at: index), in: text) else { return nil }
+            return String(text[range])
+        }
+        guard let number = group(2).flatMap({ Double($0.replacingOccurrences(of: ",", with: ".")) }) else { return nil }
+        var comparator = group(1)
+        if comparator == "≤" { comparator = "<=" }
+        if comparator == "≥" { comparator = ">=" }
+        let unit = group(3).flatMap { $0.isEmpty ? nil : $0 }
+        return Quantity(value: number, comparator: comparator, unit: unit, system: nil, code: nil)
+    }
+
     // MARK: LOINC
 
     static let loincSystem = "http://loinc.org"
 
-    /// LOINC code → catalog marker, with a caveat where the code is broader
-    /// than the marker (glucose not marked fasting).
+    /// LOINC code → catalog marker, with room for a caveat where a code is
+    /// broader than the marker (none at present: broader codes are left out).
     public static let loincToMarker: [String: (markerID: String, note: String?)] = {
         var map: [String: (markerID: String, note: String?)] = [:]
         func add(_ id: String, _ codes: [String], note: String? = nil) {
@@ -237,17 +308,23 @@ public enum HealthRecordsLabs {
         add("lpa", ["10835-7", "43583-4"])
         // Blood sugar: HbA1c as % (NGSP) or mmol/mol (IFCC).
         add("hba1c", ["4548-4", "17856-6", "4549-2", "59261-8"])
+        // Fasting glucose only. The general glucose codes (2345-7, 14749-6, 2339-0,
+        // 15074-8) don't say the sample was fasting; mapped here, a random value
+        // would set off the prediabetes rule and count as the screening test
+        // (`BloodTestSchedule`), so they fall through as not recognised.
         add("glucose", ["1558-6", "14771-0"])
-        add("glucose", ["2345-7", "14749-6", "2339-0", "15074-8"], note: "Not marked as fasting by the lab")
         add("ferritin", ["2276-4"])
         add("hemoglobin", ["718-7", "20509-6", "59260-0"])
         add("hematocrit", ["4544-3", "20570-8"])
-        add("vitaminD", ["1989-3", "62292-8", "35365-6"])
+        // Total 25(OH)D only: 1989-3 is 25(OH)D3 alone, which misses D2.
+        add("vitaminD", ["62292-8", "35365-6"])
         add("b12", ["2132-9", "14685-2"])
         add("folate", ["2284-8", "14732-2"])
         add("tsh", ["3016-3", "11580-8", "11579-0"])
         add("testosterone", ["2986-8", "14913-8"])
-        add("crp", ["30522-7", "1988-5"])
+        // hs-CRP only: 1988-5 is standard CRP, not sensitive enough below 3 mg/L
+        // for the heart-risk bands the marker uses.
+        add("crp", ["30522-7"])
         add("creatinine", ["2160-0", "14682-9", "38483-4"])
         // eGFR: MDRD, CKD-EPI and the 2021 race-free CKD-EPI equation.
         add("egfr", ["33914-3", "48642-3", "48643-1", "62238-1", "88293-6", "88294-4", "98979-8"])
@@ -379,6 +456,7 @@ public enum HealthRecordsLabs {
         var effectiveInstant: String?
         var issued: String?
         var valueQuantity: Quantity?
+        var valueString: String?
         var referenceRange: [ReferenceRange]?
     }
 

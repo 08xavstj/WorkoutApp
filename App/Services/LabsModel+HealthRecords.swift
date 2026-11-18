@@ -14,6 +14,10 @@ extension LabsModel {
         var added: Int
         var duplicates: Int
         var notTracked: Int
+        /// Tracked tests with no number in the result ("Negative", a coded value).
+        var withoutNumber: Int = 0
+        /// Tracked tests reported only as "<x" or ">x" past the range, so either side of a limit.
+        var boundsOnly: Int = 0
         var recordsRead: Int
 
         /// The card's line after an import.
@@ -23,6 +27,8 @@ extension LabsModel {
             parts.append(added == 0 ? "No new results." : "Added \(added) result\(added == 1 ? "" : "s") from Health Records.")
             if duplicates > 0 { parts.append("\(duplicates) \(duplicates == 1 ? "was" : "were") already in Labs.") }
             if notTracked > 0 { parts.append("\(notTracked) other test\(notTracked == 1 ? "" : "s") that Labs doesn't track \(notTracked == 1 ? "was" : "were") left out.") }
+            if withoutNumber > 0 { parts.append("\(withoutNumber) result\(withoutNumber == 1 ? "" : "s") without a number \(withoutNumber == 1 ? "was" : "were") skipped.") }
+            if boundsOnly > 0 { parts.append("\(boundsOnly) result\(boundsOnly == 1 ? "" : "s") reported only as more or less than a value that could be either side of the range \(boundsOnly == 1 ? "was" : "were") skipped.") }
             return parts.joined(separator: " ")
         }
 
@@ -43,6 +49,7 @@ extension LabsModel {
         }
         if !new.isEmpty { add(new) }
         return HealthRecordsImport(added: new.count, duplicates: summary.duplicates, notTracked: summary.notTracked,
+                                   withoutNumber: summary.withoutNumber, boundsOnly: summary.boundsOnly,
                                    recordsRead: summary.recordsRead)
     }
 

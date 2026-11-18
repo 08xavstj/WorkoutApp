@@ -82,7 +82,7 @@ struct HealthRecordsLabsTests {
     @Test(arguments: [
         ("2093-3", "totalCholesterol"), ("2571-8", "triglycerides"), ("1884-6", "apoB"), ("10835-7", "lpa"),
         ("4548-4", "hba1c"), ("1558-6", "glucose"), ("2276-4", "ferritin"), ("98979-8", "egfr"),
-        ("2160-0", "creatinine"), ("1742-6", "alt"), ("3016-3", "tsh"), ("1989-3", "vitaminD"),
+        ("2160-0", "creatinine"), ("1742-6", "alt"), ("3016-3", "tsh"), ("62292-8", "vitaminD"),
         ("2132-9", "b12"), ("718-7", "hemoglobin"),
     ])
     func loincCodesMapToMarkers(code: String, marker: String) {
@@ -138,18 +138,103 @@ struct HealthRecordsLabsTests {
         #expect(skip(observation(loinc: nil, display: "Glucose, urine", value: 0, unit: "mg/dL")) == .unknownTest)
     }
 
-    @Test func nonFastingGlucoseCarriesANote() throws {
+    @Test func lipoproteinNamesAreNotTotalCholesterol() {
+        // "cholesterol" is the longest alias in "Cholesterol, HDL", but it's HDL.
+        #expect(LabMarkers.match("Cholesterol, HDL")?.id == "hdl")
+        #expect(LabMarkers.match("Cholesterol in LDL")?.id == "ldl")
+        #expect(LabMarkers.match("Cholesterol in VLDL") == nil)
+        #expect(LabMarkers.match("Cholesterol, Total")?.id == "totalCholesterol")
+        #expect(LabMarkers.match("Cholesterol")?.id == "totalCholesterol")
+        #expect(parsed(observation(loinc: nil, display: "Cholesterol, HDL", value: 52, unit: "mg/dL"))?.markerID == "hdl")
+    }
+
+    @Test func onlyFastingGlucoseCodesAreRead() throws {
         let fasting = try #require(parsed(observation(loinc: "1558-6", value: 92, unit: "mg/dL")))
+        #expect(fasting.markerID == "glucose")
         #expect(fasting.note == nil)
-        let random = try #require(parsed(observation(loinc: "2345-7", value: 92, unit: "mg/dL")))
-        #expect(random.markerID == "glucose")
-        #expect(random.note == "Not marked as fasting by the lab")
+        #expect(parsed(observation(loinc: "14771-0", value: 5.1, unit: "mmol/L"))?.markerID == "glucose")
+        // General glucose codes don't say fasting: a random 140 mg/dL must not
+        // read as prediabetic fasting glucose or count as the screening test.
+        for code in ["2345-7", "14749-6", "2339-0", "15074-8"] {
+            #expect(skip(observation(loinc: code, value: 140, unit: "mg/dL")) == .unknownTest, "\(code)")
+        }
+    }
+
+    @Test func standardCRPAndVitaminD3AloneAreNotRead() throws {
+        #expect(parsed(observation(loinc: "30522-7", value: 1.2, unit: "mg/L"))?.markerID == "crp")
+        #expect(skip(observation(loinc: "1988-5", value: 4, unit: "mg/L")) == .unknownTest)
+        #expect(parsed(observation(loinc: "62292-8", value: 30, unit: "ng/mL"))?.markerID == "vitaminD")
+        #expect(parsed(observation(loinc: "35365-6", value: 30, unit: "ng/mL"))?.markerID == "vitaminD")
+        #expect(skip(observation(loinc: "1989-3", value: 30, unit: "ng/mL")) == .unknownTest)
     }
 
     @Test func comparatorIsKeptAsANote() throws {
         let lab = try #require(parsed(observation(loinc: "10835-7", value: 10, unit: "mg/dL", comparator: "<")))
         #expect(lab.value == 10)
         #expect(lab.note == "Reported as < 10 mg/dL")
+    }
+
+    @Test func boundsPastTheRangeAreSkipped() throws {
+        // hs-CRP "< 5" against a high limit of 3 could be 1 or 4.
+        #expect(skip(observation(loinc: "30522-7", value: 5, unit: "mg/L", comparator: "<")) == .boundOutsideRange)
+        // eGFR "> 30" against a low limit of 60 could be 40 or 90.
+        #expect(skip(observation(loinc: "98979-8", value: 30, unit: "mL/min/1.73m2", comparator: ">")) == .boundOutsideRange)
+        // The lab's own range counts: "<= 8" with a high of 10 is in range.
+        #expect(parsed(observation(loinc: "30522-7", value: 8, unit: "mg/L", high: 10, comparator: "<="))?.value == 8)
+        // A bound on the far side of a limit leaves no doubt: TSH "< 0.01" is low.
+        let tsh = try #require(parsed(observation(loinc: "3016-3", value: 0.01, unit: "mIU/L", comparator: "<")))
+        #expect(LabMarkers.status(value: tsh.value, low: tsh.referenceLow, high: tsh.referenceHigh) == .low)
+        // Without a comparator nothing changes.
+        #expect(parsed(observation(loinc: "30522-7", value: 5, unit: "mg/L"))?.value == 5)
+    }
+
+    // MARK: valueString
+
+    func stringObservation(loinc: String, _ text: String) throws -> Data {
+        var json = try JSONSerialization.jsonObject(with: observation(loinc: loinc, value: 0, unit: "")) as! [String: Any]
+        json["valueQuantity"] = nil
+        json["valueString"] = text
+        return try JSONSerialization.data(withJSONObject: json)
+    }
+
+    @Test func valueStringNumbersAreRead() throws {
+        // eGFR ">60" with no unit: the marker's first unit, at the bound, with notes.
+        let egfr = try #require(parsed(try stringObservation(loinc: "98979-8", ">60")))
+        #expect(egfr.value == 60)
+        #expect(egfr.unit == "mL/min/1.73m²")
+        #expect(egfr.note == "Reported as > 60 mL/min/1.73m². No unit given; read as mL/min/1.73m²")
+        #expect(LabMarkers.status(value: egfr.value, low: egfr.referenceLow, high: egfr.referenceHigh) == .inRange)
+        let lpa = try #require(parsed(try stringObservation(loinc: "10835-7", "<10")))
+        #expect(lpa.value == 10)
+        #expect(lpa.unit == "mg/dL")
+        // With a unit, a space, and the "≤" sign.
+        let crp = try #require(parsed(try stringObservation(loinc: "30522-7", "≤ 0.3 mg/L")))
+        #expect(crp.value == 0.3)
+        #expect(crp.unit == "mg/L")
+        #expect(crp.note == "Reported as <= 0.3 mg/L")
+        // A plain number with a comma decimal.
+        let a1c = try #require(parsed(try stringObservation(loinc: "4548-4", "5,4 %")))
+        #expect(a1c.value == 5.4)
+        #expect(a1c.note == nil)
+        // A unit Labs can't read is still left out, and a bound past the range too.
+        #expect(skip(try stringObservation(loinc: "2276-4", "45 furlongs")) == .unconvertibleUnit)
+        #expect(skip(try stringObservation(loinc: "98979-8", ">30")) == .boundOutsideRange)
+        #expect(skip(try stringObservation(loinc: "4548-4", "Negative")) == .noValue)
+    }
+
+    @Test func resultsWithoutANumberAreCounted() throws {
+        let records = [
+            HealthRecordsLabs.Record(identifier: "a", data: try stringObservation(loinc: "4548-4", "See note")),
+            HealthRecordsLabs.Record(identifier: "b", data: try stringObservation(loinc: "98979-8", ">60")),
+            HealthRecordsLabs.Record(identifier: "c", data: try stringObservation(loinc: "30522-7", "<5")),
+            // An untracked test without a number is "not tracked", not "without a number".
+            HealthRecordsLabs.Record(identifier: "d", data: try stringObservation(loinc: "5792-7", "Negative")),
+        ]
+        let summary = HealthRecordsLabs.importable(records, existing: [], sex: .male, calendar: calendar)
+        #expect(summary.results.map(\.markerID) == ["egfr"])
+        #expect(summary.withoutNumber == 1)
+        #expect(summary.boundsOnly == 1)
+        #expect(summary.notTracked == 1)
     }
 
     // MARK: Units
@@ -255,6 +340,27 @@ struct HealthRecordsLabsTests {
         let summary = HealthRecordsLabs.importable(records, existing: [], sex: .male, calendar: calendar)
         #expect(summary.results.count == 1)
         #expect(summary.duplicates == 1)
+    }
+
+    @Test func recordsAreKeyedBySourceAndIdentifier() {
+        let data = observation(loinc: "2276-4", value: 110, unit: "ng/mL")
+        let other = observation(loinc: "2276-4", value: 60, unit: "ng/mL", effective: "2025-03-01")
+        // Two clinics, the same FHIR id: two results.
+        let records = [
+            HealthRecordsLabs.Record(identifier: "obs-1", sourceURL: "https://a.example/fhir", data: data),
+            HealthRecordsLabs.Record(identifier: "obs-1", sourceURL: "https://b.example/fhir", data: other),
+        ]
+        let summary = HealthRecordsLabs.importable(records, existing: [], sex: .male, calendar: calendar)
+        #expect(summary.results.count == 2)
+        #expect(Set(summary.results.map(\.recordID)) == ["https://a.example/fhir|obs-1", "https://b.example/fhir|obs-1"])
+        // An earlier import from the same source is still found by its key.
+        let existing = [HealthRecordsLabs.Existing(markerID: "ferritin", value: 1, unit: "ng/mL", date: date(2020, 1, 1),
+                                                   recordID: "https://a.example/fhir|obs-1")]
+        let again = HealthRecordsLabs.importable(records, existing: existing, sex: .male, calendar: calendar)
+        #expect(again.results.map(\.recordID) == ["https://b.example/fhir|obs-1"])
+        #expect(again.duplicates == 1)
+        // No source: the identifier alone.
+        #expect(HealthRecordsLabs.Record(identifier: "x", data: data).key == "x")
     }
 
     @Test func resultsComeOldestFirst() {
