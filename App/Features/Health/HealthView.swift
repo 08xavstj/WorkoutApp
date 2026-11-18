@@ -25,6 +25,8 @@ struct HealthView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     HRVBaselineCard()
                     OuraCard()
+                    // Oura's unvalidated scores, apart from Tensile's own (owner's request, 18 Nov 2026).
+                    OuraOwnNumbersCard()
                     // This week's changes and the long-run measures (`LongevityView.swift`).
                     HealthHighlightsSection()
                     KeyMeasuresSection()

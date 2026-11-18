@@ -36,13 +36,14 @@ public enum Oura {
 
     /// The page that asks the user to allow access, with the PKCE S256
     /// challenge for `codeVerifier` (`PKCE.challenge(for:)`).
-    public static func authorizationURL(clientID: String, redirectURI: String, state: String, codeVerifier: String) -> URL? {
+    public static func authorizationURL(clientID: String, redirectURI: String, state: String, codeVerifier: String,
+                                        scope: String = scopes) -> URL? {
         var components = URLComponents(url: authorizeURL, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: clientID),
             URLQueryItem(name: "redirect_uri", value: redirectURI),
-            URLQueryItem(name: "scope", value: scopes),
+            URLQueryItem(name: "scope", value: scope),
             URLQueryItem(name: "state", value: state),
             URLQueryItem(name: "code_challenge", value: PKCE.challenge(for: codeVerifier)),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
@@ -58,12 +59,12 @@ public enum Oura {
     /// Extra permissions Oura still reports after a fresh sign-in don't ask
     /// again: one more sign-in can't remove them, and nagging would never stop.
     /// Order and case don't matter.
-    public static func needsReconnect(grantedScope: String?) -> Bool {
+    public static func needsReconnect(grantedScope: String?, required: String = scopes) -> Bool {
         func set(_ text: String) -> Set<String> {
             Set(text.lowercased().split(whereSeparator: { $0 == " " || $0 == "+" || $0 == "," }).map(String.init))
         }
         guard let grantedScope else { return true }
-        return !set(scopes).isSubset(of: set(grantedScope))
+        return !set(required).isSubset(of: set(grantedScope))
     }
 
     /// What Oura sent back to the redirect address.

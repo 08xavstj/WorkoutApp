@@ -8,6 +8,8 @@ import AppCore
 struct OuraSettingsView: View {
     @State private var link = OuraLink.shared
     @AppStorage(SleepSourceSetting.key) private var sleepSource: SleepSourcePreference = .standard
+    /// Oura's unvalidated scores in their own card (`OuraOwnNumbersCard`); on by default.
+    @AppStorage(OuraOwnNumbersSetting.key) private var ownNumbers = true
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     @State private var clientID = ""
@@ -148,6 +150,15 @@ struct OuraSettingsView: View {
             // Robbins et al., Sensors 2024 (see `SleepSourcePreference`); HRV and heart rate:
             // Dial et al., Physiol Rep 2025 vs O'Grady et al., Sensors 2024 (`OneDeviceBaseline`).
             Text("\(sleepSource.detail) One device's whole night is used, so the stages come from one tracker. In a lab study the ring staged sleep a little more consistently than Apple Watch, though both got total sleep about right. Whatever you pick here, recovery uses the ring's overnight HRV and sleeping heart rate when it has them: against ECG they were more accurate than the watch's. Each baseline uses one device, never both.")
+        }
+        Section {
+            Toggle("Show Oura's own numbers", isOn: $ownNumbers)
+                .onChange(of: ownNumbers) { link.ownNumbersSettingChanged() }
+        } header: {
+            Text("Oura's own numbers")
+        } footer: {
+            // Owner's request, 18 Nov 2026; evidence: docs/research/oura-ring-2026-11.md §5-6.
+            Text("Readiness and Sleep scores, stress, resilience, cardiovascular age, Cardio Capacity (VO₂ max) and the breathing disturbance index, in their own card on the Health tab. None has been validated in a published study, so Tensile's scores and advice never use them. Needs the extra Oura permissions: reconnect after turning this on. Chronotype and Health Radar aren't in Oura's API.")
         }
         Section {
             Text("In the Health app, open Browse › Activity › Steps › Data Sources & Access, tap Edit and drag Apple Watch above Oura. Do the same for Active Energy. Health then counts the watch's steps and energy and doesn't add the ring's on top.")

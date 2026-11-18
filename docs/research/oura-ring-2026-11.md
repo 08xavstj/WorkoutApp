@@ -327,3 +327,8 @@ Re-check this file when an independent PSG or ECG study of the Ring 5 or the Ser
 - [R50] Shaffer F, Ginsberg JP. An overview of heart rate variability metrics and norms. *Front Public Health* 2017;5:258. https://www.frontiersin.org/articles/10.3389/fpubh.2017.00258/full
 - [R54] Liang et al. Deriving accurate nocturnal heart rate, rMSSD and frequency HRV from the Oura ring. *Sensors* 2024;24(23):7475. https://mdpi.com/1424-8220/24/23/7475
 - [R55] Wang Y, et al. Apple Watch wrist-temperature ovulation estimates (Apple-funded preprint, NCT05852951). https://preprints.jmir.org/preprint/50821
+
+
+## Owner's decision, 18 Nov 2026
+
+The owner asked to see Oura's Readiness and Sleep scores, Daytime Stress, Resilience, Cardiovascular Age, Cardio Capacity (VO₂ max) and the Breathing Disturbance Index despite the findings above. They are shown in a separate "Oura's own numbers" card (`OuraOwnNumbersCard`, `OuraOwnNumbers` in AppCore), each row with its evidence note, and are display-only: no Tensile score, baseline, coach answer or recommendation reads them. Chronotype and Health Radar stay out because the API doesn't provide them. The panel asks for the `spo2` and `heart_health` scopes; if Oura refuses `heart_health` at sign-in, the app retries without it.

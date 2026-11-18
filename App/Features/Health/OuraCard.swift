@@ -6,10 +6,10 @@ import AppCore
 /// breathing rate and temperature change, each labelled as Oura's.
 /// Hidden until the ring is connected and synced.
 ///
-/// Oura's Readiness and Sleep scores are not shown (or downloaded): they are
+/// Oura's Readiness and Sleep scores are not on this card: they are
 /// proprietary composites with unpublished weights and no published
-/// validation, the same reason Apple's scores were removed
-/// (docs/research/oura-ring-2026-11.md §5-6, [R49]). The measurements below
+/// validation (docs/research/oura-ring-2026-11.md §5-6, [R49]). On the
+/// owner's request they are shown apart, in `OuraOwnNumbersCard`. The measurements below
 /// are the validated parts: HRV and heart rate against ECG (Dial et al.,
 /// Physiol Rep 2025), total sleep against polysomnography (Robbins et al.,
 /// Sensors 2024); stages and breathing rate have weaker evidence.
@@ -58,7 +58,7 @@ struct OuraCard: View {
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 if link.needsReconnect {
-                    Text("Reconnect Oura once in Settings › Oura Ring so its permission matches what Tensile now uses.")
+                    Text("Reconnect Oura once in Settings › Oura Ring so its permissions match what Tensile now uses.")
                         .font(.caption)
                         .foregroundStyle(Theme.recoveryModerateText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -71,7 +71,7 @@ struct OuraCard: View {
 
     private func footnote(_ night: Oura.SleepPeriod) -> String {
         let lowest = night.lowestHeartRate.map { " Lowest heart rate \(Int($0.rounded())) bpm." } ?? ""
-        return "As the ring measured it. HRV is the night's average RMSSD; stages are estimates; temperature is the change from your usual.\(lowest) Oura's Readiness and Sleep scores aren't shown: their formulas aren't published and no study has validated them."
+        return "As the ring measured it. HRV is the night's average RMSSD; stages are estimates; temperature is the change from your usual.\(lowest) Oura's own scores are in their own card below and don't feed Tensile's."
     }
 
     private func stat(_ title: String, _ value: String?) -> some View {

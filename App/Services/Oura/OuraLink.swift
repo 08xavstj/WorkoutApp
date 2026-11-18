@@ -75,7 +75,7 @@ final class OuraLink {
     private func updateStatus() {
         if let tokens = KeychainStore.value(Oura.Tokens.self, Account.tokens) {
             status = .connected
-            needsReconnect = Oura.needsReconnect(grantedScope: tokens.scope)
+            needsReconnect = Oura.needsReconnect(grantedScope: tokens.scope, required: OuraOwnNumbersSetting.requestedScopes)
         } else {
             status = hasCredentials ? .disconnected : .needsSetup
             needsReconnect = false
@@ -107,7 +107,8 @@ final class OuraLink {
         let verifier = PKCE.makeVerifier()
         pendingState = state
         pendingVerifier = verifier
-        return Oura.authorizationURL(clientID: clientID, redirectURI: redirectURI, state: state, codeVerifier: verifier)
+        return Oura.authorizationURL(clientID: clientID, redirectURI: redirectURI, state: state, codeVerifier: verifier,
+                                     scope: OuraOwnNumbersSetting.requestedScopes)
     }
 
     /// Finishes sign-in with the address Oura sent the browser back to, then syncs.
@@ -119,13 +120,18 @@ final class OuraLink {
         case let .code(code):
             do {
                 let response = try await tokenRequest(.code(code, redirectURI: redirectURI, codeVerifier: verifier))
-                KeychainStore.set(value: response.tokens(requestedScope: Oura.scopes), for: Account.tokens)
+                KeychainStore.set(value: response.tokens(requestedScope: OuraOwnNumbersSetting.requestedScopes), for: Account.tokens)
                 lastError = nil
                 updateStatus()
                 await sync(force: true)
             } catch {
                 fail("Couldn't finish signing in to Oura", error)
             }
+        case let .denied(reason) where reason == "invalid_scope" && !OuraOwnNumbersSetting.heartHealthRefused && OuraOwnNumbersSetting.isOn:
+            // `heart_health` is newer than Oura's sign-in docs; without it,
+            // cardiovascular age and VO₂ max stay empty and the rest works.
+            UserDefaults.standard.set(true, forKey: OuraOwnNumbersSetting.heartHealthRefusedKey)
+            lastError = "Oura didn't offer the heart-health permission. Tap Connect again to sign in without it."
         case let .denied(reason):
             lastError = reason == "access_denied" ? "Oura access wasn't allowed." : "Oura said: \(reason)"
         case .wrongState, .invalid:
@@ -143,6 +149,7 @@ final class OuraLink {
     func disconnect() {
         KeychainStore.set(Data?.none, for: Account.tokens)
         OuraCache.shared.clear()
+        OuraOwnNumbersStore.shared.clear()
         syncedAt = nil
         lastError = nil
         updateStatus()
@@ -174,6 +181,9 @@ final class OuraLink {
             let periods = try await fetch(Oura.SleepPeriod.self, "sleep", from: start, to: end)
             let now = Date.now
             OuraCache.shared.merge(periods: periods, syncedAt: now)
+            if OuraOwnNumbersSetting.isOn {
+                OuraOwnNumbersStore.shared.merge(await fetchOwnNumbers(from: start, to: end))
+            }
             syncedAt = now
             lastError = nil
         } catch OuraError.signedOut {
@@ -183,6 +193,26 @@ final class OuraLink {
         } catch {
             fail("Couldn't sync with Oura", error)
         }
+    }
+
+    /// Oura's own scores and estimates for the panel (`OuraOwnNumbersCard`).
+    /// Each list on its own: one Oura refuses (a permission not granted, a
+    /// ring without the feature) leaves the others, and never fails the sync.
+    private func fetchOwnNumbers(from start: Date, to end: Date) async -> OuraOwnNumbers {
+        var numbers = OuraOwnNumbers()
+        numbers.readiness = (try? await fetch(Oura.DailyScore.self, "daily_readiness", from: start, to: end)) ?? []
+        numbers.sleep = (try? await fetch(Oura.DailyScore.self, "daily_sleep", from: start, to: end)) ?? []
+        numbers.stress = (try? await fetch(Oura.DailyStress.self, "daily_stress", from: start, to: end)) ?? []
+        numbers.resilience = (try? await fetch(Oura.DailyResilience.self, "daily_resilience", from: start, to: end)) ?? []
+        numbers.cardiovascularAge = (try? await fetch(Oura.CardiovascularAge.self, "daily_cardiovascular_age", from: start, to: end)) ?? []
+        numbers.vo2Max = (try? await fetch(Oura.VO2Max.self, "vO2_max", from: start, to: end)) ?? []
+        numbers.spo2 = (try? await fetch(Oura.DailySpO2.self, "daily_spo2", from: start, to: end)) ?? []
+        return numbers
+    }
+
+    /// The panel was switched on or off: whether a new sign-in is needed follows.
+    func ownNumbersSettingChanged() {
+        updateStatus()
     }
 
     // MARK: Requests
