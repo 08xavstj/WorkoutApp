@@ -5,15 +5,17 @@ import AppCore
 /// training, `InspiratoryTraining`; docs/research/next-features-2026-11.md,
 /// W12), in the blood-pressure section. Shown only when the newest reliable
 /// 7-day home systolic average is 120 or more: nobody in the trials started
-/// below that, so it's never offered there or without a home average.
+/// below that, so nobody starts there or without a home average; someone
+/// already training keeps it (`InspiratoryTraining.eligibility`).
 struct InspiratoryTrainingCard: View {
     let readings: [HomeBloodPressure.Reading]
     @State private var store = InspiratoryTrainingStore.shared
 
     var body: some View {
-        switch InspiratoryTraining.eligibility(readings) {
-        case .offered(let systolic, _):
-            offer(systolic: systolic)
+        let eligibility = InspiratoryTraining.eligibility(readings, sessions: store.sessions)
+        switch eligibility {
+        case .offered, .continuing:
+            offer(eligibility)
         case .belowThreshold:
             // Not offered. Someone who trained earlier is told why it has gone; the log is kept.
             if !store.sessions.isEmpty {
@@ -27,14 +29,29 @@ struct InspiratoryTrainingCard: View {
         }
     }
 
-    private func offer(systolic: Double) -> some View {
+    private func offer(_ eligibility: InspiratoryTraining.Eligibility) -> some View {
         let week = InspiratoryTraining.fullDaysThisWeek(store.sessions)
         let done = InspiratoryTraining.doneToday(store.sessions)
+        let average = eligibility.average
+        let lead = average.map { "Your home average is \(Int($0.systolic.rounded())) systolic." } ?? "You're training."
         return VStack(alignment: .leading, spacing: 10) {
             Label("Breathing training", systemImage: "wind")
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)
-            Text("Your home average is \(Int(systolic.rounded())) systolic. In small trials, 30 hard breaths a day in through a handheld breathing trainer lowered systolic pressure by \(InspiratoryTraining.metaAnalysisSystolicDrop.formatted()) mmHg on average (\(InspiratoryTraining.metaAnalysisTrials) trials, \(InspiratoryTraining.metaAnalysisParticipants) people; Li 2023). In the main trial it fell from 135 to 126 in 6 weeks (36 people aged 50-79; Craighead 2021).")
+            // Stage 2 or very high: the doctor comes before any trainer.
+            if eligibility.seeDoctorFirst, let category = average?.category {
+                Text("\(HomeBloodPressure.advice(category)) Ask them before adding breathing training; it can add to their plan, not replace it.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if case .continuing = eligibility {
+                Text("Keep going while you train: a lower average may be the training working, and in the main trial about a quarter of the effect was gone 6 weeks after people stopped (Craighead 2021).")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("\(lead) In small trials, 30 hard breaths a day in through a handheld breathing trainer lowered systolic pressure by \(InspiratoryTraining.metaAnalysisSystolicDrop.formatted()) mmHg on average (\(InspiratoryTraining.metaAnalysisTrials) trials, \(InspiratoryTraining.metaAnalysisParticipants) people; Li 2023). In the main trial it fell from 135 to 126 in 6 weeks (36 people aged 50-79; Craighead 2021).")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

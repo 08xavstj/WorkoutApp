@@ -14,8 +14,13 @@ import Foundation
 ///   Office systolic fell from 135 to 126 mmHg (diastolic 79 to 77), about
 ///   75% of it still there 6 weeks after stopping; 24-hour systolic was lower
 ///   than with sham; about 95% of sessions were done.
-/// Nobody in these trials started below 120, so the app never offers it
-/// there, and never without a reliable home average to judge by.
+/// Nobody in these trials started below 120, so the app never starts
+/// someone there, and never without a reliable home average to judge by.
+/// Once someone is training it stays offered whatever the newer average
+/// says: a drop may be the training itself, and Craighead 2021 saw the
+/// effect fade after stopping (about 75% left 6 weeks on).
+/// At stage 2 or very high home averages the card leads with seeing a
+/// doctor (`HomeBloodPressure.advice`) before it mentions the trainer.
 public enum InspiratoryTraining {
     /// Offered from this 7-day home systolic average, mmHg: the key trial's
     /// entry level (Craighead 2021: SBP ≥ 120), and the top of normal in the
@@ -31,9 +36,13 @@ public enum InspiratoryTraining {
     /// (Craighead 2021). A home trainer can't measure that, so the app says
     /// "hard enough that the last few of 30 breaths are a real effort".
     public static let trialResistanceShare = 0.75
-    /// How old the home average may be, days (app's choice: the 7-day check
-    /// is repeated within a year at the latest, `HomeBloodPressure.repeatMonths`).
-    public static let maxAverageAgeDays = 365
+    /// How old the home average may be, days (app's choice: about the 3
+    /// months after which `HomeBloodPressure.repeatMonths` asks for a new
+    /// 7-day check when the average is above normal, which it is here).
+    public static let maxAverageAgeDays = 91
+    /// Someone with a full session in this many days (today included) counts
+    /// as training (app's choice: two weeks allows a holiday; no trial tests it).
+    public static let trainingLapseDays = 14
 
     /// Effect sizes, for the card (Li 2023; Craighead 2021).
     public static let metaAnalysisSystolicDrop = 7.9
@@ -43,17 +52,55 @@ public enum InspiratoryTraining {
 
     // MARK: Gate
 
+    /// A reliable 7-day home average.
+    public struct HomeAverage: Sendable, Equatable {
+        public var systolic: Double
+        public var diastolic: Double
+        /// The last day of the 7.
+        public var weekEnding: Date
+
+        public init(systolic: Double, diastolic: Double, weekEnding: Date) {
+            self.systolic = systolic
+            self.diastolic = diastolic
+            self.weekEnding = weekEnding
+        }
+
+        public var category: HomeBloodPressure.Category {
+            HomeBloodPressure.category(systolic: systolic, diastolic: diastolic)
+        }
+    }
+
     public enum Eligibility: Sendable, Equatable {
         /// Average at or above the threshold: offer it.
-        case offered(systolic: Double, weekEnding: Date)
-        /// A reliable average below the threshold: don't.
-        case belowThreshold(systolic: Double, weekEnding: Date)
-        /// No reliable 7-day average in the last year: don't.
+        case offered(HomeAverage)
+        /// Already training (`trainingLapseDays`) with a newer average below
+        /// the threshold, or none recent: keep offering it.
+        case continuing(HomeAverage?)
+        /// A reliable average below the threshold, not training: don't.
+        case belowThreshold(HomeAverage)
+        /// No reliable 7-day average in the last `maxAverageAgeDays`, not training: don't.
         case noAverage
 
         public var isOffered: Bool {
-            if case .offered = self { return true }
-            return false
+            switch self {
+            case .offered, .continuing: true
+            case .belowThreshold, .noAverage: false
+            }
+        }
+
+        public var average: HomeAverage? {
+            switch self {
+            case .offered(let average), .belowThreshold(let average): average
+            case .continuing(let average): average
+            case .noAverage: nil
+            }
+        }
+
+        /// Stage 2 or very high: see a doctor first (`HomeBloodPressure.advice`),
+        /// then the trainer as an extra.
+        public var seeDoctorFirst: Bool {
+            guard isOffered, let category = average?.category else { return false }
+            return category == .stage2 || category == .severe
         }
     }
 
@@ -62,24 +109,35 @@ public enum InspiratoryTraining {
     /// the last `maxAverageAgeDays`. A week still filling in doesn't hide
     /// the last complete one.
     public static func latestHomeAverage(_ readings: [HomeBloodPressure.Reading], now: Date = .now,
-                                         calendar: Calendar = .current) -> (systolic: Double, weekEnding: Date)? {
+                                         calendar: Calendar = .current) -> HomeAverage? {
         let today = calendar.startOfDay(for: now)
         guard let oldest = calendar.date(byAdding: .day, value: -maxAverageAgeDays, to: today) else { return nil }
-        let days = Set(readings.filter { $0.date <= now }.map { calendar.startOfDay(for: $0.date) }).filter { $0 >= oldest }
+        let past = readings.filter { $0.date <= now }
+        let days = Set(past.map { calendar.startOfDay(for: $0.date) }).filter { $0 >= oldest }
         for day in days.sorted(by: >) {
             // The 7 days ending on that day (`weekCheck` works in whole days).
-            let check = HomeBloodPressure.weekCheck(readings.filter { $0.date <= now }, asOf: day, calendar: calendar)
-            if check.isReliable, let systolic = check.systolic { return (systolic, day) }
+            let check = HomeBloodPressure.weekCheck(past, asOf: day, calendar: calendar)
+            if check.isReliable, let systolic = check.systolic, let diastolic = check.diastolic {
+                return HomeAverage(systolic: systolic, diastolic: diastolic, weekEnding: day)
+            }
         }
         return nil
     }
 
-    public static func eligibility(_ readings: [HomeBloodPressure.Reading], now: Date = .now,
+    /// Whether someone is training: a full session in the last `trainingLapseDays`.
+    public static func isTraining(_ sessions: [Session], now: Date = .now, calendar: Calendar = .current) -> Bool {
+        let today = calendar.startOfDay(for: now)
+        guard let start = calendar.date(byAdding: .day, value: -(trainingLapseDays - 1), to: today) else { return false }
+        return sessions.contains { $0.isComplete && $0.date >= start && $0.date <= now }
+    }
+
+    public static func eligibility(_ readings: [HomeBloodPressure.Reading], sessions: [Session] = [], now: Date = .now,
                                    calendar: Calendar = .current) -> Eligibility {
-        guard let average = latestHomeAverage(readings, now: now, calendar: calendar) else { return .noAverage }
-        return average.systolic >= systolicThreshold - 1e-9
-            ? .offered(systolic: average.systolic, weekEnding: average.weekEnding)
-            : .belowThreshold(systolic: average.systolic, weekEnding: average.weekEnding)
+        let average = latestHomeAverage(readings, now: now, calendar: calendar)
+        if let average, average.systolic >= systolicThreshold - 1e-9 { return .offered(average) }
+        if isTraining(sessions, now: now, calendar: calendar) { return .continuing(average) }
+        guard let average else { return .noAverage }
+        return .belowThreshold(average)
     }
 
     // MARK: Log

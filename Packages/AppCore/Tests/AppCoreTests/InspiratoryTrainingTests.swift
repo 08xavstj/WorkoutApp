@@ -30,11 +30,57 @@ struct InspiratoryTrainingTests {
     @Test func neverBelowTheThreshold() {
         let result = InspiratoryTraining.eligibility(week(systolic: 119, now: now), now: now, calendar: calendar)
         #expect(!result.isOffered)
-        guard case .belowThreshold(let systolic, _) = result else {
+        guard case .belowThreshold(let average) = result else {
             Issue.record("expected below threshold")
             return
         }
-        #expect(systolic == 119)
+        #expect(average.systolic == 119)
+    }
+
+    func sessions(daysAgo: [Int]) -> [InspiratoryTraining.Session] {
+        let today = calendar.startOfDay(for: now)
+        return daysAgo.map { .init(date: calendar.date(byAdding: .day, value: -$0, to: today)!.addingTimeInterval(8 * 3600), breaths: 30) }
+    }
+
+    @Test func someoneTrainingKeepsItWhenTheAverageDrops() {
+        // Started at 128, now 116 while training: the drop may be the training.
+        var readings = week(systolic: 128, endDaysAgo: 45, now: now)
+        readings += week(systolic: 116, now: now)
+        let training = sessions(daysAgo: Array(0..<30))
+        let result = InspiratoryTraining.eligibility(readings, sessions: training, now: now, calendar: calendar)
+        #expect(result.isOffered)
+        #expect(result == .continuing(result.average))
+        #expect(result.average?.systolic == 116)
+        // Stopped three weeks ago: no longer offered below 120.
+        let stopped = sessions(daysAgo: Array(21..<50))
+        #expect(!InspiratoryTraining.eligibility(readings, sessions: stopped, now: now, calendar: calendar).isOffered)
+        // A half session doesn't count as training.
+        let half = [InspiratoryTraining.Session(date: now.addingTimeInterval(-3600), breaths: 12)]
+        #expect(!InspiratoryTraining.eligibility(readings, sessions: half, now: now, calendar: calendar).isOffered)
+        // Training with no recent average stays too.
+        #expect(InspiratoryTraining.eligibility([], sessions: training, now: now, calendar: calendar) == .continuing(nil))
+    }
+
+    @Test func averagesOlderThanThreeMonthsDontCount() {
+        #expect(InspiratoryTraining.maxAverageAgeDays == 91)
+        #expect(InspiratoryTraining.eligibility(week(systolic: 128, endDaysAgo: 80, now: now), now: now, calendar: calendar).isOffered)
+        #expect(InspiratoryTraining.eligibility(week(systolic: 128, endDaysAgo: 100, now: now), now: now, calendar: calendar) == .noAverage)
+    }
+
+    @Test func stageTwoAndVeryHighLeadWithTheDoctor() {
+        func doctorFirst(_ systolic: Double, diastolic: Double = 78) -> Bool {
+            let readings = week(systolic: systolic, now: now).map {
+                HomeBloodPressure.Reading(date: $0.date, systolic: systolic, diastolic: diastolic)
+            }
+            return InspiratoryTraining.eligibility(readings, now: now, calendar: calendar).seeDoctorFirst
+        }
+        #expect(!doctorFirst(125))
+        #expect(!doctorFirst(135))
+        #expect(doctorFirst(142))
+        #expect(doctorFirst(125, diastolic: 92))
+        #expect(doctorFirst(185))
+        // Below the threshold it isn't offered at all, so there's no card to lead.
+        #expect(!doctorFirst(115))
     }
 
     @Test func neverWithoutAReliableAverage() {
