@@ -68,8 +68,11 @@ targets:
       properties:
         CFBundleDisplayName: Tensile
         UILaunchScreen: {}
+        # "workout-processing" is a watchOS-only value (App Store upload rejects it
+        # on iOS: "Invalid Info.plist value"); the Watch app declares it in
+        # WKBackgroundModes. The iPhone's own workout session (AirPods heart rate)
+        # keeps running while the workout is active without it.
         UIBackgroundModes:
-          - workout-processing
           - fetch
         # The coach's check-ins refresh in the background (`CoachNudges.backgroundRefresh`).
         BGTaskSchedulerPermittedIdentifiers:
