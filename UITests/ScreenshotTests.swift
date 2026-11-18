@@ -119,6 +119,11 @@ final class ScreenshotTests: XCTestCase {
         if tap(app, ["metric-Cardio fitness (VO₂ max)", "metric-Cardio fitness (VO₂ max, estimate)", "Cardio fitness (VO₂ max)"], name: "Fitness cardio fitness for the check") {
             if tap(app, ["fitness-check-row"], name: "Fitness check row") {
                 capture(app, "fitness-check", pages: 2)
+                // The yearly push-up test, lower on the same page (demo: two results a year apart).
+                if tap(app, ["functional-test-pushUps", "Push-ups to failure"], name: "Fitness check push-up test") {
+                    capture(app, "functional-test-push-ups", pages: 3)
+                    back(app)
+                }
                 back(app)
             }
             back(app)
@@ -219,6 +224,15 @@ final class ScreenshotTests: XCTestCase {
             if tap(app, ["labs-import-health-records", "Import from Health Records"], name: "Labs import from Health Records") {
                 sleep(1)
                 capture(app, "health-labs-import", pages: 2)
+            }
+            back(app)
+        }
+        // Breathing training, on the blood-pressure page from a home average of 120+ (demo: about 122).
+        openTab(app, "Health")
+        if tap(app, ["metric-Blood pressure", "row-Blood pressure"], name: "Health blood pressure for breathing training") {
+            if tap(app, ["imst-start"], name: "Breathing training start") {
+                capture(app, "breathing-training", pages: 2)
+                back(app)
             }
             back(app)
         }

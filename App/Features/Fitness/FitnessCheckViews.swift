@@ -121,6 +121,8 @@ struct FitnessCheckPage: View {
             if !store.results.isEmpty {
                 history
             }
+            // The yearly push-up, sitting-rising and one-leg tests (`FunctionalTest`, I4).
+            FunctionalTestsCard()
             Text("Each test is an estimate, about ±5 ml/kg/min against a lab test; its value is doing the same test the same way each time. Not a medical test. Stop if you feel chest pain, faintness or unusual breathlessness.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)

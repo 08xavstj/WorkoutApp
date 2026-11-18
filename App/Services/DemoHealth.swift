@@ -684,13 +684,15 @@ nonisolated final class DemoHealth: Sendable {
 
     /// The cuff readings of one day, taken by now: a full 7-day home check
     /// this week (morning 7:30 and evening 21:00, as ESH 2021 asks), and
-    /// every third morning before that. Rounded like a cuff.
+    /// every third morning before that. Rounded like a cuff. Eight days, so
+    /// the week ending yesterday has its 12 readings after day 1 (about 122
+    /// systolic), which opens breathing training (`InspiratoryTraining`).
     func bloodPressurePairs(_ daysAgo: Int) -> [(date: Date, systolic: Double, diastolic: Double)] {
         guard daysAgo >= 0, daysAgo <= historyDays else { return [] }
         let n = Self.noise(daysAgo, 50 + Metric.systolic.hashSalt)
         let m = Self.noise(daysAgo, 50 + Metric.diastolic.hashSalt)
         var times: [Double] = []
-        if daysAgo < 7 {
+        if daysAgo < 8 {
             times = [7 * 60 + 30, 21 * 60]
         } else if daysAgo % 3 == 0 {
             times = [7 * 60 + 30]

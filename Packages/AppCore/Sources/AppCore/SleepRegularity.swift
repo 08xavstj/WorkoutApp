@@ -25,14 +25,26 @@ public enum SleepRegularity {
     /// - Returns: SRI on Phillips' scale, -100...100 (real values are almost always 0...100).
     public static func index(asleep: [DateInterval], start: Date, days: Int, calendar: Calendar? = nil) -> Double? {
         guard days >= 2 else { return nil }
+        let dayStarts = (0..<days).map { day in
+            calendar.flatMap { $0.date(byAdding: .day, value: day, to: start) } ?? start.addingTimeInterval(Double(day) * 86_400)
+        }
+        return index(asleep: asleep, dayStarts: dayStarts)
+    }
+
+    /// The same index over days that each start at their own moment (24 h
+    /// from each start), comparing day `i` with day `i + 1` epoch by epoch.
+    /// - Parameter skippingPairs: indices `i` of day pairs (`i`, `i + 1`)
+    ///   left out, as if one of the two days had no sleep. Used for travel
+    ///   (`TravelShift.regularityScore`).
+    static func index(asleep: [DateInterval], dayStarts: [Date], skippingPairs: Set<Int> = []) -> Double? {
+        let days = dayStarts.count
+        guard days >= 2 else { return nil }
         let merged = merge(asleep)
         let epochsPerDay = Int(86_400 / epoch)
         // Asleep flag per epoch, per day.
         var dayStates: [[Bool]] = []
         var hasSleep: [Bool] = []
-        for day in 0..<days {
-            let dayStart = calendar.flatMap { $0.date(byAdding: .day, value: day, to: start) }
-                ?? start.addingTimeInterval(Double(day) * 86_400)
+        for dayStart in dayStarts {
             var states = [Bool](repeating: false, count: epochsPerDay)
             var any = false
             for interval in merged where interval.end > dayStart && interval.start < dayStart.addingTimeInterval(86_400) {
@@ -51,7 +63,7 @@ public enum SleepRegularity {
         var same = 0
         var total = 0
         var pairs = 0
-        for day in 0..<(days - 1) where hasSleep[day] && hasSleep[day + 1] {
+        for day in 0..<(days - 1) where hasSleep[day] && hasSleep[day + 1] && !skippingPairs.contains(day) {
             pairs += 1
             for index in 0..<epochsPerDay {
                 total += 1

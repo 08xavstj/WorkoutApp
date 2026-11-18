@@ -45,6 +45,8 @@ struct BloodPressureView: View {
                         HypertensionNoticeCard(flagged: flagged) { showingEntry = true }
                     }
                     weekCard
+                    // Only from a reliable home average of 120+ systolic (`InspiratoryTraining`, W12).
+                    InspiratoryTrainingCard(readings: readings.map(\.asCore))
                     BloodPressureGuide()
                     readingsList
                     Text("Only cuff readings are used. Watch and ring blood pressure estimates aren't accurate enough to judge blood pressure, and guidelines advise against using them for that (AHA/ACC 2025). This is a log, not a diagnosis: talk to your doctor about your readings.")

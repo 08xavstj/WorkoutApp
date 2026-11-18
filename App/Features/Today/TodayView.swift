@@ -33,6 +33,7 @@ struct TodayView: View {
                 VStack(spacing: 16) {
                     AlertSlot()
                     TravelGymChip() // "Training at: Hotel gym · until Sun" on a trip (`GymsView`)
+                    TravelZoneCard() // jet lag after a 5 h+ time-zone shift (`TravelShift`)
                     ProfileSetupCard() // sex, age, height or weight missing (ProfileBasicsView)
                     TodaySetupCard()
                     ScoresCard(sessions: sessions, askCoach: askCoach)
