@@ -19,6 +19,51 @@ nonisolated enum WatchPageFit: Int, Comparable, Sendable {
 extension EnvironmentValues {
     /// The fit `FittedPage` chose for the page around this view.
     @Entry var watchPageFit: WatchPageFit = .full
+    /// The height a page in a paged `TabView` can use: the `TabView`'s height
+    /// inside its safe area (under the toolbar, above the screen's edge),
+    /// measured by the pager (`View.measuresWatchPages()`). Nil outside one.
+    @Entry var watchPageHeight: CGFloat? = nil
+}
+
+extension View {
+    /// On a paged `TabView`: measures the height its pages can use and hands
+    /// it to them (`watchPageHeight`), since the pager itself offers a page
+    /// no height, only "what you need" (so a page can't tell it's too tall).
+    func measuresWatchPages() -> some View {
+        modifier(WatchPageMeasure())
+    }
+}
+
+private struct WatchPageMeasure: ViewModifier {
+    @State private var height: CGFloat?
+    #if DEBUG
+    @State private var raw = ""
+    #endif
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.watchPageHeight, height)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom
+            } action: { value in
+                height = value > 0 ? value : nil
+            }
+            #if DEBUG
+            .onGeometryChange(for: String.self) { proxy in
+                let frame = proxy.frame(in: .global)
+                return "pager \(Int(proxy.size.height)) y \(Int(frame.minY)) in \(Int(proxy.safeAreaInsets.top))/\(Int(proxy.safeAreaInsets.bottom))"
+            } action: { raw = $0 }
+            .overlay(alignment: .bottom) {
+                if UserDefaults.standard.bool(forKey: "demoLift") {
+                    Text(raw)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.black)
+                        .background(.yellow)
+                        .padding(.bottom, 70)
+                }
+            }
+            #endif
+    }
 }
 
 /// A workout page that fits the screen without scrolling when it can
@@ -35,18 +80,18 @@ extension EnvironmentValues {
 /// page is up (so sizes don't jump between sets), and starts over when
 /// `resetID` or the text size changes.
 ///
-/// The space is read with a `GeometryReader`, which takes the size it's
-/// offered whatever its content needs: a watch page in a paged `TabView`
-/// grows to fit its content, so measuring the page itself never shows the
-/// overflow.
+/// The space comes from the pager (`watchPageHeight`): a paged `TabView`
+/// offers its pages no height and grows each one to fit, so a page can't
+/// measure the space itself. Without a pager around it, the page is laid
+/// out as it is (`full`).
 struct FittedPage<Content: View>: View {
     var resetID: AnyHashable?
     @ViewBuilder let content: (WatchPageFit) -> Content
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.watchPageHeight) private var pageHeight
     @State private var fit: WatchPageFit = .full
     @State private var contentHeight: CGFloat = 0
-    @State private var availableHeight: CGFloat = 0
 
     /// Under half a point over is rounding, not overflow.
     private static var tolerance: CGFloat { 0.5 }
@@ -61,28 +106,28 @@ struct FittedPage<Content: View>: View {
             if current == .scrolls {
                 ScrollView { content(current) }
             } else {
-                GeometryReader { proxy in
-                    content(current)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .onChange(of: proxy.size.height, initial: true) { availableHeight = proxy.size.height }
-                        #if DEBUG
-                        .overlay(alignment: .center) {
-                            if UserDefaults.standard.bool(forKey: "demoLift") {
-                                let frame = proxy.frame(in: .global)
-                                Text("fit \(fit) c \(Int(contentHeight)) a \(Int(availableHeight)) y \(Int(frame.minY))-\(Int(frame.maxY)) s \(Int(proxy.safeAreaInsets.top))/\(Int(proxy.safeAreaInsets.bottom))")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.black)
-                                    .background(.yellow)
-                            }
+                // Offered exactly the page's height, the content fills it
+                // (Done at the bottom); taller than that, it reports its own
+                // height, and the page steps down.
+                content(current)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: pageHeight)
+                    #if DEBUG
+                    .overlay(alignment: .center) {
+                        if UserDefaults.standard.bool(forKey: "demoLift") {
+                            Text("fit \(fit) c \(Int(contentHeight)) a \(Int(pageHeight ?? -1))")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.black)
+                                .background(.yellow)
                         }
-                        #endif
-                }
+                    }
+                    #endif
             }
         }
         // Only a measurement that holds for a moment counts: while a page
         // appears or slides in, its sizes pass through values it never shows.
-        .task(id: Measurement(fit: fit, content: contentHeight, available: availableHeight)) {
+        .task(id: Measurement(fit: fit, content: contentHeight, available: pageHeight ?? 0)) {
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
             stepDownIfTooTall()
@@ -99,10 +144,7 @@ struct FittedPage<Content: View>: View {
     }
 
     private func stepDownIfTooTall() {
-        #if DEBUG
-        print("FittedPage fit=\(fit) content=\(contentHeight) available=\(availableHeight)")
-        #endif
-        guard availableHeight > 0, contentHeight > availableHeight + Self.tolerance,
+        guard let pageHeight, pageHeight > 0, contentHeight > pageHeight + Self.tolerance,
               let next = WatchPageFit(rawValue: fit.rawValue + 1) else { return }
         fit = next
     }

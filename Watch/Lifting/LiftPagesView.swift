@@ -42,6 +42,8 @@ struct LiftPagesView: View {
                     .tag(LiftPage.exercises)
             }
             .tabViewStyle(.page)
+            // The height a page can use, for the pages that fit themselves (`FittedPage`).
+            .measuresWatchPages()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     leading
