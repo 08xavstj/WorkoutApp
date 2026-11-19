@@ -45,9 +45,13 @@ struct LiftPagesView: View {
             // The space a page can use, for the pages that fit themselves (`FittedPage`).
             .measuresWatchPages()
             #if DEBUG
-            // Screenshot runs: open on another page (`-demoLiftPage rest`).
+            // Screenshot runs: open on another page (`-demoLiftPage rest`, `controls`).
             .onAppear {
-                if UserDefaults.standard.string(forKey: "demoLiftPage") == "rest" { page = .rest }
+                switch UserDefaults.standard.string(forKey: "demoLiftPage") {
+                case "rest": page = .rest
+                case "controls": page = .controls
+                default: break
+                }
             }
             #endif
             .toolbar {

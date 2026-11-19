@@ -73,8 +73,9 @@ struct PrimaryWideButton: View {
     }
 }
 
-/// A round glyph button with an optional caption under it. Glass, as watchOS
-/// 26 draws controls (Liquid Glass is for controls, not content).
+/// A round glyph button, exactly `size` across, with an optional caption
+/// under it. Glass, as watchOS 26 draws controls (Liquid Glass is for
+/// controls, not content).
 struct CircleButton: View {
     let title: String
     let systemImage: String
@@ -88,14 +89,19 @@ struct CircleButton: View {
 
     var body: some View {
         VStack(spacing: 3) {
+            // Glass drawn on the circle itself: `.buttonStyle(.glass)` pads its
+            // label, so a 48 pt circle came out about 72 pt wide and the rest
+            // page's ±15 s pair squeezed the countdown ring to a dot between
+            // them (seen in the watchOS simulator). This keeps `size` exact.
             Button(role: role, action: action) {
                 Image(systemName: systemImage)
                     .font(.system(size: size * 0.36, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: size, height: size)
+                    .contentShape(Circle())
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
             .accessibilityLabel(title)
             .accessibilityIdentifier(identifier ?? "")
             if showsTitle {

@@ -139,7 +139,7 @@ jobs:
               print("=== END ===")
           PY
 
-  # The Watch's Set and Rest pages in the watchOS simulator, on the 46 mm and 42 mm
+  # The Watch's Set, Rest and Controls pages in the watchOS simulator, on the 46 mm and 42 mm
   # watches at the default text size and two larger ones, from the debug-only demo lift (`-demoLift YES`,
   # `WatchWorkoutModel.loadDemoLift`): Back Squat, set 3 of 3, a rest running.
   # Printed like the phone's shots, as "=== SHOT watch-... ===" blocks. Runs
@@ -191,7 +191,7 @@ jobs:
             | tee watch-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" watch-build.log
 
-      - name: Capture the Set and Rest pages
+      - name: Capture the Set, Rest and Controls pages
         run: |
           APP=$(find dd/Build/Products -maxdepth 2 -name "*.app" -path "*watchsimulator*" | head -1)
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Info.plist")
@@ -202,7 +202,7 @@ jobs:
             xcrun simctl install "$DEVICE" "$APP"
             # The default text size, then two larger ones (Settings > Display &
             # Brightness > Text Size), set per launch through UIKit's preference.
-            for page in set rest; do
+            for page in set rest controls; do
               for size in L XXL XXXL; do
                 xcrun simctl terminate "$DEVICE" "$BUNDLE" 2>/dev/null || true
                 xcrun simctl launch "$DEVICE" "$BUNDLE" -demoLift YES -demoLiftPage "$page" -demoFitDebug YES \
