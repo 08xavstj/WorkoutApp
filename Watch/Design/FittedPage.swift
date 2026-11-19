@@ -66,6 +66,17 @@ struct FittedPage<Content: View>: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .onChange(of: proxy.size.height, initial: true) { availableHeight = proxy.size.height }
+                        #if DEBUG
+                        .overlay(alignment: .center) {
+                            if UserDefaults.standard.bool(forKey: "demoLift") {
+                                let frame = proxy.frame(in: .global)
+                                Text("fit \(fit) c \(Int(contentHeight)) a \(Int(availableHeight)) y \(Int(frame.minY))-\(Int(frame.maxY)) s \(Int(proxy.safeAreaInsets.top))/\(Int(proxy.safeAreaInsets.bottom))")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.black)
+                                    .background(.yellow)
+                            }
+                        }
+                        #endif
                 }
             }
         }
