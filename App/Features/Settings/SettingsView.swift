@@ -622,6 +622,11 @@ private struct DataSourcesSettingsSection: View {
             if let healthURL = URL(string: "x-apple-health://") {
                 Link("Open Apple Health", destination: healthURL)
             }
+            // Which Apple Watch measures reach Tensile, and why one doesn't.
+            NavigationLink("Health data check") {
+                HealthDataCheckView()
+            }
+            .accessibilityIdentifier("settings-health-data-check") // UI tests (ScreenshotTests)
             NavigationLink {
                 OuraSettingsView()
             } label: {

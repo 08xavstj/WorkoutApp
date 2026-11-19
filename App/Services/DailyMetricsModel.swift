@@ -875,7 +875,9 @@ final class DailyMetricsModel {
             self.heightCm = heightCm
             // The night's average only. A single older sample used to stand in when the watch
             // was off, was shown undated as last night's and could raise an illness sign.
-            respiratoryRate = await respiratory.nights[calendar.startOfDay(for: scoredDay)]
+            // The baseline's device first; else the other device's reading that
+            // night (a ring not synced yet, a watch on the charger), for showing only.
+            respiratoryRate = await respiratory.night(scoredDay, calendar: calendar)?.value
             let device = try? await deviceEnergy
             deviceRestingToday = device?.resting
             deviceActiveToday = device?.active

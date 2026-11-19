@@ -872,7 +872,7 @@ private struct HealthMonitor: View {
     @AppStorage("healthMonitorExpanded") private var expanded = true
 
     private enum MonitorDetail: String, Identifiable {
-        case lastNight, recovery
+        case lastNight, recovery, dataCheck
         var id: String { rawValue }
     }
 
@@ -888,7 +888,12 @@ private struct HealthMonitor: View {
             TileGrid {
                 opens(heartRateStatID) { rhrTile }
                 hrvTileButton
-                opens("respiration") { respiratoryTile }
+                // Not wrapped while it shows "Why?", so the two taps don't clash (as HRV).
+                if metrics.respiratoryRate == nil {
+                    respiratoryTile
+                } else {
+                    opens("respiration") { respiratoryTile }
+                }
                 Button { detail = .lastNight } label: { sleepTile }
                     .buttonStyle(.plain)
                     .accessibilityHint("Shows last night's sleep")
@@ -912,6 +917,8 @@ private struct HealthMonitor: View {
                 switch which {
                 case .lastNight: LastNightSleepSheet()
                 case .recovery: RecoveryContributorsSheet()
+                // An empty breathing tile: does the watch's reading reach the app?
+                case .dataCheck: NavigationStack { HealthDataCheckView() }
                 }
             }
             .presentationDetents([.medium, .large])
@@ -1061,7 +1068,10 @@ private struct HealthMonitor: View {
             },
             gauge: rate.map { min(1, max(0, ($0 - 8) / 16)) },
             color: Theme.oxygen,
-            lightColor: Theme.oxygenLight
+            lightColor: Theme.oxygenLight,
+            // No reading for the night: Health may hold one Tensile can't read (access off).
+            actionTitle: rate == nil ? "Why?" : nil,
+            onAction: { detail = .dataCheck }
         )
     }
 

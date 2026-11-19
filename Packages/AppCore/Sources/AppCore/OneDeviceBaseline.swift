@@ -51,11 +51,29 @@ public enum OneDeviceBaseline {
         public var nights: [Date: Double]
         /// True when the device has `minimumNights` in the window.
         public var isEstablished: Bool
+        /// Every device's nights, keyed by the morning, for showing one night's
+        /// value when the baseline's device missed it (`night(_:)`). Never for
+        /// a baseline: that stays one device's (`nights`).
+        public var byDevice: [BaselineDevice: [Date: Double]]
 
-        public init(device: BaselineDevice?, nights: [Date: Double], isEstablished: Bool) {
+        public init(device: BaselineDevice?, nights: [Date: Double], isEstablished: Bool,
+                    byDevice: [BaselineDevice: [Date: Double]] = [:]) {
             self.device = device
             self.nights = nights
             self.isEstablished = isEstablished
+            self.byDevice = byDevice
+        }
+
+        /// One morning's value to show: the baseline device's, else the other
+        /// device's that night (a ring that hasn't synced yet, a watch left
+        /// on the charger), with the device it came from.
+        public func night(_ morning: Date, calendar: Calendar = .current) -> (value: Double, device: BaselineDevice)? {
+            let key = calendar.startOfDay(for: morning)
+            if let device, let value = nights[key] { return (value, device) }
+            for other in [BaselineDevice.watch, .ring] where other != device {
+                if let value = byDevice[other]?[key] { return (value, other) }
+            }
+            return nil
         }
     }
 
@@ -85,18 +103,19 @@ public enum OneDeviceBaseline {
         let windowStart = calendar.date(byAdding: .day, value: -(windowNights - 1), to: anchor) ?? anchor
         func recent(_ nights: [Date: Double]) -> Int { nights.keys.filter { $0 >= windowStart }.count }
 
+        let all = Dictionary(uniqueKeysWithValues: devices.filter { !$0.nights.isEmpty }.map { ($0.device, $0.nights) })
         guard let newest = devices.flatMap({ $0.nights.keys }).max() else {
             return Choice(device: nil, nights: [:], isEstablished: false)
         }
         // Devices with the newest night first; the ring first otherwise (a stable sort keeps the order).
         let ordered = devices.filter { $0.nights[newest] != nil } + devices.filter { $0.nights[newest] == nil }
         if let established = ordered.first(where: { recent($0.nights) >= minimumNights }) {
-            return Choice(device: established.device, nights: established.nights, isEstablished: true)
+            return Choice(device: established.device, nights: established.nights, isEstablished: true, byDevice: all)
         }
         let ringCount = recent(devices[0].nights)
         let watchCount = recent(devices[1].nights)
         let pick = ringCount >= watchCount && !devices[0].nights.isEmpty ? devices[0] : devices[1]
-        return Choice(device: pick.nights.isEmpty ? nil : pick.device, nights: pick.nights, isEstablished: false)
+        return Choice(device: pick.nights.isEmpty ? nil : pick.device, nights: pick.nights, isEstablished: false, byDevice: all)
     }
 
     /// A night's readings run from 6 pm to noon on the morning they are

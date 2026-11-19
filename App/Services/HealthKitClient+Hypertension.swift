@@ -4,22 +4,18 @@ import AppCore
 
 // MARK: - Hypertension notification (iOS/watchOS 26.2)
 //
-// `HKCategoryTypeIdentifier.hypertensionEvent` is listed on Apple's page with
-// availability iOS/watchOS 26.2+ and no description or value enum yet
-// (docs/research/watch-features.md 1.1, ref A3), so any sample is treated as
-// one notification. The name could not be checked against an SDK here (no
-// Xcode in this sandbox) and CI's Xcode may predate 26.2, so the code compiles
-// only with the TENSILE_HYPERTENSION_EVENT flag (add
-// `-DTENSILE_HYPERTENSION_EVENT` to OTHER_SWIFT_FLAGS after confirming the
-// identifier exists in Xcode 26.2+). Without the flag nothing is read and
-// `hypertensionEvents(since:)` returns []. TODO(lead): verify and enable.
+// `HKCategoryTypeIdentifier.hypertensionEvent` (iOS/watchOS 26.2), confirmed
+// in the iOS 27.2 SDK's HealthKit headers (HKTypeIdentifiers.h: "HKCategory-
+// TypeIdentifierHypertensionEvent API_AVAILABLE(ios(26.2) …)", printed by the
+// SDK probe workflow, 19 Nov 2026). Its samples carry no value enum, so any
+// sample is treated as one notification. Before iOS 26.2 nothing is read and
+// `hypertensionEvents(since:)` returns [].
 //
 // What the watch does: Series 9+/Ultra 2+ review 30 days of optical data and
 // notify on consistent signs of hypertension; validation against 30-day home
 // blood pressure found sensitivity 41%, specificity 92% (refs B1-B3; the
 // figures live in `HomeBloodPressure`).
 nonisolated extension HealthKitClient {
-    #if TENSILE_HYPERTENSION_EVENT
     /// The notification's category type, for `readTypes` (empty before iOS 26.2).
     static var hypertensionReadTypes: [HKObjectType] {
         if #available(iOS 26.2, *) {
@@ -46,12 +42,4 @@ nonisolated extension HealthKitClient {
             return []
         }
     }
-    #else
-    /// Hypertension notifications not enabled in this build (see the note above).
-    static var hypertensionReadTypes: [HKObjectType] { [] }
-
-    /// Hypertension notifications not enabled in this build: none to report.
-    @concurrent
-    func hypertensionEvents(since start: Date) async throws -> [Date] { [] }
-    #endif
 }

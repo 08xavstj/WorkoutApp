@@ -295,7 +295,8 @@ final class ScreenshotTests: XCTestCase {
             ("settings-training", "training", 2, [(["Gym equipment"], "gym"), (["settings-heart-zones", "Heart-rate zones"], "heart-zones")]),
             ("settings-notifications", "notifications", 3, [(["Medications & supplements", "Medication reminders"], "medications")]),
             ("settings-sleep-nutrition", "sleep-nutrition", 1, [(["settings-sleep-window", "Trouble sleeping"], "sleep-window")]),
-            ("settings-data", "data", 1, [(["Using a Garmin"], "garmin-help"), (["Using Cronometer"], "cronometer-help")]),
+            ("settings-data", "data", 1, [(["settings-health-data-check", "Health data check"], "health-data-check"),
+                                         (["Using a Garmin"], "garmin-help"), (["Using Cronometer"], "cronometer-help")]),
         ]
         for section in sections {
             guard tap(app, [section.key], name: "Settings \(section.name)") else { continue }
