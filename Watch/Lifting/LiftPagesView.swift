@@ -42,8 +42,14 @@ struct LiftPagesView: View {
                     .tag(LiftPage.exercises)
             }
             .tabViewStyle(.page)
-            // The height a page can use, for the pages that fit themselves (`FittedPage`).
+            // The space a page can use, for the pages that fit themselves (`FittedPage`).
             .measuresWatchPages()
+            #if DEBUG
+            // Screenshot runs: open on another page (`-demoLiftPage rest`).
+            .onAppear {
+                if UserDefaults.standard.string(forKey: "demoLiftPage") == "rest" { page = .rest }
+            }
+            #endif
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     leading

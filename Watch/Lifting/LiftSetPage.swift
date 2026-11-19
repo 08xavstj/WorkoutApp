@@ -111,8 +111,7 @@ private struct SetCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 header
                 Spacer(minLength: 0)
-                weightRow
-                repsRow
+                loadRow
                 guideLine
             }
             .opacity(model.phase == .paused ? 0.45 : 1)
@@ -182,7 +181,24 @@ private struct SetCard: View {
         return parts.joined(separator: " · ")
     }
 
-    // MARK: Weight
+    // MARK: Weight and reps
+
+    /// "95 lb × 8" on one row, so the page fits under the toolbar on a 42 mm
+    /// watch (`FittedPage`); stacked, with −/+ buttons, for VoiceOver and
+    /// Switch Control. Each half has its own crown ring.
+    @ViewBuilder
+    private var loadRow: some View {
+        if showsSteppers {
+            weightRow
+            repsRow
+        } else {
+            HStack(alignment: .center, spacing: 2) {
+                weightRow
+                repsRow
+                Spacer(minLength: 0)
+            }
+        }
+    }
 
     @ViewBuilder
     private var weightRow: some View {
@@ -211,8 +227,10 @@ private struct SetCard: View {
                     @unknown default: break
                     }
                 }
-                Spacer(minLength: 0)
-                if showsSteppers { stepButton("plus", label: "Heavier") { stepWeight(1) } }
+                if showsSteppers {
+                    Spacer(minLength: 0)
+                    stepButton("plus", label: "Heavier") { stepWeight(1) }
+                }
             }
             .padding(.horizontal, 6)
             .background { focusRing(.weight) }
@@ -246,9 +264,13 @@ private struct SetCard: View {
                     .numeral(set.isHold ? .primary : .secondary)
                     .alwaysOnPrimary(.primary)
                     .lineLimit(1)
-                Text(set.isHold ? "s" : (set.reps == 1 ? "rep" : "reps"))
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .minimumScaleFactor(0.8)
+                // Beside the weight there's no room for "reps": "95 lb × 8" says it.
+                if set.isHold || showsSteppers {
+                    Text(set.isHold ? "s" : (set.reps == 1 ? "rep" : "reps"))
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(set.isHold ? "Seconds" : "Reps")
@@ -260,8 +282,10 @@ private struct SetCard: View {
                 @unknown default: break
                 }
             }
-            Spacer(minLength: 0)
-            if showsSteppers { stepButton("plus", label: set.isHold ? "Longer" : "More reps") { stepReps(1) } }
+            if showsSteppers {
+                Spacer(minLength: 0)
+                stepButton("plus", label: set.isHold ? "Longer" : "More reps") { stepReps(1) }
+            }
             if exercise.repCounting == true, !set.isHold, !set.isWarmup {
                 RepCountControl(setKey: set.id)
             }
