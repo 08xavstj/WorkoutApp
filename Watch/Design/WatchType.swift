@@ -40,6 +40,17 @@ enum WatchNumeral {
         }
     }
 
+    /// The size on a page stepped down to tight: about 30 % smaller, still
+    /// above Title 2 (30 pt) for the weight and the rest countdown.
+    var tightSize: CGFloat {
+        switch self {
+        case .primary: 34
+        case .rest: 30
+        case .secondary: 22
+        case .tertiary: 18
+        }
+    }
+
     var weight: Font.Weight {
         switch self {
         case .primary, .rest: .bold
@@ -61,17 +72,27 @@ private struct NumeralFont: ViewModifier {
     @Environment(\.watchPageFit) private var fit
     @ScaledMetric private var size: CGFloat
     @ScaledMetric private var compactSize: CGFloat
+    @ScaledMetric private var tightSize: CGFloat
     private let weight: Font.Weight
 
     init(_ role: WatchNumeral) {
         _size = ScaledMetric(wrappedValue: role.baseSize, relativeTo: role.relativeTo)
         _compactSize = ScaledMetric(wrappedValue: role.compactSize, relativeTo: role.relativeTo)
+        _tightSize = ScaledMetric(wrappedValue: role.tightSize, relativeTo: role.relativeTo)
         weight = role.weight
+    }
+
+    private var fitted: CGFloat {
+        switch fit {
+        case .compact: compactSize
+        case .tight: tightSize
+        case .full, .scrolls: size
+        }
     }
 
     func body(content: Content) -> some View {
         content
-            .font(.system(size: fit == .compact ? compactSize : size, weight: weight, design: .rounded))
+            .font(.system(size: fitted, weight: weight, design: .rounded))
             .monospacedDigit()
     }
 }

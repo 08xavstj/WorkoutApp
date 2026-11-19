@@ -7,6 +7,9 @@ nonisolated enum WatchPageFit: Int, Comparable, Sendable {
     /// One step down: big numbers about a sixth smaller, the wide button and
     /// chips shorter (`NumeralFont`, `PrimaryWideButton`, `ChipGrid`).
     case compact
+    /// Two steps down: big numbers about 30 % smaller, the wide button and
+    /// chips at their floors (the 42 mm watch at the larger text sizes).
+    case tight
     /// Still too tall: the page scrolls, so double tap is off (HIG Gestures).
     case scrolls
 
@@ -24,11 +27,18 @@ extension EnvironmentValues {
 /// A page taller than the space it's given doesn't clip: SwiftUI centres it
 /// and it spills over both ends, under the toolbar at the top (the rest
 /// timer, the clock, heart rate) and under the page dots at the bottom. That
-/// happened on the Set page at the 46 mm watch's default text size. So the
-/// page measures itself: taller than the space, it steps down to `compact`;
-/// still taller, it scrolls. At the accessibility text sizes it scrolls from
-/// the start. The fit only steps down while the page is up (so sizes don't
-/// jump between sets), and starts over when `resetID` or the text size changes.
+/// happened on the Set page on the 42 mm watch, and on the 46 mm at the
+/// larger text sizes (seen in the watchOS simulator and on the owner's
+/// wrist). So the page measures itself: taller than the space, it steps down
+/// to `compact`, then `tight`; still taller, it scrolls. At the accessibility
+/// text sizes it scrolls from the start. The fit only steps down while the
+/// page is up (so sizes don't jump between sets), and starts over when
+/// `resetID` or the text size changes.
+///
+/// The space is read with a `GeometryReader`, which takes the size it's
+/// offered whatever its content needs: a watch page in a paged `TabView`
+/// grows to fit its content, so measuring the page itself never shows the
+/// overflow.
 struct FittedPage<Content: View>: View {
     var resetID: AnyHashable?
     @ViewBuilder let content: (WatchPageFit) -> Content
@@ -51,16 +61,18 @@ struct FittedPage<Content: View>: View {
             if current == .scrolls {
                 ScrollView { content(current) }
             } else {
-                content(current)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                        contentHeight = height
-                        stepDownIfTooTall()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                        availableHeight = height
-                        stepDownIfTooTall()
-                    }
+                GeometryReader { proxy in
+                    content(current)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            contentHeight = height
+                            stepDownIfTooTall()
+                        }
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .onChange(of: proxy.size.height, initial: true) {
+                            availableHeight = proxy.size.height
+                            stepDownIfTooTall()
+                        }
+                }
             }
         }
         .environment(\.watchPageFit, current)

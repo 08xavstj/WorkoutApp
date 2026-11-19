@@ -10,7 +10,8 @@ import WatchKit
 //   (≈ 44 pt) targets were missed 9.7 % of the time walking (Dobbelstein et
 //   al., ISWC 2017);
 // - on a page `FittedPage` stepped down to compact: primary buttons 53 pt
-//   (20 % over 44 pt, the bottom of that range) and chips 48 pt;
+//   (20 % over 44 pt, the bottom of that range) and chips 48 pt; to tight:
+//   both at 44 pt, the HIG floor;
 // - secondary circles 48 pt, the controls grid 64 pt, chips 52 pt (app's
 //   choices, all above 44 pt);
 // - at most three glyph or two text buttons in a row (HIG Layout).
@@ -21,6 +22,8 @@ let watchPrimaryButtonHeight: CGFloat = 60
 let watchCompactPrimaryButtonHeight: CGFloat = 53
 /// A chip's height on a compact page (see above).
 let watchCompactChipHeight: CGFloat = 48
+/// A primary button's or chip's height on a tight page: the HIG's 44 pt floor.
+let watchTightControlHeight: CGFloat = 44
 
 /// A filled button that shrinks a little when pressed (not with Reduce
 /// Motion) and turns into a stroked outline in Always On.
@@ -49,13 +52,20 @@ struct PrimaryWideButton: View {
     let action: () -> Void
     @Environment(\.watchPageFit) private var fit
 
+    private var height: CGFloat {
+        switch fit {
+        case .compact: watchCompactPrimaryButtonHeight
+        case .tight: watchTightControlHeight
+        case .full, .scrolls: watchPrimaryButtonHeight
+        }
+    }
+
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.headline)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity,
-                       minHeight: fit == .compact ? watchCompactPrimaryButtonHeight : watchPrimaryButtonHeight)
+                .frame(maxWidth: .infinity, minHeight: height)
         }
         .buttonStyle(WatchFilledButtonStyle(tint: tint))
         .handGestureShortcut(.primaryAction, isEnabled: primaryAction)
@@ -119,9 +129,13 @@ struct ChipGrid: View {
     @Environment(\.isLuminanceReduced) private var reduced
     @Environment(\.watchPageFit) private var fit
 
-    /// Shorter on a compact page, never under 44 pt.
+    /// Shorter on a compact or tight page, never under 44 pt.
     private var chipHeight: CGFloat {
-        fit == .compact ? min(height, watchCompactChipHeight) : height
+        switch fit {
+        case .compact: min(height, watchCompactChipHeight)
+        case .tight: min(height, watchTightControlHeight)
+        case .full, .scrolls: height
+        }
     }
 
     var body: some View {
