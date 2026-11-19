@@ -1,0 +1,37 @@
+name: SDK probe
+
+# Prints what the iOS 27.2 SDK's HealthKit declares (new types and their
+# availability), so features are built on what the SDK really has rather than
+# on summaries. Runs for commits whose message contains "[sdk-probe]", or by hand.
+
+on:
+  push:
+    branches: ["claude/**"]
+  workflow_dispatch:
+
+jobs:
+  healthkit:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[sdk-probe]')
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - name: HealthKit in the iOS 27.2 SDK
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.2.app
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          HK="$SDK/System/Library/Frameworks/HealthKit.framework"
+          echo "SDK: $SDK"
+          echo "=== Quantity identifiers available from iOS 26 or 27 ==="
+          grep -h -B2 -A1 -E "HKQuantityTypeIdentifier[A-Za-z]+ .*API_AVAILABLE\(ios\((26|27)" "$HK"/Headers/*.h || true
+          grep -h -E "HKQuantityTypeIdentifier[A-Za-z]+" "$HK"/Headers/HKTypeIdentifiers.h | grep -E "ios\((26|27)" || true
+          echo "=== Category identifiers available from iOS 26 or 27 ==="
+          grep -h -E "HKCategoryTypeIdentifier[A-Za-z]+" "$HK"/Headers/HKTypeIdentifiers.h | grep -E "ios\((26|27)" || true
+          echo "=== Anything mentioning RMSSD, readiness, sleep score, vitals, respiratory ==="
+          grep -rh -i -E "rmssd|readiness|sleepScore|sleep score|vitals|RespiratoryRate" "$HK"/Headers/*.h | sort -u | head -60 || true
+          echo "=== Swift interface: new identifiers ==="
+          find "$HK" -name "*.swiftinterface" | head -3
+          for f in $(find "$HK" -name "*arm64e-apple-ios.swiftinterface" | head -1); do
+            grep -n -i -E "rmssd|readiness|sleepScore|available\(iOS 27" "$f" | head -60
+          done
+          echo "=== Last 40 identifiers in HKTypeIdentifiers.h (newest at the end) ==="
+          grep -n -E "^HK_EXTERN HKQuantityTypeIdentifier const" "$HK"/Headers/HKTypeIdentifiers.h | tail -40
