@@ -139,8 +139,8 @@ jobs:
               print("=== END ===")
           PY
 
-  # The Watch's Set page in the watchOS simulator, at the default text size
-  # and a larger one, from the debug-only demo lift (`-demoLift YES`,
+  # The Watch's Set page in the watchOS simulator, on the 46 mm and 42 mm
+  # watches at the default text size and two larger ones, from the debug-only demo lift (`-demoLift YES`,
   # `WatchWorkoutModel.loadDemoLift`): Back Squat, set 3 of 3, a rest running.
   # Printed like the phone's shots, as "=== SHOT watch-... ===" blocks. Runs
   # with "[screens]", or alone with "[watch-screens]" in the commit message.
@@ -156,26 +156,26 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Boot a Watch simulator
+      - name: Pick Watch simulators
         run: |
-          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          # The largest and smallest current Series: 46 mm and 42 mm.
+          xcrun simctl list devices available -j | python3 -c '
           import json, sys
           data = json.load(sys.stdin)["devices"]
-          picks = []
+          found = {}
           for runtime, devices in sorted(data.items(), reverse=True):
               if "watchOS" not in runtime:
                   continue
-              for d in devices:
-                  if d["name"].startswith("Apple Watch Series") and "46mm" in d["name"]:
-                      picks.append(d)
-          picks.sort(key=lambda d: d["name"], reverse=True)
-          print(picks[0]["udid"] if picks else "")
-          ')
-          [ -n "$UDID" ] || { xcrun simctl list devices available; exit 1; }
-          xcrun simctl list devices | grep "$UDID"
-          echo "UDID=$UDID" >> "$GITHUB_ENV"
-          xcrun simctl boot "$UDID"
-          xcrun simctl bootstatus "$UDID" -b
+              for d in sorted(devices, key=lambda d: d["name"], reverse=True):
+                  for mm in ("46mm", "42mm"):
+                      if mm not in found and d["name"].startswith("Apple Watch Series") and mm in d["name"]:
+                          found[mm] = d["udid"]
+          for mm, udid in found.items():
+              print(f"{mm} {udid}")
+          ' > watches.txt
+          cat watches.txt
+          [ -s watches.txt ] || { xcrun simctl list devices available; exit 1; }
+          echo "UDID=$(head -1 watches.txt | cut -d' ' -f2)" >> "$GITHUB_ENV"
 
       - name: Build the Watch app
         timeout-minutes: 20
@@ -195,20 +195,28 @@ jobs:
         run: |
           APP=$(find dd/Build/Products -maxdepth 2 -name "*.app" -path "*watchsimulator*" | head -1)
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Info.plist")
-          xcrun simctl install "$UDID" "$APP"
           mkdir -p watch-shots
-          for size in large extra-extra-extra-large; do
-            xcrun simctl ui "$UDID" content_size "$size" || true
-            xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
-            xcrun simctl launch "$UDID" "$BUNDLE" -demoLift YES
-            sleep 12
-            xcrun simctl io "$UDID" screenshot "watch-shots/watch-set-$size.png"
-          done
+          while read -r MM DEVICE; do
+            xcrun simctl boot "$DEVICE"
+            xcrun simctl bootstatus "$DEVICE" -b
+            xcrun simctl install "$DEVICE" "$APP"
+            # The default text size, then two larger ones (Settings > Display &
+            # Brightness > Text Size), set per launch through UIKit's preference.
+            for size in L XXL XXXL; do
+              xcrun simctl terminate "$DEVICE" "$BUNDLE" 2>/dev/null || true
+              xcrun simctl launch "$DEVICE" "$BUNDLE" -demoLift YES \
+                -UIPreferredContentSizeCategoryName "UICTContentSizeCategory$size"
+              sleep 12
+              xcrun simctl io "$DEVICE" screenshot "watch-shots/watch-set-$MM-$size.png"
+            done
+            xcrun simctl shutdown "$DEVICE"
+          done < watches.txt
           cd watch-shots
           for f in *.png; do
-            sips -s format jpeg -s formatOptions 70 "$f" --out "${f%.png}.jpg" >/dev/null
-            echo "=== SHOT ${f%.png} ==="
-            base64 -i "${f%.png}.jpg" | fold -w 4000
+            name=$(basename "$f" .png)
+            sips -s format jpeg -s formatOptions 70 "$f" --out "$name.jpg" >/dev/null
+            echo "=== SHOT $name ==="
+            base64 -i "$name.jpg" | fold -w 4000
             echo "=== END ==="
           done
 
