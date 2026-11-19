@@ -15,7 +15,6 @@ import WatchKit
 ///   the weight and reps are adjustable by swipe.
 struct LiftSetPage: View {
     @Environment(WatchWorkoutModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// The page is in front: only then does double tap press Done and the
     /// crown change the set.
     let isFront: Bool
@@ -52,7 +51,6 @@ private enum CrownField: Hashable {
 
 private struct SetCard: View {
     @Environment(WatchWorkoutModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -71,16 +69,11 @@ private struct SetCard: View {
     private var exercise: WatchSession.ExerciseSnapshot { session.exercises[set.exerciseIndex] }
     private var snapshotSet: WatchSession.SetSnapshot { exercise.sets[set.setIndex] }
     private var showsSteppers: Bool { voiceOver || switchControl }
-    /// At the accessibility text sizes the page scrolls, so double tap is off (HIG Gestures).
-    private var scrolls: Bool { dynamicTypeSize.isAccessibilitySize }
-
     var body: some View {
-        Group {
-            if scrolls {
-                ScrollView { content }
-            } else {
-                content
-            }
+        // Fits the screen when it can, else steps down, else scrolls (`FittedPage`);
+        // a page that scrolls turns double tap off (HIG Gestures).
+        FittedPage(resetID: set.id) { fit in
+            content(doubleTap: fit != .scrolls)
         }
         .overlay { tickOver }
         .onChange(of: set.id, initial: true) {
@@ -112,7 +105,7 @@ private struct SetCard: View {
         }
     }
 
-    private var content: some View {
+    private func content(doubleTap: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             // Paused: everything but Resume dims, a look distinct from running (HIG Workouts).
             VStack(alignment: .leading, spacing: 2) {
@@ -124,7 +117,7 @@ private struct SetCard: View {
             }
             .opacity(model.phase == .paused ? 0.45 : 1)
             Spacer(minLength: 2)
-            primaryButton
+            primaryButton(doubleTap: doubleTap)
         }
     }
 
@@ -334,15 +327,15 @@ private struct SetCard: View {
     // MARK: Done / Resume
 
     @ViewBuilder
-    private var primaryButton: some View {
+    private func primaryButton(doubleTap: Bool) -> some View {
         if model.phase == .paused {
             PrimaryWideButton(title: "Resume", systemImage: "play.fill", tint: WatchPalette.recovery,
-                              primaryAction: isFront && !scrolls, accessibilityLabel: "Paused. Resume") {
+                              primaryAction: isFront && doubleTap, accessibilityLabel: "Paused. Resume") {
                 model.resume()
             }
         } else {
             PrimaryWideButton(title: "Done", systemImage: "checkmark", tint: WatchPalette.recovery,
-                              primaryAction: isFront && !scrolls, accessibilityLabel: spokenDone) {
+                              primaryAction: isFront && doubleTap, accessibilityLabel: spokenDone) {
                 focus = nil
                 model.logCurrentSet()
             }

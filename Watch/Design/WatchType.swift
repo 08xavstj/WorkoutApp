@@ -30,6 +30,16 @@ enum WatchNumeral {
         }
     }
 
+    /// The size on a page `FittedPage` stepped down to compact: about a sixth smaller.
+    var compactSize: CGFloat {
+        switch self {
+        case .primary: 40
+        case .rest: 34
+        case .secondary: 26
+        case .tertiary: 20
+        }
+    }
+
     var weight: Font.Weight {
         switch self {
         case .primary, .rest: .bold
@@ -46,18 +56,22 @@ enum WatchNumeral {
 }
 
 /// Rounded, monospaced numerals at a role's size, scaled with Dynamic Type.
+/// On a compact page (`FittedPage`) they take the role's compact size.
 private struct NumeralFont: ViewModifier {
+    @Environment(\.watchPageFit) private var fit
     @ScaledMetric private var size: CGFloat
+    @ScaledMetric private var compactSize: CGFloat
     private let weight: Font.Weight
 
     init(_ role: WatchNumeral) {
         _size = ScaledMetric(wrappedValue: role.baseSize, relativeTo: role.relativeTo)
+        _compactSize = ScaledMetric(wrappedValue: role.compactSize, relativeTo: role.relativeTo)
         weight = role.weight
     }
 
     func body(content: Content) -> some View {
         content
-            .font(.system(size: size, weight: weight, design: .rounded))
+            .font(.system(size: fit == .compact ? compactSize : size, weight: weight, design: .rounded))
             .monospacedDigit()
     }
 }

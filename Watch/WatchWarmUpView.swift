@@ -10,28 +10,24 @@ import WatchKit
 /// sideways and nothing on the card needs adjusting. The phone owns the
 /// steps; taps here go to it as `WatchCommand`s and show at once.
 struct WatchWarmUpView: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let session: WatchSession
     let step: WatchWarmUpStep
     var isFront = true
 
-    /// At the accessibility text sizes the card scrolls, so double tap is off (HIG Gestures).
-    private var scrolls: Bool { dynamicTypeSize.isAccessibilitySize }
-
     var body: some View {
-        if scrolls {
-            ScrollView { card }
-        } else {
-            card
+        // Fits the screen when it can, else steps down, else scrolls (`FittedPage`);
+        // a card that scrolls turns double tap off (HIG Gestures).
+        FittedPage(resetID: session.isWarmUpOverview ? "overview" : step.name) { fit in
+            card(doubleTap: isFront && fit != .scrolls)
         }
     }
 
     @ViewBuilder
-    private var card: some View {
+    private func card(doubleTap: Bool) -> some View {
         if session.isWarmUpOverview {
-            WatchWarmUpOverview(session: session, isFront: isFront && !scrolls)
+            WatchWarmUpOverview(session: session, isFront: doubleTap)
         } else {
-            WatchWarmUpStepCard(session: session, step: step, isFront: isFront && !scrolls)
+            WatchWarmUpStepCard(session: session, step: step, isFront: doubleTap)
         }
     }
 }

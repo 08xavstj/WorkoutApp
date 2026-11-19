@@ -15,32 +15,34 @@ import WatchKit
 /// track hides and its arc dims there.
 struct LiftRestPage: View {
     @Environment(WatchWorkoutModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let isFront: Bool
     @Binding var page: LiftPage
 
-    private var scrolls: Bool { dynamicTypeSize.isAccessibilitySize }
-
     var body: some View {
-        Group {
-            if scrolls {
-                ScrollView { content }
-            } else {
-                content
-            }
+        // Fits the screen when it can, else steps down, else scrolls (`FittedPage`);
+        // a page that scrolls turns double tap off (HIG Gestures).
+        FittedPage(resetID: card) { fit in
+            content(doubleTap: isFront && fit != .scrolls)
         }
     }
 
+    /// Which card shows, so a new card is fitted afresh.
+    private var card: Int {
+        if model.pendingRating != nil { return 0 }
+        if model.restEndsAt != nil { return 1 }
+        return model.restEndedAt != nil ? 2 : 3
+    }
+
     @ViewBuilder
-    private var content: some View {
+    private func content(doubleTap: Bool) -> some View {
         if let pending = model.pendingRating {
             RepsLeftPrompt(set: pending)
         } else if let ends = model.restEndsAt {
-            RestRunning(ends: ends, isFront: isFront && !scrolls, page: $page)
+            RestRunning(ends: ends, isFront: doubleTap, page: $page)
         } else if model.restEndedAt != nil {
-            GoCard(isFront: isFront && !scrolls, page: $page)
+            GoCard(isFront: doubleTap, page: $page)
         } else {
-            NoRestCard(isFront: isFront && !scrolls, page: $page)
+            NoRestCard(isFront: doubleTap, page: $page)
         }
     }
 }

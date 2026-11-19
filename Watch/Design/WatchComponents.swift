@@ -9,12 +9,18 @@ import WatchKit
 //   that made up for walking in Schildbach & Rukzio (MobileHCI 2010); 7 mm
 //   (≈ 44 pt) targets were missed 9.7 % of the time walking (Dobbelstein et
 //   al., ISWC 2017);
+// - on a page `FittedPage` stepped down to compact: primary buttons 53 pt
+//   (20 % over 44 pt, the bottom of that range) and chips 48 pt;
 // - secondary circles 48 pt, the controls grid 64 pt, chips 52 pt (app's
 //   choices, all above 44 pt);
 // - at most three glyph or two text buttons in a row (HIG Layout).
 
 /// Height of a primary in-workout button (see above).
 let watchPrimaryButtonHeight: CGFloat = 60
+/// The same on a compact page (see above).
+let watchCompactPrimaryButtonHeight: CGFloat = 53
+/// A chip's height on a compact page (see above).
+let watchCompactChipHeight: CGFloat = 48
 
 /// A filled button that shrinks a little when pressed (not with Reduce
 /// Motion) and turns into a stroked outline in Always On.
@@ -41,13 +47,15 @@ struct PrimaryWideButton: View {
     var primaryAction = false
     var accessibilityLabel: String?
     let action: () -> Void
+    @Environment(\.watchPageFit) private var fit
 
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.headline)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: watchPrimaryButtonHeight)
+                .frame(maxWidth: .infinity,
+                       minHeight: fit == .compact ? watchCompactPrimaryButtonHeight : watchPrimaryButtonHeight)
         }
         .buttonStyle(WatchFilledButtonStyle(tint: tint))
         .handGestureShortcut(.primaryAction, isEnabled: primaryAction)
@@ -109,6 +117,12 @@ struct ChipGrid: View {
     var highlighted: Int?
     let action: (Int) -> Void
     @Environment(\.isLuminanceReduced) private var reduced
+    @Environment(\.watchPageFit) private var fit
+
+    /// Shorter on a compact page, never under 44 pt.
+    private var chipHeight: CGFloat {
+        fit == .compact ? min(height, watchCompactChipHeight) : height
+    }
 
     var body: some View {
         let rows = stride(from: 0, to: chips.count, by: max(1, perRow)).map { start in
@@ -143,7 +157,7 @@ struct ChipGrid: View {
                 }
             }
             .foregroundStyle(isOn && !reduced ? WatchPalette.onTint : .primary)
-            .frame(maxWidth: .infinity, minHeight: height)
+            .frame(maxWidth: .infinity, minHeight: chipHeight)
             .background {
                 let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
                 if isOn && !reduced {

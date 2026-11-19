@@ -1494,3 +1494,43 @@ nonisolated enum LocalLiftLog {
         try? FileManager.default.removeItem(at: url)
     }
 }
+
+#if DEBUG
+extension WatchWorkoutModel {
+    /// Screenshot runs only (`-demoLift YES`, .github/workflows/screenshots.yml):
+    /// a lift in progress on the Set page with a rest running, so CI can show
+    /// the Watch's pages without HealthKit or a phone. Made-up numbers.
+    func loadDemoLift() {
+        let pound = 1 / 2.20462
+        let done = WatchSession.SetSnapshot(reps: 8, weightKg: 95 * pound, isCompleted: true, isWarmup: false,
+                                            targetReps: 8, title: nil)
+        var current = done
+        current.isCompleted = false
+        current.lastWeightKg = 85 * pound
+        current.lastReps = 8
+        current.lastRPE = 6
+        let squat = WatchSession.ExerciseSnapshot(
+            id: 0, name: "Back Squat", supersetLabel: nil,
+            sets: [done, done, current], achievableLoadsKg: nil, restSeconds: 90)
+        var rdl = WatchSession.ExerciseSnapshot(
+            id: 1, name: "Romanian Deadlift", supersetLabel: nil,
+            sets: Array(repeating: current, count: 3), achievableLoadsKg: nil, restSeconds: 90)
+        rdl.sets = rdl.sets.map { set in
+            var set = set
+            set.reps = 10
+            set.targetReps = 10
+            return set
+        }
+        let now = Date.now
+        snapshot = WatchSession(
+            id: WatchSession.id(for: now), startedAt: now.addingTimeInterval(-18 * 60), name: "Lower A",
+            exercises: [squat, rdl], currentExercise: 0, currentSet: 2,
+            restSeconds: 90, restEndsAt: nil, unit: "lb", isFinished: false, sentAt: now, weightStepKg: nil)
+        isLocal = true
+        startedAt = now.addingTimeInterval(-18 * 60)
+        phase = .running
+        heartRate = 96
+        startRest(until: now.addingTimeInterval(45), length: 90, startedAt: now.addingTimeInterval(-45))
+    }
+}
+#endif

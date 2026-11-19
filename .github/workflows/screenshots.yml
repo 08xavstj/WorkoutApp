@@ -138,3 +138,86 @@ jobs:
                   print(data[i:i+4000])
               print("=== END ===")
           PY
+
+  # The Watch's Set page in the watchOS simulator, at the default text size
+  # and a larger one, from the debug-only demo lift (`-demoLift YES`,
+  # `WatchWorkoutModel.loadDemoLift`): Back Squat, set 3 of 3, a rest running.
+  # Printed like the phone's shots, as "=== SHOT watch-... ===" blocks. Runs
+  # with "[screens]", or alone with "[watch-screens]" in the commit message.
+  watch-shots:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screens]') || contains(github.event.head_commit.message, '[watch-screens]')
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Boot a Watch simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          picks = []
+          for runtime, devices in sorted(data.items(), reverse=True):
+              if "watchOS" not in runtime:
+                  continue
+              for d in devices:
+                  if d["name"].startswith("Apple Watch Series") and "46mm" in d["name"]:
+                      picks.append(d)
+          picks.sort(key=lambda d: d["name"], reverse=True)
+          print(picks[0]["udid"] if picks else "")
+          ')
+          [ -n "$UDID" ] || { xcrun simctl list devices available; exit 1; }
+          xcrun simctl list devices | grep "$UDID"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Build the Watch app
+        timeout-minutes: 20
+        run: |
+          xcodebuild build \
+            -project WorkoutApp.xcodeproj \
+            -scheme TensileWatch \
+            -destination "id=$UDID" \
+            -configuration Debug \
+            -derivedDataPath dd \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG' \
+            | tee watch-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" watch-build.log
+
+      - name: Capture the Set page
+        run: |
+          APP=$(find dd/Build/Products -maxdepth 2 -name "*.app" -path "*watchsimulator*" | head -1)
+          BUNDLE=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Info.plist")
+          xcrun simctl install "$UDID" "$APP"
+          mkdir -p watch-shots
+          for size in large extra-extra-extra-large; do
+            xcrun simctl ui "$UDID" content_size "$size" || true
+            xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
+            xcrun simctl launch "$UDID" "$BUNDLE" -demoLift YES
+            sleep 12
+            xcrun simctl io "$UDID" screenshot "watch-shots/watch-set-$size.png"
+          done
+          cd watch-shots
+          for f in *.png; do
+            sips -s format jpeg -s formatOptions 70 "$f" --out "${f%.png}.jpg" >/dev/null
+            echo "=== SHOT ${f%.png} ==="
+            base64 -i "${f%.png}.jpg" | fold -w 4000
+            echo "=== END ==="
+          done
+
+      - name: Upload Watch shots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: watch-shots
+          path: |
+            watch-shots
+            watch-build.log
+          retention-days: 3

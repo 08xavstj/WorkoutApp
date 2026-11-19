@@ -22,7 +22,13 @@ struct TensileWatchApp: App {
             WatchRootView()
                 .environment(model)
                 .environment(cardio)
-                .task { model.activate() }
+                .task {
+                    model.activate()
+                    #if DEBUG
+                    // Screenshot runs: a lift in progress (`loadDemoLift`).
+                    if UserDefaults.standard.bool(forKey: "demoLift") { model.loadDemoLift() }
+                    #endif
+                }
                 // A tapped complication (`tensile://start`) opens Home.
                 .onOpenURL { url in
                     guard url.scheme == "tensile" else { return }
