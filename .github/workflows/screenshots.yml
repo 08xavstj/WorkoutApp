@@ -205,7 +205,7 @@ jobs:
             for page in set rest controls heart; do
               for size in L XXL XXXL; do
                 xcrun simctl terminate "$DEVICE" "$BUNDLE" 2>/dev/null || true
-                xcrun simctl launch "$DEVICE" "$BUNDLE" -demoLift YES -demoLiftPage "$page" -demoFitDebug YES \
+                xcrun simctl launch "$DEVICE" "$BUNDLE" -demoLift YES -demoLiftPage "$page" \
                   -UIPreferredContentSizeCategoryName "UICTContentSizeCategory$size"
                 sleep 12
                 xcrun simctl io "$DEVICE" screenshot "watch-shots/watch-$page-$MM-$size.png"
