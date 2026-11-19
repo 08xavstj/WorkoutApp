@@ -50,6 +50,7 @@ struct LiftPagesView: View {
                 switch UserDefaults.standard.string(forKey: "demoLiftPage") {
                 case "rest": page = .rest
                 case "controls": page = .controls
+                case "heart": page = .heart
                 default: break
                 }
             }

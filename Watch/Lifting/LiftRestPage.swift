@@ -185,13 +185,15 @@ private struct RestRunning: View {
                         .alwaysOnPrimary(.primary)
                         .multilineTextAlignment(.center)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .minimumScaleFactor(0.6)
                 }
                 .padding(.horizontal, 8)
             }
         }
-        // 92 pt on the 46 mm; smaller on the 42 mm so the ±15 circles keep their 48 pt.
-        .frame(maxWidth: 92, maxHeight: 92)
+        // 92 pt on the 46 mm; smaller on the 42 mm so the ±15 circles keep their
+        // 48 pt, never under 72 pt, where the countdown still fits: below that
+        // the page steps down instead (`FittedPage`).
+        .frame(minWidth: 72, maxWidth: 92, minHeight: 72, maxHeight: 92)
         .aspectRatio(1, contentMode: .fit)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Rest left")
