@@ -63,28 +63,36 @@ struct FittedPage<Content: View>: View {
             } else {
                 GeometryReader { proxy in
                     content(current)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                            contentHeight = height
-                            stepDownIfTooTall()
-                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
                         .frame(width: proxy.size.width, height: proxy.size.height)
-                        .onChange(of: proxy.size.height, initial: true) {
-                            availableHeight = proxy.size.height
-                            stepDownIfTooTall()
-                        }
+                        .onChange(of: proxy.size.height, initial: true) { availableHeight = proxy.size.height }
                 }
             }
+        }
+        // Only a measurement that holds for a moment counts: while a page
+        // appears or slides in, its sizes pass through values it never shows.
+        .task(id: Measurement(fit: fit, content: contentHeight, available: availableHeight)) {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            stepDownIfTooTall()
         }
         .environment(\.watchPageFit, current)
         .onChange(of: dynamicTypeSize) { fit = .full }
         .onChange(of: resetID) { fit = .full }
     }
 
+    private struct Measurement: Equatable {
+        var fit: WatchPageFit
+        var content: CGFloat
+        var available: CGFloat
+    }
+
     private func stepDownIfTooTall() {
+        #if DEBUG
+        print("FittedPage fit=\(fit) content=\(contentHeight) available=\(availableHeight)")
+        #endif
         guard availableHeight > 0, contentHeight > availableHeight + Self.tolerance,
               let next = WatchPageFit(rawValue: fit.rawValue + 1) else { return }
-        // Measured again at the new fit before the next step.
-        contentHeight = 0
         fit = next
     }
 }

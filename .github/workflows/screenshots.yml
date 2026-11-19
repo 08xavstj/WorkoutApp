@@ -204,9 +204,11 @@ jobs:
             # Brightness > Text Size), set per launch through UIKit's preference.
             for size in L XXL XXXL; do
               xcrun simctl terminate "$DEVICE" "$BUNDLE" 2>/dev/null || true
-              xcrun simctl launch "$DEVICE" "$BUNDLE" -demoLift YES \
+              xcrun simctl launch --stdout="$PWD/watch-shots/console-$MM-$size.txt" "$DEVICE" "$BUNDLE" -demoLift YES \
                 -UIPreferredContentSizeCategoryName "UICTContentSizeCategory$size"
               sleep 12
+              echo "--- console $MM $size"
+              grep FittedPage "watch-shots/console-$MM-$size.txt" | tail -12 || true
               xcrun simctl io "$DEVICE" screenshot "watch-shots/watch-set-$MM-$size.png"
             done
             xcrun simctl shutdown "$DEVICE"
