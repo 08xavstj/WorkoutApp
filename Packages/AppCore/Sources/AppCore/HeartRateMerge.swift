@@ -62,6 +62,11 @@ public enum HeartRateMerge {
             if isOwnRecording || name.range(of: "AirPods", options: .caseInsensitive) != nil { return .ear }
             return .wrist
         }
+
+        /// An Oura ring (`SleepSource.tracker`): only a fallback, see `choose`.
+        public var isRing: Bool {
+            SleepSource.tracker(bundleID: bundleID, sourceName: name, deviceModel: nil) == .ring
+        }
     }
 
     /// A stretch where two sources read far apart. The preferred source was
@@ -231,6 +236,15 @@ public enum HeartRateMerge {
         _ candidates: [Int], minute: Int, lifting: Bool,
         sources: [Source], series: [[Int: Double]], coverage: [Int]
     ) -> Int? {
+        // A ring's minute only when no watch or ear sensor has one. Oura's heart
+        // rate is validated at night, not in the day or during exercise, while
+        // Apple Watch is among the most accurate wrist devices for exercise heart
+        // rate (docs/research/oura-ring-2026-11.md, R4, R30). Without this, the
+        // "steadier series" rule below handed a squash match to the ring: a
+        // smoothed ring trace swings less than a watch following rally after rally.
+        let candidates = candidates.contains { !sources[$0].isRing }
+            ? candidates.filter { !sources[$0].isRing }
+            : candidates
         guard candidates.count > 1 else { return candidates.first }
         if lifting {
             let ears = candidates.filter { sources[$0].placement == .ear }
@@ -336,5 +350,42 @@ public enum HeartRateMerge {
             }
         }
         return merged
+    }
+
+    // MARK: - Every reading inside cardio workouts
+
+    /// A cardio workout's own readings need at least one every this many
+    /// seconds to replace the per-minute merge there (app choice: the watch
+    /// writes one every 5 s in a workout, so a sparser series is a sync summary).
+    public static let workoutReadingMaximumSpacing: TimeInterval = 30
+
+    /// The source whose own readings stand for a cardio workout: the watch or
+    /// ear sensor with the most readings inside `window` (never a ring while
+    /// another source has readings), when it has one at least every
+    /// `workoutReadingMaximumSpacing`. Nil otherwise (the merge stays).
+    public static func workoutReadings(sources: [Source], window: DateInterval) -> [HeartRateSample]? {
+        let inside = sources.map { source in
+            (source: source, samples: source.samples.filter { window.contains($0.date) && $0.bpm > 0 }.sorted { $0.date < $1.date })
+        }
+        let usable = inside.contains { !$0.source.isRing && !$0.samples.isEmpty } ? inside.filter { !$0.source.isRing } : inside
+        guard let best = usable.max(by: { $0.samples.count < $1.samples.count }), !best.samples.isEmpty,
+              window.duration > 0,
+              Double(best.samples.count) >= window.duration / workoutReadingMaximumSpacing else { return nil }
+        return best.samples
+    }
+
+    /// `merged` with each cardio workout's per-minute averages replaced by its
+    /// own readings (`workoutReadings`). Squash, football or intervals change
+    /// heart rate within a minute: a minute that peaks in zone 5 can average
+    /// into zone 3, and Banister TRIMP is exponential, so averaging undercounts
+    /// hard bursts. Summing short stretches is what `StrainCalculator.trimp`
+    /// assumes (Banister 1991; Manzi et al., Am J Physiol Heart Circ Physiol
+    /// 2009: an individualised TRIMP summed beat by beat).
+    public static func withWorkoutReadings(_ merged: [HeartRateSample], workouts: [(window: DateInterval, readings: [HeartRateSample])]) -> [HeartRateSample] {
+        let detailed = workouts.filter { !$0.readings.isEmpty }
+        guard !detailed.isEmpty else { return merged }
+        let kept = merged.filter { sample in !detailed.contains { $0.window.contains(sample.date) } }
+        let added = detailed.flatMap { workout in workout.readings.filter { workout.window.contains($0.date) } }
+        return (kept + added).sorted { $0.date < $1.date }
     }
 }

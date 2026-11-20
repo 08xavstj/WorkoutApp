@@ -756,7 +756,18 @@ final class DailyMetricsModel {
                 let liftingWindows = sessions.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                     + fetchedWorkouts.filter(\.isStrength).map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
                 let merged = await Self.mergeHeartRate(mergeSources, liftingWindows: liftingWindows)
-                let heartRate = merged.samples
+                // Inside each cardio workout, the watch's own readings (every 5 s on a
+                // Series 12) instead of per-minute averages, so a squash rally's zone 5
+                // isn't averaged into zone 3 (`HeartRateMerge.withWorkoutReadings`).
+                var workoutReadings: [(window: DateInterval, readings: [HeartRateSample])] = []
+                for workout in fetchedWorkouts where !workout.isStrength && workout.end > workout.start {
+                    let window = DateInterval(start: workout.start, end: workout.end)
+                    guard let sources = try? await health.heartRateBySource(from: workout.start, to: workout.end),
+                          let readings = HeartRateMerge.workoutReadings(sources: sources.map(\.mergeSource), window: window)
+                    else { continue }
+                    workoutReadings.append((window: window, readings: readings))
+                }
+                let heartRate = HeartRateMerge.withWorkoutReadings(merged.samples, workouts: workoutReadings)
                 // Learn max heart rate from workouts only (used from the next refresh).
                 let workoutWindows = liftingWindows
                     + fetchedWorkouts.filter { !$0.isStrength }.map { DateInterval(start: $0.start, end: max($0.start, $0.end)) }
@@ -783,7 +794,8 @@ final class DailyMetricsModel {
                 let sourceCounts = sourceSeries.map { "\($0.name): \($0.samples.count)" }.joined(separator: ", ")
                 let zoneText = todayZones.map { String(Int($0.rounded())) }.joined(separator: "/")
                 let report = "Heart rate since \(firstNeeded.formatted(.iso8601)): sources [\(sourceCounts)], "
-                    + "merged \(heartRate.count) min (\(todaysHeartRate.count) today), exercise minutes \(exerciseMinutes.count), "
+                    + "merged \(merged.samples.count) min, \(workoutReadings.count) cardio workouts at full detail, "
+                    + "\(todaysHeartRate.count) readings today, exercise minutes \(exerciseMinutes.count), "
                     + "profile rest \(Int(profile.restingHeartRate)) max \(Int(profile.maxHeartRate)); "
                     + "today zones Z1-5 [\(zoneText)] min, movement credit \(Int(todayMovement)) min"
                 Self.log.info("\(report, privacy: .public)")

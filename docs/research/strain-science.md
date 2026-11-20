@@ -96,3 +96,12 @@ because of the intentional factor change. New tests:
 4. **Today's partial day** is in the 7-day window of the trend (the App passes
    28 days including today), so the acute average reads low early in the day.
 5. Optionally add Foster's weekly monotony as a variety cue.
+
+## Heart rate inside cardio workouts (20 November 2026)
+
+Reported by the owner after a squash match: the Watch's summary showed time in all five zones, while Tensile's zones and strain for the day were low. Two causes, both fixed in `HeartRateMerge`:
+
+1. **An Oura ring could win minutes during exercise.** The per-minute merge kept "the steadier series" during cardio, a rule meant for a chest strap against a watch. A ring writing smoothed heart rate swings less than a watch following rally after rally, so it won, with lower values. Oura's heart rate is validated at night, not in the day or during exercise, while Apple Watch is among the most accurate wrist devices for exercise heart rate (`oura-ring-2026-11.md`, R4, R30). A ring's minute now counts only when no watch or ear sensor has one.
+2. **Per-minute averages hid zone 5.** Squash heart rate changes within a minute: 40 s rallies near 182 bpm and 20 s at 150 average to 171, zone 4 instead of zone 5 for a 30-year-old resting at 55 with a maximum of 190. Banister TRIMP is exponential, so averaging also undercounts load. Inside each cardio workout the watch's own readings (every 5 s on a Series 12) now replace the per-minute averages, when it has one at least every 30 s (`HeartRateMerge.withWorkoutReadings`). Summing short stretches is how TRIMP is meant to be used for intermittent exercise (Banister 1991; Manzi et al., Am J Physiol Heart Circ Physiol 2009, an individualised TRIMP summed beat by beat). `WorkoutHeartRateTests` checks the squash pattern: no zone-5 time from minute averages, over 20 minutes from the readings, and a higher load.
+
+Outside workouts nothing changes: everyday heart rate stays per minute and tapered (`fullCountReserveFraction`).

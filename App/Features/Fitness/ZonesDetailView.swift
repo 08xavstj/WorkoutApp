@@ -75,6 +75,14 @@ private struct ZonesCard: View {
             Text(total > 0 ? "\(whole(total)) min in zones today" : "No time in heart-rate zones yet today")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
+            // Strain always counts Tensile's zones (`ZonePreferences`); the Watch and the
+            // workout pages use the chosen ones, so their minutes can differ from these.
+            if ZonePreferences.kind != .reserve {
+                Text("These are Tensile's zones, the ones strain counts. Your Watch and workout pages use \(ZonePreferences.kind.title) zones (Settings › Training › Heart-rate zones), so their minutes can differ.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if total == 0, let reason = noZonesReason {
                 Text(reason)
                     .font(.footnote)
