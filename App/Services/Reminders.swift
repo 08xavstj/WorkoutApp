@@ -307,6 +307,25 @@ nonisolated enum Reminders {
         return content
     }
 
+    // MARK: Bedtime
+
+    /// The bedtime reminder for the next nights (`BedtimeReminder`), replacing
+    /// any pending. Empty `fires` just clears them.
+    static func scheduleBedtime(_ fires: [Date], title: String, body: String) async {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: (0..<BedtimeReminder.nightsAhead).map { "bedtime|\($0)" })
+        guard !fires.isEmpty, await notificationsAllowed() else { return }
+        let calendar = Calendar.current
+        for (index, fire) in fires.enumerated() {
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.userInfo = ["link": "workoutapp://sleep"]
+            content.sound = .default
+            await add(content, identifier: "bedtime|\(index)", at: fire, center: center, calendar: calendar)
+        }
+    }
+
     // MARK: Stretching
 
     /// Days ahead the stretch reminder is scheduled. Few, because iOS keeps

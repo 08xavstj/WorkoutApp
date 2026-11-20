@@ -179,6 +179,17 @@ struct CardioRouteTests {
         #expect(summary.zoneMinutes.isEmpty)
     }
 
+    @Test func noRecoveryWhenHeartRateCameDownBeforeTheEnd() {
+        // Rallies at 175 until two minutes before the end, then walking off at 125.
+        let end = start.addingTimeInterval(1800)
+        var readings = (0...335).map { (date: start.addingTimeInterval(Double($0) * 5), bpm: 175.0) }
+        readings += (336...360).map { (date: start.addingTimeInterval(Double($0) * 5), bpm: 125.0) }
+        readings.append((end.addingTimeInterval(60), 121))
+        let summary = CardioHeartSummary(readings: readings, start: start, end: end, zones: nil)
+        #expect(summary.recoveryDrop == nil)
+        #expect(summary.slowedBeforeEnd)
+    }
+
     @Test func averageIsWeightedByTime() {
         // Ten minutes at 120 with one reading a minute, then a minute of
         // readings every second at 180: the burst must not dominate.

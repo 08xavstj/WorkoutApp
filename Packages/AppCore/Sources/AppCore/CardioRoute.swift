@@ -343,6 +343,9 @@ public nonisolated struct CardioHeartSummary: Sendable, Equatable {
     /// Beats per minute heart rate fell in the first minute after the end,
     /// when readings exist for both moments; nil otherwise.
     public var recoveryDrop: Double?
+    /// True when heart rate had already come down before the workout was
+    /// ended (`slowedBeforeEndBpm`), so no recovery is shown.
+    public var slowedBeforeEnd = false
 
     /// Heart-rate recovery under this many beats in the first minute after
     /// exercise was linked with higher mortality (Cole et al., N Engl J Med
@@ -354,6 +357,13 @@ public nonisolated struct CardioHeartSummary: Sendable, Equatable {
     public static let endReadingSeconds = 30.0
     /// The one-minute reading counts if it is between these times after the end.
     public static let recoveryWindow: ClosedRange<TimeInterval> = 45...90
+    /// Recovery is measured from the end of effort (Cole 1999 started the
+    /// clock at peak exercise). When the reading at the end is more than this
+    /// below the highest of the last 3 minutes, the workout was ended after
+    /// walking off or cooling down, and a "drop" from there says nothing
+    /// (a squash match ended at 125 bpm after rallies at 175 read "down
+    /// 4 bpm"). The 15 bpm is the app's choice.
+    public static let slowedBeforeEndBpm = 15.0
 
     /// `readings` may run past the end: those after it are used only for the recovery.
     public init(readings: [(date: Date, bpm: Double)], start: Date, end: Date, zones: HeartRateZoneScheme?) {
@@ -366,7 +376,11 @@ public nonisolated struct CardioHeartSummary: Sendable, Equatable {
         zoneMinutes = zones?.zoneMinutes(during) ?? []
         let atEnd = during.last { end.timeIntervalSince($0.date) <= Self.endReadingSeconds }
         let after = valid.first { Self.recoveryWindow.contains($0.date.timeIntervalSince(end)) }
-        if let atEnd, let after {
+        let lastMinutesPeak = during.filter { end.timeIntervalSince($0.date) <= 180 }.map(\.bpm).max()
+        if let atEnd, let peak = lastMinutesPeak, peak - atEnd.bpm > Self.slowedBeforeEndBpm {
+            recoveryDrop = nil
+            slowedBeforeEnd = true
+        } else if let atEnd, let after {
             recoveryDrop = atEnd.bpm - after.bpm
         } else {
             recoveryDrop = nil

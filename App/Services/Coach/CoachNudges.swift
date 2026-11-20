@@ -56,6 +56,8 @@ final class CoachNudges {
     var quietEndMinutes: Int { didSet { defaults.set(quietEndMinutes, forKey: "coachNudgeQuietEnd"); rescheduleSoon() } }
     /// Let Apple's on-device model reword the message (falls back to the app's words).
     var friendlyWording: Bool { didSet { defaults.set(friendlyWording, forKey: "coachNudgeFriendly") } }
+    /// The bedtime reminder (`BedtimeReminder`), on unless switched off (Settings › Sleep & rest).
+    var bedtimeOn: Bool { didSet { defaults.set(bedtimeOn, forKey: "bedtimeReminder"); rescheduleSoon() } }
 
     var anyOn: Bool { morningOn || postWorkoutOn || eveningOn }
 
@@ -94,6 +96,7 @@ final class CoachNudges {
         quietStartMinutes = defaults.object(forKey: "coachNudgeQuietStart") as? Int ?? CoachCheckIns.defaultQuietHours.startMinutes
         quietEndMinutes = defaults.object(forKey: "coachNudgeQuietEnd") as? Int ?? CoachCheckIns.defaultQuietHours.endMinutes
         friendlyWording = defaults.object(forKey: "coachNudgeFriendly") as? Bool ?? true
+        bedtimeOn = defaults.object(forKey: "bedtimeReminder") as? Bool ?? true
     }
 
     /// Gives the service the app's models. Call once from `RootView.task`.
@@ -120,6 +123,7 @@ final class CoachNudges {
         defer { isRefreshing = false }
         if morningOn { await scheduleMorning(now: now) } else { await cancelPending(.morning) }
         if eveningOn { await scheduleEvening(now: now) } else { await cancelPending(.evening) }
+        await scheduleBedtime(now: now)
         if morningOn || eveningOn { scheduleBackgroundRefresh(now: now) }
     }
 
@@ -154,6 +158,19 @@ final class CoachNudges {
         }
         let facts = eveningFacts(window: tonight, now: now)
         await deliver(CoachCheckIns.evening(facts), kind: .evening, at: adjusted, now: now)
+    }
+
+    /// The next nights' bedtime reminders, from the latest bed-by window
+    /// (`BedtimeReminder`); cleared when switched off or there's no window yet.
+    private func scheduleBedtime(now: Date) async {
+        guard bedtimeOn, let window = metrics?.bedtimeWindow else {
+            await Reminders.scheduleBedtime([], title: "", body: "")
+            return
+        }
+        let fires = BedtimeReminder.fireDates(windowStart: window.start, now: now)
+        let text = BedtimeReminder.content(windowText: window.windowText, startText: window.startText,
+                                           reason: window.reason, sleepWindow: window.isSleepWindow)
+        await Reminders.scheduleBedtime(fires, title: text.title, body: text.body)
     }
 
     // MARK: - After a workout

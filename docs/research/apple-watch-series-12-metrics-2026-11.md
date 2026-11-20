@@ -60,3 +60,9 @@ Built so the owner can tell which: **Settings › Data sources › Health data c
 - `Packages/AppCore/Sources/AppCore/OneDeviceBaseline.swift` (`Choice.byDevice`, `Choice.night(_:)`; `BreathingRateNightTests`).
 - `App/Services/HealthKitClient+DataCheck.swift`, `App/Features/Settings/HealthDataCheckView.swift`.
 - `App/Services/HealthKitClient+Hypertension.swift` (flag removed).
+
+## Follow-up, 20 November 2026: the cause was two watches
+
+The owner's Health data check showed breathing rate arriving every night "from Xavier's Apple Watch and Xavier's Apple Watch": the old watch and the Series 12, each writing under its own source (`com.apple.health.<device>`). The watch side of a baseline kept the one source with the most nights in 90 days, which was the old watch; it stopped at the upgrade, so last night was never shown. Apple Watches are now one series (`OneDeviceBaseline.chainAppleWatches`): each night from the newest watch that has it, never two watches averaged in one night. That is safe where ring and watch weren't: both watches run Apple's own method, one after the other. It also applies to sleeping heart rate (`oneWatchSource`).
+
+Also changed: the check no longer lists Apple's Cardio Recovery (Tensile measures its own recovery and doesn't read Apple's), and a workout's recovery is no longer shown when heart rate had already come down more than 15 bpm from the last 3 minutes' peak before the workout was ended (`CardioHeartSummary.slowedBeforeEndBpm`): the owner's squash match, ended at 125 bpm after rallies at 175, had read "down 4 bpm".

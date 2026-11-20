@@ -29,6 +29,11 @@ public enum HeartRateRecovery {
     public static func measure(_ samples: [HeartRateSample], workoutEnd end: Date) -> Result? {
         let lastMinutes = samples.filter { $0.date >= end.addingTimeInterval(-180) && $0.date <= end }
         guard let peak = lastMinutes.map(\.bpm).max() else { return nil }
+        // Ended after cooling down: the fall had already begun, so no measurement
+        // (`CardioHeartSummary.slowedBeforeEndBpm`; Cole 1999 timed it from peak exercise).
+        // The last reading before the end (a per-minute reading dated at the end covers the minute after it).
+        if let atEnd = lastMinutes.last(where: { $0.date < end && end.timeIntervalSince($0.date) <= 90 }),
+           peak - atEnd.bpm > CardioHeartSummary.slowedBeforeEndBpm { return nil }
         guard let one = value(near: end.addingTimeInterval(60), in: samples) else { return nil }
         let drop = peak - one
         guard drop >= 0 else { return nil }

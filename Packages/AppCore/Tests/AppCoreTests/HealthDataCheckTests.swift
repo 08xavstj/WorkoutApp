@@ -110,6 +110,39 @@ struct BreathingRateNightTests {
         #expect(shown?.device == .watch)
     }
 
+    @Test func aNewWatchContinuesTheOldWatchsSeries() {
+        // The old watch: 80 nights ending a week ago. The Series 12: the last 7 nights.
+        func morning(_ offset: Int) -> Date { calendar.date(byAdding: .day, value: -offset, to: today)! }
+        var readings: [(date: Date, value: Double, device: BaselineDevice, source: String)] = []
+        for offset in 7..<87 {
+            readings += watchNight(morning: morning(offset), value: 16).map { ($0.date, $0.value, $0.device, "com.apple.health.OLD") }
+        }
+        for offset in 0..<7 {
+            readings += watchNight(morning: morning(offset), value: 15).map { ($0.date, $0.value, $0.device, "com.apple.health.NEW") }
+        }
+        let means = OneDeviceBaseline.nightlyMeans(readings, calendar: calendar)
+        #expect(means.watch[today] == 15)
+        #expect(means.watch[morning(30)] == 16)
+        let choice = OneDeviceBaseline.choose(ring: [:], watch: means.watch, latest: today, calendar: calendar)
+        #expect(choice.night(today, calendar: calendar)?.value == 15)
+        #expect(choice.isEstablished)
+    }
+
+    @Test func onAnOverlappingNightTheNewWatchWins() {
+        let night = today
+        let chained = OneDeviceBaseline.chainAppleWatches([
+            "com.apple.health.OLD": [night: 16, calendar.date(byAdding: .day, value: -1, to: night)!: 16],
+            "com.apple.health.NEW": [night: 14, calendar.date(byAdding: .day, value: 1, to: night)!: 14],
+        ])
+        #expect(chained.count == 1)
+        #expect(chained["com.apple.health.NEW"]?[night] == 14)
+    }
+
+    @Test func aNonWatchSourceIsNeverChained() {
+        let chained = OneDeviceBaseline.chainAppleWatches(["com.apple.health.A": [today: 15], "com.garmin.connect": [today: 13]])
+        #expect(chained.count == 2)
+    }
+
     @Test func theBaselineDeviceWinsWhenItHasTheNight() {
         var ring: [Date: Double] = [:]
         for offset in 0...20 { ring[calendar.date(byAdding: .day, value: -offset, to: today)!] = 15 }

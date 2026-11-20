@@ -49,6 +49,13 @@ struct HeartHealthTests {
         #expect(HeartRateRecovery.measureHardEfforts(samples, workouts: [workout], lifting: [], profile: profile).count == 1)
     }
 
+    @Test func noMeasurementAfterWalkingOff() {
+        // Hard until two minutes before the end, then walking at 125: the drop would start from the walk.
+        let end = start.addingTimeInterval(600)
+        let samples = perMinute([172, 170, 125, 124, 121], from: start.addingTimeInterval(420))
+        #expect(HeartRateRecovery.measure(samples, workoutEnd: end) == nil)
+    }
+
     @Test func shortWorkoutsAreSkipped() {
         let workout = DateInterval(start: start, duration: 8 * 60)
         let samples = perMinute([170, 170, 170, 170, 170, 170, 170, 170, 172, 140, 130], from: start)

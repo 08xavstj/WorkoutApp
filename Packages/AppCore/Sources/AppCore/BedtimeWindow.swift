@@ -115,6 +115,9 @@ public enum BedtimeWindow {
         /// "21:50–22:20"
         public var windowText: String { "\(Self.clock(start))–\(Self.clock(end))" }
 
+        /// "21:50", the window's start.
+        public var startText: String { Self.clock(start) }
+
         /// "8 h need + 40 min of debt to repay, up at 6:30 → in bed by 21:50–22:20"
         /// In sleep-window mode: "… → bed from 23:45, when sleepy".
         public var line: String {

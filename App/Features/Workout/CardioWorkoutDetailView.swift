@@ -273,6 +273,12 @@ struct CardioWorkoutDetailView: View {
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        } else if heart.slowedBeforeEnd {
+            // Ended after walking off: a drop from there says nothing (`CardioHeartSummary.slowedBeforeEndBpm`).
+            Text("No recovery reading: your heart rate had already come down before the workout ended. End it right after your last hard effort to measure how fast it falls.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -548,6 +548,7 @@ private struct RemindersSettingsSection: View {
 private struct SleepSettingsSection: View {
     @Environment(UserSettings.self) private var settings
     @AppStorage(SleepSourceSetting.key) private var sleepSource: SleepSourcePreference = .standard
+    @State private var nudges = CoachNudges.shared
 
     var body: some View {
         @Bindable var settings = settings
@@ -567,10 +568,19 @@ private struct SleepSettingsSection: View {
             ))
             // The insomnia path's way in (`SleepWindowView`); nothing else of it shows until it applies.
             SleepWindowSettingsRow()
+            // 30 minutes before tonight's bed-by window (`BedtimeReminder`).
+            Toggle("Bedtime reminder", isOn: Binding(
+                get: { nudges.bedtimeOn },
+                set: { on in
+                    nudges.bedtimeOn = on
+                    // Asks for notifications the first time, from the switch (never at launch).
+                    if on { Task { _ = await Reminders.requestPermission() } }
+                }
+            ))
         } header: {
             Text("Sleep & rest")
         } footer: {
-            Text("Sleep need sets your sleep score and sleep debt; adults need 7 hours or more. Sleep from picks whose night counts when you wear more than one tracker to bed. Rest mode pauses strain targets and workout nudges for 3 days, then turns itself off.")
+            Text("Sleep need sets your sleep score and sleep debt; adults need 7 hours or more. Sleep from picks whose night counts when you wear more than one tracker to bed. Rest mode pauses strain targets and workout nudges for 3 days, then turns itself off. The bedtime reminder comes \(BedtimeReminder.windDownMinutes) minutes before your bed-by window, worked out from your sleep need and wake time, so you can wind down.")
         }
     }
 }

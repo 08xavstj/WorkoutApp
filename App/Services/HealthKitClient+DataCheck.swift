@@ -69,8 +69,6 @@ nonisolated extension HealthKitClient {
         specs += [
             CheckSpec(id: "walkingHeartRate", title: "Walking heart rate", healthName: "Walking Heart Rate Average", group: .heart,
                       cadence: .nightly, type: HKQuantityType(.walkingHeartRateAverage), unit: perMinute, unitLabel: "bpm", digits: 0),
-            CheckSpec(id: "cardioRecovery", title: "Heart rate recovery", healthName: "Cardio Recovery", group: .heart, cadence: .occasional,
-                      type: HKQuantityType(.heartRateRecoveryOneMinute), unit: perMinute, unitLabel: "bpm", digits: 0),
 
             CheckSpec(id: "respiratoryRate", title: "Breathing rate", healthName: "Respiratory Rate", group: .breathing, cadence: .nightly,
                       type: HKQuantityType(.respiratoryRate), unit: perMinute, unitLabel: "/min", digits: 1),

@@ -165,10 +165,42 @@ public enum OneDeviceBaseline {
 
     /// The one source with the most nights, and its nights (ties: the
     /// alphabetically first source, so the pick is the same every time).
+    ///
+    /// Apple Watches are one series (`chainAppleWatches`): each watch writes
+    /// under its own source (`com.apple.health.<device>`), so after an upgrade
+    /// the old watch kept "the most nights" and won, and the new watch's nights,
+    /// last night included, were never shown (seen with a Series 12, Nov 2026).
     public static func dominantSource(_ bySource: [String: [Date: Double]]) -> (source: String, nights: [Date: Double])? {
-        bySource.filter { !$0.value.isEmpty }
+        chainAppleWatches(bySource.filter { !$0.value.isEmpty })
             .min { a, b in a.value.count != b.value.count ? a.value.count > b.value.count : a.key < b.key }
             .map { (source: $0.key, nights: $0.value) }
+    }
+
+    /// Whether a source key (a bundle ID) is an Apple Watch: each one writes
+    /// to Apple Health as `com.apple.health.<device UUID>`.
+    static func isAppleWatchSource(_ key: String) -> Bool {
+        key.lowercased().hasPrefix("com.apple.health.")
+    }
+
+    /// Two or more Apple Watches become one series under the newest watch's
+    /// key: each night from the watch that was newest to have it, so a night
+    /// is never two watches averaged. Chaining is fine here, unlike ring and
+    /// watch: both watches run Apple's own method, and one replaced the other.
+    static func chainAppleWatches(_ bySource: [String: [Date: Double]]) -> [String: [Date: Double]] {
+        let watches = bySource.filter { isAppleWatchSource($0.key) && !$0.value.isEmpty }
+        guard watches.count > 1 else { return bySource }
+        // Oldest watch first (by its newest night), so a newer watch's night overwrites an older one's.
+        let ordered = watches.sorted { a, b in
+            let lastA = a.value.keys.max() ?? .distantPast, lastB = b.value.keys.max() ?? .distantPast
+            return lastA != lastB ? lastA < lastB : (a.value.count != b.value.count ? a.value.count < b.value.count : a.key > b.key)
+        }
+        var chained: [Date: Double] = [:]
+        for (_, nights) in ordered {
+            for (night, value) in nights { chained[night] = value }
+        }
+        var result = bySource.filter { !isAppleWatchSource($0.key) }
+        result[ordered.last!.key] = chained
+        return result
     }
 
     /// Per-minute readings a night needs before its sleeping heart rate
